@@ -3,16 +3,19 @@ import { droneYprToOpk, normalizeExifMetadata } from './metadata.js'
 
 describe('droneYprToOpk', () => {
   it('maps DJI nadir and heading into photogrammetric OPK', () => {
-    expect(droneYprToOpk(0, -90, 0)).toMatchObject({ omega: -0, phi: 0, kappa: 0 })
+    const north = droneYprToOpk(0, -90, 0)
+    for (const k of ['omega', 'phi', 'kappa']) expect(north[k]).toBeCloseTo(0, 10)
+    // Heading east puts the top of the photo east: kappa −90, as Metashape writes it.
     const east = droneYprToOpk(90, -90, 0)
     expect(east.omega).toBeCloseTo(0, 10)
     expect(east.phi).toBeCloseTo(0, 10)
-    expect(east.kappa).toBeCloseTo(90, 10)
+    expect(east.kappa).toBeCloseTo(-90, 10)
   })
 
   it('converts DJI pitch-from-horizon instead of passing -90 through', () => {
+    // 10° forward of nadir, heading north: the camera looks north of nadir.
     const oblique = droneYprToOpk(0, -80, 0)
-    expect(oblique.omega).toBeCloseTo(-10, 10)
+    expect(oblique.omega).toBeCloseTo(10, 10)
     expect(oblique.phi).toBeCloseTo(0, 10)
     expect(oblique.kappa).toBeCloseTo(0, 10)
   })
@@ -74,7 +77,7 @@ describe('normalizeExifMetadata', () => {
     })
     expect(out.cameraOmega).toBeCloseTo(0, 10)
     expect(out.cameraPhi).toBeCloseTo(0, 10)
-    expect(out.cameraKappa).toBeCloseTo(32.5, 10)
+    expect(out.cameraKappa).toBeCloseTo(-32.5, 10)
   })
 
   it('does not mistake airframe attitude for camera attitude', () => {

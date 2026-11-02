@@ -8,6 +8,7 @@ import {
   migrationsComplete,
   planDocuments,
   splitDocumentPath,
+  transposedOpk,
 } from './formatMigrations.js'
 import { PROJECT_FORMAT_MIN, PROJECT_FORMAT_VERSION } from './projectFormat.js'
 
@@ -136,5 +137,76 @@ describe('changedDocuments', () => {
     const before = { a: { x: 1 }, b: { y: 2 }, c: null, d: { z: 1 } }
     const after = { a: { x: 1 }, b: { y: 3 }, c: { new: true }, d: null }
     expect(changedDocuments(before, after).sort()).toEqual(['b', 'c', 'd'])
+  })
+})
+
+describe('format 1 → 2: omega/phi/kappa in the Metashape and Pix4D sense', () => {
+  const step = FORMAT_MIGRATIONS.find((s) => s.from === 1)
+
+  it('transposes the rotation of gimbal-derived angles, and of nothing else', async () => {
+    const { droneYprToOpk } = await import('./io/metadata.js')
+    const { opkMatrix } = await import('./footprint.js')
+    // Version 1 wrote the angles of the transposed rotation for a DJI gimbal reading.
+    const now = droneYprToOpk(32.5, -75, 3)
+    const old = transposedOpk(now.omega, now.phi, now.kappa)
+    const fromFile = { omega: 4, phi: -3, kappa: 120 }
+    const docs = {
+      'project.json': {
+        formatVersion: 1,
+        images: [
+          {
+            id: 'a',
+            meta: {
+              cameraOmega: old[0],
+              cameraPhi: old[1],
+              cameraKappa: old[2],
+              cameraOrientationSource: 'xmp-gimbal',
+            },
+          },
+          { id: 'b', meta: { cameraOmega: 1, cameraPhi: 2, cameraKappa: 3, cameraOrientationSource: 'exif-opk' } },
+          { id: 'c', meta: null },
+        ],
+      },
+      'poses.json': {
+        crs: 'EPSG:32632',
+        poses: [
+          {
+            source: 'exif',
+            orientationSource: 'xmp-gimbal',
+            omega: old[0],
+            phi: old[1],
+            kappa: old[2],
+            omegaEnu: old[0],
+            phiEnu: old[1],
+            kappaEnu: old[2],
+          },
+          { source: 'imported', ...fromFile },
+          { source: 'exif', orientationSource: 'xmp-gimbal', omega: null, phi: null, kappa: null },
+        ],
+      },
+    }
+    const { docs: out } = applyMigrations(docs, [step])
+    const [a, b, c] = out['project.json'].images
+    const same = (angles, ref) => {
+      const A = opkMatrix(...angles),
+        B = opkMatrix(ref.omega, ref.phi, ref.kappa)
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) expect(A[i][j]).toBeCloseTo(B[i][j], 12)
+    }
+    same([a.meta.cameraOmega, a.meta.cameraPhi, a.meta.cameraKappa], now)
+    expect(b).toEqual(docs['project.json'].images[1])
+    expect(c).toEqual(docs['project.json'].images[2])
+    const [p0, p1, p2] = out['poses.json'].poses
+    same([p0.omega, p0.phi, p0.kappa], now)
+    same([p0.omegaEnu, p0.phiEnu, p0.kappaEnu], now)
+    expect(p1).toEqual(docs['poses.json'].poses[1])
+    expect(p2).toMatchObject({ omega: null, phi: null, kappa: null })
+    expect(out['project.json'].formatVersion).toBe(2)
+  })
+
+  it('leaves a project without poses alone', () => {
+    const { docs: out } = applyMigrations({ 'project.json': { formatVersion: 1, images: [] }, 'poses.json': null }, [
+      step,
+    ])
+    expect(out['poses.json']).toBeNull()
   })
 })

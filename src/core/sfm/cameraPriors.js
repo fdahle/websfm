@@ -24,9 +24,10 @@ const inverseM3 = (m) => {
 }
 
 // Convert an imported photogrammetric OPK pose to the solver's camera frame.
-// OPK uses photo axes (x right, y up, optical axis -z); BA uses pixel axes
-// (x right, y down, optical axis +z). D=diag(1,-1,-1) is that proper-rotation
-// basis change. `fitRotation` maps SfM vectors into project-CRS vectors.
+// opkMatrix is photo → object, with photo axes (x right, y up, optical axis -z);
+// BA uses object → camera with pixel axes (x right, y down, optical axis +z).
+// D=diag(1,-1,-1) is that proper-rotation basis change, so the target is
+// D·Rᵀ·fitRotation. `fitRotation` maps SfM vectors into project-CRS vectors.
 export function orientationPriorInSfm(pose, fitRotation) {
   if (![pose.omega, pose.phi, pose.kappa].every(Number.isFinite)) return null
   const sigmasDeg = [pose.accuracyOmega, pose.accuracyPhi, pose.accuracyKappa].map((v) =>
@@ -38,21 +39,22 @@ export function orientationPriorInSfm(pose, fitRotation) {
     [0, -1, 0],
     [0, 0, -1],
   ]
-  const targetR = mulM3(mulM3(D, M), fitRotation)
+  const targetR = mulM3(mulM3(D, transposeM3(M)), fitRotation)
 
   // Local differential from [dω,dφ,dκ] to the solver's left-multiplied
   // rotation vector. Transform diagonal OPK precision through it so each
-  // imported angular accuracy retains its intended axis.
-  const o = (pose.omega * Math.PI) / 180,
-    ph = (pose.phi * Math.PI) / 180
-  const co = Math.cos(o),
-    so = Math.sin(o),
-    cp = Math.cos(ph),
-    sp = Math.sin(ph)
+  // imported angular accuracy retains its intended axis. With R = Rx·Ry·Rz the
+  // columns are −D·Rzᵀ·Ryᵀ·ex, −D·Rzᵀ·ey and −D·ez.
+  const ph = (pose.phi * Math.PI) / 180,
+    ka = (pose.kappa * Math.PI) / 180
+  const cp = Math.cos(ph),
+    sp = Math.sin(ph),
+    ck = Math.cos(ka),
+    sk = Math.sin(ka)
   const J = [
-    [1, 0, sp],
-    [0, -co, so * cp],
-    [0, -so, -co * cp],
+    [-cp * ck, -sk, 0],
+    [-cp * sk, ck, 0],
+    [sp, 0, 1],
   ]
   const Ji = inverseM3(J)
   if (!Ji) return null // OPK gimbal lock: do not invent a singular prior.

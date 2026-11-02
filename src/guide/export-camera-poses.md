@@ -10,11 +10,11 @@ name, the camera's position X, Y, Z, and its orientation as omega, phi and kappa
 file has the columns **Import ▸ Camera Poses** reads, so it goes back into WebSfM, or
 into another project of the same images, as pose priors.
 
-The angles are in degrees, in the photogrammetric convention the pose import uses: the
-rotation from the ground into the photo is $R_x(\omega)\,R_y(\varphi)\,R_z(\kappa)$,
-with the photo's x to the right, y up and the camera looking down its −z axis. At
-omega = phi = kappa = 0 the camera looks straight down, with the top of the photo to
-grid north.
+The angles are in degrees, in the photogrammetric convention the pose import uses and
+Metashape and Pix4D write: the rotation from the photo onto the ground is
+$R_x(\omega)\,R_y(\varphi)\,R_z(\kappa)$, with the photo's x to the right, y up and the
+camera looking down its −z axis. At omega = phi = kappa = 0 the camera looks straight
+down, with the top of the photo to grid north.
 
 **Format** is CSV, tab-separated text (for tools that want it, and spreadsheets that
 read a comma as the decimal point), or GeoJSON: one point per camera, named by its

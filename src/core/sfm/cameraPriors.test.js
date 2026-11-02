@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildCameraPriors, orientationPriorInSfm, surveyFrameFor, gcpToSurveyFrame } from './cameraPriors.js'
 import { ensureProjection } from '../crs.js'
+import { estimatedPose } from './cameraEstimated.js'
 
 const images = [
   { id: 'image-1', uuid: 'uuid-1' },
@@ -178,12 +179,56 @@ describe('orientationPriorInSfm', () => {
     expect(prior.orientationPrecision[0][1]).toBeCloseTo(0, 12)
   })
 
-  it('skips incomplete and gimbal-locked orientations', () => {
-    const I = [
-      [1, 0, 0],
-      [0, 1, 0],
+  const I = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
+  const mul = (A, B) => A.map((r) => B[0].map((_, j) => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]))
+  const T = (A) => A[0].map((_, j) => A.map((r) => r[j]))
+  // The rotation vector of a small rotation matrix.
+  const logSmall = (R) => [(R[2][1] - R[1][2]) / 2, (R[0][2] - R[2][0]) / 2, (R[1][0] - R[0][1]) / 2]
+
+  it('gives back the rotation of a camera whose pose the export wrote', () => {
+    // Any solver camera: its exported omega/phi/kappa must constrain it to itself.
+    const c = Math.cos(0.4),
+      s = Math.sin(0.4)
+    const Rz = [
+      [c, -s, 0],
+      [s, c, 0],
       [0, 0, 1],
     ]
+    const Rx = [
+      [1, 0, 0],
+      [0, Math.cos(2.9), -Math.sin(2.9)],
+      [0, Math.sin(2.9), Math.cos(2.9)],
+    ]
+    const R = mul(Rx, Rz)
+    const pose = estimatedPose({ R, t: [1, 2, 3] })
+    const prior = orientationPriorInSfm(pose, I)
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) expect(prior.targetR[i][j]).toBeCloseTo(R[i][j], 12)
+  })
+
+  it('weights each angle along the rotation that angle makes', () => {
+    // A step in one angle moves the solver rotation by δ; δᵀ·P·δ must be that angle's
+    // weight, and the cross terms between angles zero.
+    const pose = { omega: 12, phi: -25, kappa: 140, accuracyOmega: 1, accuracyPhi: 2, accuracyKappa: 4 }
+    const { targetR, orientationPrecision: P } = orientationPriorInSfm(pose, I)
+    const h = 1e-6
+    const deltas = ['omega', 'phi', 'kappa'].map((k) => {
+      const moved = orientationPriorInSfm({ ...pose, [k]: pose[k] + (h * 180) / Math.PI }, I).targetR
+      return logSmall(mul(moved, T(targetR))).map((v) => v / h)
+    })
+    const rad = Math.PI / 180
+    const w = [1, 2, 4].map((sd) => 1 / (sd * rad) ** 2)
+    const q = (a, b) => a.reduce((sum, ai, i) => sum + ai * P[i].reduce((t, pij, j) => t + pij * b[j], 0), 0)
+    for (let i = 0; i < 3; i++) {
+      expect(q(deltas[i], deltas[i]) / w[i]).toBeCloseTo(1, 4)
+      for (let j = i + 1; j < 3; j++) expect(Math.abs(q(deltas[i], deltas[j])) / w[0]).toBeLessThan(1e-4)
+    }
+  })
+
+  it('skips incomplete and gimbal-locked orientations', () => {
     expect(orientationPriorInSfm({ omega: 0, phi: null, kappa: 0 }, I)).toBeNull()
     expect(orientationPriorInSfm({ omega: 0, phi: 90, kappa: 0 }, I)).toBeNull()
   })

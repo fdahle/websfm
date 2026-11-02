@@ -37,15 +37,16 @@ export function estimatedCenter(cam) {
 // similarity `sim` maps the model into ({ scale, R, t, local? }, as
 // products/exportFrame.js gives it), or in the model frame when `sim` is null.
 // The solver's camera looks along +z with y down; a photogrammetric one along −z with
-// y up, hence the flip D = diag(1, −1, −1) of cameraPriors.js orientationPriorInSfm.
-// Angles are null at phi = ±90°.
+// y up, hence the flip D = diag(1, −1, −1) of cameraPriors.js orientationPriorInSfm:
+// the photo → object rotation the angles describe is (D·R)ᵀ. Angles are null at
+// phi = ±90°.
 export function estimatedPose(cam, sim = null) {
   const C = estimatedCenter(cam)
   if (!C) return null
   const [x, y, z] = sim ? applySimilarity(sim, C) : C
   // Export frame → camera: R·simRᵀ.
   const R = sim ? cam.R.map((row) => sim.R.map((s) => row[0] * s[0] + row[1] * s[1] + row[2] * s[2])) : cam.R
-  const opk = opkFromMatrix([R[0], R[1].map((v) => -v), R[2].map((v) => -v)])
+  const opk = opkFromMatrix([0, 1, 2].map((i) => [R[0][i], -R[1][i], -R[2][i]]))
   return { x, y, z, omega: opk?.omega ?? null, phi: opk?.phi ?? null, kappa: opk?.kappa ?? null }
 }
 

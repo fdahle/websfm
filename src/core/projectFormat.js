@@ -10,7 +10,7 @@
 //
 // Projects saved before the version existed (≤ 0.5.0) have no field and count as 1.
 
-export const PROJECT_FORMAT_VERSION = 1
+export const PROJECT_FORMAT_VERSION = 2
 export const PROJECT_FORMAT_MIN = 1
 
 /** The format a project.json was saved in. */

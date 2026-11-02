@@ -110,6 +110,14 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **Omega, phi and kappa read the way Metashape and Pix4D write them.** Camera poses
+  imported with orientation angles now point the way their file meant, in footprints and
+  as priors for Sparse Model; before, WebSfM turned them the opposite way, so a 60°
+  kappa put a footprint's corners about 200 m off at 100 m flying height. Export ▸
+  Camera Poses writes the same convention. Angles WebSfM took from a drone's gimbal
+  were right and stay right: opening a project saved by an earlier version converts
+  them (project format 2). Checked against Metashape 2.2's own Omega Phi Kappa export
+  on 42 Aukerman photos: the same rotation to 1e-8.
 - **Splitting a camera group keeps the original fiducial layout where it cannot be
   estimated.** Sensors ▸ right-click ▸ **Split camera group…** copied every group after
   the first from the first group, after its layout had been estimated from its own

@@ -4,13 +4,15 @@
 //
 // CRS-agnostic: the camera centre and the returned ring are in whatever CRS the
 // caller works in (the project working CRS in practice). Angles are degrees in
-// the standard photogrammetric omega/phi/kappa convention — the rotation matrix
-// M below maps an object-space vector into image/camera space, so Mᵀ maps an
-// image-space ray back into object space.
+// the photogrammetric omega/phi/kappa convention Metashape and Pix4D write: the
+// rotation matrix R below turns a photo-space vector (x right, y up, the camera
+// looking down −z) into object space, so its columns are the photo axes on the
+// ground and Rᵀ maps object space into the photo.
 
-// Standard photogrammetric omega/phi/kappa rotation matrix (object → image).
-// At omega=phi=kappa=0 this is the identity, i.e. a nadir camera looking straight
-// down with image x→east, y→north. Row-major 3×3.
+// The omega/phi/kappa rotation R = Rx(ω)·Ry(φ)·Rz(κ), photo → object. At
+// omega=phi=kappa=0 this is the identity, i.e. a nadir camera looking straight
+// down with image x→east, y→north. Row-major 3×3. Checked against Metashape's own
+// Omega Phi Kappa export (core/io/metashapeXml.test.js), whose r11…r33 are Rᵀ.
 export function opkMatrix(omegaDeg, phiDeg, kappaDeg) {
   const d = Math.PI / 180
   const co = Math.cos(omegaDeg * d),
@@ -26,7 +28,7 @@ export function opkMatrix(omegaDeg, phiDeg, kappaDeg) {
   ]
 }
 
-// The inverse of opkMatrix: omega/phi/kappa (degrees) of an object → image rotation.
+// The inverse of opkMatrix: omega/phi/kappa (degrees) of a photo → object rotation.
 // Null at phi = ±90°, where omega and kappa turn about the same axis.
 export function opkFromMatrix(M) {
   const phi = Math.asin(Math.max(-1, Math.min(1, M[0][2])))
@@ -66,16 +68,16 @@ export const MIN_RAY_DEPRESSION_DEG = 1
 // Returns [X, Y] (object space) or null if the ray doesn't usefully descend to
 // the plane (camera at/below it, a ray pointing up — the horizon — or a ray so
 // near-horizontal it would land absurdly far away; see MIN_RAY_DEPRESSION_DEG).
-export function projectPixelToGround(u, v, { Mt, center, focal, cx, cy, groundZ, minSinDepression = 0 }) {
+export function projectPixelToGround(u, v, { R, center, focal, cx, cy, groundZ, minSinDepression = 0 }) {
   // Image-space ray direction: photo x right, photo y up (pixel rows grow down,
   // hence the negation), optical axis at -focal.
   const vx = u - cx
   const vy = -(v - cy)
   const vz = -focal
-  // Object-space direction = Mᵀ · [vx, vy, vz].
-  const dx = Mt[0][0] * vx + Mt[0][1] * vy + Mt[0][2] * vz
-  const dy = Mt[1][0] * vx + Mt[1][1] * vy + Mt[1][2] * vz
-  const dz = Mt[2][0] * vx + Mt[2][1] * vy + Mt[2][2] * vz
+  // Object-space direction = R · [vx, vy, vz].
+  const dx = R[0][0] * vx + R[0][1] * vy + R[0][2] * vz
+  const dy = R[1][0] * vx + R[1][1] * vy + R[1][2] * vz
+  const dz = R[2][0] * vx + R[2][1] * vy + R[2][2] * vz
   if (dz === 0) return null
   const s = (groundZ - center[2]) / dz
   if (s <= 0) return null // plane is behind the camera along this ray
@@ -109,15 +111,9 @@ export function projectFootprint(pose, sensor, groundZ) {
 
   const cx = sensor.cx ?? width / 2
   const cy = sensor.cy ?? height / 2
-  const M = opkMatrix(pose.omega ?? 0, pose.phi ?? 0, pose.kappa ?? 0)
-  // Transpose (object ← image).
-  const Mt = [
-    [M[0][0], M[1][0], M[2][0]],
-    [M[0][1], M[1][1], M[2][1]],
-    [M[0][2], M[1][2], M[2][2]],
-  ]
+  const R = opkMatrix(pose.omega ?? 0, pose.phi ?? 0, pose.kappa ?? 0)
   const minSinDepression = Math.sin((MIN_RAY_DEPRESSION_DEG * Math.PI) / 180)
-  const ctx = { Mt, center: [pose.x, pose.y, pose.z], focal, cx, cy, groundZ, minSinDepression }
+  const ctx = { R, center: [pose.x, pose.y, pose.z], focal, cx, cy, groundZ, minSinDepression }
 
   const corners = [
     [0, 0],
@@ -165,7 +161,7 @@ export async function projectFootprintOnTerrain(pose, sensor, heightAt) {
   const { width, height, focal } = sensor
   const cx = sensor.cx ?? width / 2,
     cy = sensor.cy ?? height / 2
-  const M = opkMatrix(pose.omega ?? 0, pose.phi ?? 0, pose.kappa ?? 0)
+  const R = opkMatrix(pose.omega ?? 0, pose.phi ?? 0, pose.kappa ?? 0)
   // Ray height above the terrain at parameter s along direction d, or null.
   const above = async (d, s) => {
     const h = await heightAt(pose.x + s * d[0], pose.y + s * d[1])
@@ -179,9 +175,9 @@ export async function projectFootprintOnTerrain(pose, sensor, heightAt) {
     [width, height],
     [0, height],
   ]) {
-    // Object-space direction Mᵀ · [u − cx, −(v − cy), −focal], as projectPixelToGround.
+    // Object-space direction R · [u − cx, −(v − cy), −focal], as projectPixelToGround.
     const r = [u - cx, -(v - cy), -focal]
-    const d = [0, 1, 2].map((i) => M[0][i] * r[0] + M[1][i] * r[1] + M[2][i] * r[2])
+    const d = R.map((row) => row[0] * r[0] + row[1] * r[1] + row[2] * r[2])
     let s0 = 0,
       f0 = pose.z - below
     let s1 = (below - pose.z) / d[2]

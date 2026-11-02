@@ -27,10 +27,14 @@ function localGridRotation(lon, lat, projectCrs) {
 
 function orientationInProject(raw, grid) {
   if (![raw.omega, raw.phi, raw.kappa].every(Number.isFinite)) return { omega: null, phi: null, kappa: null }
-  const M = opkMatrix(raw.omega, raw.phi, raw.kappa)
-  // Rotate each physical photo-axis direction from ENU components into project
-  // grid components. The resulting rows remain an object→photo rotation matrix.
-  const projected = M.map(([east, north, up]) => [grid.c * east - grid.s * north, grid.s * east + grid.c * north, up])
+  const [east, north, up] = opkMatrix(raw.omega, raw.phi, raw.kappa)
+  // The columns are the photo axes in east/north/up components; turn each into
+  // project grid components. The result is still a photo → object rotation.
+  const projected = [
+    east.map((e, i) => grid.c * e - grid.s * north[i]),
+    east.map((e, i) => grid.s * e + grid.c * north[i]),
+    up,
+  ]
   return opkFromMatrix(projected) ?? { omega: null, phi: null, kappa: null }
 }
 

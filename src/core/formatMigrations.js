@@ -34,8 +34,67 @@ import { PROJECT_FORMAT_MIN, PROJECT_FORMAT_VERSION } from './projectFormat.js'
  * @property {(docs: ProjectDocuments) => ProjectDocuments} migrate
  */
 
+// Version 1 read omega/phi/kappa as Rx·Ry·Rz from the ground into the photo; from
+// version 2 they mean that rotation from the photo onto the ground, as Metashape and
+// Pix4D write them (footprint.js opkMatrix). Angles taken from a file were the file's
+// own and now read as their author meant; the ones WebSfM worked out from a drone's
+// gimbal yaw/pitch/roll were in the old sense, and become the angles of the transposed
+// rotation. Self-contained, so a later change to footprint.js cannot change the step.
+export function transposedOpk(omega, phi, kappa) {
+  if (![omega, phi, kappa].every(Number.isFinite)) return [omega, phi, kappa]
+  const d = Math.PI / 180
+  const co = Math.cos(omega * d),
+    so = Math.sin(omega * d),
+    cp = Math.cos(phi * d),
+    sp = Math.sin(phi * d),
+    ck = Math.cos(kappa * d),
+    sk = Math.sin(kappa * d)
+  // Rx·Ry·Rz, transposed: row i is column i.
+  const M = [
+    [cp * ck, co * sk + so * sp * ck, so * sk - co * sp * ck],
+    [-cp * sk, co * ck - so * sp * sk, so * ck + co * sp * sk],
+    [sp, -so * cp, co * cp],
+  ]
+  const p = Math.asin(Math.max(-1, Math.min(1, M[0][2])))
+  if (Math.abs(Math.cos(p)) < 1e-9) return [omega, phi, kappa]
+  return [Math.atan2(-M[1][2], M[2][2]) / d, p / d, Math.atan2(-M[0][1], M[0][0]) / d]
+}
+
 /** @type {FormatMigration[]} */
-export const FORMAT_MIGRATIONS = []
+export const FORMAT_MIGRATIONS = [
+  {
+    from: 1,
+    note: 'omega/phi/kappa from drone gimbal angles now follow the Metashape and Pix4D convention',
+    documents: ['project.json', 'poses.json'],
+    migrate(docs) {
+      const project = docs['project.json']
+      if (Array.isArray(project?.images)) {
+        docs['project.json'] = {
+          ...project,
+          images: project.images.map((im) => {
+            const m = im?.meta
+            if (m?.cameraOrientationSource !== 'xmp-gimbal') return im
+            const [cameraOmega, cameraPhi, cameraKappa] = transposedOpk(m.cameraOmega, m.cameraPhi, m.cameraKappa)
+            return { ...im, meta: { ...m, cameraOmega, cameraPhi, cameraKappa } }
+          }),
+        }
+      }
+      const poses = docs['poses.json']
+      if (Array.isArray(poses?.poses)) {
+        docs['poses.json'] = {
+          ...poses,
+          poses: poses.poses.map((p) => {
+            if (p?.source !== 'exif' || p.orientationSource !== 'xmp-gimbal') return p
+            const [omega, phi, kappa] = transposedOpk(p.omega, p.phi, p.kappa)
+            const [omegaEnu, phiEnu, kappaEnu] = transposedOpk(p.omegaEnu, p.phiEnu, p.kappaEnu)
+            return { ...p, omega, phi, kappa, omegaEnu, phiEnu, kappaEnu }
+          }),
+        }
+      }
+      return docs
+    },
+  },
+]
 
 /**
  * The steps from version `from` to `to`, in order. Throws when one is missing: a

@@ -1080,10 +1080,13 @@ them a re-solve can only lower the reprojection cost, so it would pass its own g
 while quietly undoing a GCP doming correction.
 
 When an imported or EXIF/XMP-derived camera pose also carries a complete
-omega/phi/kappa orientation, its rotation constrains the same BA passes. The
-photogrammetric image frame
-(x right, y up, optical axis −z) is converted to the solver camera frame (x right,
-y down, optical axis +z), then composed with the SfM→project similarity rotation.
+omega/phi/kappa orientation, its rotation constrains the same BA passes. The angles
+follow Metashape and Pix4D: R = Rx(ω)·Ry(φ)·Rz(κ) turns the photogrammetric image
+frame (x right, y up, optical axis −z) onto the ground, so its columns are the photo
+axes in project coordinates (checked against Metashape's own Omega Phi Kappa export to
+1e-8; WebSfM read them transposed up to project format 1). Rᵀ is converted to the
+solver camera frame (x right, y down, optical axis +z), then composed with the
+SfM→project similarity rotation.
 The solver minimizes the wrapped rotation-vector residual
 `Log(R R_targetᵀ)`. Per-axis omega/phi/kappa 1σ accuracies are transformed into a
 full tangent-space precision matrix, so anisotropic angular uncertainty is retained;

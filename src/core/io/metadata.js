@@ -55,9 +55,10 @@ function opkFromMatrix(R) {
 
 // DJI and compatible drone XMP describe the gimbal as yaw clockwise from north,
 // pitch from the horizon (-90 = nadir), and roll around the viewing axis. Build
-// the camera basis in local east/north/up, then recover WebSfM's object→photo OPK
-// angles (0/0/0 = nadir, image top north). This also handles oblique captures and
-// avoids the common but destructive mistake of treating DJI -90 pitch as phi=-90.
+// the camera basis in local east/north/up, then recover the omega/phi/kappa of the
+// photo → object rotation whose columns are that basis (footprint.js opkMatrix;
+// 0/0/0 = nadir, image top north). This also handles oblique captures and avoids
+// the common but destructive mistake of treating DJI -90 pitch as phi=-90.
 export function droneYprToOpk(yawDeg, pitchDeg, rollDeg) {
   if (![yawDeg, pitchDeg, rollDeg].every(Number.isFinite)) return null
   const yaw = deg(yawDeg),
@@ -71,7 +72,7 @@ export function droneYprToOpk(yawDeg, pitchDeg, rollDeg) {
     sr = Math.sin(roll)
   const photoX = right.map((v, i) => cr * v - sr * photoY[i])
   const rolledY = right.map((v, i) => sr * v + cr * photoY[i])
-  return opkFromMatrix([photoX, rolledY, photoZ])
+  return opkFromMatrix([0, 1, 2].map((i) => [photoX[i], rolledY[i], photoZ[i]]))
 }
 
 export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
