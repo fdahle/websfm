@@ -2,6 +2,8 @@
 import { linearCrsUnit } from '../../../core/crs.js'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
@@ -49,7 +51,12 @@ const recon = useReconstructionStore()
 // map position (core/products/productLayers.js), so 'local' there would be a trap.
 // Read once at open — a fact about the project, never re-applied over the user's pick.
 // <FrameCrsField> keeps it valid afterwards (back to local when the georeference goes).
-const settings = ref({ ...DEM_DEFAULTS, crs: props.canGeoreference ? 'project' : DEM_DEFAULTS.crs })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('dem', {
+  ...DEM_DEFAULTS,
+  crs: props.canGeoreference ? 'project' : DEM_DEFAULTS.crs,
+})
+const settings = dialog.settings
 // A DTM has building- and tree-sized holes where non-ground points were removed,
 // so choosing Ground only turns on the enclosed-gap fill (and All points turns it
 // off again). The checkbox stays the user's after that.
@@ -105,6 +112,7 @@ function runSettings() {
   return { ...rest, classes: [...rest.classes], memBudgetBytes: memBudgetBytes.value, ...size }
 }
 function run() {
+  dialog.remember()
   emit('run', runSettings())
 }
 
@@ -160,6 +168,10 @@ const effects = computed(() => {
 
 <template>
   <ModalShell title="Build DEM" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Build DEM</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <SettingsStep step="1" title="Points" :effect="effects.points">
       <SettingsField
         label-for="dem-points"

@@ -2,6 +2,8 @@
 import { ref, computed } from 'vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -48,7 +50,12 @@ const { recommendations } = useDatasetRecommendations()
 // Prefill from the single source of truth (core/sfm/sfm.js falls back to the same
 // values). Clone so edits don't mutate the shared constant.
 const { addToModel: prefillAdd = null, ...prefillSettings } = props.prefill ?? {}
-const settings = ref({ ...RECONSTRUCT_DEFAULTS, ...prefillSettings })
+// The last run's settings in this project, and saved presets (useDialogSettings); a
+// prefill (Try again) wins over them.
+const dialog = useDialogSettings('sparse-reconstruction', RECONSTRUCT_DEFAULTS, {
+  initial: Object.keys(prefillSettings ?? {}).length ? prefillSettings : null,
+})
+const settings = dialog.settings
 // Run stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step).
 // Add to the model or Rebuild: offered once a model exists, and Add is the start when it
@@ -130,6 +137,7 @@ const adding = computed(() => mode.value === 'add')
 const blocked = computed(() => adding.value && !!props.extendBlocker)
 
 function run() {
+  dialog.remember()
   emit('run', adding.value ? { ...modeSettings.value } : { ...settings.value })
 }
 </script>
@@ -139,6 +147,12 @@ function run() {
     :title="props.groundControlAdjustment ? 'Adjust with Ground Control' : 'Sparse Reconstruction'"
     @close="emit('close')"
   >
+    <template #header>
+      <span class="modal-title">{{
+        props.groundControlAdjustment ? 'Adjust with Ground Control' : 'Sparse Reconstruction'
+      }}</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <p v-if="props.groundControlAdjustment" class="adjust-intro">
       Rebuild the sparse model with the eligible GCPs included in bundle adjustment. When it succeeds, the model will
       automatically be fitted to the project CRS.

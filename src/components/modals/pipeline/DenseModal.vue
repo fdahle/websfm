@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
@@ -26,7 +28,9 @@ const { memBudgetBytes, memBudgetRamBytes } = useComputeSettings()
 // No dataset recommendation here by design: `auto` picks minViews from the map count,
 // maxCost is a fixed loose backstop, and the geometric gates are dataset-independent
 // (core/recommend.js `recommendFuse`). An empty banner is worse than none.
-const settings = ref({ ...DENSE_FUSE_DEFAULTS })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('dense-cloud', DENSE_FUSE_DEFAULTS)
+const settings = dialog.settings
 // Run stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step); the hidden manual thresholds are only checked when shown.
 const numbers = computed(() =>
@@ -44,6 +48,7 @@ const numbers = computed(() =>
 const effects = computed(() => denseEffects(settings.value, { maps: props.maps }))
 
 function run() {
+  dialog.remember()
   const { auto, minViews, depthTolPct, maxCost, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated, replaceMain } =
     settings.value
   emit('run', {
@@ -63,6 +68,10 @@ function run() {
 
 <template>
   <ModalShell title="Build Dense Cloud" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Build Dense Cloud</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <SettingsStep step="1" title="Sample the depth maps" :effect="effects.sample">
       <SettingsField
         label-for="step"

@@ -2,6 +2,8 @@
 import { ref, computed, watch } from 'vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
@@ -107,13 +109,20 @@ const matchers = [
 
 // Prefill from the single source of truth (core/defaults.user.js); useMatchesStore
 // falls back to the same values. Cloned so edits don't mutate the shared constant.
-const settings = ref({
-  ...MATCH_DEFAULTS,
-  // A selection is matched again (its pairs' results are replaced) unless asked otherwise.
-  onlyNewPairs:
-    !props.onlyIds?.length &&
-    onlyNewPairsDefault({ matchedPairs: props.matchedPairs, unpairedImages: props.unpairedImages }),
-})
+// The last run's settings in this project, and saved presets (useDialogSettings); the
+// only-new-pairs choice follows the project's state, so it is never kept.
+const dialog = useDialogSettings(
+  'match-features',
+  {
+    ...MATCH_DEFAULTS,
+    // A selection is matched again (its pairs' results are replaced) unless asked otherwise.
+    onlyNewPairs:
+      !props.onlyIds?.length &&
+      onlyNewPairsDefault({ matchedPairs: props.matchedPairs, unpairedImages: props.unpairedImages }),
+  },
+  { exclude: ['onlyNewPairs'] },
+)
+const settings = dialog.settings
 
 // Quality presets tune the geometric-verification strictness (deltas over defaults)
 // and own only the keys they patch (ratio, inlier ratio, RANSAC iterations): a card
@@ -292,6 +301,7 @@ const numbers = computed(() => {
 })
 
 function run() {
+  dialog.remember()
   emit('run', {
     strategy: strategy.value,
     matcher: matcher.value,
@@ -306,6 +316,10 @@ function run() {
 
 <template>
   <ModalShell title="Match Features" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Match Features</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <SettingsGroup v-if="limited" title="Source">
       <p class="field-hint">
         Only pairs with one of the {{ onlyCount }} selected image{{ onlyCount === 1 ? '' : 's' }}, matched with every

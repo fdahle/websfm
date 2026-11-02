@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
@@ -49,7 +51,9 @@ const { recommendations } = useDatasetRecommendations()
 // maxDim (null ⇒ derive from quality) and bestK (null ⇒ auto per image).
 // Defaults are the single source of truth in core/defaults.user.js; run() below
 // transforms filterRelTol (%) and drops null overrides before dispatch.
-const settings = ref({ ...DEPTHMAP_DEFAULTS })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('depth-maps', DEPTHMAP_DEFAULTS)
+const settings = dialog.settings
 // Run stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step). The two overrides may be blank (= auto); fields hidden by
 // their toggle are not checked.
@@ -159,12 +163,17 @@ const keepEffect = computed(() =>
 )
 
 function run() {
+  dialog.remember()
   emit('run', { ...runSettings.value })
 }
 </script>
 
 <template>
   <ModalShell title="Build Depth Maps" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Build Depth Maps</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <!-- Cards, not a select: no value/default on the FieldHelp (the Guide marker's default shows). -->
     <div class="field-label"><FieldHelp op="depth-maps" param="quality">Quality</FieldHelp></div>
     <PresetCards

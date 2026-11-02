@@ -2,6 +2,8 @@
 import { linearCrsUnit } from '../../../core/crs.js'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
@@ -48,7 +50,12 @@ const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
 // map position (core/products/productLayers.js), so 'local' there would be a trap.
 // Read once at open — a fact about the project, never re-applied over the user's pick.
 // <FrameCrsField> keeps it valid afterwards (back to local when the georeference goes).
-const settings = ref({ ...ORTHO_DEFAULTS, crs: props.canGeoreference ? 'project' : ORTHO_DEFAULTS.crs })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('orthophoto', {
+  ...ORTHO_DEFAULTS,
+  crs: props.canGeoreference ? 'project' : ORTHO_DEFAULTS.crs,
+})
+const settings = dialog.settings
 
 // Open on the first available surface rather than a dead default: with a mesh
 // built and no DEM, 'dem' would greet the user disabled.
@@ -143,6 +150,7 @@ function runSettings() {
   }
 }
 function run() {
+  dialog.remember()
   emit('run', runSettings())
 }
 
@@ -193,6 +201,10 @@ const effects = computed(() =>
 
 <template>
   <ModalShell title="Build Orthophoto" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Build Orthophoto</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <SettingsStep step="1" title="Surface" :effect="effects.surface">
       <SettingsField
         label-for="ortho-surface"

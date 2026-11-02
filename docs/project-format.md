@@ -57,6 +57,7 @@ cannot be recomputed at all.
 | `depthmaps/index.json`, `<uuid>.{depth,cost,nrm,rgb}.bin`, `<uuid>.png` | `useReconstructionStore` (dense) | depth maps and their previews ([`opfs/depth.js`](../src/utils/opfs/depth.js)); the index's `mapsKey` and `cameraKeys` say which maps a later run may keep ([`depthReuse.js`](../src/core/dense/depthReuse.js); an index without them keeps none) | a run (Depth Maps) |
 | `products/<stem>.json` + `.bin` sidecars | `useReconstructionStore` (products) | DEMs and orthophotos: grid, geotransform, CRS, rasters, COGs, previews ([`opfs/products.js`](../src/utils/opfs/products.js)) | a run (DEM, Orthophoto) |
 | `external/index.json`, `<id>.{bin,cog,src}` | `useExternalStore` | imported reference rasters (DEMs, orthophotos) and their display planes | user data (the import) |
+| `dialogs.json` | `useDialogSettings` | each Reconstruct dialog's last-run settings, as differences from its defaults | cheap (the defaults) |
 | `gcps.json` | `useGcpsStore` | ground control points, check points and markers with their image marks | user data |
 | `poses.json` | `usePosesStore` | imported or EXIF camera positions and orientations | user data |
 | `scalebars.json` | `useScaleBarsStore` | scale bars between two markers | user data |

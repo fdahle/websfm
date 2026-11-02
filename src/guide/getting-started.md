@@ -79,6 +79,11 @@ reason. Interactive tools open a small toolbox over the view (close with × or E
 Hover a button for its shortcut; **?** lists them all. **What's New** lists the changes
 of each version.
 
+The Reconstruct dialogs (Match Features, Sparse Model, Depth Maps, Dense Cloud, DEM,
+Orthophoto, Mesh) open on the settings of their last run in this project. **Presets ▾**
+in a dialog's title bar saves the current settings under a name, for the next project of
+the same kind, brings a saved set back, or resets to the defaults.
+
 ## Supported browsers
 **Chrome and Edge** support everything; WebGPU (depth maps and matching on the graphics
 card) depends on the driver. **Firefox** runs the whole pipeline, but on the CPU only,

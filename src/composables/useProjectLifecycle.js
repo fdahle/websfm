@@ -26,6 +26,7 @@ import { rememberNewProjectDraft } from './newProjectDraft.js'
 import { pluralize } from '../core/textFormat.js'
 import { EXAMPLES, downloadExample } from '../core/examples.js'
 import { useGuideStore } from '../stores/useGuideStore.js'
+import { preloadDialogSettings } from './useDialogSettings.js'
 
 // Everything that opens, creates, switches, moves, saves or deletes a project,
 // lifted out of App.vue. Owns the blocking load overlay (`projectLoading` +
@@ -284,6 +285,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
         .map(({ phase, ms }) => `${phase} ${Math.round(ms)} ms`)
         .join(' · ')
       log(`Project load timing: ${Math.round(performance.now() - loadStarted)} ms total — ${detail}`, 'info', 'Project')
+      preloadDialogSettings(id)
       logHeapInventory()
       // restore() sets selectedCloud, which the watcher pushes into the viewer.
     })

@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Dialogs remember their settings.** The Reconstruct dialogs (Match Features, Sparse
+  Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh) open on the settings of their
+  last run in the project, and **Presets ▾** in the title bar saves a set under a name
+  for the next project of the same kind, brings it back, or resets to the defaults. Only
+  what differs from the defaults is kept, so a setting renamed in a later version falls
+  back to its default. Match Features' "only new pairs" follows the project each time.
 - **The orthophoto as a web map.** Export ▸ Orthophoto ▸ **MBTiles** or **XYZ tiles**
   cuts it into Web Mercator map tiles, from the zoom that shows the whole area to the
   first one as fine as its pixels, in PNG, JPEG or WebP: one file for QGIS, QField or

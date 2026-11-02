@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
@@ -33,7 +35,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({ ...MESH_DEFAULTS })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('mesh', MESH_DEFAULTS)
+const settings = dialog.settings
 const { id: sourceId, item: source } = useSourcePick(() => props.sources, { initialId: props.defaultSourceId })
 const sourceLabel = (s) =>
   `${s.name} — ${s.count.toLocaleString()} points` +
@@ -87,12 +91,17 @@ const numbers = computed(() =>
 const { memBudgetRamBytes } = useComputeSettings()
 
 function run() {
+  dialog.remember()
   emit('run', { ...settings.value, sourceId: sourceId.value, ramBudgetBytes: memBudgetRamBytes.value })
 }
 </script>
 
 <template>
   <ModalShell title="Build Mesh" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Build Mesh</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <WarnBox v-if="!sources.length && !hasDense">
       No dense point cloud yet. Build one first (<strong>Reconstruct ▸ Dense Model</strong>): meshing reconstructs a
       surface over the dense cloud.
