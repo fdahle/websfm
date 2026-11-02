@@ -81,6 +81,11 @@ Notable changes to websfm. The format follows
   change it, in a few sentences; the hover help of a setting is the same short text.
   Test results and the history of each setting are gone from the app (they stay in this
   changelog). The guide is half as long, about 24,000 words instead of 51,000.
+- **Footprints from Poses in numbered steps.** Tools ▸ Model ▾ ▸ **Footprints from
+  poses…** now lays out its settings as *1 · Ground* and *2 · Cameras*, each with a line
+  saying what it does to this project: what the corners land on, in which height datum,
+  and how many poses get a footprint and why the others are skipped. **Ground** is a
+  row of buttons, and the manual intrinsics have their own help.
 
 ### Performance
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps

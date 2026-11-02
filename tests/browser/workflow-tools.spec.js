@@ -1199,19 +1199,21 @@ test("footprints from poses follow the terrain tiles, in the cameras' vertical d
 
   // The dialog: terrain is the default ground, the plane modes swap in their own field.
   await page.getByRole('button', { name: 'Footprints', exact: true }).click()
-  await expect(page.getByRole('radio', { name: 'Terrain model' })).toBeChecked()
+  await expect(page.getByRole('button', { name: 'Terrain model', pressed: true })).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'Terrain model' })).toHaveValue('terrain')
   await page.getByRole('combobox', { name: 'Camera heights' }).selectOption('ellipsoidal')
-  await expect(page.getByText(/converted to it where the two convert/)).toBeVisible()
-  await page.getByRole('radio', { name: 'Fixed elevation' }).check()
+  await expect(
+    page.getByText(/the camera heights are Ellipsoidal \(WGS 84\), and the terrain .* is converted to it/),
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'Fixed elevation' }).click()
   await expect(page.getByRole('spinbutton', { name: 'Ground elevation' })).toHaveValue('0')
-  await page.getByRole('radio', { name: 'Terrain model' }).check()
+  await page.getByRole('button', { name: 'Terrain model' }).click()
   // No sensor behind the pose: the manual intrinsics fallback is on and must be filled.
   await page.getByRole('spinbutton', { name: 'Focal' }).fill('1000')
   await page.getByRole('combobox', { name: 'Unit' }).selectOption('px')
   await page.getByRole('spinbutton', { name: 'Image width (px)' }).fill('1000')
   await page.getByRole('spinbutton', { name: 'Image height (px)' }).fill('800')
-  await page.getByRole('button', { name: 'Compute Footprints' }).click()
+  await page.getByRole('button', { name: 'Compute footprints' }).click()
   await expect(page.locator('#footprints')).toHaveText('1')
 })
 

@@ -2,8 +2,9 @@
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
 import WarnBox from '../ui/WarnBox.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { focalPx } from '../../../core/footprint.js'
 import { isGeographic, linearCrsUnit } from '../../../core/crs.js'
@@ -12,6 +13,7 @@ import { TERRAIN_DATUM } from '../../../core/terrainHeights.js'
 import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
 import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { FOOTPRINT_DEFAULTS } from '../../../core/defaults.user.js'
+import { footprintsEffects } from '../../../core/stepEffects/footprintsFromPoses.js'
 
 const props = defineProps({
   poses: { type: Array, default: () => [] },
@@ -40,14 +42,6 @@ const demOptions = computed(() => [
   ...external.demRasters.map((r) => ({ value: r.id, label: r.name, datum: r.verticalDatum || 'unknown' })),
 ])
 const demDatum = computed(() => demOptions.value.find((o) => o.value === settings.value.demSource)?.datum ?? 'unknown')
-const datumHint = computed(() => {
-  const dem = datumLabel(demDatum.value),
-    cams = settings.value.poseDatum
-  if (cams === 'unknown') return `Taken to be the terrain model's datum (${dem}).`
-  if (cams === demDatum.value) return 'Same datum as the terrain model.'
-  return `The terrain model (${dem}) is converted to it where the two convert.`
-})
-
 // Manual intrinsics override, for poses with no calibrated sensor (e.g. poses
 // imported without their images). Prefilled from the first known sensor.
 const seed = props.sensors[0] || null
@@ -104,25 +98,23 @@ const breakdown = computed(() => {
   return b
 })
 
-const GROUND_HINT = {
-  dem: 'Each corner lands where its ray meets the terrain.',
-  absolute: 'One horizontal plane at this elevation, in the project vertical units.',
-  agl: 'A plane per image, this far below its camera.',
-}
-const groundHint = computed(() => GROUND_HINT[settings.value.ground])
+const groundOptions = [
+  { id: 'dem', label: 'Terrain model' },
+  { id: 'absolute', label: 'Fixed elevation' },
+  { id: 'agl', label: 'Height above ground' },
+]
 
-const total = computed(() => props.poses.length)
-const REASON_LABEL = {
-  noPose: 'missing X/Y position',
-  noElevation: 'missing elevation (Z)',
-  noAngles: 'missing orientation angles',
-  noSensor: 'no calibrated sensor or intrinsics',
-  belowPlane: 'camera at/below the ground elevation',
-}
-const reasonLines = computed(() =>
-  Object.entries(REASON_LABEL)
-    .filter(([k]) => breakdown.value[k] > 0)
-    .map(([k, label]) => ({ n: breakdown.value[k], label })),
+// What each step does with these poses (core/stepEffects/footprintsFromPoses.js).
+const effects = computed(() =>
+  footprintsEffects(settings.value, {
+    demName: demOptions.value.find((o) => o.value === settings.value.demSource)?.label,
+    demDatum: datumLabel(demDatum.value),
+    poseDatum: settings.value.poseDatum === 'unknown' ? null : datumLabel(settings.value.poseDatum),
+    unit: heightUnit.value,
+    breakdown: breakdown.value,
+    total: props.poses.filter((p) => p.enabled !== false).length,
+    fallback: !!fallback.value,
+  }),
 )
 
 function run() {
@@ -133,136 +125,126 @@ function run() {
 <template>
   <ModalShell title="Footprints from Poses" @close="emit('close')">
     <p class="intro">
-      Project each image's corners onto the ground using its camera position, orientation and sensor intrinsics.
+      Project each image's corners onto the ground using its camera position, orientation and sensor intrinsics. The
+      footprints are drawn on the map (View ▸ Map ▸ Footprints shows and hides them); a new run replaces them.
     </p>
-
-    <SettingsField :hint="groundHint">
-      <template #label><FieldHelp op="footprints-from-poses" param="ground">Ground</FieldHelp></template>
-      <div class="radio-row">
-        <label class="radio"><input type="radio" value="dem" v-model="settings.ground" /> Terrain model</label>
-        <label class="radio"><input type="radio" value="absolute" v-model="settings.ground" /> Fixed elevation</label>
-        <label class="radio"><input type="radio" value="agl" v-model="settings.ground" /> Height above ground</label>
-      </div>
-    </SettingsField>
-    <template v-if="settings.ground === 'dem'">
-      <SettingsField label-for="fp-dem">
-        <template #label><FieldHelp op="footprints-from-poses" param="demSource">Terrain model</FieldHelp></template>
-        <select id="fp-dem" v-model="settings.demSource" class="field-input field-select">
-          <option v-for="o in demOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-      </SettingsField>
-      <SettingsField label-for="fp-datum" :hint="datumHint">
-        <template #label><FieldHelp op="footprints-from-poses" param="poseDatum">Camera heights</FieldHelp></template>
-        <select id="fp-datum" v-model="settings.poseDatum" class="field-input field-select">
-          <option v-for="d in VERTICAL_DATUMS" :key="d.id" :value="d.id">{{ d.label }}</option>
-        </select>
-      </SettingsField>
-    </template>
-    <SettingsField v-else-if="settings.ground === 'absolute'" label-for="fp-elev" :unit="`${heightUnit} (project CRS)`">
-      <template #label>
-        <FieldHelp
-          op="footprints-from-poses"
-          param="groundElev"
-          :value="settings.groundElev"
-          :default-value="FOOTPRINT_DEFAULTS.groundElev"
-          >Ground elevation</FieldHelp
-        >
-      </template>
-      <input id="fp-elev" v-model.number="settings.groundElev" type="number" step="any" class="field-input" />
-    </SettingsField>
-    <SettingsField v-else label-for="fp-agl" :unit="`${heightUnit} below each camera`">
-      <template #label>
-        <FieldHelp op="footprints-from-poses" param="agl" :value="settings.agl" :default-value="FOOTPRINT_DEFAULTS.agl"
-          >Flying height</FieldHelp
-        >
-      </template>
-      <input id="fp-agl" v-model.number="settings.agl" type="number" min="1" step="any" class="field-input" />
-    </SettingsField>
-
-    <SettingsField>
-      <template #label
-        ><GlossaryTerm id="camera-intrinsics">Camera intrinsics</GlossaryTerm> (for poses with no calibrated
-        sensor)</template
-      >
-      <label class="checkbox-row"
-        ><input type="checkbox" v-model="ov.enabled" class="checkbox" /> Provide a manual fallback</label
-      >
-      <div v-if="ov.enabled" class="override">
-        <div class="ov-row">
-          <label class="ov-field"
-            ><span class="ov-label">Focal</span>
-            <input v-model.number="ov.focal" type="number" min="0" step="any" class="field-input sm"
-          /></label>
-          <label class="ov-field"
-            ><span class="ov-label">Unit</span>
-            <select v-model="ov.unit" class="field-input sm">
-              <option value="px">pixels</option>
-              <option value="mm">mm</option>
-            </select></label
-          >
-          <label v-if="ov.unit === 'mm'" class="ov-field"
-            ><span class="ov-label">Pixel size (mm)</span>
-            <input v-model.number="ov.pixelSize" type="number" min="0" step="any" class="field-input sm"
-          /></label>
-        </div>
-        <div class="ov-row">
-          <label class="ov-field"
-            ><span class="ov-label">Image width (px)</span>
-            <input v-model.number="ov.width" type="number" min="1" step="1" class="field-input sm"
-          /></label>
-          <label class="ov-field"
-            ><span class="ov-label">Image height (px)</span>
-            <input v-model.number="ov.height" type="number" min="1" step="1" class="field-input sm"
-          /></label>
-        </div>
-        <span v-if="ov.unit === 'mm' && !ov.pixelSize" class="field-hint warn">
-          A mm focal needs a pixel size to convert to pixels.
-        </span>
-        <span v-else class="field-hint">
-          Used only where an image's own sensor can't supply a pixel focal + dimensions.
-        </span>
-      </div>
-    </SettingsField>
-
-    <SettingsField>
-      <template #label>
-        <FieldHelp
-          op="footprints-from-poses"
-          param="assumeNadir"
-          :value="settings.assumeNadir"
-          :default-value="FOOTPRINT_DEFAULTS.assumeNadir"
-          >Assume nadir</FieldHelp
-        >
-      </template>
-      <label class="checkbox-row"
-        ><input type="checkbox" v-model="settings.assumeNadir" class="checkbox" /> For images without orientation
-        angles</label
-      >
-    </SettingsField>
-    <p class="intro">
-      The footprints are drawn on the map (View ▸ Map ▸ Footprints shows and hides them); a new run replaces them.
-    </p>
-
     <p v-if="geographicCrs" class="intro">
       Working CRS {{ projectCrs }} is geographic — footprints are computed in a local metric frame and stored back in
       lat/lon.
     </p>
-    <div v-if="breakdown.ok > 0" class="summary">
-      {{ breakdown.ok }} of {{ total }} pose{{ total === 1 ? '' : 's' }} will produce a footprint
-      <ul v-if="reasonLines.length" class="reasons">
-        <li v-for="r in reasonLines" :key="r.label">{{ r.n }} — {{ r.label }}</li>
-      </ul>
-    </div>
-    <WarnBox v-else>
-      No poses will produce a footprint.
-      <ul v-if="reasonLines.length" class="reasons">
-        <li v-for="r in reasonLines" :key="r.label">{{ r.n }} — {{ r.label }}</li>
-      </ul>
-    </WarnBox>
+
+    <SettingsStep step="1" title="Ground" :effect="effects.ground">
+      <SettingsField>
+        <template #label><FieldHelp op="footprints-from-poses" param="ground">Ground</FieldHelp></template>
+        <SegmentedControl v-model="settings.ground" :options="groundOptions" />
+      </SettingsField>
+      <template v-if="settings.ground === 'dem'">
+        <SettingsField label-for="fp-dem">
+          <template #label><FieldHelp op="footprints-from-poses" param="demSource">Terrain model</FieldHelp></template>
+          <select id="fp-dem" v-model="settings.demSource" class="field-select">
+            <option v-for="o in demOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+        </SettingsField>
+        <SettingsField label-for="fp-datum">
+          <template #label><FieldHelp op="footprints-from-poses" param="poseDatum">Camera heights</FieldHelp></template>
+          <select id="fp-datum" v-model="settings.poseDatum" class="field-select">
+            <option v-for="d in VERTICAL_DATUMS" :key="d.id" :value="d.id">{{ d.label }}</option>
+          </select>
+        </SettingsField>
+      </template>
+      <SettingsField
+        v-else-if="settings.ground === 'absolute'"
+        label-for="fp-elev"
+        :unit="`${heightUnit} (project CRS)`"
+      >
+        <template #label>
+          <FieldHelp
+            op="footprints-from-poses"
+            param="groundElev"
+            :value="settings.groundElev"
+            :default-value="FOOTPRINT_DEFAULTS.groundElev"
+            >Ground elevation</FieldHelp
+          >
+        </template>
+        <input id="fp-elev" v-model.number="settings.groundElev" type="number" step="any" class="field-input" />
+      </SettingsField>
+      <SettingsField v-else label-for="fp-agl" :unit="`${heightUnit} below each camera`">
+        <template #label>
+          <FieldHelp
+            op="footprints-from-poses"
+            param="agl"
+            :value="settings.agl"
+            :default-value="FOOTPRINT_DEFAULTS.agl"
+            >Flying height</FieldHelp
+          >
+        </template>
+        <input id="fp-agl" v-model.number="settings.agl" type="number" min="1" step="any" class="field-input" />
+      </SettingsField>
+    </SettingsStep>
+
+    <SettingsStep step="2" title="Cameras" :effect="effects.cameras">
+      <SettingsField>
+        <template #label>
+          <FieldHelp
+            op="footprints-from-poses"
+            param="assumeNadir"
+            :value="settings.assumeNadir"
+            :default-value="FOOTPRINT_DEFAULTS.assumeNadir"
+            >Assume nadir</FieldHelp
+          >
+        </template>
+        <label class="checkbox-row"
+          ><input v-model="settings.assumeNadir" type="checkbox" class="checkbox" /> For images without orientation
+          angles</label
+        >
+      </SettingsField>
+      <SettingsField>
+        <template #label
+          ><FieldHelp op="footprints-from-poses" param="intrinsics">Manual intrinsics</FieldHelp></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="ov.enabled" type="checkbox" class="checkbox" /> For poses with no calibrated sensor</label
+        >
+        <div v-if="ov.enabled" class="override">
+          <div class="ov-row">
+            <label class="ov-field"
+              ><span class="ov-label">Focal</span>
+              <input v-model.number="ov.focal" type="number" min="0" step="any" class="field-input sm"
+            /></label>
+            <label class="ov-field"
+              ><span class="ov-label">Unit</span>
+              <select v-model="ov.unit" class="field-select sm">
+                <option value="px">pixels</option>
+                <option value="mm">mm</option>
+              </select></label
+            >
+            <label v-if="ov.unit === 'mm'" class="ov-field"
+              ><span class="ov-label">Pixel size (mm)</span>
+              <input v-model.number="ov.pixelSize" type="number" min="0" step="any" class="field-input sm"
+            /></label>
+          </div>
+          <div class="ov-row">
+            <label class="ov-field"
+              ><span class="ov-label">Image width (px)</span>
+              <input v-model.number="ov.width" type="number" min="1" step="1" class="field-input sm"
+            /></label>
+            <label class="ov-field"
+              ><span class="ov-label">Image height (px)</span>
+              <input v-model.number="ov.height" type="number" min="1" step="1" class="field-input sm"
+            /></label>
+          </div>
+          <span v-if="ov.unit === 'mm' && !ov.pixelSize" class="field-hint warn">
+            A mm focal needs a pixel size to convert to pixels.
+          </span>
+        </div>
+      </SettingsField>
+    </SettingsStep>
+
+    <WarnBox v-if="breakdown.ok === 0">No pose can be placed yet: step 2 says why.</WarnBox>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="breakdown.ok === 0" @click="run">Compute Footprints</button>
+      <button class="btn btn-primary" :disabled="breakdown.ok === 0" @click="run">Compute footprints</button>
     </template>
   </ModalShell>
 </template>
@@ -274,18 +256,6 @@ function run() {
   color: var(--text-dim);
   margin: 0;
   line-height: 1.45;
-}
-.radio-row {
-  display: flex;
-  gap: 16px;
-}
-.radio {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
 }
 .field-hint.warn {
   color: #d89a3a;
@@ -314,16 +284,7 @@ function run() {
 .field-input.sm {
   width: 92px;
 }
-.summary {
-  font-size: 12px;
-  color: var(--text);
-}
-.reasons {
-  margin: 4px 0 0;
-  padding-left: 18px;
-  color: var(--text-dim);
-}
-.reasons li {
-  font-size: 11px;
+.field-select.sm {
+  min-width: 92px;
 }
 </style>

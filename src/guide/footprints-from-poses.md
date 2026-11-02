@@ -58,3 +58,9 @@ For **Height above ground**: how far below each camera the ground plane lies.
 Treats an image with no orientation angles as looking straight down, with its top
 edge to the north. Right for a vertical aerial block; turn it off for oblique images,
 which are then skipped until their angles are known.
+
+## Manual intrinsics
+<!-- param: intrinsics  default: Off, or On when no pose has a calibrated sensor -->
+A focal length and image size for poses with no calibrated sensor, such as poses
+imported without their photos. Poses whose own sensor gives a focal in pixels and an
+image size keep it. A focal in mm needs the pixel size to convert it.

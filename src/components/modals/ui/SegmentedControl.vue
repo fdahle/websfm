@@ -17,6 +17,7 @@ defineEmits(['update:modelValue'])
       type="button"
       class="seg-btn"
       :class="{ active: modelValue === o.id }"
+      :aria-pressed="modelValue === o.id"
       :disabled="o.disabled"
       @click="!o.disabled && $emit('update:modelValue', o.id)"
     >
