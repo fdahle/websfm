@@ -565,8 +565,11 @@ export const useSensorsStore = defineStore('sensors', () => {
     const s = sensors.value.find((x) => x.id === id)
     if (!s || !groups?.length) return []
     const ids = []
+    // Each copy starts from the sensor as it was, not from the first group's relabelled
+    // sensor with its re-estimated layout.
+    const original = structuredClone(toRaw(s))
     groups.forEach((g, i) => {
-      const sensor = i === 0 ? s : { ...structuredClone(toRaw(s)), id: crypto.randomUUID(), signature: null }
+      const sensor = i === 0 ? s : { ...structuredClone(original), id: crypto.randomUUID(), signature: null }
       if (g.label) sensor.label = g.label
       if (i > 0) sensors.value.push(sensor)
       const members = new Set(g.imageIds)
@@ -583,7 +586,7 @@ export const useSensorsStore = defineStore('sensors', () => {
       ids.push(sensor.id)
     })
     log(
-      `Sensor ${groups[0].label ?? s.label}: split into ${groups.length} camera groups — ` +
+      `Sensor ${original.label}: split into ${groups.length} camera groups — ` +
         groups
           .map((g, i) => `${g.label ?? sensors.value.find((x) => x.id === ids[i])?.label} (${g.imageIds.length})`)
           .join(', '),

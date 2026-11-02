@@ -92,6 +92,11 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **Splitting a camera group keeps the original fiducial layout where it cannot be
+  estimated.** Sensors ▸ right-click ▸ **Split camera group…** copied every group after
+  the first from the first group, after its layout had been estimated from its own
+  photos; a group whose layout could not be estimated then kept the first group's,
+  not the camera's.
 - **The match view shows the tie points joined through other photos.** A pair's view
   in **Matches** listed "via PnP" tie points in its legend but never drew them: the tie
   points both photos see in the model, which this pair did not match directly. They are

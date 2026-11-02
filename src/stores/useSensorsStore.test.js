@@ -155,6 +155,19 @@ describe('splitSensor', () => {
     expect(store.sensors[1].fiducialCalibration.focalMm).toBe(153.5)
   })
 
+  it("keeps the sensor's own layout for a group it cannot be estimated from", () => {
+    const { images, store } = setup('batch')
+    const before = store.sensors[0].fiducialCalibration.marks
+    // a1 and a2: no marks found; b1 alone gives another layout (110 mm, not 100).
+    images.images[0].fiducialDetections = []
+    images.images[1].fiducialDetections = []
+    const ids = store.splitSensor('s1', [
+      { label: 'Camera L · B', imageIds: ['b1'] },
+      { label: 'Camera L · A', imageIds: ['a1', 'a2'] },
+    ])
+    expect(store.sensors.find((s) => s.id === ids[1]).fiducialCalibration.marks).toEqual(before)
+  })
+
   it('copies a certificate layout to every group', () => {
     const { store } = setup('certificate')
     const before = store.sensors[0].fiducialCalibration.marks
