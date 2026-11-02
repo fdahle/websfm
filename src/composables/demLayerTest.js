@@ -1,3 +1,4 @@
+import { toRaw } from 'vue'
 import { ensureProjection, transform } from '../core/crs.js'
 import { polygonAreaTest } from '../core/products/vectorLayers.js'
 
@@ -5,12 +6,15 @@ import { polygonAreaTest } from '../core/products/vectorLayers.js'
 // entries skipped), as (x, y) in the DEM's CRS → bool. Layers are stored in the project
 // CRS `crs`; the DEM may be in another one. null when no layer is given. Used by Quality
 // Report ▸ DEM vs reference and Co-register DEM (stable ground, an area of interest).
+// The polygons are read raw: through the store's reactive proxies, every vertex read
+// is tracked, and Melville's rock layer (1,056 polygons, 224,000 vertices) took about
+// 170 s instead of 1 s over the cells co-registration tests.
 export async function demLayerTest(dem, layers, crs) {
   const tests = []
   for (const set of layers) {
     if (!set) continue
     if (!dem.crs || dem.crs === 'local') throw new Error('Limiting the comparison to a layer needs a DEM in a CRS')
-    let polygons = set.footprints.map((f) => f.rings)
+    let polygons = toRaw(set).footprints.map((f) => f.rings)
     if (crs && dem.crs !== crs) {
       await Promise.all([ensureProjection(crs), ensureProjection(dem.crs)])
       polygons = polygons.map((rings) => rings.map((ring) => ring.map((p) => transform(p, crs, dem.crs))))

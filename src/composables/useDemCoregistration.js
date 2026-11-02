@@ -18,8 +18,8 @@ import { useLog } from './useLog.js'
 // Tools ▸ Products ▸ Co-register DEM…: a DEM against a reference DEM, on stable ground,
 // the steps xDEM chains (core/products/demCoregistration.js), applied to a copy of the
 // DEM or to the georeference. On the main thread, as Quality Report ▸ DEM vs reference:
-// about 20,000 cells and a dozen reference samples each take well under a second, and
-// the reference sampler (reprojection, datum) lives here.
+// about 20,000 cells and a dozen reference samples each take about a second (Melville,
+// with 1,056 rock polygons), and the reference sampler (reprojection, datum) lives here.
 export function useDemCoregistration() {
   const recon = useReconstructionStore()
   const external = useExternalStore()
@@ -65,7 +65,9 @@ export function useDemCoregistration() {
     log(
       `${label}: on ${result.before.n.toLocaleString()} cells${stable ? ` of "${stable.name}"` : ''}, ` +
         (settings.horizontal ? `shift E ${f(result.shift[0])}, N ${f(result.shift[1])}${u}` : 'no horizontal shift') +
-        (result.horizontal ? ` (${result.horizontal.iterations} iterations)` : '') +
+        (result.horizontal
+          ? ` (${result.horizontal.iterations} iteration${result.horizontal.iterations === 1 ? '' : 's'})`
+          : '') +
         `, vertical ${f(result.vertical)}${u}` +
         (result.tilt ? `, ${result.tilt.order === 1 ? 'plane' : 'quadratic surface'} removed` : '') +
         `; NMAD ${result.before.nmad.toFixed(2)} → ${result.after.nmad.toFixed(2)}${u}, ` +

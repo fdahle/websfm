@@ -15,8 +15,10 @@ Use it when the DEM's control and the reference disagree, as they do when Find G
 takes positions from a satellite image and heights from a DEM, or when the control is
 old. On the Melville Glacier scans (Find GCPs control, 20 m DEM), the DEM was 1.1 m
 east and 7.9 m north of REMA, and its NMAD on stable rock went from 6.9 m to 5.2 m
-with both shifts, 5.0 m with a plane and 4.9 m with a quadratic surface. Metashape's
-DEM of the same photos, by the same measure, is at 5.0 m. Quality Report ▸ DEM vs
+with both shifts, 5.0 m with a plane and 4.9 m with a quadratic surface; moved through
+the georeference, the DEM rebuilt afterwards measured 5.1 m. Metashape's DEM of the same
+photos, by the same measure, is at 5.0 m, and 4.5 m once co-registered the same way.
+Quality Report ▸ DEM vs
 reference DEM shows the offset first, and its **Co-register DEM…** opens this dialog
 with the same reference and stable ground.
 

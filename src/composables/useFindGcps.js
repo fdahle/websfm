@@ -313,8 +313,9 @@ export async function findGcpCandidates({
     accept = null
   const stableSet = stableSetId ? useFootprintsStore().sets.find((s) => s.id === stableSetId) : null
   if (stableSet) {
-    // Layers are stored in the project CRS; candidates come in the reference CRS.
-    const inside = polygonAreaTest(stableSet.footprints.map((f) => f.rings))
+    // Layers are stored in the project CRS; candidates come in the reference CRS. The
+    // raw rings: read through the store's proxies, every vertex costs a tracked get.
+    const inside = polygonAreaTest(toRaw(stableSet).footprints.map((f) => f.rings))
     stable = { name: stableSet.name, rejected: 0 }
     accept = (x, y) => {
       const ok = inside(...toProject([x, y]))

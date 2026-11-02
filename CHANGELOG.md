@@ -46,7 +46,10 @@ Notable changes to websfm. The format follows
   now cited (About ▸ References, the Quality Report's methods). On Melville (Find GCPs
   control, 20 m DEM) the DEM lay 1.1 m east and 7.9 m north of REMA; its NMAD on stable
   rock went from 6.9 m to 5.2 m with both shifts, 5.0 m with a plane, 4.9 m with a
-  quadratic surface, against 5.0–5.5 m for Metashape's DEM by the same scoring.
+  quadratic surface. Moved through the georeference (both shifts and a plane), the DEM
+  rebuilt afterwards measured 5.1 m, with 0.5 m of shift left. Metashape's DEM of the
+  same photos is at 5.0 m as built and 4.5 m once co-registered the same way, so the
+  step closes most of the gap, not all of it.
 
 ### Performance
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps
