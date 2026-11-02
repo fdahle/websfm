@@ -9,6 +9,7 @@ import {
   bboxCoverage,
   s2RasterName,
   s2Attribution,
+  windowOnTile,
 } from './sentinel2.js'
 
 // The shape of an Earth Search v1 item (trimmed from a real answer over Neko Harbour).
@@ -67,6 +68,10 @@ describe('s2Scenes and rankScenes', () => {
     expect(s).toMatchObject({ id: 'a', date: '2025-03-23', tile: '20DNP', cloud: 2.2, snow: 44.3, epsg: 32720 })
     expect(s.coverage).toBe(1)
     expect(s.hrefs.green).toMatch(/B03\.tif$/)
+    expect(s.thumbnail).toBeNull()
+    const withThumb = { ...item('c', {}) }
+    withThumb.assets = { ...withThumb.assets, thumbnail: { href: 'https://x/preview.jpg' } }
+    expect(s2Scenes({ features: [withThumb] }, null)[0].thumbnail).toBe('https://x/preview.jpg')
     expect(s2Scenes(fc, null)).toHaveLength(1)
   })
 
@@ -152,5 +157,16 @@ describe('stretchBands', () => {
     expect(Array.from(rgb.slice(3, 6))).toEqual([1, 1, 1])
     expect(rgb[3 * 3 + 1]).toBe(255) // snow at the top of the range, not clipped below it
     expect(rgb[3 * 2]).toBe(1 + Math.round((4000 * 254) / 14000))
+  })
+})
+
+describe('windowOnTile', () => {
+  it('gives a window as shares of the tile', () => {
+    expect(windowOnTile({ x: 2745, y: 5490, width: 1098, height: 2196 }, [10980, 10980])).toEqual({
+      left: 0.25,
+      top: 0.5,
+      width: 0.1,
+      height: 0.2,
+    })
   })
 })

@@ -8,6 +8,7 @@ import {
   s2Scenes,
   rankScenes,
   sceneWindow,
+  windowOnTile,
   lonLatBbox,
   s2RasterName,
   s2Attribution,
@@ -37,14 +38,31 @@ export async function searchSentinel2(area, { maxCloud = SENTINEL2_DEFAULTS.maxC
   return rankScenes(s2Scenes(await res.json(), area.bbox))
 }
 
+// The pixel window of `scene` that a fetch reads over `area` (sceneWindow; throws as it does).
+async function areaWindow(scene, area) {
+  const crs = `EPSG:${scene.epsg}`
+  await ensureProjection(crs)
+  const points = area.points.map((p) => transform(p, 'EPSG:4326', crs))
+  const { padFraction, minPad, maxPx } = SENTINEL2_TUNING
+  return sceneWindow(scene.transform, scene.shape, points, { padFraction, minPad, maxPx })
+}
+
+// Where that window sits on the scene's thumbnail (windowOnTile), or null when it
+// cannot be read (outside the scene, too wide).
+export async function sentinel2Outline(scene, area) {
+  try {
+    return windowOnTile(await areaWindow(scene, area), scene.shape)
+  } catch {
+    return null
+  }
+}
+
 // Read `scene` over `area`, import it as a reference orthophoto with its σ XY, and
 // return the raster's record.
 export async function fetchSentinel2Scene(scene, area, { onLog } = {}) {
   const crs = `EPSG:${scene.epsg}`
-  await ensureProjection(crs)
-  const points = area.points.map((p) => transform(p, 'EPSG:4326', crs))
-  const { padFraction, minPad, maxPx, loQ, hiQ } = SENTINEL2_TUNING
-  const window = sceneWindow(scene.transform, scene.shape, points, { padFraction, minPad, maxPx })
+  const { loQ, hiQ } = SENTINEL2_TUNING
+  const window = await areaWindow(scene, area)
   const t0 = performance.now()
   // Plain strings: the scene may be a reactive proxy, which a worker message cannot carry.
   const hrefs = { red: scene.hrefs.red, green: scene.hrefs.green, blue: scene.hrefs.blue }

@@ -71,8 +71,10 @@ export function bboxCoverage(geometry, [w, s, e, n], N = 9) {
 }
 
 // The catalogue's answer as scenes: { id, date, tile, cloud, snow, nodata, coverage
-// (share of `bbox`), epsg, transform, shape, hrefs: { red, green, blue } }. Scenes
-// without the three 10 m bands or a projection are left out.
+// (share of `bbox`), epsg, transform, shape, hrefs: { red, green, blue }, thumbnail }.
+// `thumbnail` is the catalogue's small JPEG of the whole tile (343 px, about 45 KB,
+// served with CORS), or null. Scenes without the three 10 m bands or a projection are
+// left out.
 export function s2Scenes(featureCollection, bbox) {
   const out = []
   for (const f of featureCollection?.features ?? []) {
@@ -94,6 +96,7 @@ export function s2Scenes(featureCollection, bbox) {
       transform: red['proj:transform'],
       shape: red['proj:shape'],
       hrefs: Object.fromEntries(S2_RGB_ASSETS.map((k) => [k, a[k].href])),
+      thumbnail: a.thumbnail?.href ?? null,
     })
   }
   return out
@@ -148,6 +151,12 @@ export function sceneWindow(transform, [rows, cols], points, { padFraction = 0.2
         `at most ${((maxPx * Math.abs(a)) / 1000).toFixed(0)} km is read. Choose a smaller search area.`,
     )
   return { x: c0, y: r0, width, height, originX: c + a * c0, originY: f + e * r0, res: Math.abs(a) }
+}
+
+// A pixel window of a scene (sceneWindow) as shares of the whole tile, { left, top,
+// width, height } in 0–1: where to outline it on the tile's thumbnail.
+export function windowOnTile({ x, y, width, height }, [rows, cols]) {
+  return { left: x / cols, top: y / rows, width: width / cols, height: height / rows }
 }
 
 // Three bands of 16-bit reflectance (0 = no data) as 8-bit RGB, interleaved, with one

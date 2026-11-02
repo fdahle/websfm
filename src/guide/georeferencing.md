@@ -252,7 +252,8 @@ or a polygon layer you choose.
 **Search scenes** lists the scenes over the area, best first: those that cover all of
 it, then the least cloud, then the fewest empty pixels, then the newest. Each row gives
 the date, the 110 km tile, and the scene's share of cloud and of snow and ice. Click a
-row to choose it, and **Fetch** reads the area plus a quarter on each side (at least
+row to choose it: a preview of the whole tile shows beside the list, with a box on what
+will be read, so cloud over the area shows before the fetch. **Fetch** reads the area plus a quarter on each side (at least
 1 km, at most 60 km across) from the red, green and blue bands. It is imported as a
 reference orthophoto in the scene's UTM zone, named after the date and tile, with σ XY
 8 m.
@@ -266,7 +267,7 @@ leaves the rest of the window empty.
 The most cloud a Sentinel-2 scene may have to be listed, in percent of the whole
 110 km tile, as the catalogue states it. Cloud elsewhere on the tile does not matter,
 so a scene with some cloud can still show the area clearly; raise it when no scene is
-listed. **From** and **To** limit the dates.
+listed; the preview shows whether the cloud is over the area. **From** and **To** limit the dates.
 
 ## Search area
 <!-- param: searchArea  default: Auto -->

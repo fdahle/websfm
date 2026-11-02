@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -7,7 +7,12 @@ import SettingsGroup from '../ui/SettingsGroup.vue'
 import DataTable from '../ui/DataTable.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useLog } from '../../../composables/useLog.js'
-import { sentinel2Area, searchSentinel2, fetchSentinel2Scene } from '../../../composables/useSentinel2.js'
+import {
+  sentinel2Area,
+  searchSentinel2,
+  fetchSentinel2Scene,
+  sentinel2Outline,
+} from '../../../composables/useSentinel2.js'
 import { SENTINEL2_DEFAULTS } from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
@@ -52,6 +57,24 @@ const numbers = computed(() =>
 )
 const chosen = computed(() => scenes.value?.find((s) => s.id === chosenId.value) ?? null)
 
+// The chosen scene's thumbnail (the whole tile), with the window a fetch reads
+// outlined on it: cloud or an empty half over the area shows before the fetch.
+const outline = ref(null),
+  thumbFailed = ref(false)
+watch(chosen, async (scene) => {
+  outline.value = null
+  thumbFailed.value = false
+  if (!scene || !area.value) return
+  const box = await sentinel2Outline(scene, area.value)
+  if (chosen.value === scene) outline.value = box
+})
+const outlineStyle = computed(() => {
+  const o = outline.value
+  if (!o) return null
+  const pc = (v) => `${(100 * v).toFixed(2)}%`
+  return { left: pc(o.left), top: pc(o.top), width: pc(o.width), height: pc(o.height) }
+})
+
 async function search() {
   busy.value = 'search'
   error.value = ''
@@ -88,7 +111,7 @@ const rowClass = (row) => ({ 's2-chosen': row.id === chosenId.value })
 </script>
 
 <template>
-  <ModalShell title="Sentinel-2 reference" width="640px" @close="emit('close')">
+  <ModalShell title="Sentinel-2 reference" width="820px" @close="emit('close')">
     <p class="s2-intro">
       Fetch a Sentinel-2 image of the search area as a reference orthophoto: 10 m true colour from the Copernicus
       programme, free and open, read straight from AWS Open Data.
@@ -143,14 +166,32 @@ const rowClass = (row) => ({ 's2-chosen': row.id === chosenId.value })
               : 'No scene matches. Allow more cloud or a wider date range.'
           }}
         </p>
-        <DataTable
-          v-if="scenes.length"
-          class="s2-table"
-          :columns="COLUMNS"
-          :rows="scenes"
-          :row-class="rowClass"
-          @row-click="(row) => (chosenId = row.id)"
-        />
+        <div v-if="scenes.length" class="s2-results">
+          <DataTable
+            class="s2-table"
+            :columns="COLUMNS"
+            :rows="scenes"
+            :row-class="rowClass"
+            @row-click="(row) => (chosenId = row.id)"
+          />
+          <figure v-if="chosen" class="s2-preview">
+            <div class="s2-thumb">
+              <!-- crossorigin: the app is cross-origin isolated (COEP), and the catalogue's
+                   bucket answers CORS. -->
+              <img
+                v-if="chosen.thumbnail && !thumbFailed"
+                :key="chosen.id"
+                :src="chosen.thumbnail"
+                crossorigin="anonymous"
+                :alt="`Sentinel-2 tile ${chosen.tile} on ${chosen.date}`"
+                @error="thumbFailed = true"
+              />
+              <span v-else class="s2-thumb-none">No preview</span>
+              <span v-if="outlineStyle" class="s2-outline" :style="outlineStyle"></span>
+            </div>
+            <figcaption>Tile {{ chosen.tile }}, {{ chosen.date }}. The box is what will be read.</figcaption>
+          </figure>
+        </div>
         <WarnBox v-if="chosen && chosen.coverage != null && chosen.coverage < 0.99"
           >This scene covers {{ pct(100 * chosen.coverage) }} of the area: the rest of the window will be
           empty.</WarnBox
@@ -205,6 +246,59 @@ const rowClass = (row) => ({ 's2-chosen': row.id === chosenId.value })
   margin: 0;
   font-size: 12px;
   color: var(--danger);
+}
+.s2-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+.s2-results .s2-table {
+  flex: 1 1 380px;
+  min-width: 0;
+}
+.s2-preview {
+  flex: 0 0 220px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.s2-thumb {
+  position: relative;
+  width: 220px;
+  height: 220px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.s2-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.s2-thumb-none {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+/* Two strokes, so the box reads on snow and on dark water alike. */
+.s2-outline {
+  position: absolute;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  min-width: 6px;
+  min-height: 6px;
+  pointer-events: none;
+}
+.s2-preview figcaption {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
 }
 .s2-table {
   max-height: 220px;
