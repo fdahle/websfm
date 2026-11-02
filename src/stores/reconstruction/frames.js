@@ -221,6 +221,20 @@ export function createFrameResolver({
     return { stale: false, reason: null }
   }
 
+  // Whether a georeferenced product was built in the georeference's own fit, before the
+  // co-registration it now carries moved it (Co-register DEM, georeferencing.js
+  // withCoregistration: `fitSim`): its coordinates are then those the fit puts the model
+  // in, though productFrameStatus calls it stale.
+  function builtInFit(product) {
+    const stamp = product?.frameStamp
+    const g = validGeoref.value
+    if (!stamp?.frameKey || stamp.source !== 'georef' || !g?.fitSim || g.crs !== currentCrs()) return false
+    const cloud = mainSparseCloud.value
+    if (stamp.cloudId && (!cloud || stamp.cloudId !== cloud.id || stamp.cloudCreatedAt !== (cloud.createdAt ?? null)))
+      return false
+    return stamp.frameKey === JSON.stringify({ kind: 'similarity', ...g.fitSim, crs: g.crs, ...georefUnits(g.crs) })
+  }
+
   // What a product should record about the frame it was built in (D8/D11).
   const frameStampOf = (resolved) => ({
     source: resolved.source,
@@ -233,5 +247,5 @@ export function createFrameResolver({
     at: new Date().toISOString(),
   })
 
-  return { effectiveFrameSpec, currentFrameSignature, productFrameStatus, frameStampOf }
+  return { effectiveFrameSpec, currentFrameSignature, productFrameStatus, builtInFit, frameStampOf }
 }

@@ -60,7 +60,13 @@ describe('coregisterEffects', () => {
       'The georeference is co-registered to "rema_4m" (moved E −1.1, N −7.9, Z +0.8 m).',
     )
     const g = { ...COREG_DEFAULTS, applyTo: 'georeference' }
-    expect(coregisterEffects(g, { ...project, current, chain: true }).apply).toMatch(/on top of the current move/)
+    expect(coregisterEffects(g, { ...project, current, builtIn: 'moved' }).apply).toMatch(/on top of the current move/)
+    expect(coregisterEffects(g, { ...project, current, builtIn: 'fit' }).apply).toMatch(/in place of the current move/)
+    expect(coregisterEffects(g, { ...project, builtIn: null }).blocked).toMatch(
+      /was built before the georeference last changed/,
+    )
+    // On the DEM itself the frame it was built in does not matter.
+    expect(coregisterEffects({ ...g, applyTo: 'dem' }, { ...project, builtIn: null }).blocked).toBeNull()
     expect(coregisterEffects(g, { ...project, current }).apply).toMatch(/in place of the current move/)
   })
 })

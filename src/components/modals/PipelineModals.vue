@@ -298,7 +298,7 @@ const demProducts = computed(() => {
   return [...all.filter((p) => p.id === dem.value?.id), ...all.filter((p) => p.id !== dem.value?.id)]
 })
 const polygonLayers = computed(() => footprintsStore.sets.filter((s) => s.kind !== 'lines'))
-const { chainsOnto, removeFromGeoreference } = useDemCoregistration()
+const { builtIn, removeFromGeoreference } = useDemCoregistration()
 const exportingFootprints = computed(
   () => !!exportTargetVectorSet.value && exportTargetVectorSet.value.id === footprintsStore.footprintSet?.id,
 )
@@ -638,7 +638,7 @@ const exportingFootprints = computed(
       :initial="coregisterInitial"
       :georef-crs="reconstructionStore.georef?.crs ?? null"
       :current="reconstructionStore.coregistration"
-      :chains-onto="chainsOnto"
+      :built-in="builtIn"
       @close="
         () => {
           toolModal = null

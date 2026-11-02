@@ -122,3 +122,35 @@ it('returns a frame spec the worker can clone, though it is spread from reactive
   const local = await resolver.effectiveFrameSpec()
   expect(structuredClone(local.frameSpec)).toEqual(local.frameSpec)
 })
+
+it('knows a product built in the fit a co-registration has since moved', async () => {
+  proj4.defs('EPSG:32632', '+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs')
+  const I = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ]
+  const fit = { scale: 2, R: I, t: [0, 0, 0] }
+  const validGeoref = ref({ crs: 'EPSG:32632', sim: fit })
+  const resolver = createFrameResolver({
+    mainSparseCloud: ref({ id: 'c', createdAt: 1 }),
+    validGeoref,
+    currentCrs: () => 'EPSG:32632',
+    georeference: vi.fn(),
+    scaleFit: ref(null),
+    scaleFitStatus: () => ({ valid: false }),
+    log: vi.fn(),
+  })
+  const inFit = { frameStamp: resolver.frameStampOf(await resolver.effectiveFrameSpec()) }
+  expect(resolver.builtInFit(inFit)).toBe(false) // nothing moved it: not stale either
+  // Co-registered: the georeference moves, its fit is kept as fitSim.
+  validGeoref.value = { crs: 'EPSG:32632', sim: { ...fit, t: [1, 2, 3] }, fitSim: fit, coregistered: true }
+  expect(resolver.productFrameStatus(inFit).stale).toBe(true)
+  expect(resolver.builtInFit(inFit)).toBe(true)
+  const inMoved = { frameStamp: resolver.frameStampOf(await resolver.effectiveFrameSpec()) }
+  expect(resolver.productFrameStatus(inMoved).stale).toBe(false)
+  expect(resolver.builtInFit(inMoved)).toBe(false)
+  // Refitted since (new control): the old product is in neither.
+  validGeoref.value = { crs: 'EPSG:32632', sim: { ...fit, scale: 3, t: [1, 2, 3] }, fitSim: { ...fit, scale: 3 } }
+  expect(resolver.builtInFit(inFit)).toBe(false)
+})

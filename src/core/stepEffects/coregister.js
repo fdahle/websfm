@@ -16,7 +16,9 @@ export function describeCoregistration(c) {
 // project: { demName, demInCrs (the DEM is in a CRS), demTiled (kept as tiles: past
 //   one plane), demCrs, referenceName, stableName (null = every cell), georefCrs (the
 //   georeference's CRS, null when there is none), current (the store's coregistration),
-//   chain (the DEM was built in the co-registered georeference: a new move adds to it) }
+//   builtIn (where the DEM is against the georeference, useDemCoregistration: 'moved' =
+//   built in the co-registered georeference, a new move adds to it; 'fit' = built in the
+//   fit itself; null = built in an earlier georeference) }
 // → { stable, horizontal, vertical, tilt, apply, current, blocked } — `blocked` is why
 //   Run cannot go ahead, or null.
 export function coregisterEffects(
@@ -30,7 +32,7 @@ export function coregisterEffects(
     stableName = null,
     georefCrs = null,
     current = null,
-    chain = false,
+    builtIn = 'fit',
   } = {},
 ) {
   const ref = referenceName ? `"${referenceName}"` : 'the reference DEM'
@@ -62,6 +64,8 @@ export function coregisterEffects(
   else if (!referenceName) blocked = 'Import a reference DEM first (Import ▸ Reference DEM / Ortho).'
   else if (georef && s.tilt === 'quadratic') blocked = 'A quadratic tilt applies to the DEM only.'
   else if (georef && !georefCrs) blocked = 'The project has no georeference to move.'
+  else if (georef && builtIn == null)
+    blocked = `"${demName}" was built before the georeference last changed: rebuild it to move the georeference by it.`
   else if (georef && demCrs !== georefCrs)
     blocked = `"${demName}" is in ${demCrs}, the georeference in ${georefCrs}: build the DEM in the project CRS.`
   else if (!georef && demTiled)
@@ -69,7 +73,7 @@ export function coregisterEffects(
   else if (!s.horizontal && !s.vertical && s.tilt === 'off') blocked = 'Turn on at least one step.'
 
   const apply = georef
-    ? `The georeference moves onto ${ref}${current ? (chain ? ', on top of the current move' : ', in place of the current move') : ''}: ` +
+    ? `The georeference moves onto ${ref}${current ? (builtIn === 'moved' ? ', on top of the current move' : ', in place of the current move') : ''}: ` +
       'the DEMs and orthophotos built before are outdated, rebuild them. Every refit keeps the move until you remove it here.'
     : `A new DEM "${demName} (co-registered)" is added beside "${demName}"; the orthophoto and the model stay where they are.`
   return {

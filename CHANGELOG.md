@@ -97,6 +97,12 @@ Notable changes to websfm. The format follows
   the first from the first group, after its layout had been estimated from its own
   photos; a group whose layout could not be estimated then kept the first group's,
   not the camera's.
+- **Co-register DEM moves the georeference only from a DEM built in it.** Applied to the
+  georeference, it read the DEM's coordinates as the current fit's whenever the DEM was
+  out of date for any reason. A DEM built before the georeference was refitted now
+  blocks the run (rebuild it first), and one built in the co-registered georeference
+  adds to the move even when it is out of date for another reason, such as a rebuilt
+  dense cloud. **Co-register** also waits while the Copernicus DEM is still downloading.
 - **The match view shows the tie points joined through other photos.** A pair's view
   in **Matches** listed "via PnP" tie points in its legend but never drew them: the tie
   points both photos see in the model, which this pair did not match directly. They are

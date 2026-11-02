@@ -26,7 +26,7 @@ const props = defineProps({
   initial: { type: Object, default: null }, // { demId, referenceId, stableSetId }
   georefCrs: { type: String, default: null },
   current: { type: Object, default: null }, // the store's coregistration
-  chainsOnto: { type: Function, default: () => false }, // dem → bool
+  builtIn: { type: Function, default: () => 'fit' }, // dem → 'moved' | 'fit' | null (useDemCoregistration)
 })
 const emit = defineEmits(['close', 'run', 'remove'])
 
@@ -61,7 +61,7 @@ const effects = computed(() =>
     stableName: stable.value?.name ?? null,
     georefCrs: props.georefCrs,
     current: props.current,
-    chain: !!dem.value && props.chainsOnto(dem.value),
+    builtIn: dem.value ? props.builtIn(dem.value) : 'fit',
   }),
 )
 
@@ -191,7 +191,9 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!dems.length || !!effects.blocked" @click="run">Co-register</button>
+      <button class="btn btn-primary" :disabled="!dems.length || !!effects.blocked || fetching" @click="run">
+        Co-register
+      </button>
     </template>
   </ModalShell>
 </template>

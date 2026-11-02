@@ -27,11 +27,16 @@ export function useDemCoregistration() {
   const projects = useProjectsStore()
   const { log } = useLog()
 
-  // Whether a co-registration of this DEM moves the georeference on from where the
-  // current one put it: the DEM was built in the co-registered georeference.
-  function chainsOnto(dem) {
-    return !!recon.coregistration && !!recon.georef?.coregistered && !recon.productStatus(dem).outdated
+  // Where a DEM's coordinates are against the georeference, from the frame it recorded:
+  // 'moved' (built in the co-registered georeference: a new move chains onto it), 'fit'
+  // (built in the fit itself, before any co-registration moved it: a new move replaces
+  // it), or null (built in an earlier georeference: its anchors would carry the refit
+  // too, so it cannot move this one).
+  function builtIn(dem) {
+    if (!recon.productFrameStatus(dem).stale) return recon.georef?.coregistered ? 'moved' : 'fit'
+    return recon.builtInFit(dem) ? 'fit' : null
   }
+  const chainsOnto = (dem) => builtIn(dem) === 'moved'
 
   // settings: { demId, referenceId, stableSetId, horizontal, vertical, tilt, applyTo }
   // → { result (coregisterDem), record (the new DEM, applyTo 'dem'), unit (the
@@ -90,6 +95,8 @@ export function useDemCoregistration() {
     }
 
     if (settings.applyTo === 'georeference') {
+      if (!builtIn(dem))
+        throw new Error(`${label}: the DEM was built before the georeference last changed; rebuild it first`)
       const pairs = chainsOnto(dem)
         ? chainCoregistration(recon.coregistration.pairs, result)
         : coregistrationPairs(coregistrationAnchors(points), result)
@@ -127,5 +134,5 @@ export function useDemCoregistration() {
     )
   }
 
-  return { run, chainsOnto, removeFromGeoreference }
+  return { run, builtIn, chainsOnto, removeFromGeoreference }
 }

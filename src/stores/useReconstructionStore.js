@@ -1112,16 +1112,17 @@ export const useReconstructionStore = registerProjectStore(
       frameModel: () => frameModelFor.value,
     })
 
-    const { effectiveFrameSpec, currentFrameSignature, productFrameStatus, frameStampOf } = createFrameResolver({
-      mainSparseCloud,
-      validGeoref,
-      currentCrs: () => projects.currentCrs,
-      georeference,
-      scaleFit,
-      scaleFitStatus,
-      log,
-      orientationBasis: activeOrientationBasis,
-    })
+    const { effectiveFrameSpec, currentFrameSignature, productFrameStatus, builtInFit, frameStampOf } =
+      createFrameResolver({
+        mainSparseCloud,
+        validGeoref,
+        currentCrs: () => projects.currentCrs,
+        georeference,
+        scaleFit,
+        scaleFitStatus,
+        log,
+        orientationBasis: activeOrientationBasis,
+      })
 
     // Mesh texture (reconstruction/meshTexture.js).
     const { textureMesh } = createMeshTexture({
@@ -1509,6 +1510,7 @@ export const useReconstructionStore = registerProjectStore(
       scaleFitStatus,
       currentFrameSignature,
       productFrameStatus,
+      builtInFit,
       gcpAccuracyReport,
       poseResidualReport,
       gcpGuides,
