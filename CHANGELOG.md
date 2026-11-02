@@ -61,6 +61,12 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **Gradual selection no longer reports unsaved changes.** On a project with depth maps,
+  Tools ▸ Model ▸ **Gradual selection…** showed *Unsaved changes: Failed to execute
+  'removeEntry' … modifications are not allowed*. Retiring the depth maps deleted each
+  depth file twice at once, once with the image's preview and once in the sweep of all
+  maps, and the browser refuses one of two overlapping deletes of the same file (22 of
+  400 in a test). Deletes of one file now wait their turn, as its writes already did.
 - **DISK without a GPU error.** Detect Features and Find GCPs now run DISK on the CPU
   from the start, instead of first trying the GPU, logging an ONNX Runtime error
   ("MaxPool … The Indices output is not supported yet") and then falling back to the CPU.

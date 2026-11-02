@@ -1,7 +1,7 @@
 // Depth-map planes (Stage A) and their index.
 import { trackPersistence, ignoreMissing } from '../persistence.js'
 import { DEPTH_BIN_KEYS, planeBytes } from '../../core/dense/depthMapCodec.js'
-import { getSubDir, readJson, writeBin, writeJson } from './base.js'
+import { getSubDir, readJson, removeFileIn, writeBin, writeJson } from './base.js'
 
 // ── Depth-map planes ──────────────────────────────────────────────────────────
 // The dense Stage A output: minutes of PatchMatch per image, so it is persisted
@@ -20,7 +20,7 @@ async function removeStaleDepthBins(dir, keepUuids) {
     const m = name.match(/^(.+)\.(?:depth|cost|nrm|rgb)\.bin$/)
     if (m && !keepUuids.has(m[1])) stale.push(name)
   }
-  for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
+  for (const name of stale) await removeFileIn(dir, name)
 }
 
 // `entries`: [{ uuid, buffers: { depth, cost, nrm, rgb } }] — buffers as
@@ -35,7 +35,7 @@ export async function saveDepthPlanes(projectId, index, entries) {
         const buf = buffers?.[key]
         const name = `${uuid}.${key}.bin`
         if (buf && buf.byteLength) await writeBin(dir, name, buf)
-        else await dir.removeEntry(name).catch(ignoreMissing) // e.g. nrm absent
+        else await removeFileIn(dir, name) // e.g. nrm absent
       }
     }
     await writeJson(dir, 'index.json', index)
@@ -49,7 +49,7 @@ export async function saveDepthPlanes(projectId, index, entries) {
 export async function beginDepthPlanes(projectId) {
   return trackPersistence('beginDepthPlanes:' + String(projectId), async () => {
     const dir = await getSubDir(projectId, 'depthmaps')
-    await dir.removeEntry('index.json').catch(ignoreMissing)
+    await removeFileIn(dir, 'index.json')
   })
 }
 
@@ -64,7 +64,7 @@ export async function saveDepthPlane(projectId, uuid, buffers) {
       const buf = buffers[key],
         name = `${uuid}.${key}.bin`
       if (buf && buf.byteLength) await writeBin(dir, name, buf)
-      else await dir.removeEntry(name).catch(ignoreMissing)
+      else await removeFileIn(dir, name)
     }
   })
 }
@@ -98,12 +98,12 @@ export async function promoteStagedDepthPlanes(projectId, uuids, tag = 'g') {
           ignoreMissing(error)
           continue
         }
-        await dir.removeEntry(name).catch(ignoreMissing)
+        await removeFileIn(dir, name)
         if (typeof handle.move === 'function') {
           await handle.move(name)
         } else {
           await writeBin(dir, name, await (await handle.getFile()).arrayBuffer())
-          await dir.removeEntry(staged).catch(ignoreMissing)
+          await removeFileIn(dir, staged)
         }
       }
     }
@@ -156,7 +156,7 @@ export async function deleteDepthPlanes(projectId) {
   return trackPersistence('deleteDepthPlanes:' + String(projectId), async () => {
     try {
       const dir = await getSubDir(projectId, 'depthmaps')
-      await dir.removeEntry('index.json').catch(ignoreMissing)
+      await removeFileIn(dir, 'index.json')
       await removeStaleDepthBins(dir, new Set())
     } catch (error) {
       ignoreMissing(error)

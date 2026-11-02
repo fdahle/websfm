@@ -139,6 +139,21 @@ export async function writeBin(dir, filename, buffer) {
   await writeFileIn(dir, filename, buffer)
 }
 
+// Remove one file, in the same per-file queue as its writes; a file already gone is
+// not an error. Two removals of one file that overlap make Chromium refuse one with
+// NoModificationAllowedError (measured: 22 of 400 in a race), which is what Gradual
+// selection hit when each image's depth preview and the bulk plane sweep deleted the
+// same planes at once (2026-11-02).
+export async function removeFileIn(dir, filename) {
+  return withFileLock(`${dir.name}/${filename}`, async () => {
+    try {
+      await dir.removeEntry(filename)
+    } catch (error) {
+      if (error?.name !== 'NotFoundError') throw error
+    }
+  })
+}
+
 // An ArrayBuffer; a file past the browser's largest ArrayBuffer (a cloud of more than
 // 178 M points) comes as a shareable Uint8Array (core/bigArray.js) read in chunks, which
 // readers take with viewAs.

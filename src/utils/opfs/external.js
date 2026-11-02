@@ -1,6 +1,6 @@
 // External reference rasters: the index, height planes, sources and COGs.
 import { trackPersistence, ignoreMissing } from '../persistence.js'
-import { getSubDir, readBin, readJson, writeBin, writeFileIn, writeJson } from './base.js'
+import { getSubDir, readBin, readJson, removeFileIn, writeBin, writeFileIn, writeJson } from './base.js'
 
 // ── External reference rasters ────────────────────────────────────────────────
 // Imported georeferenced DEMs / orthophotos: evidence the user brought in, which
@@ -66,9 +66,9 @@ export async function deleteExternalPlane(projectId, id) {
   return trackPersistence('deleteExternalPlane:' + String(projectId) + ':' + String(id), async () => {
     try {
       const dir = await getSubDir(projectId, 'external')
-      await dir.removeEntry(`${id}.bin`).catch(ignoreMissing)
-      await dir.removeEntry(`${id}.src`).catch(ignoreMissing)
-      await dir.removeEntry(`${id}.cog`).catch(ignoreMissing)
+      await removeFileIn(dir, `${id}.bin`)
+      await removeFileIn(dir, `${id}.src`)
+      await removeFileIn(dir, `${id}.cog`)
     } catch (error) {
       ignoreMissing(error)
     }
@@ -116,7 +116,7 @@ export async function pruneExternalPlanes(projectId, keepIds) {
         const m = name.match(/^(.+)\.(?:bin|src|cog)$/)
         if (m && !keepIds.has(m[1])) stale.push(name)
       }
-      for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
+      for (const name of stale) await removeFileIn(dir, name)
     } catch (error) {
       ignoreMissing(error)
     }
@@ -127,7 +127,7 @@ export async function deleteExternalAll(projectId) {
   return trackPersistence('deleteExternalAll:' + String(projectId), async () => {
     try {
       const dir = await getSubDir(projectId, 'external')
-      await dir.removeEntry('index.json').catch(ignoreMissing)
+      await removeFileIn(dir, 'index.json')
       await pruneExternalPlanes(projectId, new Set())
     } catch (error) {
       ignoreMissing(error)

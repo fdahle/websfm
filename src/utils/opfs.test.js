@@ -70,9 +70,23 @@ function makeDir(name) {
       }
       return files.get(n)
     },
+    // Chromium refuses a second removal of a file while the first is under way
+    // (NoModificationAllowedError).
+    removing: new Set(),
     async removeEntry(n) {
+      if (this.removing.has(n)) {
+        throw Object.assign(new Error('An attempt was made to modify an object where modifications are not allowed.'), {
+          name: 'NoModificationAllowedError',
+        })
+      }
+      this.removing.add(n)
+      await tick()
       files.delete(n)
       dirs.delete(n)
+      this.removing.delete(n)
+    },
+    async *keys() {
+      yield* [...files.keys(), ...dirs.keys()]
     },
   }
 }
@@ -179,6 +193,15 @@ describe('write serialization', () => {
     expect(tail).toHaveLength(25)
     expect(tail[0].i).toBe(2975)
     expect(tail[24].i).toBe(2999)
+  })
+
+  it('survives two overlapping removals of the same files', async () => {
+    // Gradual selection retires the depth maps: each image's preview delete and the
+    // sweep of all planes removed the same files at once (2026-11-02).
+    const plane = new Uint8Array(4).buffer
+    await opfs.saveDepthPlane('p7', 'u1', { depth: plane, cost: plane, rgb: plane })
+    await Promise.all([opfs.deleteDepth('p7', 'u1'), opfs.deleteDepthPlanes('p7')])
+    expect([...projectDir('p7').dirs.get('depthmaps').files.keys()]).toEqual([])
   })
 
   it('round-trips and deletes project workflows', async () => {

@@ -3,7 +3,7 @@
 import { trackPersistence, ignoreMissing } from '../persistence.js'
 import { DEPTH_BIN_KEYS } from '../../core/dense/depthMapCodec.js'
 import { IMAGE_INDEX_FILE } from '../../core/io/imageIndex.js'
-import { getSubDir, writeFileIn } from './base.js'
+import { getSubDir, removeFileIn, writeFileIn } from './base.js'
 
 // ── Images ────────────────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ export async function deleteImageDerived(projectId, uuid) {
   return trackPersistence('deleteImageDerived:' + String(projectId) + ':' + String(uuid), async () => {
     try {
       const dir = await getSubDir(projectId, 'images-derived')
-      for (const kind of DERIVED_KINDS) await dir.removeEntry(await derivedName(uuid, kind)).catch(ignoreMissing)
+      for (const kind of DERIVED_KINDS) await removeFileIn(dir, await derivedName(uuid, kind))
     } catch (error) {
       ignoreMissing(error)
     }
@@ -154,11 +154,11 @@ export async function deleteDepth(projectId, uuid) {
   return trackPersistence('deleteDepth:' + String(projectId) + ':' + String(uuid), async () => {
     try {
       const dir = await getSubDir(projectId, 'depthmaps')
-      await dir.removeEntry(uuid + '.png').catch(ignoreMissing)
+      await removeFileIn(dir, uuid + '.png')
       // The float planes belong to the same image — drop them together, or an
       // image removal would leave orphaned (and much larger) sidecars behind.
       for (const key of DEPTH_BIN_KEYS) {
-        await dir.removeEntry(`${uuid}.${key}.bin`).catch(ignoreMissing)
+        await removeFileIn(dir, `${uuid}.${key}.bin`)
       }
     } catch (error) {
       ignoreMissing(error)

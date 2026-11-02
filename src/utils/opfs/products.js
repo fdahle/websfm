@@ -2,7 +2,7 @@
 import { trackPersistence, persistenceLock, ignoreMissing } from '../persistence.js'
 import { writeBinaryDocument, readBinaryDocument } from '../binaryDocument.js'
 import { dataUrlToBlob } from '../../core/mask.js'
-import { getProjectDir, getSubDir, readBin, readJson, writeBin, writeJson } from './base.js'
+import { getProjectDir, getSubDir, readBin, readJson, removeFileIn, writeBin, writeJson } from './base.js'
 
 // ── Products (DEM / orthophoto rasters) ──────────────────────────────────────
 // Recomputable but expensive, so persisted like other project data. Metadata
@@ -137,14 +137,13 @@ export async function deleteProduct(projectId, stem) {
   return trackPersistence('deleteProduct:' + String(projectId) + ':' + String(stem), () =>
     persistenceLock(`product:${projectId}:${stem}`, async () => {
       const dir = await getSubDir(projectId, 'products')
-      await dir.removeEntry(`${stem}.json`).catch(ignoreMissing)
+      await removeFileIn(dir, `${stem}.json`)
       for (const suffix of ['_data.bin', '_mask.bin', '_rgba.bin']) {
-        await dir.removeEntry(`${stem}${suffix}`).catch(ignoreMissing)
+        await removeFileIn(dir, `${stem}${suffix}`)
       }
       if (dir.keys)
         for await (const name of dir.keys()) {
-          if (name.startsWith(`${stem}.json.`) && name.endsWith('.bin'))
-            await dir.removeEntry(name).catch(ignoreMissing)
+          if (name.startsWith(`${stem}.json.`) && name.endsWith('.bin')) await removeFileIn(dir, name)
         }
     }),
   )

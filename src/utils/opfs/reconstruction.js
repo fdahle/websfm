@@ -2,7 +2,7 @@
 import { trackPersistence, persistenceLock, ignoreMissing } from '../persistence.js'
 import { writeBinaryDocument, readBinaryDocument } from '../binaryDocument.js'
 import { mapConcurrent } from '../concurrency.js'
-import { getProjectDir, getRoot, getSubDir, readBin, writeBin, writeJson } from './base.js'
+import { getProjectDir, getRoot, getSubDir, readBin, removeFileIn, writeBin, writeJson } from './base.js'
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Metadata → reconstruction.json (version 3):
@@ -142,11 +142,10 @@ export async function deleteReconstruction(projectId) {
   return trackPersistence('deleteReconstruction:' + String(projectId), () =>
     persistenceLock(`reconstruction:${projectId}`, async () => {
       const dir = await getProjectDir(projectId)
-      await dir.removeEntry('reconstruction.json').catch(ignoreMissing)
+      await removeFileIn(dir, 'reconstruction.json')
       if (dir.keys)
         for await (const name of dir.keys()) {
-          if (name.startsWith('reconstruction.json.') && name.endsWith('.bin'))
-            await dir.removeEntry(name).catch(ignoreMissing)
+          if (name.startsWith('reconstruction.json.') && name.endsWith('.bin')) await removeFileIn(dir, name)
         }
     }),
   )
@@ -175,7 +174,7 @@ export async function pruneLodFiles(projectId, keepNames, { building = false } =
     const stale = []
     for await (const name of dir.keys())
       if (/\.(lod|hier)$|\.copc\.laz$/.test(name) && !keepNames.has(name)) stale.push(name)
-    for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
+    for (const name of stale) await removeFileIn(dir, name)
     if (!building) {
       const root = await getRoot()
       await root.removeEntry('tmp', { recursive: true }).catch(ignoreMissing)
