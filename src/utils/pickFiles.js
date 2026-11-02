@@ -36,6 +36,7 @@ export const FILE_PICKERS = {
   cameras: { accept: '.csv,.txt,.tsv,.cam,text/*' },
   imageFiducials: { accept: '.csv,.txt,.tsv,text/*' },
   cameraFiducials: { accept: '.csv,.txt,.tsv,text/*' },
+  metashape: { accept: '.xml,application/xml,text/xml' },
   sfmFiles: { accept: '.db,.sqlite,.txt,.bin,.zip,.json,.nvm', multiple: true },
   sfmFolder: { directory: true, multiple: true },
   cloud: { accept: '.ply,.las,.laz,.xyz,.pts' },

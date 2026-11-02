@@ -33,6 +33,7 @@ import ImportRasterModal from './import/ImportRasterModal.vue'
 import ImportVideoModal from './import/ImportVideoModal.vue'
 import InteropImportModal from './import/InteropImportModal.vue'
 import InteropSourceModal from './import/InteropSourceModal.vue'
+import MetashapeImportModal from './import/MetashapeImportModal.vue'
 import MaskManagerModal from './inspect/MaskManagerModal.vue'
 import MatchListModal from './inspect/MatchListModal.vue'
 import ProductInfoModal from './inspect/ProductInfoModal.vue'
@@ -69,6 +70,7 @@ const {
   cameraImportMode,
   cameraImportName,
   cameraImportOpen,
+  metashapeImportData,
   cameraImportText,
   fiducialCalibrateOpen,
   fiducialCalibrateSensorId,
@@ -130,6 +132,7 @@ const {
   matchNodePositions,
   matchSummaries,
   onCameraImport,
+  onMetashapeImport,
   onCloudImport,
   onFootprintFromPoses,
   onFiducialImport,
@@ -184,6 +187,19 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :session="sfmImportSession"
       @close="closeSfmImport"
       @run="commitSfmImport"
+    />
+  </Teleport>
+
+  <Teleport to="body">
+    <MetashapeImportModal
+      v-if="metashapeImportData"
+      :data="metashapeImportData"
+      :project-crs="currentCrs"
+      :sensors="sensors"
+      :images="images"
+      :existing-gcps="gcps"
+      @close="metashapeImportData = null"
+      @import="onMetashapeImport"
     />
   </Teleport>
 

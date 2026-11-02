@@ -199,7 +199,8 @@ export const usePosesStore = registerProjectStore(
           accuracyPhi: raw.accuracyPhi ?? raw.accAngle ?? DEFAULT_ACC_ANGLE,
           accuracyKappa: raw.accuracyKappa ?? raw.accAngle ?? DEFAULT_ACC_ANGLE,
           source: 'imported',
-          enabled: true,
+          enabled: raw.enabled ?? true,
+          ...(raw.verticalDatum ? { verticalDatum: raw.verticalDatum } : {}),
         }
         if (existing) Object.assign(existing, next)
         else {

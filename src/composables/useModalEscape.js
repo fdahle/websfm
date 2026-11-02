@@ -71,6 +71,7 @@ export function useModalEscape({
     footprintImportData,
     footprintFromPosesOpen,
     cameraImportOpen,
+    metashapeImportData,
     importKindOpen,
     importKindFile,
     fiducialImportData,
@@ -260,6 +261,12 @@ export function useModalEscape({
         cameraImportOpen.value,
         () => {
           cameraImportOpen.value = false
+        },
+      ],
+      [
+        !!metashapeImportData.value,
+        () => {
+          metashapeImportData.value = null
         },
       ],
       [

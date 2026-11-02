@@ -9,6 +9,7 @@ import {
   ellipsoidOf,
   geographicDefOf,
   geocentricToGeodetic,
+  scaleSensorTo,
 } from './metashapeXml.js'
 import { opkMatrix } from '../footprint.js'
 
@@ -178,5 +179,20 @@ describe('metashapeChunkToImport', () => {
     expect(r.sensors).toHaveLength(1)
     expect(r.gcps.every((g) => g.role === 'marker' && g.x == null && g.observations.length > 0)).toBe(true)
     expect(r.warnings.join(' ')).toMatch(/local frame/)
+  })
+})
+
+describe('scaleSensorTo', () => {
+  const s = { width: 2400, height: 1800, focal: 1777, cx: 1237.2, cy: 882.66, k1: 0.008, pixelSize: 0.00257 }
+  it('scales the pixel quantities of a calibration made at another size', () => {
+    const half = scaleSensorTo(s, 1200, 900)
+    expect(half).toMatchObject({ width: 1200, height: 900, focal: 888.5, k1: 0.008 })
+    // Pixel centres: the centre of pixel 0 at full size is at ¼ px of half-size pixel 0.
+    expect(half.cx).toBeCloseTo((1237.2 + 0.5) / 2 - 0.5, 12)
+    expect(half.pixelSize).toBeCloseTo(0.00514, 12)
+    expect(scaleSensorTo(s, 2400, 1800)).toBe(s)
+  })
+  it('refuses a different aspect', () => {
+    expect(scaleSensorTo(s, 1800, 1800)).toBeNull()
   })
 })

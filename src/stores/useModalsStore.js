@@ -63,6 +63,8 @@ export const useModalsStore = defineStore('modals', () => {
   const footprintImportData = ref(null) // { features, propertyKeys, detectedCrs, fileName }
   const footprintFromPosesOpen = ref(false)
   const cameraImportOpen = ref(false)
+  // Import ▸ Metashape Cameras: { fileName, doc } (core/io/metashapeXml.js), or null.
+  const metashapeImportData = ref(null)
   const cameraImportText = ref('')
   const cameraImportName = ref('')
   const cameraImportMode = ref('pose') // sniffed default: 'sensor' | 'pose'
@@ -175,6 +177,7 @@ export const useModalsStore = defineStore('modals', () => {
     footprintImportData,
     footprintFromPosesOpen,
     cameraImportOpen,
+    metashapeImportData,
     cameraImportText,
     cameraImportName,
     cameraImportMode,

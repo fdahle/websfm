@@ -7,6 +7,7 @@ import { confirmDialog } from './useConfirmations.js'
 import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../core/io/geojson.js'
 import { detectCameraMode } from '../core/io/cameraKind.js'
 import { detectFileKind, isColmapFile } from '../core/io/importKind.js'
+import { readMetashapeXml } from '../core/io/metashapeXml.js'
 import { parseFiducialObs } from '../core/io/fiducialObs.js'
 import { parseFiducialMarks } from '../core/io/fiducialMarks.js'
 import { sniffCloudFormat, looksLikeXyzText } from '../core/io/cloudImport.js'
@@ -61,6 +62,7 @@ export function useImportRouting({
     footprintImportOpen,
     footprintImportData,
     cameraImportOpen,
+    metashapeImportData,
     cameraImportText,
     cameraImportName,
     cameraImportMode,
@@ -229,6 +231,7 @@ export function useImportRouting({
     else if (kind === 'fiducialObs') openFiducialObsImport(file)
     else if (kind === 'fiducialMarks') openFiducialMarksImport(file)
     else if (kind === 'colmap') openColmapImport([file])
+    else if (kind === 'metashape') openMetashapeImport(file)
     else if (kind === 'cloud') openCloudImport(file)
     else {
       importKindFile.value = file
@@ -650,6 +653,37 @@ export function useImportRouting({
     }
   }
 
+  // ── Import (Metashape cameras and markers XML) ────────────────────────────────
+  async function openMetashapeImport(file) {
+    if (!file) return
+    let doc
+    try {
+      doc = readMetashapeXml(await file.text())
+    } catch (err) {
+      readFailed('the Metashape file', file, err)
+      return
+    }
+    metashapeImportData.value = { fileName: file.name, doc }
+  }
+
+  // The dialog's Import: each part through the importer it would take on its own.
+  async function onMetashapeImport({ sensorItems, poses, gcps, crs, verticalDatum }) {
+    metashapeImportData.value = null
+    if (sensorItems.length) await importSensors(sensorItems)
+    if (poses.length) await addPoses(poses, crs)
+    if (gcps.length)
+      await addGcps(gcps, crs, {}, { convention: '1sigma', unit: 'metres', verticalDatum, rememberDefaults: false }, {})
+    if (poses.length || gcps.length) activateTab('map')
+    if (gcps.length) showGcps?.()
+    else if (poses.length) showPoses?.()
+    else if (sensorItems.length) showSensors?.()
+  }
+
+  function onMetashapePick(event) {
+    openMetashapeImport(event.target.files?.[0])
+    event.target.value = ''
+  }
+
   function onCameraPick(event) {
     const file = event.target.files?.[0]
     // The Ribbon's two camera commands set `cameraPickMode` before opening the
@@ -697,6 +731,8 @@ export function useImportRouting({
     onImportSwitchKind,
     openCameraImport,
     onCameraImport,
+    onMetashapeImport,
+    onMetashapePick,
     onGcpImport,
     onFootprintImport,
     onFiducialImport,

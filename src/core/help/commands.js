@@ -183,6 +183,7 @@ export const CONSOLE_NAMES = {
   'import-images': ['import'],
   'import-video': ['import video', 'video'],
   'import-colmap': ['import colmap', 'colmap-import'],
+  'import-metashape': ['import metashape', 'metashape', 'agisoft'],
   'import-project': ['import project', 'merge projects', 'merge blocks'],
   'eval-overview': ['report', 'quality'],
   'open-project-settings': ['project settings', 'project properties'],

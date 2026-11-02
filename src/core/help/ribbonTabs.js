@@ -226,6 +226,9 @@ export const TABS = [
           // (composables/useProjectMerge.js); then Add to the model joins them.
           { id: 'import-project', label: 'WebSfM\nProject', icon: 'folder', needs: ['project'] },
           { id: 'import-colmap', label: 'SfM\nProject', icon: 'cube' },
+          // Calibration, camera poses and markers from Metashape's XML exports
+          // (core/io/metashapeXml.js, components/modals/import/MetashapeImportModal.vue).
+          { id: 'import-metashape', label: 'Metashape\nCameras', icon: 'camera' },
         ],
       },
     ],

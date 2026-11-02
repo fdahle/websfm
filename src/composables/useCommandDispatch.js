@@ -64,6 +64,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     onFiducialObsPick,
     onFiducialMarksPick,
     onColmapPick,
+    onMetashapePick,
     onCloudPick,
     onRasterPick,
     onVideoPick,
@@ -336,6 +337,9 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         break
       case 'import-colmap':
         sfmSourceOpen.value = true
+        break
+      case 'import-metashape':
+        pickFiles(FILE_PICKERS.metashape, onMetashapePick)
         break
       case 'import-project':
         importProjectOpen.value = true

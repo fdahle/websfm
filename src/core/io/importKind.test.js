@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectFileKind, isColmapFile } from './importKind.js'
+import { looksLikeMetashapeXml, detectFileKind, isColmapFile } from './importKind.js'
 
 describe('detectFileKind', () => {
   it('detects COLMAP model files by name (case-insensitive, path-stripped)', () => {
@@ -88,5 +88,15 @@ describe('detectFileKind — image file-name columns', () => {
       'gcp',
     )
     expect(detectFileKind('point_label,image_file_name,x,y\nP1,a.tif,100,200').kind).toBe('gcp')
+  })
+})
+
+describe('detectFileKind — Metashape XML', () => {
+  it('routes a Metashape cameras or markers export, and no other XML', () => {
+    const doc = '<?xml version="1.0" encoding="UTF-8"?>\n<document version="2.0.0">\n  <chunk label="Chunk 1">'
+    expect(detectFileKind(doc, 'cameras.xml')).toEqual({ kind: 'metashape', confidence: 'high' })
+    expect(looksLikeMetashapeXml('<document version="1.4.0"><chunk/></document>')).toBe(true)
+    expect(looksLikeMetashapeXml('<?xml version="1.0"?><kml><Document></Document></kml>')).toBe(false)
+    expect(looksLikeMetashapeXml('<document><other/></document>')).toBe(false)
   })
 })

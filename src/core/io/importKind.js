@@ -29,9 +29,16 @@ export function isColmapFile(fileName = '') {
   return COLMAP_FILE.test(String(fileName).split(/[\\/]/).pop() || '')
 }
 
+// A Metashape cameras or markers export (core/io/metashapeXml.js): an XML <document>
+// that holds a <chunk>.
+export function looksLikeMetashapeXml(text) {
+  const head = String(text).slice(0, 4096)
+  return /^\s*(<\?xml[^>]*\?>\s*)?(<!--[\s\S]*?-->\s*)*<document[\s>]/.test(head) && /<chunk[\s/>]/.test(head)
+}
+
 // Returns { kind, confidence } where
-//   kind:       'colmap' | 'gcp' | 'footprint' | 'pose' | 'sensor' | 'fiducialObs' |
-//               'fiducialMarks' | 'cloud' | 'ambiguous'
+//   kind:       'colmap' | 'metashape' | 'gcp' | 'footprint' | 'pose' | 'sensor' |
+//               'fiducialObs' | 'fiducialMarks' | 'cloud' | 'ambiguous'
 //   confidence: 'high' | 'low'
 // 'gcp' and 'footprint' both route through the GeoJSON/GCP importer. NOTE: this
 // takes decoded TEXT — binary cloud formats (PLY/LAS) are sniffed by magic bytes
@@ -39,6 +46,7 @@ export function isColmapFile(fileName = '') {
 // only text-shaped clouds (a bare numeric xyz table) are detected here.
 export function detectFileKind(text, fileName = '') {
   if (isColmapFile(fileName)) return { kind: 'colmap', confidence: 'high' }
+  if (looksLikeMetashapeXml(text)) return { kind: 'metashape', confidence: 'high' }
   // A pure-numeric 3–7 column table with no header is a point cloud, not a
   // labelled GCP/pose list (those lead with a name/image column). Checked before
   // the delimited-table guessing so xyz files don't land in 'ambiguous'.

@@ -476,3 +476,25 @@ export function metashapeChunkToImport(
     },
   }
 }
+
+// A calibration made at another photo size (Metashape run on full-size photos, the
+// project on smaller copies, or the other way round), scaled to `width` × `height`.
+// The distortion terms are in normalised coordinates and stay; the pixel quantities
+// scale, the principal point about the pixel-centre convention. Null when the aspect
+// differs (a crop, not a resize: nothing can be scaled).
+export function scaleSensorTo(sensor, width, height) {
+  if (!(width > 0 && height > 0) || !(sensor.width > 0 && sensor.height > 0)) return sensor
+  if (width === sensor.width && height === sensor.height) return sensor
+  const sx = width / sensor.width,
+    sy = height / sensor.height
+  if (Math.abs(sx / sy - 1) > 0.005) return null
+  return {
+    ...sensor,
+    width,
+    height,
+    focal: sensor.focal * sx,
+    cx: (sensor.cx + 0.5) * sx - 0.5,
+    cy: (sensor.cy + 0.5) * sy - 0.5,
+    pixelSize: sensor.pixelSize != null ? sensor.pixelSize / sx : null,
+  }
+}
