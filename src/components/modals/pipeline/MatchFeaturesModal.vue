@@ -675,9 +675,6 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-        <span v-if="matcher === 'lightglue' && density === 'fast'" class="field-hint">
-          No further LightGlue settings for the Fast density.
-        </span>
       </SettingsStep>
 
       <SettingsStep step="3" title="Verify geometry" :effect="verifyEffect" :inactive="!settings.geometricVerification">
