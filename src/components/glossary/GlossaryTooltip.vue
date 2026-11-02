@@ -26,14 +26,18 @@ const rootEl = ref(null)
 const style = ref({})
 
 // Below the anchor, or above it when there's no room below; clamped to the
-// viewport. Re-run when the body changes height (the renderer loads lazily).
+// viewport. When it fits on neither side (a label halfway down a tall dialog), it
+// is shifted up until its foot, with Read more, is on screen; taller than the
+// window, it scrolls (max-height). Re-run when the body changes height (the
+// renderer loads lazily).
 function place() {
   const rect = props.anchor.getBoundingClientRect()
   const height = rootEl.value?.offsetHeight ?? 0
   const left = Math.max(GAP, Math.min(rect.left, window.innerWidth - WIDTH - 20))
   let top = rect.bottom + GAP
-  if (top + height > window.innerHeight - GAP && rect.top - GAP - height >= GAP) {
-    top = rect.top - GAP - height
+  if (top + height > window.innerHeight - GAP) {
+    if (rect.top - GAP - height >= GAP) top = rect.top - GAP - height
+    else top = Math.max(GAP, window.innerHeight - GAP - height)
   }
   style.value = { left: `${left}px`, top: `${top}px`, zIndex: 500 + props.level }
 }
@@ -67,6 +71,8 @@ watch(
   position: fixed;
   z-index: 500;
   width: 268px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 6px;
