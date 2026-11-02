@@ -39,7 +39,7 @@ const OPTIONS = [
     </div>
 
     <template #footer>
-      <button class="btn-secondary" @click="emit('close')">Cancel</button>
+      <button class="btn" @click="emit('close')">Cancel</button>
     </template>
   </ModalShell>
 </template>
@@ -88,20 +88,5 @@ const OPTIONS = [
 .choice-desc {
   font-size: 12px;
   color: var(--text-dim);
-}
-
-.btn-secondary {
-  background: none;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 6px 14px;
-  cursor: pointer;
-}
-.btn-secondary:hover {
-  background: var(--hover-bg);
-  color: var(--text);
 }
 </style>

@@ -111,7 +111,9 @@ export function createProductRuns({
     log(
       `DEM: source is the ${source.kind} cloud` +
         `${source.name ? ` "${source.name}"` : ''} (${source.count.toLocaleString()} points)` +
-        (source.kind === 'sparse' ? ' — cells are interpolated from tie points; densify for a true surface' : ''),
+        (source.kind === 'sparse'
+          ? ' — cells are interpolated from tie points; build a dense cloud for a true surface'
+          : ''),
       source.kind === 'sparse' ? 'warn' : 'info',
       'Products',
     )

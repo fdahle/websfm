@@ -6,8 +6,8 @@ category: Reconstruction pipeline
 order: 17
 ---
 A [panoramic camera](help:panoramic-camera) exposes a long strip of curved film, and
-no frame camera describes a whole strip. **Split Panoramic Strips** (Tools → Images ▾
-→ Film scans) cuts every scan of a sensor into segments a few degrees of scan wide.
+no frame camera describes a whole strip. **Split Panoramic Strips** (Tools ▸ Images ▾
+▸ Film scans) cuts every scan of a sensor into segments a few degrees of scan wide.
 Each segment is resampled exactly into the image a frame camera would have taken,
 turned to that part of the scan, at the same focal length and pixel size. The
 segments then go through Detect Features, Match Features and Sparse Reconstruction

@@ -82,7 +82,7 @@ works only where the application supports it; STL is geometry only. Check the ta
 application's axes and units.
 
 ## Cleaning, simplifying and measuring
-**Tools → Mesh ▾** works on any mesh, built or imported, and adds a new mesh each time.
+**Tools ▸ Mesh ▾** works on any mesh, built or imported, and adds a new mesh each time.
 Clean, Smooth and Decimate are also [Workflow Builder](guide:workflow-builder) blocks.
 - **Clean mesh…** welds duplicate vertices (needed for STL imports), removes small
   pieces and long bridging triangles, fills holes up to a size and drops unused
@@ -95,5 +95,5 @@ Clean, Smooth and Decimate are also [Workflow Builder](guide:workflow-builder) b
 - **Sample to points…** turns the surface into a dense cloud, for the point-cloud tools
   and DEMs.
 - **Texture…** paints the mesh with the photos ([Texture a Mesh](guide:texture-mesh)).
-- **Mesh area & volume…** (in **Tools → Measure ▾**) reports the area and, for a closed
+- **Mesh area & volume…** (in **Tools ▸ Measure ▾**) reports the area and, for a closed
   mesh, the volume; an open mesh reports its open edges instead.

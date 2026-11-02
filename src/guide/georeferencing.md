@@ -35,9 +35,9 @@ A GCP needs 3D coordinates and marks in at least two registered images; use at l
 three, spread over the area and its height range. Keep some as checkpoints for an
 honest accuracy test.
 
-**Import → GCP File** reads a table of point names and coordinates, optionally with
+**Import ▸ GCP File** reads a table of point names and coordinates, optionally with
 image marks (image name, pixel x/y). Check the columns it guessed before importing. To
-mark points, open an image and choose **Tools → Images ▾ → Edit GCPs**; with the 2D map
+mark points, open an image and choose **Tools ▸ Images ▾ ▸ Edit GCPs**; with the 2D map
 in front, the same entry places the surveyed points on the map. Right-click adds a
 point directly.
 
@@ -84,7 +84,7 @@ from the raster inherit these accuracies.
 
 ## Find candidate GCPs from a reference orthophoto
 Build an orthophoto, import a georeferenced reference raster, and open **Reconstruct
-→ Find GCPs**. It aligns your orthophoto to the reference [coarse to
+▸ Find GCPs**. It aligns your orthophoto to the reference [coarse to
 fine](help:coarse-to-fine): first the whole image within the **Search area**, then
 tile by tile, and proposes sparse points that match a reference feature as control.
 

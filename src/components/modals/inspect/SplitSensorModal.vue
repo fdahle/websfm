@@ -41,7 +41,7 @@ const um = (v) => `${Math.round(v)} µm`
 </script>
 
 <template>
-  <ModalShell title="Split camera group" width="min(94vw, 680px)" @close="emit('close')">
+  <ModalShell title="Split Camera Group" width="min(94vw, 680px)" @close="emit('close')">
     <p class="intro">
       The photos of <strong>{{ sensor.label }}</strong> share one focal length, principal point{{
         film ? ', lens distortion and fiducial layout' : ' and lens distortion'

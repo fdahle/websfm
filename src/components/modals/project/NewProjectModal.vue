@@ -138,8 +138,8 @@ function submit() {
       >
         New here? Open the example project
       </button>
-      <button v-if="canCancel" class="btn-secondary" @click="emit('cancel')">Cancel</button>
-      <button class="btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
+      <button v-if="canCancel" class="btn" @click="emit('cancel')">Cancel</button>
+      <button class="btn btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
     </template>
   </ModalShell>
 </template>
@@ -291,41 +291,5 @@ function submit() {
   padding: 0 3px;
   border-radius: 3px;
   background: var(--hover-bg);
-}
-
-.btn-secondary {
-  background: none;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 6px 14px;
-  cursor: pointer;
-}
-
-.btn-secondary:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-.btn-primary {
-  background: var(--accent);
-  border: none;
-  border-radius: 5px;
-  color: #fff;
-  font: inherit;
-  font-size: 12px;
-  padding: 6px 16px;
-  cursor: pointer;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.btn-primary:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 </style>

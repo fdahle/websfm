@@ -5,7 +5,7 @@ summary: Assemble, configure, save, and run a sequence of reconstruction command
 category: Start here
 order: 3
 ---
-Open **Reconstruct → Workflow Builder** to build a sequence of commands for the
+Open **Reconstruct ▸ Workflow Builder** to build a sequence of commands for the
 project, save it and run it again. You can set it up before importing images; missing
 inputs show under **Preflight**.
 

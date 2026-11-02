@@ -44,7 +44,7 @@ test('a project imported into another brings photos, features, matches and marks
     }
   })
 
-  // Project A: new and empty, then Import ▸ WebSfM Project….
+  // Project A: new and empty, then Import ▸ WebSfM Project.
   await page.evaluate(async () => {
     const app = document.querySelector('#app').__vue_app__._instance.setupState
     await app.handleCreateProject({ name: 'Merged', sceneType: 'aerial', crs: 'EPSG:32617' })

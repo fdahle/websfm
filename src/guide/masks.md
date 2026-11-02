@@ -16,7 +16,7 @@ strips, sky, the operator's shadow, a turntable, passing vehicles.
 
 ## Mask border
 <!-- param: border  default: 40 px -->
-**Tools → Images ▾ → Auto mask…** masks a band of this many pixels along the image
+**Tools ▸ Images ▾ ▸ Auto mask…** masks a band of this many pixels along the image
 edges: for the frame and fiducial border of film scans, or a vignetted edge. Images
 are grouped by size, each with a preview; **Apply to group** or **Apply to all
 groups**. For film whose frame shifts between scans, **Generate background masks** in
@@ -33,7 +33,7 @@ bottom band over a data strip.
 all margins at 0, Replace removes the masks.
 
 ## Paint a mask
-Open an image and choose **Tools → Images ▾ → Edit mask**. The toolbox has **Brush**
+Open an image and choose **Tools ▸ Images ▾ ▸ Edit mask**. The toolbox has **Brush**
 (B), **Eraser** (E), **Rectangle** (R, Alt-drag erases), **Smart Select** (S),
 **Invert** (I), **Import** and **Clear**; `[` and `]` change the brush size, and undo
 goes back ten steps. The mask is saved when you leave editing. Very large scans can't
@@ -46,7 +46,7 @@ parts; **Add to mask** (Enter) keeps the outline. Check it first: it may stop at
 shadow or spill into a similar background.
 
 ## Masks list
-**View → Masks** lists every image's mask state, grouped by size. **Import & apply to
+**View ▸ Masks** lists every image's mask state, grouped by size. **Import & apply to
 all…** or **to group…** gives one file to many images (a landing gear or rig fixed in
 every frame); **Import folder…** gives each image its own file.
 

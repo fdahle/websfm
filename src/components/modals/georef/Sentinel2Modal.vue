@@ -111,7 +111,7 @@ const rowClass = (row) => ({ 's2-chosen': row.id === chosenId.value })
 </script>
 
 <template>
-  <ModalShell title="Sentinel-2 reference" width="820px" @close="emit('close')">
+  <ModalShell title="Sentinel-2 Reference" width="820px" @close="emit('close')">
     <p class="s2-intro">
       Fetch a Sentinel-2 image of the search area as a reference orthophoto: 10 m true colour from the Copernicus
       programme, free and open, read straight from AWS Open Data.

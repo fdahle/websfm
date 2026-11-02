@@ -625,7 +625,7 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
 export function prepareMesh(dense, settings = {}, onLog = () => {}) {
   if (!dense || !dense.pos || !(dense.count > 0)) throw new Error('generateMesh: empty dense cloud')
   if (!dense.nrm || dense.nrm.length < dense.count * 3) {
-    throw new Error('generateMesh: dense cloud has no per-point normals — re-run Densify to compute normals')
+    throw new Error('generateMesh: dense cloud has no per-point normals — build it again or estimate its normals')
   }
   const cfg = { ...MESH_DEFAULTS, ...MESH_TUNING, ...settings }
   const t0 = now()

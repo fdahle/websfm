@@ -193,7 +193,7 @@ const effects = computed(() => {
 
       <WarnBox v-if="isSparseSource">
         Building from the <b>sparse</b> cloud — cells are interpolated from tie points, so the surface is approximate.
-        Run <b>Depth maps → Densify</b> for a true DSM.
+        Build depth maps and a dense cloud (<b>Reconstruct ▸ Depth Maps</b>, then <b>Dense Model</b>) for a true DSM.
       </WarnBox>
     </SettingsStep>
 

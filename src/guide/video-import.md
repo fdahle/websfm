@@ -5,7 +5,7 @@ summary: Turns a video into a set of overlapping, sharp frames — picked by cam
 category: Reconstruction pipeline
 order: 10
 ---
-**Import → Video** (or dropping a video on the sidebar) extracts frames and adds them
+**Import ▸ Video** (or dropping a video on the sidebar) extracts frames and adds them
 as images. A slow phone video around an object or along a façade is often the easiest
 set to reconstruct, since consecutive frames overlap.
 

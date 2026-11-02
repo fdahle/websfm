@@ -6,7 +6,7 @@ category: Start here
 order: 6
 ---
 The console at the bottom of the window shows the log and has a command line. Open it
-with **Other → Console**, **Ctrl+`**, or **Ctrl+K** (**⌘K** on a Mac), which also puts
+with **Other ▸ Console**, **Ctrl+`**, or **Ctrl+K** (**⌘K** on a Mac), which also puts
 the cursor in the prompt. **↑** and **↓** recall earlier commands, and **Tab** completes
 a command, a setting name, a stage or an image name; when several fit, it completes
 as far as they agree and lists them.

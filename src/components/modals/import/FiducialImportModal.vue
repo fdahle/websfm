@@ -60,7 +60,7 @@ const canImport = computed(() =>
     : targets.value.some((t, i) => t && groups.value[i].marks.length),
 )
 const importLabel = computed(() =>
-  props.data.kind === 'image' ? `Import ${plural(matchedMarks.value, 'mark')}` : 'Import Marks',
+  props.data.kind === 'image' ? `Import ${plural(matchedMarks.value, 'mark')}` : 'Import marks',
 )
 
 function doImport() {
@@ -194,8 +194,8 @@ function doImport() {
     </div>
 
     <template #footer>
-      <button class="btn-secondary" @click="emit('close')">Cancel</button>
-      <button class="btn-primary" :disabled="!canImport" @click="doImport">{{ importLabel }}</button>
+      <button class="btn" @click="emit('close')">Cancel</button>
+      <button class="btn btn-primary" :disabled="!canImport" @click="doImport">{{ importLabel }}</button>
     </template>
   </ModalShell>
 </template>

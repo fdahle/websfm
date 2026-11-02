@@ -61,7 +61,7 @@ test('a camera group of two image sizes is marked and split by size', async ({ p
 
   await row.click({ button: 'right' })
   await page.getByRole('button', { name: 'Split camera group…' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Split camera group' })
+  const dialog = page.getByRole('dialog', { name: 'Split Camera Group' })
   await expect(dialog).toContainText('Image sizes: 1200×900 (3 photos), 1600×900 (2 photos).')
   await expect(dialog.locator('tbody tr')).toHaveCount(2)
   await dialog.getByRole('button', { name: 'Split into 2 groups' }).click()

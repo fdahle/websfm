@@ -5,7 +5,7 @@ summary: Outline the ground each image covers from its camera pose, before any m
 category: Reconstruction pipeline
 order: 25
 ---
-**Tools → Model ▾ → Footprints from poses** draws each image's
+**Tools ▸ Model ▾ ▸ Footprints from poses** draws each image's
 [footprint](help:image-footprint) from its [camera pose](help:camera-pose) and
 [intrinsics](help:camera-intrinsics): the four image corners are cast as rays from
 the camera and placed where they meet the ground. It needs positions with a height,

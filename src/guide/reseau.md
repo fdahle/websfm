@@ -6,7 +6,7 @@ category: Reconstruction pipeline
 order: 16
 ---
 Some metric film cameras expose a [reseau](help:reseau), a grid of small crosses, onto
-every frame. **Detect Reseau** (Tools → Images ▾ → Film scans) finds the crosses in
+every frame. **Detect Reseau** (Tools ▸ Images ▾ ▸ Film scans) finds the crosses in
 every scan of a sensor and measures each against its nominal position. Reconstruction
 then corrects each scan by its own crosses: the scan's placement (shift, rotation,
 pixel size) and the film's deformation between the crosses, interpolated smoothly.

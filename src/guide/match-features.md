@@ -208,7 +208,7 @@ their size and matched by brute force, not on a selection, and not when more tha
 the block is apart: detect everything at full size then.
 
 ## GPU acceleration
-With **Use GPU** on (Settings → Compute), brute-force matching runs on the graphics
+With **Use GPU** on (Settings ▸ Compute), brute-force matching runs on the graphics
 card, typically 10–100× faster with the same matches. The first pair is checked
 against the CPU, and the run falls back to the CPU on any disagreement or error.
 Geometric verification stays on the CPU. With fast GPU matching, consider turning the

@@ -9,7 +9,7 @@ A scanned negative has no fixed link between scan pixels and the camera: scan
 resolution, film position and shrinkage are unknown. [Fiducial marks](help:fiducial-marks)
 recover it in two steps: **detect** finds the marks in each scan, **calibrate** says
 which mark each is and where it sits in millimetres. Give the images a sensor of kind
-**Film** first; both commands are under **Tools → Images**.
+**Film** first; both commands are under **Tools ▸ Images**.
 
 ## Film width and scan pitch
 The sensor table converts the focal length to pixels with **format (mm)**, the frame
@@ -28,7 +28,7 @@ Two checks catch wrong hits: marks must be symmetric about the frame centre, and
 four or more scans) sit where the same mark sits in the rest of the flight. Failing
 marks go to review.
 
-**Import → Image Fiducials** reads marks measured elsewhere, one row per mark or one
+**Import ▸ Image Fiducials** reads marks measured elsewhere, one row per mark or one
 row per image with a column pair per position, and previews where each goes before
 importing.
 
@@ -56,9 +56,9 @@ length and principal point and choose the transform (affine suits most scans). E
 scan is then fitted to the certificate and works in one camera frame per sensor.
 
 ## Import the certificate
-**Import → Calibration** reads a certificate table, one row per camera: focal length,
+**Import ▸ Calibration** reads a certificate table, one row per camera: focal length,
 pitch, principal point and an x/y column in mm per mark, named by position. The sensor
-becomes **Film** and is calibrated at once. **Import → Camera Fiducials** takes one row
+becomes **Film** and is calibrated at once. **Import ▸ Camera Fiducials** takes one row
 per mark. The dialog shows which sensor each row updates (by label, the only sensor,
 the images named, or a new sensor) and lets you change it; only the values in the file
 are set.

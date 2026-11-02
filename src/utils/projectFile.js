@@ -39,7 +39,7 @@ async function openArchiveSink(suggestedName) {
     try {
       handle = await window.showSaveFilePicker({
         suggestedName,
-        types: [{ description: 'websfm project', accept: { 'application/zip': ['.websfm'] } }],
+        types: [{ description: 'WebSfM project', accept: { 'application/zip': ['.websfm'] } }],
       })
     } catch (err) {
       if (err?.name === 'AbortError') return null // user cancelled — not an error
@@ -459,7 +459,7 @@ export async function importProjectArchive({ file, projectId, onProgress = null,
   }
 
   const manifest = await readManifest(file, entries)
-  if (!manifest) throw new Error('not a websfm project file (no manifest.json)')
+  if (!manifest) throw new Error('not a WebSfM project file (no manifest.json)')
   const v = validateManifest(manifest)
   if (!v.ok) throw new Error(v.error)
 
@@ -479,7 +479,7 @@ export async function importProjectArchive({ file, projectId, onProgress = null,
     onProgress?.({ done: entryCount, total: entries.length - 1, label: e.name })
   }
 
-  if (!manifest) throw new Error('not a websfm project file (no manifest.json)')
+  if (!manifest) throw new Error('not a WebSfM project file (no manifest.json)')
   if (skipped) log(`Skipped ${skipped} archive ${skipped === 1 ? 'entry' : 'entries'} with unsafe paths`, 'warn')
   log(`Loaded ${entryCount} files (${formatBytes(bytes)}) from project file`)
   return { manifest, entryCount, bytes }

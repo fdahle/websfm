@@ -5,7 +5,7 @@ summary: Brings another WebSfM project's photos, features and matches into this 
 category: Reconstruction pipeline
 order: 11
 ---
-**Import ▸ WebSfM Project…** copies another project into the open one: two flights or
+**Import ▸ WebSfM Project** copies another project into the open one: two flights or
 two days processed apart, a large set split by hand, or a colleague's project of the
 neighbouring area. The other project stays as it was. A colleague's `.websfm` file is
 opened first (**Open existing ▸ Project file…**), which makes it a project you can

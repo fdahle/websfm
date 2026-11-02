@@ -73,7 +73,7 @@ Inspect the cloud in the 3D view for floating clusters, edge shells and holes. C
 4 million points or more are drawn level of detail, the nearest part finest. Systematic
 defects are better fixed in the depth maps, masks or images than by filtering.
 
-To clean by hand, pick **Select (rectangle)** or **Select (lasso)** in **Tools → Point
+To clean by hand, pick **Select (rectangle)** or **Select (lasso)** in **Tools ▸ Point
 Cloud ▾** and drag around points in the 3D view. Shift adds, Alt removes, a click
 clears; selected points turn pink. **Delete** or **Keep only** acts on them, and
 **Assign class** gives them a LAS class instead. Selection goes through the cloud, so

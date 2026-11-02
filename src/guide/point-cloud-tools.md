@@ -5,7 +5,7 @@ summary: Clean, cut, transform, align and compare dense point clouds — every t
 category: Products and export
 order: 65
 ---
-**Tools → Point Cloud ▾** holds the tools for dense clouds, computed or imported. A tool
+**Tools ▸ Point Cloud ▾** holds the tools for dense clouds, computed or imported. A tool
 that cannot run yet stays greyed with the reason.
 
 Every tool adds a new cloud named after its source and hides the source, which stays
@@ -36,7 +36,7 @@ blocks. Lengths you type are in the cloud's own units; the dialogs say what that
   mesh. The log reports the RMS, rotation and shift.
 
 ## Measure
-In **Tools → Measure ▾**:
+In **Tools ▸ Measure ▾**:
 - **Measure in 3D**: **Distance**, **Polyline** or **Area** by clicking on a cloud or
   mesh. Lengths are split into horizontal and height parts; an area gives its surface
   and its footprint. **Save** keeps a measurement; **Export…** writes them as CSV or

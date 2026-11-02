@@ -94,12 +94,14 @@ function run() {
 <template>
   <ModalShell title="Build Mesh" @close="emit('close')">
     <WarnBox v-if="!sources.length && !hasDense">
-      No dense point cloud yet. Run <strong>Densify</strong> first — meshing reconstructs a surface over the dense
-      cloud.
+      No dense point cloud yet. Build one first (<strong>Reconstruct ▸ Dense Model</strong>): meshing reconstructs a
+      surface over the dense cloud.
     </WarnBox>
     <WarnBox v-else-if="!sources.length">
-      No dense cloud has per-point normals, which screened Poisson requires. Re-run
-      <strong>Densify</strong> to compute them, then build the mesh.
+      No dense cloud has per-point normals, which screened Poisson requires. Build the dense cloud again (<strong
+        >Reconstruct ▸ Dense Model</strong
+      >) to compute them, or estimate them (<strong>Tools ▸ Point Cloud ▾ ▸ Estimate normals…</strong>), then build the
+      mesh.
     </WarnBox>
 
     <SourcePicker

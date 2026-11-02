@@ -336,8 +336,8 @@ function doImport() {
     </div>
 
     <template #footer>
-      <button class="btn-secondary" @click="emit('close')">Cancel</button>
-      <button class="btn-primary" :disabled="!canImport" @click="doImport">Import GCPs</button>
+      <button class="btn" @click="emit('close')">Cancel</button>
+      <button class="btn btn-primary" :disabled="!canImport" @click="doImport">Import GCPs</button>
     </template>
   </ModalShell>
 </template>

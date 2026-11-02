@@ -21,16 +21,16 @@ To bring one cloud or mesh into view, right-click it in the sidebar and choose
 ## Camera and scene
 - **Top**, **Bottom**, **Left**, **Right**, **Front** and **Back** look at the whole
   scene from that side, level with the scene's up direction (from the cameras, or
-  from **Tools → Model ▾ → Orient model**). **Reset View** returns to the oblique
+  from **Tools ▸ Model ▾ ▸ Orient model**). **Reset View** returns to the oblique
   overview.
 - **Cameras**, **Grid** and **Legend** show or hide the camera frustums, the ground
   grid and the colour legend. The two steppers set the point size and the size of
   the camera frustums.
 - The background colour, the grid's height and the near clipping distance are in
-  **Settings → Map & 3D**.
+  **Settings ▸ Map & 3D**.
 
 ## Turntable
-**View → Camera → Turntable** turns the camera slowly around the centre of the view,
+**View ▸ Camera ▸ Turntable** turns the camera slowly around the centre of the view,
 about the scene's up direction, so the model turns on its own: for showing a result, or
 for checking a dense cloud, where floating points and holes stand out once it moves.
 Drag to steer at any time; the turn carries on from there when you let go. The

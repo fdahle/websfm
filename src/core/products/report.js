@@ -121,7 +121,7 @@ export function buildReportHtml(report = {}) {
 <style>${STYLE}</style></head>
 <body>
   <h1>${esc(name)} — Quality Report</h1>
-  <p class="sub">Generated ${esc(date.toLocaleString())} · websfm</p>
+  <p class="sub">Generated ${esc(date.toLocaleString())} · WebSfM</p>
   <section><h2>Overview</h2>${healthTable(report.health)}</section>
   ${sections}
 </body></html>`

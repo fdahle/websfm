@@ -71,14 +71,14 @@ In the [Quality Report](guide:quality-report), check reprojection error, track l
 calibration, coverage and disconnected parts before building depth maps.
 
 ## Sparse gradual selection
-**Tools → Model ▾ → Gradual selection** removes points by reprojection error (above a
+**Tools ▸ Model ▾ ▸ Gradual selection** removes points by reprojection error (above a
 threshold), track length or triangulation angle (below), previews the counts, and
 **Delete selected + refine** re-adjusts the model, held to the same control. It
 replaces the model and retires its depth maps and georeference; other products are
 kept, marked [outdated](help:main-product). Save a copy first to keep the old solution.
 
 ## Optimize cameras
-**Tools → Model ▾ → Optimize cameras** re-runs bundle adjustment with the focal length
+**Tools ▸ Model ▾ ▸ Optimize cameras** re-runs bundle adjustment with the focal length
 (optionally the principal point) free per sensor, held to the same control. Use it after
 adding control or gradual selection when residuals suggest a slightly wrong
 calibration. It refuses changes over 20 % and solves that make the residual worse.

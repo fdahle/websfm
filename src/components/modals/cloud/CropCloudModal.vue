@@ -143,8 +143,9 @@ function run() {
   <ModalShell :title="mesh ? 'Crop Mesh' : 'Crop Cloud'" @close="emit('close')">
     <NoSourceWarn v-if="!clouds.length && mesh" kind="mesh" />
     <WarnBox v-else-if="!clouds.length">
-      No editable point cloud. Run <strong>Densify</strong> or import a cloud first — cropping applies to dense clouds;
-      a sparse cloud carries the view-tracks the later stages read and is left intact on purpose.
+      No editable point cloud. Build one (<strong>Reconstruct ▸ Dense Model</strong>) or import one first — cropping
+      applies to dense clouds; a sparse cloud carries the view-tracks the later stages read and is left intact on
+      purpose.
     </WarnBox>
 
     <template v-else>

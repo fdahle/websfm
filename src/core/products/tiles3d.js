@@ -334,7 +334,7 @@ export function cloudToGlbPoints(
   const node = { mesh: 0 }
   if (translation) node.translation = yUp ? [translation[0], translation[2], -translation[1]] : [...translation]
   const gltf = {
-    asset: { version: '2.0', generator: 'websfm' },
+    asset: { version: '2.0', generator: 'WebSfM' },
     scene: 0,
     scenes: [{ nodes: [0] }],
     nodes: [node],

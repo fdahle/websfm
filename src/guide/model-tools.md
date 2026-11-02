@@ -10,7 +10,7 @@ Orient model are interactive: the ribbon opens the tool, and you work in a small
 floating toolbox over the 3D view. Esc or the toolbox's × leaves it.
 
 ## Image quality
-**Tools → Images ▾ → Image quality** scores every image's sharpness and exposure.
+**Tools ▸ Images ▾ ▸ Image quality** scores every image's sharpness and exposure.
 Motion blur from a moving drone is a common, silent cause of thin or failed
 reconstructions, and it is hard to spot in thumbnails.
 
@@ -28,7 +28,7 @@ it (0.3) when scenes vary a lot, such as water and land, since open water scores
 without blur.
 
 ## Region
-**Tools → Model ▾ → Region** sets a box that bounds the dense stages:
+**Tools ▸ Model ▾ ▸ Region** sets a box that bounds the dense stages:
 
 - **Depth maps** only search the depth range of the sparse points inside the box,
   so the far background is not searched at all.
@@ -44,7 +44,7 @@ until applied again.
 ## Orient model
 A project without a georeference has no natural "up". WebSfM then guesses it from the
 camera viewing directions, which is right for a nadir aerial block and wrong for a
-turntable object or a façade. **Tools → Model ▾ → Orient model** sets it yourself:
+turntable object or a façade. **Tools ▸ Model ▾ ▸ Orient model** sets it yourself:
 
 - **Up**: **Pick 3 ground points**, then click three points on a floor, table or
   ground plane in the 3D view (green markers). Up is that plane's normal, on the side

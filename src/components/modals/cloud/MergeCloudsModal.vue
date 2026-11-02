@@ -68,7 +68,7 @@ function run() {
 
       <WarnBox v-if="losesNormals">
         Some of the selected clouds have per-point normals and some do not, so the merged cloud will have none — meaning
-        it cannot be meshed until you re-run Densify.
+        it cannot be meshed until you estimate them (<strong>Tools ▸ Point Cloud ▾ ▸ Estimate normals…</strong>).
       </WarnBox>
     </template>
 

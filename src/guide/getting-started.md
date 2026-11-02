@@ -20,11 +20,11 @@ Projects live in browser storage, or on Chromium in a folder on your disk; see
 Use images with strong overlap, sharp focus and steady exposure, taken from viewpoints
 that move around the subject. Avoid near-identical frames, blur, sky and moving or
 reflective surfaces; [mask](guide:masks) what doesn't belong. For an aerial block,
-aim for about 70–80 % forward and 60–70 % side overlap. **Tools → Images ▾ → Image
+aim for about 70–80 % forward and 60–70 % side overlap. **Tools ▸ Images ▾ ▸ Image
 quality** flags blurred or badly exposed frames (see
 [Image Quality, Region and Orientation](guide:model-tools)).
 
-**Import → Video** extracts sharp, overlapping frames from a video (see
+**Import ▸ Video** extracts sharp, overlapping frames from a video (see
 [Import Video](guide:video-import)). Images already in the project are caught on import:
 **Skip duplicates** or **Add anyway**.
 
@@ -50,7 +50,7 @@ images, weak links or poor calibration now. The
 Camera positions or ground control place an aerial model in the project CRS; a scale
 bar scales an object. Both are under **Georeferencing** in the Reconstruct tab. Do this
 before the final products: an adjustment with control retires the depth maps, and older
-products are marked [outdated](help:main-product). **Tools → Model ▾ → Orient model**
+products are marked [outdated](help:main-product). **Tools ▸ Model ▾ ▸ Orient model**
 levels an object and sets its origin.
 
 ## 5 · Make the result
@@ -61,7 +61,7 @@ Build [Depth Maps](guide:depth-maps) and a [Dense Cloud](guide:dense-cloud), the
   and a DEM or mesh).
 
 The **Tools** tab's [Point Cloud](guide:point-cloud-tools), Mesh and Products menus
-clean, align, compare and measure. A **Region** (Tools → Model ▾) limits the dense steps
+clean, align, compare and measure. A **Region** (Tools ▸ Model ▾) limits the dense steps
 to your area. Right-click a result ▸ **Show information** for what it holds and how it
 was made.
 

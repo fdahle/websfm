@@ -126,36 +126,3 @@
 .summary .ok {
   color: var(--text-dim);
 }
-
-.btn-secondary {
-  background: none;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 6px 14px;
-  cursor: pointer;
-}
-.btn-secondary:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-.btn-primary {
-  background: var(--accent);
-  border: none;
-  border-radius: 5px;
-  color: #fff;
-  font: inherit;
-  font-size: 12px;
-  padding: 6px 16px;
-  cursor: pointer;
-}
-.btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-.btn-primary:disabled {
-  opacity: 0.45;
-  cursor: default;
-}

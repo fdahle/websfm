@@ -89,8 +89,8 @@ function run() {
     @close="emit('close')"
   >
     <WarnBox v-if="!clouds.length">
-      No dense cloud is available. Run <strong>Dense Model</strong> first, or import one. To clean the sparse model, use
-      <strong>Tools ▸ Model ▸ Gradual selection</strong>.
+      No dense cloud is available. Build one first (<strong>Reconstruct ▸ Dense Model</strong>), or import one. To clean
+      the sparse model, use <strong>Tools ▸ Model ▾ ▸ Gradual selection…</strong>.
     </WarnBox>
 
     <template v-else>

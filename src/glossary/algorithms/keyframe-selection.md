@@ -38,5 +38,5 @@ from breaking into pieces. Sequential matching
 ([pair preselection](help:preselection) by capture order) then matches each keyframe
 with the next few, which fits frames chosen this way.
 
-In WebSfM this is the **Automatic** mode of **Import → Video**; see
+In WebSfM this is the **Automatic** mode of **Import ▸ Video**; see
 [Import Video](guide:video-import).

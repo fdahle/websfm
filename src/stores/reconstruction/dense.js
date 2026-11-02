@@ -201,7 +201,7 @@ export function createDense({
           } else {
             why =
               `the last sparse run produced no interior-orientation transform for it — ` +
-              `re-run the sparse reconstruction before densifying`
+              `re-run the sparse reconstruction before building the dense cloud`
           }
           log(`Dense: ${im.name} skipped — ${why}.`, 'error', 'Dense')
           continue
@@ -1094,7 +1094,7 @@ export function createDense({
         await save()
       } catch (err) {
         if (!stillCurrent()) return
-        log(`Densify error: ${densifyErrorText(err)}`, 'error', 'Dense')
+        log(`Dense: error: ${densifyErrorText(err)}`, 'error', 'Dense')
         reconStatus.value = 'error'
       }
       return
@@ -1146,7 +1146,7 @@ export function createDense({
       depthMaps.value = new Map()
       const recovered = await loadDepthIndexIntoMeta()
       log(
-        `Densify error: ${densifyErrorText(err)}. Depth maps were released to the worker` +
+        `Dense: error: ${densifyErrorText(err)}. Depth maps were released to the worker` +
           (recovered
             ? ' — they will be reloaded from disk on the next attempt.'
             : ' and must be recomputed before retrying.'),
@@ -1179,7 +1179,11 @@ export function createDense({
       return
     }
     if (!dense.nrm || dense.nrm.length < dense.count * 3) {
-      log('Mesh: the dense cloud has no per-point normals — re-run Densify to compute them', 'warn', 'Products')
+      log(
+        'Mesh: the dense cloud has no per-point normals — build it again (Reconstruct ▸ Dense Model) or estimate them (Tools ▸ Point Cloud ▾ ▸ Estimate normals…)',
+        'warn',
+        'Products',
+      )
       return
     }
     // The fusion merge cell is the sample spacing of the clouds fused in this project's

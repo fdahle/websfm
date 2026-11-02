@@ -224,8 +224,8 @@ export const TABS = [
         commands: [
           // Another WebSfM project's photos, features and matches, into this one
           // (composables/useProjectMerge.js); then Add to the model joins them.
-          { id: 'import-project', label: 'WebSfM\nProject…', icon: 'folder', needs: ['project'] },
-          { id: 'import-colmap', label: 'SfM\nProject…', icon: 'cube' },
+          { id: 'import-project', label: 'WebSfM\nProject', icon: 'folder', needs: ['project'] },
+          { id: 'import-colmap', label: 'SfM\nProject', icon: 'cube' },
         ],
       },
     ],

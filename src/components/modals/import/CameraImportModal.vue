@@ -329,9 +329,9 @@ function doImport() {
     </div>
 
     <template #footer>
-      <button class="btn-secondary" @click="emit('close')">Cancel</button>
-      <button class="btn-primary" :disabled="!canImport" @click="doImport">
-        {{ mode === 'sensor' ? 'Import Calibration' : 'Import Poses' }}
+      <button class="btn" @click="emit('close')">Cancel</button>
+      <button class="btn btn-primary" :disabled="!canImport" @click="doImport">
+        {{ mode === 'sensor' ? 'Import calibration' : 'Import poses' }}
       </button>
     </template>
   </ModalShell>

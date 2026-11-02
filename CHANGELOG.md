@@ -86,6 +86,12 @@ Notable changes to websfm. The format follows
   saying what it does to this project: what the corners land on, in which height datum,
   and how many poses get a footprint and why the others are skipped. **Ground** is a
   row of buttons, and the manual intrinsics have their own help.
+- **One look for every dialog's buttons and menu paths.** The import dialogs for GCPs,
+  camera poses, calibration, fiducials and footprints, and the New Project dialog, use
+  the same buttons as every other dialog. Import ▸ **WebSfM Project** and **SfM
+  Project** lose the "…" no other large ribbon button has, and the guide and glossary
+  write menu paths with ▸, as the app does. Messages that named commands the app does not
+  have (*Densify*, *Depth maps → Densify*, *Mesh ▸ Clean mesh*) now name the real ones.
 
 ### Performance
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps

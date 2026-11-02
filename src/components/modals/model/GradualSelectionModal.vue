@@ -47,7 +47,7 @@ function run() {
 }
 </script>
 <template>
-  <ModalShell title="Sparse gradual selection" @close="emit('close')">
+  <ModalShell title="Gradual Selection" @close="emit('close')">
     <SettingsGroup title="Source">
       <p class="source-line">
         <strong>{{ cloud.name }}</strong> · {{ cloud.points.length.toLocaleString() }} points
