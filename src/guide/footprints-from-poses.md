@@ -11,64 +11,38 @@ order: 25
 the camera and placed where they meet the ground. It needs positions with a height,
 so it is for imported poses or EXIF GPS, and it runs before any reconstruction.
 
-The footprints are drawn on the 2D map above every layer, and a new run replaces
-them. The map opens on them, so footprints that land in the wrong place are obvious at
-once. **View ▸ Map ▸ Footprints** shows and hides them, an image's expanded row in the
-sidebar says whether it has one, and a right-click on a footprint (or **Export ▸
-Footprints**) downloads them as GeoJSON or removes them.
-
-**View ▸ Map ▸ Photos** draws the images themselves on the map, each stretched into
-its footprint the way a flat-ground projection of the photo would land: the corners
-on the footprint's corners, the far side of a tilted view compressed as in the photo.
-It is a quick check that a camera's position and angles are right, and a rough
-picture of the area before any reconstruction; it is not an orthophoto, so relief
-leans and the photos do not join up exactly. The photos are a layer in **View ▸ Map
-▸ Layers**, where the selected row chooses what is drawn: **The selected image**
-(click a footprint or an image in the sidebar; the default) or **Every image**, from
-the small thumbnails. Fade them there, or switch the footprints off to see them
-untinted.
-[Preselect by footprint overlap](guide:match-features) uses them to choose which
-image pairs to match.
+The footprints are drawn on the 2D map, which opens on them, so misplaced ones show at
+once. **View ▸ Map ▸ Footprints** toggles them; right-click one (or **Export ▸
+Footprints**) to download them as GeoJSON. **View ▸ Map ▸ Photos** stretches the photos
+into their footprints: a quick check of positions and angles, not an orthophoto.
+[Preselect by footprint overlap](guide:match-features) uses footprints to choose pairs.
 
 ## Ground
 <!-- param: ground  default: Terrain model -->
 What the corner rays are cast onto:
 
-- **Terrain model** follows the ground. Each corner is placed where its ray meets a
-  [DEM](help:digital-elevation-model), so a footprint over a valley is larger and
-  one over a hilltop smaller, as the photos really are. Use it whenever the ground is
-  not flat.
-- **Fixed elevation** is one horizontal plane at a height you type. Use it over flat
-  ground, or with no network and no reference DEM.
-- **Height above ground** puts a plane under each camera at its height minus the
-  flying height. Use it when camera heights are above take-off rather than absolute,
-  as some drones record them.
+- **Terrain model** casts them onto a [DEM](help:digital-elevation-model): use it
+  whenever the ground isn't flat.
+- **Fixed elevation** uses one plane at a height you type: flat ground, or offline
+  without a DEM.
+- **Height above ground** puts a plane the flying height below each camera, for drones
+  that record height above take-off.
 
-A camera at or below its ground is skipped. With **Terrain model** that usually
-means the camera heights are in another [vertical datum](help:vertical-datum) than
-the one chosen, or are above take-off.
+A camera at or below its ground is skipped; with Terrain model that usually means a
+wrong [vertical datum](help:vertical-datum) or heights above take-off.
 
 ## Terrain model
 <!-- param: demSource  default: Global terrain -->
-**Global terrain** reads the elevation tiles behind the map's *Terrain* basemap
-(SRTM and other sources, about 30 m), so it works anywhere with no preparation. A
-large area is read more coarsely, at most 64 tiles. It needs a connection, or tiles
-the app has already kept; see [Offline use](guide:offline). A footprint with no
-terrain under the camera or a corner is skipped, and the log names the tile that
-failed.
-
-An imported reference DEM is listed here too. It is usually sharper and in your own
-datum, so prefer it when you have one.
+**Global terrain** (about 30 m, the map's *Terrain* tiles) works anywhere but needs a
+connection or cached tiles ([Offline use](guide:offline)). An imported reference DEM is
+usually sharper and in your datum: prefer it when you have one.
 
 ## Camera heights
 <!-- param: poseDatum  default: Unknown -->
-The vertical datum the camera heights are given in. Heights from GNSS (RTK, PPK, a
-drone's XMP *absolute altitude*) are usually **Ellipsoidal**; the EXIF GPS altitude
-is meant to be above mean sea level, close to **Geoid EGM96**. When this and the
-terrain model's datum both convert, the terrain heights are converted to the
-cameras' datum; the global terrain is EGM96. **Unknown** uses the terrain heights as
-they are. The two can differ by tens of metres, which shrinks or grows every
-footprint by the same share of the flying height.
+The vertical datum of the camera heights: GNSS heights (RTK, PPK, XMP absolute
+altitude) are usually **Ellipsoidal**, EXIF GPS altitude close to **Geoid EGM96**. The
+terrain is converted to it; **Unknown** uses it as is. The two can differ by tens of
+metres, which scales every footprint.
 
 ## Ground elevation
 <!-- param: groundElev  default: 0 m -->

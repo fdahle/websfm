@@ -52,15 +52,11 @@ which cells were interpolated (see [DEM ▸ Gap interpolation](guide:dem)), a ti
 gives the RMSE of the cells with points and of the interpolated cells apart; the
 interpolated ones usually carry most of the large errors.
 
-A DEM in a CRS is also co-registered to the reference (Nuth & Kääb): **Horizontal
-offset** says where the DEM sits relative to it, east and north, and **NMAD after
-shift** what the spread would be once that offset is gone (slopes 5–45°, where an
-offset shows). A large offset with a much smaller NMAD after it means the DEM is a
-good surface in the wrong place, not a noisy one: on a slope, a sideways shift reads
-as height error. It happens when the control's positions and heights come from
-different references, as with Find GCPs (a satellite image for the position, a DEM
-for the height). On Rachel Glacier the DEM sat 11 m north of REMA, and its NMAD on
-stable rock went from 8.7 m to 5.3 m once shifted.
+**Horizontal offset** says how far the DEM sits east and north of the reference, and
+**NMAD after shift** what the spread would be without it. A large offset with a much
+smaller NMAD after it means a good surface in the wrong place: on slopes a sideways
+shift reads as height error. It happens when the control's positions and heights come
+from different references, as with Find GCPs.
 
 **Co-register DEM…** removes such an offset: it opens
 [Co-register a DEM](guide:coregister-dem) with this reference and stable ground, which
@@ -68,28 +64,21 @@ moves a copy of the DEM, or the georeference, onto the reference.
 
 ## Stable ground
 <!-- param: stableArea  default: All cells -->
-A polygon layer of ground that has not changed between the two DEMs, such as rock
-outcrops, roads or buildings. Only cells inside it are compared. Without it, a
-comparison of a historical DEM with a modern one mixes the reconstruction error with
-real change: a thinning glacier, an eroded bank or a filled pit. Import the outlines
-as a polygon file (**Import**, GeoJSON); the panel says how many DEM cells fell
-outside.
+A polygon layer (GeoJSON) of ground unchanged between the two DEMs, such as rock,
+roads or buildings; only cells inside it are compared. Without it, comparing a
+historical DEM with a modern one mixes reconstruction error with real change.
 
 ## Area
 <!-- param: area  default: Whole DEM -->
-A polygon layer that limits the comparison to an area of interest, for example a
-glacier outline or the study area plus a buffer. It combines with **Stable ground**:
-a cell must lie inside both. The margins of a block are usually its weakest part,
-so the statistics inside the area of interest can differ a lot from those of the
-whole DEM. The exported report names both layers.
+A polygon layer limiting the comparison to an area of interest; a cell must also lie
+in **Stable ground**. A block's margins are usually its weakest part, so the figures
+inside the area can differ a lot from the whole DEM's.
 
 ## Export report
 Export produces a self-contained HTML report with no external assets or scripts. Open
 it in a browser and print to PDF if needed. It captures the current state, so export it
 after the final reconstruction and alignment.
 
-The report ends with **Methods and references**: each step this project ran (features,
-matching, SfM, dense, point classes, mesh, DEM, orthophoto, …), how WebSfM did it, and the papers it
-follows, with a full reference list. It is meant for the methods section of a paper or
-report. Every method WebSfM implements is listed under About ▸ References, and each
-glossary entry names its own under *Sources*.
+It ends with **Methods and references**: each step the project ran, how, and the papers
+it follows, for the methods section of a paper or report. About ▸ References lists every
+method WebSfM implements.

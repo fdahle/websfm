@@ -11,19 +11,12 @@ every scan of a sensor and measures each against its nominal position. Reconstru
 then corrects each scan by its own crosses: the scan's placement (shift, rotation,
 pixel size) and the film's deformation between the crosses, interpolated smoothly.
 
-The sensor needs its **scan pixel size** (mm per pixel) in the sensor table, and the
-camera's focal length in millimetres from its calibration certificate. Detection
-reads every scan at full resolution, a small window per cross, so even satellite
-frames of two gigapixels take well under a minute each.
-
-After detection the sensor becomes a **Film** sensor with a reseau calibration, and
-each image's crosses appear as its fiducial marks. Run Sparse Reconstruction again to
-use them. With self-calibration on **Auto**, a reseau-calibrated camera keeps its
-certificate values: its film deformation is already measured, and solving lens
-distortion against a short strip of wide-angle frames bends the whole block instead
-(see [Sparse Reconstruction](guide:sparse-reconstruction)). Turn on **Filter stationary
-points** in Match Features as well, so matches between the crosses themselves are
-dropped.
+The sensor needs its **scan pixel size** (mm per pixel) and the certificate's focal
+length in mm. After detection it becomes a **Film** sensor with a reseau calibration;
+run Sparse Reconstruction again to use it. Self-calibration on **Auto** then keeps the
+certificate values, since the film deformation is already measured (see
+[Sparse Reconstruction](guide:sparse-reconstruction)). Turn on **Ignore stationary
+points** in Match Features too, so the crosses don't match each other.
 
 The scan must show the whole frame, centred to within half a grid cell. Frames
 scanned in two halves are stitched instead (see **Scans** below).
@@ -36,24 +29,11 @@ frames are: `<frame>_a` is the left of the film and `<frame>_b` the right (`-a` 
 works too). The dialog pairs the scans by name and offers this mode when it finds
 pairs.
 
-Each half's crosses are found by growing outward from one cross, so a half needs no
-known placement. Every half shows the film's full height, which fixes the rows; the
-columns are counted from each half's outer edge. How many columns the two halves
-share is decided by the scene: the overlap is compared for every count the crosses
-allow, and the one where the halves' images agree is kept. A pair whose halves agree
-on no count clearly is reported and left as it is, most often because a half's edge
-column of crosses was not found.
-
-Each pair becomes one image, `<frame>.tif`, on the film's own grid: every half is
-corrected for its placement and its film deformation, and the two meet in the middle
-of the shared columns. Ground control marks on a half move to the stitched frame. The
-stitched frames share one new sensor with the certificate's focal length and principal
-point and the scan pixel size. Their deformation is already corrected, so they need no
-reseau calibration of their own, and self-calibration on **Auto** holds the
-certificate values for them too. Stitching reads both halves in full and writes the
-frame: about fifteen seconds per hundred megapixels.
-
-Film size is not asked in this mode: the halves' crosses give the lattice.
+The two halves are aligned by their crosses and their overlapping image content, and
+stitched into one image, `<frame>.tif`, on the film's own grid, corrected for
+placement and film deformation. GCP marks move with them. The stitched frames share a
+new sensor with the certificate values. A pair whose overlap can't be decided is
+reported and left as it is. Film size isn't needed in this mode.
 
 ## Remove the halves
 <!-- param: removeHalves  default: on -->
@@ -89,13 +69,7 @@ The width of a cross's lines on the film. Below one scan pixel it is treated as 
 pixel.
 
 ## Results
-For each scan the dialog lists how many crosses it found, how much film deformation
-they measured beyond the scan's placement (µm RMS), and how much is left after the
-correction. That remainder is the crosses' own measurement noise, usually a few
-micrometres. A cross that disagrees with its neighbours, most often scene texture
-taken for a cross, is left out of the correction and counted as an outlier.
-
-For half frames the dialog lists, per frame, the crosses found on each half, the
-lattice they make up (columns × rows), how many columns the halves share (hover it for
-how well the scenes agreed there, 1 being identical), and the film deformation
-measured on each half.
+Per scan the dialog lists the crosses found, the film deformation they measured
+(µm RMS) and what is left after correction, usually a few micrometres of measurement
+noise. Crosses that disagree with their neighbours are left out as outliers. For half
+frames it also lists the lattice and how many columns the halves share.

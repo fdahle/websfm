@@ -6,165 +6,81 @@ category: Reconstruction pipeline
 order: 40
 ---
 Sparse reconstruction turns verified matches into camera poses and 3D
-[tie point](help:tie-point)s. It grows the model incrementally, registers new cameras
-with [PnP](help:pnp), triangulates tracks, and repeatedly runs
+[tie point](help:tie-point)s. It grows the model one camera at a time with
+[PnP](help:pnp), triangulates points and refines everything with
 [bundle adjustment](help:bundle-adjustment).
 
 ## Before you run
-Inspect the match graph for disconnected groups or isolated images. A reconstruction
-cannot bridge parts of the dataset that have no verified matches. A disabled image
-([Disable photos](guide:getting-started)) and its matches are left out. Balanced is the best
-first run; higher quality spends more iterations polishing a model, but cannot repair
-missing overlap.
+Check the match graph for disconnected groups: no reconstruction can join parts without
+verified matches. [Disabled](guide:getting-started) images are left out. Balanced is the
+right first run; higher quality polishes a model but can't repair missing overlap.
 
 ## While it runs
-In the 3D view, the model is drawn as it grows: the registered cameras and the points
-triangulated so far, updated every couple of seconds, and the view zooms out as it
-expands. The 3D view stays usable while it grows: drag to orbit, scroll to zoom. The rest
-of the app is dimmed and locked until the run ends, and the progress bar sits in the
-view's corner. A selection, measuring or model tool left open is closed when the run
-starts. Big models are thinned for this picture. The finished model replaces it, together with the clouds
-shown before the run.
+The 3D view draws the model as it grows, and you can orbit and zoom it. The rest of the
+app is lightly dimmed and locked until the run ends, with the progress card in the
+view's corner. The finished model then replaces the live one.
 
 ## Mode
 <!-- param: addToModel  default: Add to the model when the model can take the new images, otherwise Rebuild -->
-Shown once there is a sparse model. **Add to the model** registers the images with
-features that the model does not hold yet (photos added to the project since, another
-project's block brought in with [Import a Project](guide:import-project), or images an
-earlier run could not place) and leaves the model as it is around them. Match them
-first: [Match only new pairs](guide:match-features) matches each new photo with the
-others without matching the whole block again. The model's points are the starting point,
-so a new image joins as soon as enough of its matches see them. The model's calibration
-stays as it is, and Self-calibration is off for the run. An image that cannot be placed
-stays out, and the console names it; Quality Report ▸ Sparse ▸ **Try again…** adds it
-again with looser registration gates. **Rebuild** builds a new model from every image, as
-the first run did.
-
-Adding needs the model's observations: an imported model has none, and an image whose
-features were detected again since the model was built no longer matches what the model
-recorded, so the run stops and asks for a rebuild. A fisheye camera cannot be added to a
-model yet.
+**Add to the model** places the images the model doesn't hold yet (photos added since,
+a block from [Import a Project](guide:import-project), images an earlier run couldn't
+place) and leaves the rest as it is; match them first with
+[Match only new pairs](guide:match-features). Images that can't be placed are named in
+the console; Quality Report ▸ Sparse ▸ **Try again…** retries them. **Rebuild** builds a
+new model from all images. Imported models, images detected again since, and fisheye
+cameras need a rebuild.
 
 ## Existing cameras
 <!-- param: existingCameras  default: Auto -->
-What happens to the cameras already in the model. **Fixed** keeps every one of them
-exactly where it is, and the new cameras are placed against them, so depth maps, clouds,
-meshes, DEMs, orthophotos and the georeference built from the model stay current. Build
-the depth maps again to cover the new images. **Refined** then runs
-**Optimize cameras** (Tools ▸ Model ▾) on the whole model, so every camera may move
-with the new ones; what was built from the model is marked outdated, as after a rebuild.
-**Auto** chooses Fixed when something was built from the model, and Refined when nothing
-was; the line under Mode says which.
+**Fixed** keeps the model's cameras where they are, so the depth maps, clouds and
+products built on it stay current (build depth maps for the new images). **Refined**
+then lets all cameras move (Optimize cameras), which outdates what was built. **Auto**
+picks Fixed when something was built from the model, else Refined.
 
 ## Min correspondences
 <!-- param: minMatchesForRegistration default: 20 -->
-The minimum 3D–2D evidence needed to attempt registering another camera with PnP. Lowering it
-may admit weak cameras but makes pose estimation less stable. If only a few images fail,
-check their matches and sharpness before relaxing this gate.
+How many 2D–3D matches a camera needs before it is placed. Lowering it admits weaker
+cameras with less stable poses; check failing images' matches and sharpness first.
 
 ## Reprojection threshold
 <!-- param: reprjThreshold default: 4.0 -->
-The [reprojection error](help:reprojection-error) a match may have and still count as an
-inlier, both in camera-pose estimation and in track filtering. It is expressed in
-**detection pixels** and automatically scaled to native resolution. Lower is stricter;
-raise it cautiously for imprecisely localized features or heavily downscaled detection.
+The largest [reprojection error](help:reprojection-error), in detection pixels, an
+observation may have and still count. Lower is stricter; raise it cautiously for
+imprecise features.
 
 ## Bundle adjustment iterations
 <!-- param: baIterations default: 30 -->
-Solver iterations per bundle adjustment pass. More iterations can improve convergence
-at a time cost. A large residual that does not
-improve with more iterations usually points to bad matches, poorly fitting intrinsics, weak
-geometry, or incorrect control—not an iteration shortage.
+Solver iterations per bundle adjustment. A large error that more iterations don't
+reduce comes from bad matches, poor intrinsics, weak geometry or wrong control, not
+from too few iterations.
 
 ## Self-calibration
 <!-- param: refineIntrinsics default: Auto -->
-**Auto** solves focal length and radial distortion for EXIF-only cameras, but preserves
-an existing calibrated distortion model. A [fisheye](help:fisheye-lens) sensor with all
-coefficients zero counts as uncalibrated: Auto refines its focal length, principal point
-and its own fisheye terms in the pixels the lens recorded, k4 of a four-term lens last,
-once k1–k3 have been refined. If the fit with k4 would bend the lens curve back on
-itself before the image corner, that pass is solved again without k4 and k4 keeps its
-value for the rest of the run (the log says so). Turn calibration off only when the sensor
-parameters are trustworthy. Solving many parameters needs many well-distributed views;
-on a weak network it can absorb scene error into implausible intrinsics. Self-calibration
-runs inside bundle adjustment, so it is unavailable when bundle adjustment iterations are
-set to 0.
-
-A short strip of wide-angle frames (a satellite frame camera, a few aerial photos) is
-such a weak network: radial distortion and a slight bowl of the whole block trade off,
-and Auto can bend the block by metres towards its ends while the checkpoints near the
-middle stay good. With a calibration certificate entered in the sensor table, compare
-the checkpoint residuals of a run with **None**: if the error grows towards the block's
-edges under Auto and not under None, keep None. On scanned film the certificate does
-not describe the film's own deformation, which Auto partly absorbs, so try both —
-unless the camera has a [reseau](help:reseau) and you ran
-[Detect Reseau](guide:reseau), or stitched half frames there: the film's deformation
-is then measured per scan, and Auto holds the certificate values on its own (the log
-says so).
+**Auto** solves focal length and lens distortion for cameras known only from EXIF, and
+keeps a calibration you entered. Turn it off (**None**) when the calibration is
+trustworthy. Many parameters need many well-spread views: on a weak network, such as a
+short strip of wide-angle frames, Auto can bend the block towards its ends. If
+checkpoint errors grow towards the edges under Auto but not under None, keep None.
 
 ## Check the result
-Camera positions should follow the capture path, most useful images should register,
-and the cloud should have coherent shape.
-
-Two log lines report checks the run makes on its own. Images with no focal length in
-their metadata get one estimated from the verified pairs before registration (**focal
-from pair geometry**); without it, the default guess can be far enough off to bend the
-whole model. After bundle adjustment the **registration check** compares every camera
-with the geometry of its strongest image pairs. A camera that disagrees was registered
-in the wrong place: it is taken out, registered again against the finished model, and
-left out if it still disagrees, because a missing camera does less harm than a
-misplaced one. In the Quality Report, check reprojection
-error, track lengths, calibration drift, coverage, and disconnected components before
-continuing to depth maps.
-
-Near the end of a run the log reports **track completion**: once the cameras are final,
-every verified match that links an existing point to a keypoint in another image adds
-that observation if it agrees with the point. This turns many two-view points into
-points seen by three or more images. Once the model has a strong multi-view core, the
-delivered model drops the remaining two-view points, except where one is the only
-coverage of its part of an image, so thin-overlap areas of a block are not left empty.
-
-It then reports **guided track extension**. Each point is projected into the
-registered images that do not yet see it, and a keypoint with a matching descriptor is
-searched for within a few pixels of the projection. This finds observations that
-matching missed, typically on repetitive façades, and usually adds 5–30 % more
-multi-view points. A following **audit** line compares the added observations' errors
-with the rest of the model. They should be similar; much larger values point to a weak
-model, for example film scans without fiducials.
+Cameras should follow the capture path, most images should register, and the points
+should have a coherent shape. The log reports the run's own checks: a focal length
+estimated for images without one, cameras moved or dropped because they disagreed with
+their strongest pairs, and observations added by track completion and guided matching.
+In the [Quality Report](guide:quality-report), check reprojection error, track lengths,
+calibration, coverage and disconnected parts before building depth maps.
 
 ## Sparse gradual selection
-Open **Tools → Model ▾ → Gradual selection**. Choose
-reprojection RMS error (select above the threshold), track length (select below),
-or maximum triangulation angle (select below). The slider previews selected and
-remaining counts before **Delete selected + refine**.
-
-Refinement preserves surviving tracks and fixes camera calibration while bundle
-adjustment updates camera poses and points. It is held to the same enabled ground
-control and camera positions as the original solve, so it cannot undo a GCP
-correction; the log states how many GCP anchors and camera positions constrained it. It refuses a disconnected camera
-network, fewer than six surviving observations in any camera, or missing stored
-photo measurements. Cancel or solver failure preserves the original model. A
-successful edit replaces the main sparse model and retires the depth maps, scale and
-georeference; rebuild/refit those next. The dense clouds, meshes, DEMs and
-orthophotos built on the previous model are kept, marked
-[outdated](help:main-product). Save a project copy first if you want to retain the
-previous solution.
+**Tools → Model ▾ → Gradual selection** removes points by reprojection error (above a
+threshold), track length or triangulation angle (below), previews the counts, and
+**Delete selected + refine** re-adjusts the model, held to the same control. It
+replaces the model and retires its depth maps and georeference; other products are
+kept, marked [outdated](help:main-product). Save a copy first to keep the old solution.
 
 ## Optimize cameras
-**Tools → Model ▾ → Optimize cameras** re-runs bundle adjustment on the finished
-model with the **focal length** free (optionally the **principal point** too),
-shared by every image of a sensor, and every point kept. Use it after adding or
-correcting ground control, or after gradual selection, when the reprojection error
-or the GCP residuals suggest the calibration is slightly off.
-
-It is held to the same ground control and camera positions as the original solve.
-It refuses a change of the focal length larger than 20 %, which is a runaway rather
-than a refinement, and it refuses a solve that raises the residual (unless survey
-constraints explain the increase). Radial distortion stays as the reconstruction
-calibrated it: a different radial term would no longer match the observations the
-dense stage warps by. Re-run the reconstruction with self-calibration to change it.
-[Fisheye](help:fisheye-lens) cameras are solved in the pixels their lens recorded, with
-the lens the reconstruction ended with, and their stored observations are re-derived for
-the new focal length.
-Like gradual selection, a successful run replaces the main model in place and retires
-its depth maps, scale and georeference; the products built on it stay, marked outdated.
+**Tools → Model ▾ → Optimize cameras** re-runs bundle adjustment with the focal length
+(optionally the principal point) free per sensor, held to the same control. Use it after
+adding control or gradual selection when residuals suggest a slightly wrong
+calibration. It refuses changes over 20 % and solves that make the residual worse.
+Lens distortion stays; re-run the reconstruction with self-calibration to change it.
+Like gradual selection, it retires the depth maps and georeference.

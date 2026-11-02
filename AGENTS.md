@@ -42,6 +42,11 @@ Rules that are easy to miss:
   commit. `PROJECT_FORMAT_MIN` rises only at a release.
 - Pushing deploys: `main` goes to dev.websfm.app, a `v*` tag to websfm.app (CI ▸
   `deploy`). Don't push, and never push a tag, unless asked.
+- Write UI text and help for the users: people who know photogrammetry from Metashape,
+  COLMAP or ODM, not the maintainers. Say what a setting does and when to change it,
+  briefly, in their terms. Never name a test dataset, a bench number or a date in the
+  app; the evidence goes in CHANGELOG.md, the method detail in docs/METHODS.md
+  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in step*).
 - The name is **WebSfM** in anything people read (UI text, messages, docs, help).
   Lowercase `websfm` stays only in identifiers: URLs, the repo and npm package, the
   `.websfm` extension, storage, cache and lock keys, file names.

@@ -5,164 +5,95 @@ summary: Reconstructs a continuous screened-Poisson surface from a dense cloud a
 category: Products and export
 order: 100
 ---
-Meshing turns a dense point cloud into connected triangles. Screened Poisson is
-smooth and robust, but on its own it produces a closed surface that extrapolates
-past the data and wraps small specks of noise in their own shells. Build Mesh
-therefore trims the result to what the points support, closes small holes, and
-drops floating pieces. These steps are on by default.
+Meshing turns a dense cloud into connected triangles with screened Poisson. On its own,
+Poisson closes the surface past the data and wraps noise in small shells, so Build Mesh
+also trims to what the points support, closes small holes and drops floating pieces.
 
 ## Before you run
-The source must be a dense cloud with per-point normals. Missing normals mean the
-cloud must be fused again. **Source** chooses which cloud to mesh: the cloud
-selected in the 3D view if it is a dense cloud, otherwise your most recent edited
-copy (a crop, filter or selection cleanup), otherwise the fused cloud. Edits are
-non-destructive, so clean the cloud first (crop to the object, filter or select
-away clutter) and mesh the cleaned copy.
-
-Points far outside the bulk of the cloud are left out of the solve automatically,
-so a few stray points no longer coarsen the whole mesh.
+The source must be a dense cloud with normals. **Source** takes the cloud selected in
+the 3D view, else your latest edited copy, else the fused cloud: clean the cloud first
+(crop, filter, select) and mesh the clean copy. Far outliers are left out
+automatically.
 
 ## Quality and octree depth
 <!-- param: depth default: 8 -->
-Depth is the octree depth of the screened Poisson solve, and the main detail, time,
-and memory control. Each level roughly quadruples the work. Use Coarse for a preview and Balanced first for real work. If the
-cloud is too sparse for the depth you choose, the depth is lowered automatically
-and the log says why. A depth that is high relative to the point count mostly
-creates empty detail, and the modal warns you.
-
-The solve's memory grows with the surface it covers and quadruples with each level:
-about 1 GB at depth 8 over a smooth terrain, and 14 GB at depth 10 over a 1 km quarry
-with pit walls. A solve too large for the 4 GB a 32-bit WebAssembly module can hold runs
-on the 64-bit build instead, which holds 16 GB, in browsers with 64-bit WebAssembly
-memory (Chrome, Edge, Firefox). It is about a sixth slower, so it runs only when needed;
-the log says which build a mesh used. A solve past 16 GB stops with a message saying so:
-lower the quality, or set a Region around part of the scene.
+The octree depth of the Poisson solve: the main control of detail, time and memory,
+each level about four times the work. Use Coarse for a preview and Balanced for real
+work. A depth too high for the point count only adds empty detail; it is lowered
+automatically when the cloud is too sparse. A solve too large for memory stops with a
+message: lower the quality or set a Region.
 
 ## Screening weight
 <!-- param: screening default: 4 -->
-Higher values pull the surface more tightly toward samples; lower values favour
-smoothness. Excessive screening can reproduce noise, while too little can round edges
-and erase small details.
-
+Higher pulls the surface tighter to the points; lower favours smoothness. Too much
+reproduces noise, too little rounds edges.
 
 ## Tiles
 <!-- param: tiles default: Auto -->
-A scene whose solve would not fit in memory (more than about 12 GB with 64-bit
-WebAssembly memory, 3.5 GB without) is solved in tiles: a grid over the scene's two
-longest axes, each tile with an overlap of at least 8 leaves, all on the same octree grid
-the whole scene would use. Each tile keeps the surface of its own cells, and neighbouring
-tiles are welded where they meet, on the grid edges they share, and every tile trims
-against the whole scene's support level. Continuous surface joins without cracks. Where a
-trimmed area or a hole crosses a seam, the two tiles can end it slightly differently, which
-leaves short open edges along that border; the log counts the open edges along the seams.
-The tiles are solved on several workers at once, as many as the memory budget (Settings ▸
-Compute) holds solves of the largest tile. Small
-floating pieces are judged after the tiles are joined, so a piece a tile border cuts is
-not mistaken for one. On a synthetic terrain the tiled surface lies within a hundredth of
-a leaf of the one-piece solve (median). **Off** always solves in one piece, and a scene too
-large for that stops with a message.
+A scene too large to solve at once is solved in overlapping tiles on several workers
+and welded at the seams, without cracks in continuous surface. Where a hole crosses a
+seam, short open edges can remain; the log counts them. **Off** always solves in one
+piece.
+
 ## Surface trimming
 <!-- param: trim default: Gentle -->
-**Gentle** removes surface that no points support: the hull Poisson extrapolates
-past the data, and the shells around stray specks. **Strong** also removes thinly
-observed surface, which can open holes where coverage is sparse. **Off** keeps the
-whole closed Poisson surface, which is useful when you need a watertight solid and
-accept invented geometry where nothing was seen.
+**Gentle** removes surface no points support: the hull Poisson extrapolates and shells
+around stray specks. **Strong** also removes thinly observed surface, which can open
+holes. **Off** keeps the closed surface, for a watertight solid with invented geometry
+where nothing was seen.
 
 ## Distance trim
 <!-- param: distanceTrim default: 0 -->
-An optional extra trim: triangles farther than this many sample spacings from any
-point are cut. Surface trimming already covers most cases. Use this only to cut
-smooth extrapolated sheets that Gentle keeps.
+Optionally cuts triangles farther than this many point spacings from any point. Use it
+only for smooth extrapolated sheets that Gentle keeps.
 
 ## Fill small holes
 <!-- param: fillHoles default: true -->
-Closes small holes that trimming opened inside otherwise solid surface. A hole is
-filled only when it is closed all round and small compared with the surface
-around it, so the open edges of a scan are never closed.
+Closes small holes that trimming opened inside solid surface. The open edges of a scan
+are never closed.
 
 ## Remove floating pieces
 <!-- param: removeFloaters default: true -->
-Drops disconnected pieces that explain only a few of the cloud's points: specks of
-fusion noise and leftover clutter. The size threshold (Advanced, default 1 % of the
-main surface's support) is measured in points explained, not in area. If a real
-separate object disappears, lower the threshold or switch this off. If clutter
-remains, it is supported by many points; remove it from the cloud instead.
+Drops disconnected pieces supported by few points: fusion noise and clutter. If a real
+separate object disappears, lower **Floating piece size** or turn this off; clutter
+that stays is well supported, so remove it from the cloud.
 
 ## Floating piece size
 <!-- param: minPiecePct default: 1 % -->
-The threshold for Remove floating pieces: a disconnected piece is dropped when it
-explains less than this share of the points the best-supported piece explains.
-Support counts the points lying on a piece, not its area. Poisson inflates a small
-speck into a closed ball that can look sizeable, yet only a handful of points rest on
-it; a piece no point lies near, such as an extrapolated sheet, has no support and
-always goes. Raise the value to clear larger clutter; lower it when a real, separate,
-thinly covered object disappears.
+A piece is dropped when fewer points lie on it than this share of the best-supported
+piece. Raise it for larger clutter; lower it when a thin real object disappears.
 
 ## Transfer colour from the dense cloud
 <!-- param: colorize default: on -->
-Gives each mesh vertex the colour of its nearest point in the dense point cloud. It
-reads the full cloud, not the thinned copy the solve uses, so colour is as sharp as the vertices
-allow. It is useful for viewing, but close inspection may show blurred or stretched
-colour where mesh vertices are sparse; for the photos' full detail, texture the mesh
-([Texture a Mesh](guide:texture-mesh)). A vertex with no dense
-point nearby, such as one in a filled hole, falls back to grey. Switch it off for
-geometry-only uses such as STL export; a cloud without colour leaves the mesh
-uncoloured either way.
+Colours each vertex from the nearest dense point: fine for viewing, blurred where
+vertices are sparse. For the photos' full detail, [texture the mesh](guide:texture-mesh).
+Turn it off for geometry-only uses such as STL.
 
 ## Replace the main mesh
 <!-- param: replaceMain default: Off -->
-Where the new mesh goes. Off, it is added beside the others under a name of its own
-("Mesh 2") and becomes the [main mesh](help:main-product), the one the next step
-uses; the older ones stay until you remove them. On, it takes the main mesh's place
-and name. Either way, products built on the old one are kept and marked outdated.
-An edited mesh (a Mesh ▾ tool's output) or an imported one is never replaced.
+Off, the new mesh is added beside the others ("Mesh 2") and becomes the
+[main mesh](help:main-product). On, it takes the main mesh's place and name; edited and
+imported meshes are never replaced. Products built on the old mesh are kept and marked
+outdated.
 
 ## Export choice
-OBJ preserves vertex colour only in applications that support the extension; STL is
-geometry-only. A textured mesh keeps its texture in GLB and OBJ (see
-[Texture a Mesh](guide:texture-mesh)). Check the target application's axis, units, and colour support before
-choosing a format.
+GLB and OBJ keep a texture ([Texture a Mesh](guide:texture-mesh)); OBJ vertex colour
+works only where the application supports it; STL is geometry only. Check the target
+application's axes and units.
 
 ## Cleaning, simplifying and measuring
-The **Tools → Mesh ▾** menu works on any mesh, built or imported. Like the point-cloud
-tools, each adds a new mesh and leaves the source alone; a later **Build Mesh** never
-replaces these copies, even with Replace on. Clean, Smooth and Decimate are also
-[Workflow Builder](guide:workflow-builder) blocks, to replay a cleanup chain after
-every run.
-
-- **Clean mesh…** runs, in order: weld duplicate vertices, remove small pieces (by
-  share of the largest piece), remove long-edge bridges (triangles Poisson stretched
-  across gaps, measured against the median edge), fill holes up to a size, and drop
-  unused vertices. **Close all holes** makes the mesh watertight, for 3D printing or a
-  volume. Do not use it on terrain: an open surface's outer rim counts as a hole and
-  would be closed too.
-- The **weld** step matters for imported meshes. An STL, and the output of some
-  other programs, gives every triangle its own three corners, so without welding
-  every triangle is a separate piece and every edge an open edge. Welding joins
-  corners that lie within a tiny distance of each other: a millionth of the mesh's
-  diagonal or a hundredth of its median edge length, whichever is smaller. The log
-  records the distance used. A mesh that already shares its vertices, such as one
-  from **Build Mesh**, is left unchanged.
-- **Smooth…** applies Taubin smoothing, which removes small noise without the
-  shrinkage plain smoothing causes. The boundary stays fixed by default.
-- **Decimate…** reduces the triangle count to a share or a number, removing
-  triangles where the surface is flat and keeping them where it bends (quadric edge
-  collapse). Boundaries are preserved, so a terrain edge or a cut does not erode. A
-  mesh of half a million triangles or more is cut into blocks, one per worker, then
-  joined and decimated once more across the seams; a few million triangles take a
-  few seconds.
-- **Crop…** keeps the triangles whose three corners lie inside a box.
-- **Sample to points…** turns the surface into a dense cloud of evenly spread points
-  with normals and colour, so the point-cloud tools and the DEM can use a mesh.
-- **Texture…** paints the mesh with the photos themselves, as a new textured mesh.
-  See [Texture a Mesh](guide:texture-mesh), which also says which of these tools keep
-  a texture. On a textured mesh these tools find the same pieces, holes and open edges
-  as on the mesh before texturing.
-- **Mesh area & volume…** (in **Tools → Measure ▾**, with the other measurements)
-  reports the surface area and, when the mesh is closed and
-  consistently wound, its volume. An open mesh reports how many open edges it has
-  instead of a volume that would mean nothing. It welds duplicate corners itself
-  before checking whether the mesh is closed, so an imported STL is measured
-  correctly; the dialog says when it did, and **Clean mesh** saves a welded copy. Values are in metres once the project
-  has a scale or georeference, otherwise in model units.
+**Tools → Mesh ▾** works on any mesh, built or imported, and adds a new mesh each time.
+Clean, Smooth and Decimate are also [Workflow Builder](guide:workflow-builder) blocks.
+- **Clean mesh…** welds duplicate vertices (needed for STL imports), removes small
+  pieces and long bridging triangles, fills holes up to a size and drops unused
+  vertices. **Close all holes** makes it watertight for printing or volume; not for
+  terrain, whose outer rim would be closed too.
+- **Smooth…** removes small noise without shrinking (Taubin).
+- **Decimate…** reduces the triangle count, keeping detail where the surface bends and
+  preserving boundaries.
+- **Crop…** keeps triangles inside a box.
+- **Sample to points…** turns the surface into a dense cloud, for the point-cloud tools
+  and DEMs.
+- **Texture…** paints the mesh with the photos ([Texture a Mesh](guide:texture-mesh)).
+- **Mesh area & volume…** (in **Tools → Measure ▾**) reports the area and, for a closed
+  mesh, the volume; an open mesh reports its open edges instead.

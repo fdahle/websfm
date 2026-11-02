@@ -25,9 +25,7 @@ The test is only as good as the pairwise rotations it composes, and that is the
 catch. Each one comes from decomposing a pair's essential matrix, which needs a
 correct [focal length](help:focal-length) and enough non-planar structure. When
 either is missing, a **true** pair carries a wrong rotation and fails its
-triangles. WebSfM once ran this as a filter before reconstruction (each triangle
-votes on its edges, the worst edge is dropped). An audit against finished models
-showed it removed mostly true pairs and changed no point count, so it was removed
-in October 2026. False pairs are now stopped later, by the
+triangles. In practice such a filter removes mostly true pairs, so WebSfM doesn't
+use one: false pairs are stopped later, by the
 [PnP](help:pnp) registration gates, the track filter and the robust
 [bundle adjustment](help:bundle-adjustment).

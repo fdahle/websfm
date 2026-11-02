@@ -5,403 +5,175 @@ summary: Rasterises a sparse or dense cloud into a gridded elevation surface.
 category: Products and export
 order: 80
 ---
-A [digital elevation model](help:digital-elevation-model) collapses 3D points into
-one height per grid cell. A dense cloud produces a useful DSM; the sparse tie-point
-cloud is acceptable only for a coarse preview.
+A [digital elevation model](help:digital-elevation-model) gives one height per grid
+cell. Build it from a dense cloud; the sparse cloud is enough only for a coarse preview.
 
 ## Points
 <!-- param: points default: All points -->
-**All points** (default) builds a surface model (DSM) from the whole cloud, roofs and
-canopy included. **Ground only** builds a bare-earth terrain model (DTM) from the
-ground class of a classified cloud: run [Classify Points](guide:classify-ground)
-first. **Classes…** builds the top surface of the classes you tick, from the same
-classified cloud. It uses the cloud selected in the 3D view when that one is classified,
-otherwise the newest classified cloud, and the line under **Points** names it. Choosing
-Ground only turns on Fill enclosed gaps, because the ground under a removed
-building is a hole the radius fill cannot close. A classified LiDAR survey imported
-as a *streamed* cloud (too large for memory) is a ground source too.
+**All points** builds a surface model (DSM), roofs and canopy included. **Ground only**
+builds a terrain model (DTM) from the ground class: run
+[Classify Points](guide:classify-ground) first. **Classes…** builds the top surface of
+the classes you tick. The line under the field names the classified cloud it uses.
+Ground only turns on Fill enclosed gaps, to close the holes under removed buildings.
 
 ## Classes
 <!-- param: classes default: High vegetation -->
-Shown for **Points ▸ Classes…**: the classes whose points go into the grid. High
-vegetation alone gives the canopy's top surface; with a DTM of the same area, a
-[DEM of difference](help:dem-of-difference) between the two is a canopy height model,
-the height of the trees above the ground. Building alone gives the roofs, for building
-heights the same way. Cells without a point of these classes stay empty: turn off Fill
-enclosed gaps to keep the gaps between trees open.
+The classes that go into the grid with **Points ▸ Classes…**. High vegetation gives the
+canopy top, Building the roofs; subtract a DTM of the same area
+([DEM of difference](help:dem-of-difference)) for tree or building heights. Turn off
+Fill enclosed gaps to keep the gaps between them open.
 
 ## Coordinate frame
 <!-- param: crs default: Local -->
-**Local** uses the model orientation and its best available scale. **Project CRS**
-requires a georeference fit and produces real-world coordinates. Once the project has
-a georeference, Project CRS is preselected, so the DEM lands on the map's CRS view
-with the basemap and GCPs. For an object with
-a scale bar, Local is metric but still has no CRS.
-Local levels the model from the cameras. When the camera positions share one height
-(a drone flight plan) and the photos are oblique, that level plane sets the vertical;
-a nadir survey uses its viewing direction. A block that mixes vertical photos with
-obliques (historical film) levels on its verticals. The log names which one was used.
-The option names why it is unavailable. "Geographic CRS" means the project is still
-in degrees (WGS 84): use the projected CRS suggested under the field, or choose one in
-Project Settings; the frame switches to it once the fit is possible. "Needs ≥3 camera
-positions or GCPs" means there is not enough evidence yet.
+**Local** uses the model's own frame and scale, levelled from the cameras. **Project
+CRS** gives real-world coordinates and needs a georeference; once there is one, it is
+preselected. When it is unavailable, the option says why: the project is still in
+degrees (choose a projected CRS), or there are fewer than three camera positions or
+GCPs.
 
 ## Extent
 <!-- param: extent default: Dense core -->
-**Dense core** (default) grids only the area where the cloud is dense. Oblique photos
-see far past the site, almost to the horizon, and those thin distant points would
-otherwise make the DEM huge, coarse and mostly empty. The log says how many points
-fall outside and are left out; a warning appears when that is more than 5%. Choose
-**All points** to grid the full extent of the cloud. A Region (Tools ▸ Model ▸ Region)
-limits the input before either.
+**Dense core** grids only where the cloud is dense, leaving out the thin points that
+oblique photos see far off, which would make the DEM huge and mostly empty. The log
+says how many points that drops. **All points** grids the whole cloud. A Region (Tools ▸
+Model ▸ Region) limits both.
 
 ## Raster size by
 <!-- param: sizeBy default: Cell size -->
-Set the DEM's size either as a **Cell size** (the ground sample distance below) or as
-the **Long side** in pixels, and let the other follow from the extent. Under the field,
-the dialog shows the size the run will build: pixels, cell size and the uncompressed
-size, estimated from a sample of the cloud in the chosen frame (marked ≈). In a
-project CRS it appears once the georeference is fitted. When Auto stops at 4,096 cells
-a side, or a size would pass 65,535 cells a side, the warning shows there before the
-run.
+Set the DEM's size as a **Cell size** or as the **Long side** in pixels; the other
+follows from the extent. The line under the field shows the size the run will build.
 
 ## Ground sample distance
 <!-- param: gsd default: Auto -->
-The raster's [ground sample distance](help:ground-sample-distance): cell size in
-metres or model units per pixel. Auto estimates a sensible value from
-point density, and keeps the grid to at most 4,096 cells a side. Choosing a much finer
-cell than the source spacing makes a larger file, not more detail, and forces
-interpolation across more empty cells.
-
-A GSD (or long side) you set that needs more than 4,096 cells a side (a satellite
-frame at its native resolution, say) is built block by block as a
-[Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) at that GSD, up to 65,535 cells a
-side (written as a BigTIFF past 4 GiB, which GDAL and QGIS read). Everything
-that reads heights reads that file:
-
-- the GeoTIFF and ASCII grid exports, at full resolution;
-- the DEM's tab and the map, which draw it as you zoom in, coloured and hillshaded by
-  its symbology, and read the full-resolution height under the cursor;
-- profiles and volumes, from a window around what you draw (up to 16 million cells,
-  coarser beyond that), and the DEM-vs-GCP check;
-- a clip, at full resolution up to 67 million cells;
-- contours and terrain derivatives, up to 48 million cells — a bigger DEM is read at
-  the finest level of its GeoTIFF that fits, and the log says which;
-- an orthophoto built on the DEM, as fine as the memory budget (Settings ▸ Compute)
-  allows.
-
-The hillshade PNG export and the comparison with a reference DEM use its overview, the
-first level of at most 4,096 cells a side, and **Fill enclosed gaps** is applied to the
-overview only.
+The cell size ([ground sample distance](help:ground-sample-distance)). Auto matches
+the point spacing, up to 4,096 cells a side. A finer cell than the points' spacing
+adds file size, not detail. A larger grid, up to 65,535 cells a side, is built in
+blocks as a [Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) and read at full
+resolution by the exports, the map, profiles, volumes and clips.
 
 ## Long side
 <!-- param: longSide default: Auto -->
-The number of cells on the DEM's longer side. The cell size is then the extent divided
-by it, and the readout shows it. **0** (Auto) means one point per cell, as Auto does for
-the cell size. Past 4,096 the DEM is built block by block, as a set cell size is (see
-above).
+The number of cells on the DEM's longer side; the cell size follows. **0** (Auto) puts
+about one point in each cell.
 
 ## Surface aggregation
 <!-- param: aggregate default: Median -->
-How the heights of all points that land in one cell become that cell's single
-height. **Median** (default) gives the surface at the cell, unmoved by stray points
-above and below it. **Max** keeps the top surface: roofs and the tops of trees where a
-cell straddles their edge. But in a cell on a slope it takes the cell's highest
-corner: on Rachel Glacier's rock at 20 m cells the max surface stood 14 m above the
-reference DEM, the median 0.7 m. On flat ground (Casa Grande) all of them agree within
-0.1 m, so choose Max for small cells over buildings or canopy. **Mean** gives a smooth
-average where many points share a cell, but one outlier pulls it. **Min** takes the
-lowest point, which is only "ground-ish": it drops some points on low vegetation, but
-it is not a terrain model, and under trees or roofs there is no ground in the cloud to
-find. For a terrain model, use Points ▸ Ground only. Median needs about 8 extra bytes
-per point (see Memory); a cloud too big for that takes the mean instead, and the log
-says so.
+How the points in one cell become its height. **Median** ignores stray points above and
+below. **Max** keeps roof and tree tops, but on slopes it takes each cell's highest
+corner. **Mean** is smooth but pulled by outliers. **Min** takes the lowest point; it is
+not a terrain model (use Points ▸ Ground only for that).
 
 ## Gap interpolation
 <!-- param: fillMethod default: Inverse distance -->
-Fills empty cells, which no point landed in, from measured cells nearby
-([gap interpolation](help:gap-interpolation)). **Inverse distance** blends every
-measured cell within the Interpolation radius, weighted by 1/distance², so small
-holes close smoothly. **Nearest neighbour** copies the closest measured height: it
-keeps steps such as roof edges and walls sharp, but fills look blocky. **None** keeps
-the cells as nodata, which shows exactly where the cloud has no data; an orthophoto
-built on this DEM is then transparent there.
+How empty cells near measured ones are filled ([gap interpolation](help:gap-interpolation)).
+**Inverse distance** blends nearby cells smoothly. **Nearest neighbour** keeps steps
+such as roof edges sharp but looks blocky. **None** leaves them empty, showing exactly
+where the cloud has no points.
 
 ## Interpolation radius
 <!-- param: fillRadius default: 2 px -->
-How far, in grid cells, an empty cell may be from a measured one and still be
-filled. The radius never enlarges the raster: it only fills cells inside the grid,
-and only from original measurements, never from other filled cells, so a hole wider
-than twice the radius keeps an unfilled core. 1–2 closes the speckle between points
-of a dense cloud. Larger values bridge real gaps (occluded ground, water, the space
-between buildings) with invented surface, especially from a sparse cloud, whose
-measured cells lie far apart. Because it counts cells, the same radius covers more
-ground at a coarser ground sample distance.
+How far, in cells, an empty cell may be from a measured one and still be filled. 1–2
+closes the speckle of a dense cloud; larger values bridge real gaps with invented
+surface. It never grows the raster, and a coarser cell covers more ground per cell.
 
 ## Fill enclosed gaps
 <!-- param: fillHoles default: Off -->
-Interpolates every empty area that measured cells surround on all sides, however
-large: the ground under a removed building, or a pond. It runs after the radius
-fill, with a smooth multi-resolution average of the measured cells around the gap
-([gap interpolation](help:gap-interpolation)). Empty areas that reach the edge of
-the grid are the edge of the survey and stay nodata. The filled heights are an
-estimate, not a measurement: a building on a slope gets the slope continued under
-it. On by default for Ground only, off otherwise.
+Fills every empty area surrounded by measured cells, however large (under a removed
+building, a pond), with a smooth estimate. Gaps reaching the edge of the grid stay
+empty. On by default for Ground only.
 
 ## Replace the main DEM
 <!-- param: replaceMain default: Off -->
-Where the new DEM goes. Off, it is added beside the others under a name of its own
-("DEM 2") and becomes the [main DEM](help:main-product), the one the next step
-uses; the older ones stay until you remove them, and each still opens in a tab, goes on
-the map and downloads. On the map the new one takes the place of the one before. On,
-it takes the main DEM's place and name. Either way, products built on the old one are kept and marked outdated.
-A rebuilt DEM no longer removes the orthophoto built on it: that one is marked
-outdated instead.
+Off, the new DEM is added beside the others ("DEM 2") and becomes the
+[main DEM](help:main-product) the next steps use. On, it takes the main DEM's place and
+name. Either way, products built on the old one are kept and marked outdated.
 
 ## Support layer
 <!-- param: supportExport default: — -->
-Every DEM records which of its cells points landed in and which the gap
-interpolation filled: its **direct support**. A filled cell looks like any other in
-the DEM, but its height is a guess from the measured cells around it, and on snow,
-water, shadow or a weakly matched block margin those guesses carry most of the large
-errors. Coverage alone overstates how much of a surface was reconstructed; the
-support layer shows it.
-
-**Export ▸ DEM ▸ Support layer** writes it as a one-band GeoTIFF on the DEM's grid:
-for each cell the percentage that points landed in (100 = measured, 0 = filled),
-255 where the DEM is empty. A DEM too large for one plane records it on its
-overview, where a cell can be partly measured. **Quality Report ▸ Products** uses it
-to give the error of measured and filled cells apart. A DEM built before
-23 October 2026 has no support layer; build it again to get one.
+Each DEM records which cells were measured and which were interpolated. **Export ▸ DEM ▸
+Support layer** writes it as a GeoTIFF: per cell the percentage measured (100 =
+measured, 0 = filled, 255 = empty). The Quality Report uses it to report the error of
+measured and filled cells separately.
 
 ## Show on the 2D map
-A newly built DEM goes on the 2D map by itself. The checkbox on its row in the
-Products section, or **In Layers** in the DEM's ribbon tab, takes it off the map and
-puts it back; a rebuild keeps the choice. While it is on the map, the expanded row
-has an **Opacity** slider. The map draws the DEM's hillshade preview under GCPs and
-footprints, and by default above imported reference rasters (see Layers below);
-**Fit View** includes it. With the cursor over it, the map's status bar shows the
-height of the cell under the cursor, and "no data" over a hole.
+A new DEM goes on the 2D map, drawn as a hillshade. Its checkbox in the Products
+section takes it off and puts it back, and its row has an **Opacity** slider. The
+status bar shows the height under the cursor.
 
-**View ▸ Map ▸ Layers** opens a small panel over the map that lists the layers on it
-in one stack, as a GIS does: imported reference rasters, contour lines, polygon files
-and the photos (**View ▸ Map ▸ Photos**) included. The sidebar holds everything in the project; the panel only what you
-put on the map. The top of the list draws on top: drag a row by ⠿ (or use ▲ ▼) to
-restack. A row's checkbox hides the layer for a while and keeps it in the list; its
-✕ takes it off the map. Click a row to set its **Opacity** or **Zoom to** it in the
-strip below the list. The last row is the **Basemap**, which draws under everything.
-The order and what is hidden are saved with the project. Footprints, GCPs and cameras
-always draw above the layers; **View ▸ Map ▸ GCPs** hides the GCP symbols (they stay
-while you edit GCPs).
+**View ▸ Map ▸ Layers** lists everything on the map in one stack, as in a GIS: drag rows
+to restack, untick to hide, ✕ to remove, and set opacity or zoom below the list. The
+basemap is always at the bottom; footprints, GCPs and cameras always on top.
 
-The 2D map has two frames, switched with **View ▸ Map ▸ Model Frame**:
-- **Project CRS** (Model Frame off): the basemap, GPS positions, GCPs, footprints,
-  reference rasters and Project CRS products. A Local DEM is not drawn here; a
-  note on the map says so.
-- **Model frame** (on): a top-down view of the sparse model's local frame, labelled
-  X/Y in model units (or metres with scale bars). It shows the registered cameras
-  and Local products. Everything that only has a CRS position is hidden, and Edit
-  GCPs is unavailable. Markers appear where their marks triangulate. A product
-  built on an older sparse model, or in a different model orientation, is not drawn
-  until it is rebuilt.
-
-Until you choose, the map uses the model frame only when there is a sparse model and
-nothing with a CRS position (no georeference, GPS, poses, GCP coordinates or
-reference rasters on the map).
+**View ▸ Map ▸ Model Frame** switches the map between the **Project CRS** (basemap,
+GPS, GCPs, CRS products) and the **model frame**, a top-down view of the local model
+and its Local products.
 
 ## Memory
-The DEM copies the source cloud's points (about 24 bytes each, only those inside the
-region when one is set) and allocates the grid. Both must fit the memory budget in
-**Settings ▸ Compute**, the same budget dense matching uses. If a build is refused, the
-message names the size it needed: raise the budget, set a region, subsample the cloud
-(Tools ▸ Point Cloud ▸ Filter, voxel), or choose a coarser cell size for the grid.
-Median uses about 8 extra bytes per point; Max, Min and Mean need none.
-
-A *streamed* cloud ([level of detail](help:level-of-detail)) is read from its octree
-instead: only as finely as the cell size needs (points about half a cell apart; finer
-levels add nothing to a cell), and within half the budget, so a 0.5 m DTM of a
-76-million-point survey reads some 20 million of them. With the cell size on auto,
-the budget alone sets how finely it reads.
+A DEM holds a copy of the cloud's points (about 24 bytes each) and its grid within the
+memory budget (Settings ▸ Compute). If a build is refused, raise the budget, set a
+region, thin the cloud (Tools ▸ Point Cloud ▸ Filter) or use a coarser cell size. A
+streamed cloud is read only as finely as the cell size needs.
 
 ## Inspect before export
-Look for spikes, pits, edge extrapolation, bridges across gaps, and a plausible height
-range. Export GeoTIFF when the product has a CRS; preserve nodata for downstream GIS.
+Look for spikes, pits, extrapolated edges and bridges across gaps, and check the height
+range. Export a GeoTIFF when the DEM has a CRS.
 
 ## Measure a raster
-Every measuring tool is in **Tools ▸ Measure ▾**. With a DEM or orthophoto tab in
-front, choose **Ruler**, **Area**, **Profile** or **Volume**. Profile and Volume need
-elevations, so on an orthophoto they stay greyed with the reason. A bar at the top of
-the view shows the active tool, and the Measure button stays lit while one runs.
-Click vertices on the raster. **Enter** finishes, **Backspace** removes the last
-point, and Shift-drag pans. **Esc** clears the drawing, and a second Esc leaves the
-tool; choosing the active tool again in the menu also turns it off. A click after
-Finish starts a new measurement.
+With a DEM or orthophoto open, **Tools ▸ Measure ▾** offers **Ruler**, **Area**,
+**Profile** and **Volume** (the last two need heights, so a DEM). Click vertices;
+**Enter** finishes, **Backspace** removes the last point, **Esc** clears. On the 2D
+map, **Map layer to measure** picks the raster, so you can draw over the orthophoto and
+read heights from the DEM.
 
-**On the 2D map** the same menu works while a raster is on the map, and it adds a
-**Map layer to measure** section that picks which raster is measured: the DEM by
-default, because only a DEM serves Profile and Volume, so you can draw over the
-orthophoto and still read heights from the DEM underneath. Drag pans; clicks add
-vertices. A measurement saved on the map belongs to its raster, so it also appears
-under **Saved measurements** in that raster's tab, and the other way round.
-
-The same menu holds the measurements of clouds and meshes: **Distance to
-reference…** and **Section…** (see Point Cloud Tools) and **Mesh area & volume…**
-(see Mesh).
-
-The result card shows the value with its details (perimeter for an area, elevation
-range and relief for a profile, cut/fill/coverage for a volume). Type a name and
-choose **Save measurement** to keep it with the project. **Saved measurements** in
-the menu opens the list of this raster's saved measurements. Click one to reopen it, then
-rename or delete it from its card; **Export…** in the list's header writes the list as
-CSV or GeoJSON (see *Export measurements* below). Rebuilding the raster or changing its coordinate
-frame marks older measurements **stale**. Their saved results remain readable;
-draw a new measurement on the current source to replace them.
-
-Distance and area use the raster's recorded horizontal frame and display its
-units, including model units when scale is unknown. In a projected CRS, lengths,
-areas and volumes are reported as **ground** values: the map projection's scale
-factor k at the raster centre (0.98 at 80°S in Antarctic Polar Stereographic) is
-divided out, and the result card shows the k it used. Heights are not scaled. Area
-is the horizontal footprint, not terrain surface area. Measurements are unavailable for geographic
-coordinates or a stale computed frame. An [elevation profile](help:elevation-profile)
-requires a loaded DEM, preserves nodata gaps, and can be downloaded with **Export profile CSV**. The profile uses
-approximately one-cell spacing, coarsened for very long paths.
+Name a result and **Save measurement** to keep it; **Saved measurements** lists them.
+Rebuilding the raster marks older measurements stale. In a projected CRS, lengths,
+areas and volumes are ground values (the projection's scale factor is divided out);
+area is the horizontal footprint. An [elevation profile](help:elevation-profile) keeps
+nodata gaps and exports as CSV.
 
 ## Measure a volume
-**Volume (cut / fill)** measures material inside a polygon relative to a base
-surface, for example a stockpile, an excavation or a fill. Draw the polygon around
-the feature's toe, then choose the **Base** in the measuring toolbox:
-- **Best-fit plane through vertices**: a plane fitted to the DEM heights at your
-  vertices. It is exact for three vertices and a least-squares fit for more. Use it
-  when the ground around the feature slopes.
-- **Lowest vertex**: a horizontal base at the lowest vertex height.
-- **Custom height**: a horizontal base at an elevation you enter, in the DEM's
-  vertical units. Until you enter one, no volume is shown: an empty field never
-  means a base at zero.
-- **Reference DEM**: an imported reference DEM as the base, which turns the volume
-  into a [DEM of difference](help:dem-of-difference) between two epochs. It is
-  offered for the computed DEM in a CRS; **Tools ▸ Measure ▸ DEM of difference** opens
-  the tool with it chosen. The result reads as **Gain** (the DEM above the reference)
-  and **Loss** (below it). The reference is read at each DEM cell centre, bilinearly
-  where its four surrounding cells have heights. A centre over a reference hole, or
-  off the reference, counts as unmeasured and never borrows a neighbouring height, so
-  **DEM coverage** shows the true overlap. Over a polygon of more than 262,144 cells
-  (65,536 while you are still drawing it) the comparison uses a regular sub-grid of
-  that many cells, scaled to the whole polygon, and the toolbox shows **Sampled: 1
-  cell in n×n**. Only the reference base is sampled this way; the plane bases use
-  every cell. The reference's declared offset is applied, and its heights are
-  converted to the DEM's [vertical datum](help:vertical-datum) when both datums are
-  declared and convertible (ellipsoidal, EGM96, EGM2008). The DEM has the datum of the
-  control it was georeferenced with, when all of it shares one. Otherwise both
-  DEMs must use the same datum.
-- **Background terrain (~30 m)**: the global elevation model the **Terrain** basemap
-  shades (Mapzen Terrain Tiles: SRTM, NOAA ETOPO1 and others) as the base, for a DEM
-  of difference without a reference DEM of your own. Its cells are about 30 m at best,
-  coarser in places, and its heights are metres accurate, so it shows only large
-  changes, a vertical offset or a tilt of the whole DEM; import a reference DEM for
-  anything finer. It is offered for the computed DEM in a CRS, and **Tools ▸ Measure ▸
-  DEM of difference** chooses it when the project has no reference DEM. The tiles under
-  the DEM are read once (from the browser's cache when the map has shown the area
-  before) and sampled at each DEM cell like a reference DEM. Its heights (EGM96 geoid)
-  are converted to the DEM's vertical datum when that is declared and convertible.
-  The tiles stop at 85° latitude, so a DEM nearer a pole has no terrain under it.
+**Volume** measures material inside a polygon against a **Base**:
+- **Best-fit plane through vertices**, for ground that slopes around the feature;
+- **Lowest vertex**, a horizontal base at the lowest vertex;
+- **Custom height**, a horizontal base at a height you enter;
+- **Reference DEM**, an imported DEM, which makes the result a
+  [DEM of difference](help:dem-of-difference) between two epochs (**Gain** and
+  **Loss**). Heights are converted between [vertical datums](help:vertical-datum)
+  where both are declared;
+- **Background terrain (~30 m)**, the global terrain model, for large changes only.
 
-On an imported reference DEM, heights, profiles and volumes include the raster's
-declared **vertical offset** (Reference Data ▸ right-click ▸ **Accuracy & datum…**), the same correction
-used when a GCP height is filled from it.
-
-**Cut** is the volume above the base and **Fill** the volume below it.
-**Net** is cut minus fill. Each DEM cell whose centre lies inside the polygon
-contributes its height difference times its cell area, so a finer DEM follows the
-polygon edge more closely. Place vertices on valid ground: a vertex on a nodata
-cell gives no height, and the plane needs at least three vertices that are not
-on one line.
-
-**DEM coverage** reports how many cells inside the polygon actually have data.
-Holes and parts of the polygon outside the raster are left out, not interpolated.
-Below 100%, the volume is an underestimate of the area you drew, so fill holes
-before measuring or redraw the polygon around them. The units are the DEM's
-horizontal unit squared times its vertical unit, e.g. m³, or model units³ before
-the project has a scale.
+**Cut** is the volume above the base, **Fill** below it, **Net** their difference.
+**DEM coverage** below 100 % means holes or areas off the raster were left out, so the
+volume is too small: fill holes first or redraw.
 
 ## Export coordinate system
 <!-- param: rasterCrs default: As built -->
-**As built** writes the DEM in the CRS it was built in. For the GeoTIFF and COG
-formats, **Another CRS…** writes a reprojected copy in the
-[CRS](help:coordinate-reference-system) you pick: a Cloud-Optimized GeoTIFF (DEFLATE,
-nodata NaN) at the same ground cell size, while the DEM itself stays as built. Only
-the horizontal CRS changes. Heights keep their [vertical datum](help:vertical-datum).
-A DEM in the local frame has no CRS, so it can't be reprojected, and a raster around a
-pole can't be written in a geographic CRS (degrees).
+**As built** writes the DEM in its own CRS. **Another CRS…** writes a reprojected
+Cloud-Optimized GeoTIFF in the [CRS](help:coordinate-reference-system) you pick, at the
+same cell size. Heights keep their [vertical datum](help:vertical-datum). A Local DEM
+cannot be reprojected.
 
 ## Export resampling
 <!-- param: resampling default: Bilinear -->
-How a reprojected copy samples the heights. **Bilinear** interpolates between the four
-nearest cells; **Nearest** keeps every height as it was measured, which suits a DTM
-whose values must not be smoothed. Next to an empty cell, Bilinear takes the nearest
-height instead, so holes don't spread.
+How a reprojected copy samples heights. **Bilinear** interpolates; **Nearest** keeps
+every height as measured, for a DTM that must not be smoothed.
 
 ## Export measurements
 <!-- param: measurementCoords default: Project CRS -->
-**Export ▸ Measurements** writes every saved measurement of the project (rulers,
-areas, profiles, volumes and the 3D measurements) to one file; the **Export…** button
-of a saved-measurements list writes just that list. **CSV** has one row per
-measurement. Each value column has its unit in a `*_unit` column next to its group
-(`length_unit` for the lengths and the perimeter, `area_unit`, `elevation_unit`,
-`volume_unit`), so a number never travels without its unit. The geometry is in a
-`geometry_wkt` column, in the frame named by `coordinate_frame`. Profiles are
-summarised (length, lowest and highest point, relief); their samples are in the
-GeoJSON or the per-profile CSV. Stale measurements are included, marked `stale`.
-
-**GeoJSON** writes each measurement as a line or a polygon carrying the same values
-as properties, and a profile its samples. **Coordinates** chooses where they are
-placed when the measurements have a CRS:
-- **Project CRS** (the default) keeps the exact project coordinates and, for 3D
-  measurements, their heights as a third coordinate. The CRS is named in the file's
-  `crs` member, as the contour and polygon exports do; QGIS and GDAL read it, and so
-  does this app's GeoJSON import.
-- **WGS 84 (RFC 7946)** is the strict standard that web maps expect: longitude and
-  latitude on WGS 84, no `crs` member. RFC 7946 makes a third coordinate a height
-  above the WGS 84 ellipsoid, which a project height is not, so these geometries are
-  2D; the measured coordinates, heights included, are kept in each feature's
-  `frame_coordinates`.
-
-A measurement whose frame has no CRS (a DEM built in the local frame, a project
-without a georeference, an imported cloud's own file coordinates) is never placed on
-the map: in a georeferenced file its geometry is empty and its coordinates are kept
-in `frame_coordinates`, labelled with their frame and unit. When none of the
-measurements has a CRS, the file is written in the frames they were measured in,
-marked `"georeferenced": false`, and the Coordinates choice is not offered. 3D
-measurements are recomputed in the project's current unit (metres once there is a
-georeference or scale bars) and written in the same frame as a point-cloud export.
+**Export ▸ Measurements** writes the saved measurements as **CSV** (one row each, every
+value with its unit, geometry as WKT) or **GeoJSON**. **Project CRS** keeps the exact
+coordinates and heights and names the CRS in the file, as QGIS reads it. **WGS 84
+(RFC 7946)** is the strict web standard: 2D longitude and latitude, with the original
+coordinates kept per feature. Measurements without a CRS are written in their own
+frame.
 
 ## Contours, slope and clipping
-The **Tools → Products ▾** menu derives contours and files from the DEM and
-orthophoto. None of them changes the stored product.
-
-- **Contours…** traces contour lines at an interval in the DEM's vertical unit
-  (*0* picks a round interval for about 25 levels) and adds them to the 2D map as a
-  layer, listed in the sidebar's **Products** section and in **View ▸ Map ▸ Layers**,
-  the index contours drawn heavier. Its checkbox shows and hides it, and its
-  right-click menu zooms to it or downloads it as GeoJSON. **Download** also saves them straight away as **GeoJSON** (GIS) or
-  **DXF** (CAD, with index contours on their own layer). A DEM without a coordinate
-  system cannot go on the map's layers, so its contours are always downloaded. Lines
-  stop at nodata holes rather than cutting across them. **Smooth the DEM first**
-  (default 2 cells) blurs the heights before tracing: a photogrammetric DEM carries a
-  few centimetres of noise, and traced as it is every noise bump on flat ground becomes
-  its own little ring (on the Aukerman example, 31,436 lines, 96 % of them under 20
-  cells long; smoothed, 733). **Drop lines shorter than** (default 20 cells) removes
-  what is left. Set both to *0* for the exact trace. Smoothing passes round the corners
-  of the grid crossings; *0* keeps them exact.
-- **Slope, aspect, hillshade…** writes each as a GeoTIFF on the DEM's grid and CRS
-  (Horn's method, as in GDAL). Slope is in degrees or percent, aspect in degrees
-  clockwise from north. In a projected CRS the grid spacing carries the projection's
-  scale factor k, which is corrected at the DEM centre (heights are never scaled). A
-  DEM in degrees of longitude/latitude is refused: its horizontal and vertical units
-  differ.
-- **Clip to polygon…** exports the DEM or orthophoto with everything outside a
-  polygon set to nodata (transparent for the orthophoto), cropped to the polygon. The
-  polygon is a saved **Area** or **Volume** measurement on that product, or a GeoJSON
-  file. A file that names its CRS, or one in longitude/latitude (standard GeoJSON, what
-  QGIS writes by default), is reprojected into the product's CRS; one in neither is
-  taken to be in the product's coordinates. The dialog says which it assumed.
+**Tools ▸ Products ▾** derives files from the DEM and orthophoto:
+- **Contours…** traces lines at an interval (*0* picks one), adds them to the map as a
+  layer and downloads them as GeoJSON or DXF. **Smooth the DEM first** and **Drop lines
+  shorter than** remove the small rings that height noise makes on flat ground; set
+  both to *0* for the exact trace.
+- **Slope, aspect, hillshade…** writes each as a GeoTIFF on the DEM's grid (Horn's
+  method, as in GDAL).
+- **Clip to polygon…** exports the DEM or orthophoto cropped to a saved Area or Volume
+  measurement or a GeoJSON polygon, reprojected when the file names its CRS.

@@ -15,10 +15,8 @@ calibrated wrongly, and the model bends to make up for it.
 WebSfM groups photos by their EXIF: camera, focal length and image size. Scans have no
 EXIF, so they are grouped by size alone, and a calibration file you import groups them
 by the values it gives. Two cameras of the same size, or rolls of one survey flown with
-different lenses, can end up in one group. On the Melville Glacier scans (173 photos
-from 20 rolls), groups by camera position alone put the cameras 28 m RMS off the
-reference; split as WebSfM suggests, by scan size, 13 m, and the DEM's error against the
-reference fell from 8.2 to 7.0 m.
+different lenses, can end up in one group, and splitting them can improve the model
+considerably.
 
 ## When WebSfM suggests a split
 A group that may hold photos of more than one camera gets a **⑂** in the Sensors list,
@@ -26,19 +24,16 @@ and the Sparse Reconstruction dialog says so at the top. Two things point to ano
 camera:
 
 - **Scan formats.** A scan batch has one exact size, so photos of another size, even a
-  few pixels off, come from another camera or batch: on the Melville scans, groups
-  10137, 10140 and 10141 px wide fitted their fiducials up to twice as well apart. When
-  every frame was cropped to its own size, sizes up to 1 % apart count as one.
-- **The fiducial fit.** In a film group with a fiducial layout, a roll (the file name
-  without its frame number: *CA215731L* for CA215731L0040.tif) whose photos fit the
-  layout at three times the error of the others, and at more than half a scan pixel,
-  was taken with another camera. Wrongly placed marks look the same: check a few of its
-  photos in the image view before you split.
+  few pixels off, come from another camera or batch. When every frame was cropped to its
+  own size, sizes up to 1 % apart count as one.
+- **The fiducial fit.** A roll (the file name without its frame number) whose photos
+  fit the group's fiducial layout three times worse than the others, and worse than
+  half a scan pixel, was likely taken with another camera, or its marks are misplaced:
+  check a few of its photos before you split.
 
-WebSfM only suggests. It cannot know the focal lengths of scans: a calibration with a
+WebSfM only suggests; it can't know the focal lengths of scans. A calibration with a
 focal length per photo ([Import ▸ Calibration](guide:film-fiducials)) makes one group
-per lens, but check the scan formats afterwards. On Melville, groups by focal length
-alone were worse than by camera position (33 m), and by scan size as good as by both.
+per lens; check the scan formats afterwards.
 
 ## Split a camera group
 Right-click the group ▸ **Split camera group…**. The dialog lists the groups the split

@@ -96,6 +96,15 @@ The app explains itself in two places:
 - `src/guide/*.md`: one article per operation, with a `## ` section per setting
   bound by `<!-- param: key  default: … -->`.
 
+Write both for the people who use WebSfM: they know photogrammetry, often from
+Metashape, COLMAP or ODM, and want to know what a setting does and when to change it,
+not how it was tuned. A setting's guide section is a few sentences, about 80 words at
+most, because its hover box shows it whole: what it does, when to raise or lower it,
+what it costs. An article's introduction says what the operation makes and when to run
+it. Leave out the names of test datasets, bench numbers, dates and the history of a
+change: the evidence belongs in the CHANGELOG entry, the algorithm in
+[docs/METHODS.md](docs/METHODS.md).
+
 Whenever a change alters what a setting or operation does, changes a default, or
 adds, removes or renames a setting, operation or user-visible feature:
 

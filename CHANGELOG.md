@@ -62,6 +62,10 @@ Notable changes to websfm. The format follows
   rest of the app is dimmed only lightly. The card used to start in the middle, move to
   the corner with the first cameras and come back for the last steps, and the earlier
   clouds flashed up before the finished model replaced the live one.
+- **A shorter guide.** Every guide article now says what a setting does and when to
+  change it, in a few sentences; the hover help of a setting is the same short text.
+  Test results and the history of each setting are gone from the app (they stay in this
+  changelog). The guide is half as long, about 24,000 words instead of 51,000.
 
 ### Performance
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps

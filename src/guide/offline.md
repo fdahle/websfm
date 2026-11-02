@@ -13,29 +13,21 @@ complete. From then on WebSfM starts without a connection, in a tab at the same
 address or as an installed app.
 
 ## Install the app
-Browsers that support it offer to install WebSfM, usually with an install icon in the
-address bar or an **Install** item in the browser menu. The installed app opens in
-its own window, without the browser's toolbars, and starts from the desktop or
-start menu like any program. It is the same app at the same address: projects in
-browser storage, settings and downloaded models are shared with the browser tab.
-Installing is optional; a tab works offline just as well.
+Browsers that support it offer to install WebSfM (an install icon in the address bar,
+or **Install** in the browser menu). The app then opens in its own window from the
+desktop or start menu, sharing projects, settings and models with the browser tab.
+It's optional; a tab works offline too.
 
 ## Updates
 WebSfM checks for a new version when it starts and then once an hour, and downloads
 it in the background. It never switches until you ask: a box at the bottom left says
 *A new version of WebSfM is available*.
 
-- **Reload** switches to the new version now. While a task is running (a pipeline
-  step, opening or saving a project, importing images) the button is disabled and
-  the box says you can reload once the task has finished, so an update never cuts a
-  run short.
-- **Later** hides the box for this session. The new version is used the next time
-  WebSfM starts after all its tabs and windows were closed.
+- **Reload** switches now; while a task runs it waits, so an update never cuts a run
+  short.
+- **Later** keeps the old version until WebSfM next starts with all its tabs closed.
 
-With WebSfM open in several tabs, **Reload** in one switches all of them: an idle
-tab reloads at once, and a tab still running a task keeps the box up and reloads by
-itself once the task has finished. Once another tab has switched, **Later** is no
-longer offered, since that tab's old code no longer matches the new version.
+**Reload** in one tab switches all of them, each once its running task has finished.
 
 ## What needs a connection
 - **Learned models** (ALIKED, DISK, LightGlue, and the Smart Select model for
@@ -54,29 +46,20 @@ longer offered, since that tab's old code no longer matches the new version.
   part of the app and work offline too.
 
 ## The 2D map offline
-Map tiles are kept only for areas you have already viewed online, and only at the
-coarser zoom levels (0 to 12, down to about 40 m per pixel at the equator). Nothing
-is downloaded in advance: OpenStreetMap's tile policy forbids bulk downloading and
-Esri's terms restrict offline use of its imagery. Each layer keeps a few hundred
-tiles, up to 30 days; the oldest go first.
-
-Offline, a project area you have seen before therefore comes back as a coarser,
-upsampled image when you zoom in, and an area you have never viewed stays blank.
-The map says *Offline: the basemap shows only areas viewed before, at lower detail*,
-so a blurry or empty map is not mistaken for an error. When the connection returns,
-the missing tiles load again by themselves.
+Map tiles are kept only for areas viewed online, at coarser zoom levels (to about 40 m
+per pixel), for up to 30 days; the tile providers' terms forbid downloading in advance.
+Offline, a known area shows coarser and an unseen one stays blank, and the map says so.
+Tiles load again when the connection returns.
 
 - **Streets**, **Satellite** (Esri World Imagery) and **Terrain** are kept this way.
   [Footprints from poses](guide:footprints-from-poses) reads its ground heights from
   the same Terrain tiles, so offline it works only where they were kept.
 - **A satellite source of your own** (Settings) is never kept, so it is unavailable
   offline.
-- **The polar layers** (NASA, for polar coordinate systems) are coarse, so every level
-  is kept. If the layer cannot be set up offline, the map shows only the grid and
-  says the polar basemap is unavailable until you reconnect.
+- **The polar layers** (NASA) are coarse, so every level is kept.
 
-If the map is online but tiles still fail, it says *Basemap tiles are not loading*:
-the tile server is unreachable or blocked, not your project.
+Online tiles that fail to load are reported as *Basemap tiles are not loading*: the
+server is unreachable, not your project.
 
 Your own data never depends on the basemap: cameras, GCPs, footprints, DEMs and
 orthophotos are drawn from the project, online or not.

@@ -5,360 +5,151 @@ summary: Places the model in real-world coordinates using control, camera positi
 category: Alignment and accuracy
 order: 70
 ---
-A reconstruction initially has arbitrary position, orientation, and scale
+A reconstruction starts with arbitrary position, orientation and scale
 ([gauge freedom](help:gauge-freedom)). Georeferencing fits it to the project
 [coordinate reference system](help:coordinate-reference-system); a scale bar gives
-metric scale without a geographic CRS.
+metric scale without a CRS.
 
 ## Choose the project CRS
-Coordinates for cameras, GCPs, reference rasters, and exported products must be
-interpreted consistently. For accurate distance and elevation work, a projected
-CRS suited to the site remains the best output coordinate system. Sparse
-reconstruction does not require one, however: camera positions in a geographic CRS
-are automatically converted to a survey-centred metric frame for adjustment while
-the selected project CRS remains unchanged. The same holds in a projected CRS: map
-grid coordinates are scaled by the projection's scale factor and ignore Earth
-curvature, so the fit, GCP anchoring and camera positions are all solved in a local
-metric frame around the site and converted back to the CRS. The log reports the
-scale factor k it divided out; near the poles this removes metres of error.
-
-Georeferenced products are the exception: a DEM or orthophoto in the project CRS
-needs a projected CRS, because the model cannot be fitted to degrees. New projects
-start in WGS 84 (EPSG:4326). When the project CRS is geographic and the cameras have
-positions (EXIF GPS or imported), WebSfM suggests a projected CRS: the UTM zone of
-the median camera position, or polar stereographic beyond UTM's range (EPSG:3031 in
-the far south, EPSG:3413 in the far north). The log names the suggestion when the
-GPS positions are read. **Project Settings** and the Build DEM / Build Orthophoto
-frame field offer it as one click. Applying it reprojects positions, GCPs and
-footprints; nothing changes until you click. A national grid (e.g. Lambert-93,
-EPSG:2154 in France) works just as well; pick it in the CRS list.
+Cameras, GCPs, reference rasters and products all use the project CRS. Sparse
+reconstruction works in any CRS: positions are converted to a local metric frame for
+the adjustment and back. DEMs and orthophotos in the project CRS need a projected CRS.
+New projects start in WGS 84; when the cameras have positions, WebSfM suggests their
+UTM zone (or polar stereographic near the poles), offered as one click in **Project
+Settings** and the DEM and orthophoto dialogs. Any projected CRS, such as a national
+grid, works as well.
 
 ## Camera positions
-Imported or EXIF positions can fit the reconstruction when at least three registered
-cameras have usable 3D coordinates. They are convenient but consumer GNSS may be too
-weak for survey accuracy. Check residuals rather than assuming the metadata is exact.
-The reconstruction log reports when geographic positions are converted for bundle
-adjustment and later reports the camera-prior residual.
+GPS or imported camera positions georeference the model once three registered cameras
+have them. Consumer GNSS is metres off, so check the residuals. Accurate positions
+(RTK/PPK) also correct the dome a nadir block can bend into; give them their real
+accuracy, as the 5 m default carries little weight.
 
-With accurate positions (RTK/PPK, a few centimetres), the camera-position adjustment also
-re-solves focal length and lens distortion. A nadir drone block calibrated from its own
-images alone tends to bend into a shallow dome. Accurate positions are what corrects
-it. Give imported positions their real accuracy, because the 5 m default carries almost
-no weight.
-
-By default the positions are taken as the camera centres. An RTK antenna usually sits
-0.1–0.5 m from the lens. Enter that offset per sensor in the **Sensor table**: the
-**GNSS** button on the sensor's row opens three fields, in metres and camera axes (x
-right, y down in the image, z forward along the view). The positions are then treated
-as antenna positions. Metashape gives its GNSS offset with y up and z backward, so enter
-its (x, y, z) as (x, −y, −z). Without the offset, expect a horizontal camera residual of
-about the offset's length, and a self-calibrated principal point pulled off by the
-offset's size in pixels. On a 444-image RTK block, entering it cut the camera residual
-from 41 cm to 2 cm. Checkpoints are the better accuracy test either way.
+An RTK antenna sits some centimetres from the lens. Enter that offset per sensor with
+the **GNSS** button in the **Sensor table**, in metres in camera axes (x right, y down,
+z forward). Metashape's (x, y, z) is (x, −y, −z) here. Without it, expect a camera
+residual about the offset's length.
 
 ## Ground control points
-A GCP needs known 3D coordinates and image marks. For adjustment, use at least three
-enabled control points, each marked in two registered images; more well-distributed
-control is far better. Spread points across the area and elevation range, and keep
-independent checkpoints out of the fit when you need an honest accuracy test.
+A GCP needs 3D coordinates and marks in at least two registered images; use at least
+three, spread over the area and its height range. Keep some as checkpoints for an
+honest accuracy test.
 
-**Import → GCP File** reads a table with a point name and its coordinates, optionally
-with one row per image the point is marked in (image name plus pixel x/y). When a file
-carries several coordinate pairs, the dialog takes longitude/latitude (and preselects
-WGS 84) over a projected pair such as `x_map`/`y_map`. A bare `x`/`y` next to an image
-column is read as the pixel position. Change any column it guessed before importing.
-A file with image marks but no coordinates adds those marks to the points of the same
-name. Names not yet in the project become markers, which are never used as control.
-
-To place marks, open an image and choose **Tools → Images ▾ → Edit GCPs**: a
-click on the image then marks the GCP selected in the sidebar, or adds a new one. With
-the 2D map in front, the same entry places and moves the surveyed points on the map
-instead. Choose it again to leave the mode; a right-click on an image or the
-map adds a point without entering it.
+**Import → GCP File** reads a table of point names and coordinates, optionally with
+image marks (image name, pixel x/y). Check the columns it guessed before importing. To
+mark points, open an image and choose **Tools → Images ▾ → Edit GCPs**; with the 2D map
+in front, the same entry places the surveyed points on the map. Right-click adds a
+point directly.
 
 ## Adjust or transform
-**Adjust reconstruction with GCPs** rebuilds the sparse model with control inside
-bundle adjustment. It is the stronger choice after adding good control, but invalidates
-depth maps, dense output, DEM, orthophoto, and mesh. **Transform current reconstruction**
-fits scale, rotation, and translation only, preserving its internal geometry.
+**Adjust reconstruction with GCPs** re-runs bundle adjustment with the control: the
+stronger choice, but it outdates the depth maps and products. **Transform current
+reconstruction** only moves, rotates and scales the model, keeping its shape.
 
 ## Scale bars
-For an object or local model, mark two reconstructed points and enter their measured
-distance. Multiple scale bars can reveal inconsistent marking. Scale bars provide
-metric units but no real-world origin or CRS.
+For an object or a local model, mark two points and enter their measured distance.
+Several scale bars reveal marking errors. Scale bars give metric units, not a CRS.
 
 ## Verify accuracy
-Inspect GCP and camera residuals in the Quality Report. A low fitting residual is not
-proof of external accuracy when all control lies in one corner or one plane. Look for
-spatial patterns and compare withheld checkpoints where possible.
+Check GCP and camera residuals in the Quality Report. A low residual proves little when
+all control lies in one corner or one plane; look for patterns and use checkpoints.
 
 ## Reference raster alignment
-Imported GeoTIFFs are placed the way GDAL reads them, including point-registered
-(PixelIsPoint) files and tiepoints that are not at the first pixel. A raster imported
-before 3 October 2026 keeps the position it was imported with. If a point-registered
-DEM looks shifted by half a cell, remove it and import it again.
-
-A reference DEM is held at full resolution in one buffer of 4 bytes per cell, and the
-browser caps one buffer at 2 GiB: about 23,000 × 23,000 cells. A 64-bit (Float64) DEM
-is first read at 8 bytes per cell, so its limit is about 16,000 × 16,000. A larger DEM
-(a REMA 2 m tile is 25,100 × 25,100) is read only over the project: the area of its
-images' positions (GPS or imported camera positions) and its GCPs, grown by half its
-extent and by at least 1 km on each side. When even that area is too large, it is read at
-a whole multiple of its cell size (2 m instead of 1 m), resampled bilinearly, and the log
-says so with a warning. The map still draws the whole file at full resolution. Without
-image positions or GCPs the DEM is refused with its size: import a coarser copy (for
-example `gdal_translate -tr 4 4`) or crop it to your area with `-projwin`. Orthophotos are drawn as tiles and have no such limit for display.
+Imported GeoTIFFs are placed as GDAL reads them. A reference DEM larger than the
+browser can hold (about 23,000 cells a side) is read only around the project's images
+and GCPs, coarser if needed, and the log says so. Without positions it is refused:
+import a coarser or cropped copy (`gdal_translate -tr` or `-projwin`).
 
 ## Pick GCPs off a reference raster
-Without survey data, a georeferenced orthophoto and DEM of the area can stand in
-for it: often the only option for historical imagery. Open the reference raster
-from **Reference Data**, zoom in on a feature you can also find in your photos,
-right-click it and choose **Add GCP here**. With a GCP selected, **Move <name> here**
-moves that point instead.
-
-The GCP's X/Y is the clicked point, converted to the project CRS. Its σ X/Y is one
-pixel of the reference measured in the project CRS, its
-[GSD](help:ground-sample-distance), or more when you click zoomed out or while only
-the preview is drawn: a click is good to one pixel as you see it. In a geographic
-project CRS σ is in metres. When the raster declares a horizontal accuracy, that
-and the pixel combine in quadrature.
-
-Z comes from a reference DEM at that point: the raster itself when it is a DEM,
-otherwise the default reference DEM. It is taken only when the DEM declares a
-vertical accuracy, which becomes σ Z. A moved GCP keeps its own height datum when the
-DEM's converts to it; a new one takes the DEM's. Without a declared accuracy, Z is
-left as it was and the log says why, just as **Fill Z** does. Then mark the point in
-at least two photos as usual.
+Without survey data, a georeferenced orthophoto and DEM can stand in, often the only
+option for historical images. Open the raster from **Reference Data**, right-click a
+feature you can also find in your photos and choose **Add GCP here** (or **Move
+<name> here**). X/Y is the clicked point, with σ of one reference pixel. Z is read from
+a reference DEM when it declares a vertical accuracy. Then mark the point in at least
+two photos.
 
 ## Height datums
-Every GCP and reference DEM declares what its heights are measured from: its
-[vertical datum](help:vertical-datum). Set a GCP's in the GCP table's Uncertainty
-column or when importing the file, and a DEM's with **Accuracy & datum…**. The datum
-select only says what the numbers already are. To change the numbers, use **Convert
-heights to…** in the GCP table's toolbar. It adds the geoid separation at each
-point's own position and converts ellipsoidal, EGM96 and EGM2008 heights; other
-points are skipped and logged. Converting refits the georeference.
-
-**Fill Z**, **Check Z** and a GCP picked off a reference convert the DEM's height into
-the GCP's declared datum when both convert. The log shows the shift. A GCP with
-an unknown datum takes the DEM's.
-
-The georeference records the datum its control shares and passes it to the DEM
-built in it. Control in mixed datums biases the fit, and the log says so.
-**Evaluate ▸ DEM vs Reference** and the DEM-of-difference volume then convert the
-reference to that datum and report the shift they added.
-
+Every GCP and reference DEM declares its [vertical datum](help:vertical-datum): in the
+GCP table's Uncertainty column or on import, and with **Accuracy & datum…** for a DEM.
+Declaring a datum doesn't change the numbers; **Convert heights to…** in the GCP
+toolbar does (ellipsoidal, EGM96, EGM2008). Heights read from a DEM are converted to
+the GCP's datum. Control in mixed datums biases the fit, and the log warns.
 
 ## Reference raster accuracy
 <!-- param: horizontalAccuracy default: unknown -->
-Right-click a raster in **Reference Data** and choose **Accuracy & datum…** to
-declare how good it is. **Horizontal accuracy** is the 1σ error of its ground
-position, in metres, as its producer states it. Orthophoto archives often quote CE90
-or RMSE; divide CE90 by 2.15 for σ. For a DEM the same dialog sets the vertical
-datum, the vertical accuracy that GCP heights taken from it claim, and a vertical
-offset added to every height. A low-confidence import asks for these straight away;
-a confident one needs this dialog.
+Right-click a raster in **Reference Data** ▸ **Accuracy & datum…** to declare its
+**horizontal accuracy**, the 1σ error of its positions in metres (CE90 ÷ 2.15). For a
+DEM, also its vertical datum, vertical accuracy and any vertical offset. GCPs taken
+from the raster inherit these accuracies.
 
 ## Find candidate GCPs from a reference orthophoto
-Build an orthophoto, import a georeferenced reference raster, then open **Reconstruct →
-Find GCPs**. Choose the reference, the coarse matcher and the band (step 1), how many
-candidates to keep and where (step 2), and select **Find candidates**. The matcher works [coarse to fine](help:coarse-to-fine):
+Build an orthophoto, import a georeferenced reference raster, and open **Reconstruct
+→ Find GCPs**. It aligns your orthophoto to the reference [coarse to
+fine](help:coarse-to-fine): first the whole image within the **Search area**, then
+tile by tile, and proposes sparse points that match a reference feature as control.
 
-1. **Where to look.** A polygon layer chosen as the **Search area** is searched,
-   padded by a quarter. Otherwise, if the orthophoto is already georeferenced, the search starts
-   from its footprint in the reference. Otherwise it starts from the registered
-   photos' image footprints, imported (**Import**, a polygon file with image names,
-   as archives such as USGS EarthExplorer supply them) or computed from poses,
-   padded by a quarter of their extent. Footprints say where an oblique photo looks,
-   which its camera position does not. Without footprints it starts from the
-   photos' GPS positions, padded by half their spread and at least 300 m. Without
-   any of these, it searches the whole reference. A footprint that misses the
-   reference stops the search with that message. The line under **Search area** says
-   which of these applies before you run.
-2. **Coarse.** With a learned matcher (the default), both rasters are read at the
-   same ground resolution, up to 2,000 pixels a side, the orthophoto is turned to
-   a guessed rotation, and LightGlue matches the detector's features; one RANSAC
-   [homography](help:homography) with at least 20 agreeing matches aligns them.
-   Learned features tolerate neither a large scale difference nor more than about
-   15° of rotation, so the guesses matter. They come from a prior: the
-   orthophoto's own georeference, else the photos' GPS positions, else the
-   footprint centres of the near-vertical photos (within 20° of straight down),
-   each paired with its camera in the orthophoto. The prior's rotation is tried,
-   then 15° either side, then every 30°. Without a prior, the search area and the
-   orthophoto are assumed to cover about the same ground, and each of five scales
-   (×1, ×1.4, ×0.7, ×2, ×0.5) is tried at every 30°. A hit is then tried 10° either
-   side. With **SIFT**, a 1,536-pixel look at the whole orthophoto and at the search
-   area; if that fails, the search area is tried again as 3 × 3 overlapping windows
-   of half its size, then 5 × 5 windows of a quarter. Either way, each success is
-   refined by a second look at just the predicted footprint.
-3. **Fine.** Tiles of up to 512 pixels are laid over the orthophoto, up to 6 × 6
-   of them. Both sides are read at the coarser of the two native resolutions,
-   because neither raster can place a feature better than that. A tile keeps its
-   matches only when they sit near the coarse prediction, at least 10 agree on
-   the tile's own homography, at least 30 % of its matches agree, and they spread
-   over at least a fifth of the tile in both directions. Repeated texture matches
-   itself in a tight cluster, and the last rule rejects it. A per-tile model
-   follows relief and doming that one plane cannot. Tiles that are mostly empty
-   orthophoto are skipped.
+The result table lists each candidate with a **Confidence** (to order your review, not
+to accept blindly; **Select confidence ≥ 50 %** ticks those rows), its **Residual**
+and its **σ XY** from the reference's pixel size and accuracy. Click a row for
+side-by-side close-ups and keep only candidates on the same stable feature. Fill
+heights from a reference DEM in step 4, mark some as **Checkpoint**, and **Add
+candidates** imports the ticked rows.
 
-The fine pass needs the stored orthophoto file. An orthophoto record without one
-uses the coarse alignment only, and the message says so. Large rasters are read
-from their overviews, so a coarse look at a 30,000-pixel orthophoto does not decode
-it at full resolution.
-
-Step 3 shows the run's numbers (verified matches, fine tiles, candidates, and how much of
-the block they cover), the numbered candidates on both images, and a table of them. Each candidate is an
-existing sparse track measured in at least two source photos, lying within 2
-working pixels of a verified match. Its reference coordinate is that matched
-feature moved by the track's offset, using the tile's own homography. Up to
-**Candidates** (90) are kept, spread over the block: the best one in each cell of a
-√n × √n grid first, then the next best anywhere. The message gives how many of 16 cells they cover and the
-share of the block inside their outline. Control bunched in one corner fits that
-corner only.
-
-For each candidate the table shows:
-- **Confidence**, from 0 to 100 %. It multiplies the share of the tile's matches
-  that agreed, the inlier count (full credit from 30), how closely this match sits
-  on its tile's model (one working pixel off gives 61 %), and 80 % for a track seen
-  in only two photos. Use it to order your review, not as acceptance.
-  **Select confidence ≥ 50 %** ticks those rows for you to review.
-- **Residual**: the match's distance from its tile model, in working pixels.
-- **σ XY**: prefilled from the reference [GSD](help:ground-sample-distance). It is
-  one reference pixel measured in the project CRS, or the residual in reference
-  pixels when that is larger. If the reference raster declares a horizontal
-  accuracy (**Accuracy & datum…**), σ is that accuracy and the residual combined in quadrature.
-  Edit it if you know better.
-
-Click a row, or a number on either image, for side-by-side project/reference
-close-ups, cut from the candidate's fine tile at working resolution, and the
-source-photo marks; ‹ and › step through the candidates. Select only candidates that
-identify the same stable feature.
-
-Below the close-ups, enter the height and coordinate accuracies (positive 1σ values
-in project units), or in step 4 select a reference DEM and **Fill selected heights**. DEM
-filling copies its declared vertical accuracy and datum; nodata, out-of-bounds
-locations, and DEMs without declared accuracy leave the candidate unchanged.
-Choose **Checkpoint** to reserve a point for checking rather than fitting.
-**Add candidates** imports only the selected rows. Unknown elevation and
-accuracy stay unknown; incomplete controls cannot constrain adjustment. Photo
-marks can still be refined later in Control & Markers.
+It can fail on heavily changed scenes, references with very different radiometry, or
+a small block in a large reference without positions; crop the reference then, or
+mark control by hand.
 
 ## Sentinel-2 reference
-Without a reference raster of your own, **Sentinel-2…** beside the reference fetches a
-[Sentinel-2](help:sentinel-2) image of the search area and selects it. It needs a
-search area (see below): the photos' footprints, their GPS, a georeferenced orthophoto,
-or a polygon layer you choose.
-
-**Search scenes** lists the scenes over the area, best first: those that cover all of
-it, then the least cloud, then the fewest empty pixels, then the newest. Each row gives
-the date, the 110 km tile, and the scene's share of cloud and of snow and ice. Click a
-row to choose it: a preview of the whole tile shows beside the list, with a box on what
-will be read, so cloud over the area shows before the fetch. **Fetch** reads the area plus a quarter on each side (at least
-1 km, at most 60 km across) from the red, green and blue bands. It is imported as a
-reference orthophoto in the scene's UTM zone, named after the date and tile, with σ XY
-8 m.
-
-Pick a scene from the same season as the photos where you can: snow lines and
-shadows that match make matching easier. A scene that covers only part of the area
-leaves the rest of the window empty.
+Without a reference raster of your own, **Sentinel-2…** fetches a free
+[Sentinel-2](help:sentinel-2) image (10 m, true colour) of the search area. **Search
+scenes** lists the scenes, best first: full coverage, then least cloud, then newest.
+Click one to see its whole tile with a box on the part that will be read; **Fetch**
+imports that part as a reference orthophoto with σ XY 8 m. Prefer a scene from the
+same season as the photos.
 
 ## Max cloud
 <!-- param: sentinel2Cloud  default: 20 -->
-The most cloud a Sentinel-2 scene may have to be listed, in percent of the whole
-110 km tile, as the catalogue states it. Cloud elsewhere on the tile does not matter,
-so a scene with some cloud can still show the area clearly; raise it when no scene is
-listed; the preview shows whether the cloud is over the area. **From** and **To** limit the dates.
+The most cloud a scene may have to be listed, in percent of its whole 110 km tile.
+Cloud elsewhere on the tile doesn't matter, so raise it when nothing is listed and use
+the preview to check the area. **From** and **To** limit the dates.
 
 ## Search area
 <!-- param: searchArea  default: Auto -->
-Where in the reference to look for the photos. **Auto** uses the best that the project
-knows, in this order: the orthophoto's footprint once it is georeferenced, the
-registered photos' footprints, their GPS positions, else the whole reference. The line
-under the field says which one it is.
-
-Footprints matter most: they say where each photo looks, and the footprints of the
-near-vertical photos also give the learned matchers the block's rotation. When only GPS
-or camera poses are known, **Compute footprints…** opens
-[Footprints from poses](guide:footprints-from-poses) (Tools → Model ▾) over this dialog.
-
-Choose a polygon layer to search inside its polygons instead, padded by a quarter: a
-box drawn in a GIS around where you expect the block, imported as GeoJSON (**Import**).
-Use it when nothing else locates the photos, or when the reference is much larger than
-the block. The **Terrain** matcher does not use it; it starts from the prior.
+Where in the reference to look. **Auto** takes the best the project knows: the
+orthophoto's georeferenced footprint, the photos' footprints, their GPS positions,
+else the whole reference; the line under the field says which. Footprints work best;
+**Compute footprints…** makes them from poses ([Footprints from
+poses](guide:footprints-from-poses)). A polygon layer limits the search to its
+polygons.
 
 ## Coarse matcher
 <!-- param: coarseMatcher  default: Auto -->
-What aligns the whole orthophoto with the reference at first.
-
-- **Auto** uses SuperPoint when its weights are installed, otherwise DISK.
-- **DISK + LightGlue** and **SuperPoint + LightGlue** are learned. They match an
-  orthophoto from historical film to a modern satellite image, where little texture
-  survives but the shapes do. The weights download on first use, with your consent;
-  SuperPoint's licence does not let WebSfM ship them, so you supply that file.
-- **SIFT** is quickest and needs no download. It aligns photos taken with similar
-  light and a similar sensor: a recent drone survey against a recent orthophoto.
-- **Terrain (reference DEM, ICP)** matches shape instead of appearance: the sparse
-  cloud is fitted to a reference DEM you choose under it by
-  [ICP](help:icp), with scale, in four passes that narrow from 600 m to 60 m. Use
-  it where no reference image shows the same thing: snow, cloud, or a DEM as the only
-  reference. It needs a start within a few hundred metres and a degree or so, which
-  the prior gives (the orthophoto's georeference, GPS, or vertical photos'
-  footprints); without one it stops and says so. Candidates are tracks seen in at
-  least two photos whose aligned position lies within three times the fit's RMS of
-  the DEM, and their σ XY is that RMS. On Rachel Glacier the fit's RMS was 9.5 m and
-  its candidates lay a median 13 m from an independent Metashape solution, against 7 m for
-  DISK + LightGlue: prefer an image matcher when a reference image works.
-
-On Rachel Glacier (1960s film against Sentinel-2), DISK and SuperPoint found 100–150
-agreeing matches at under a reference pixel; SIFT found too few to align it. With
-DISK, the candidates on Rachel, Stubb and Pequod lay a median 6–7 m from where an
-independent Metashape solution of each block puts them.
+What aligns the whole orthophoto first. **DISK** or **SuperPoint + LightGlue**
+(learned; Auto takes SuperPoint when its weights are installed) match across decades
+and sensors, such as film against a satellite image. **SIFT** is quickest, for similar
+images such as a recent drone survey against a recent orthophoto. **Terrain** fits the
+sparse cloud to a reference DEM by [ICP](help:icp) where no image matches (snow,
+cloud), from a start within a few hundred metres; it is less precise than an image
+matcher.
 
 ## Reference band
 <!-- param: referenceBand  default: Mean of bands 1–3 (RGB) -->
-Which band of the reference is matched. A reference with three or more bands is read
-as the mean of bands 1–3 by default; for a Sentinel-2 or other true-colour image,
-that is blue, green and red. Film is panchromatic, so its grey values follow the
-mean of the visible bands more closely than any one band. A single band (red, or
-near-infrared for vegetation) can still match better where the photos were taken
-on infrared film.
+Which band of the reference is matched. The mean of bands 1–3 suits panchromatic film
+against a colour image; a single band can match better for infrared film.
 
 ## Candidates
 <!-- param: candidates  default: 90 -->
-How many candidates to propose, spread over the block: the best in each cell of a
-√n × √n grid first, then the next best anywhere. Their heights pin the
-georeference's tilt, and a height read off a reference DEM on steep rock is a few
-metres off, so more, better spread candidates give a level model. On Rachel Glacier
-30 candidates left the DEM 2.8 m high once the control was moved onto REMA (what
-[Co-register a DEM](guide:coregister-dem) now does to the georeference), 90 only 0.7 m. Fewer suit a block with little stable ground,
-where the extra candidates would only repeat the same patches.
+How many candidates to propose, spread evenly over the block. More, well-spread
+candidates hold the model's tilt better; fewer suit a block with little stable ground.
 
 ## Stable ground
 <!-- param: stableArea  default: Anywhere -->
-A polygon layer that marks ground which has not changed between the photos and the
-reference: rock outcrops beside a glacier, built-up areas, bedrock. With one chosen,
-only candidates whose reference position lies inside a polygon are kept, and the
-spread over the block picks from those. **Anywhere** keeps every candidate.
-
-Use it whenever the photos are older than the reference. A candidate on a glacier,
-a river bank or a pit face matches a feature that has since moved or a surface whose
-height has changed, so both its position and the height filled from a reference DEM
-are wrong. Import the outlines as a polygon file (**Import**, GeoJSON) in any CRS;
-they are converted to the project CRS. The result line says how many matches fell
-outside.
+A polygon layer of ground unchanged between the photos and the reference (rock,
+buildings). Only candidates inside it are kept. Use it whenever the photos are older
+than the reference: points on glaciers, river banks or pits have moved since.
 
 ## Role
 <!-- param: role  default: Control point -->
-What the selected candidate is used for once it is added. A **Control point** takes
-part in the fit: its coordinates pull the model into place. A **Checkpoint** is left
-out of the fit, and the Quality Report measures the model's error at it. A control
-point's residual shows only how well the fit agrees with itself, so checkpoints are
-the honest accuracy test. Keep a few well-spread candidates as checkpoints when you
-have enough of them, for example one in five.
-
-Some scenes defeat this matcher: a heavily changed historical scene, a reference
-whose radiometry differs strongly (film against a multispectral band), or a block
-too small to find in a regional reference without GPS. In the last case, crop the
-reference to the area first. A failed alignment creates no control; use manual
-marks or a more suitable reference instead. Closing the search dialog discards
-pending search results.
+A **Control point** takes part in the fit. A **Checkpoint** is left out, and the
+Quality Report measures the model's error at it, the honest accuracy test. Keep about
+one in five as checkpoints when you have enough.

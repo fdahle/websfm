@@ -14,30 +14,18 @@ floating toolbox over the 3D view. Esc or the toolbox's × leaves it.
 Motion blur from a moving drone is a common, silent cause of thin or failed
 reconstructions, and it is hard to spot in thumbnails.
 
-Click **Score all images**. Each image is analysed at a fixed working size, so
-cameras of different resolution are comparable, and masked areas (sky, the operator)
-are left out. The table shows each image's sharpness **relative to the median** of
-this batch: texture varies from scene to scene, so only the ranking within one set
-of photos means anything. Images below **Blurry below** (0.5 × median by default) are
-flagged, as are images with more than a quarter of their pixels crushed black or
-blown white.
-
-- **Group flagged** puts the flagged images in an image group named *Low image
-  quality*, so you can review them. Groups only organise the list; they do not
-  change the pipeline.
-- **Remove flagged…** removes them from the project, after the usual confirmation.
-
-Rescore after changing [masks](guide:masks). A frame that is sharp only in one corner (shallow depth
-of field) may still be flagged; check it before removing it.
+**Score all images** rates each image's sharpness relative to the set's median (only
+the ranking within one set means anything), leaving masked areas out. Images below
+**Blurry below**, or with over a quarter of their pixels black or blown out, are
+flagged. **Group flagged** groups them for review; **Remove flagged…** removes them.
+Check a flagged image before removing it: shallow depth of field can trigger it.
 
 ## Blurry below
 <!-- param: minRelative  default: 0.5 -->
-The [sharpness](help:image-sharpness) under which an image is flagged, as a share of
-the batch's median: 0.5 flags images half as sharp as the typical one. The flags only
-mark images for you to look at; nothing is removed until you choose to. Raise it (0.6–0.7)
-for a flight where a few soft frames among many sharp ones are worth catching. Lower it
-(0.3) when the scene varies a lot from frame to frame, such as part water and part
-land, because a frame of open water scores low without being blurred.
+The [sharpness](help:image-sharpness), as a share of the set's median, under which an
+image is flagged. Raise it (0.6–0.7) to catch a few soft frames among sharp ones; lower
+it (0.3) when scenes vary a lot, such as water and land, since open water scores low
+without blur.
 
 ## Region
 **Tools → Model ▾ → Region** sets a box that bounds the dense stages:
@@ -47,21 +35,11 @@ land, because a frame of open water scores low without being blurred.
 - **Fusion** never keeps a point outside the box.
 - **Mesh** and **DEM** only use the points inside the box.
 
-The toolbox opens with the saved box, or a box fitted around the sparse points. Use
-**Fit to sparse** or **Fit to dense** (both leave out stray points: past the
-farthest 2 % on each side, the box only follows points that continue without a gap, so
-a tower or a tree line stays in and a lone stray does not), type
-the bounds, or drag the box in the 3D view, then **Apply**. The box is drawn in orange.
-While the toolbox is open it has handles: drag a coloured square on a face (red for X,
-green for Y, blue for Z) to move that face, or the orange square in the middle to move
-the whole box across the screen. The numbers follow as you drag. Press Esc during a drag
-to put the box back; closing the toolbox without **Apply** keeps the saved box. Nothing
-already computed is cut: the region shapes the *next* run. **Remove region** goes back
-to unbounded runs.
-
-A region belongs to the sparse model it was drawn on. After a new reconstruction it is
-drawn grey and ignored, and the dense log says so, until you fit and apply it again.
-Imported clouds are never cut by it.
+**Fit to sparse** or **Fit to dense** fits the box (ignoring stray points), or type the
+bounds or drag the face handles in the 3D view, then **Apply**. The region shapes the
+next run; nothing already computed is cut. **Remove region** goes back to unbounded
+runs. A region belongs to its sparse model and is ignored after a new reconstruction
+until applied again.
 
 ## Orient model
 A project without a georeference has no natural "up". WebSfM then guesses it from the
@@ -74,11 +52,7 @@ turntable object or a façade. **Tools → Model ▾ → Orient model** sets it 
 - **Origin**: **Pick origin** and click a point (white marker), or **Model centre**.
 - **X heading**: turns X and Y about up, counter-clockwise in degrees.
 
-**Apply** stores it. The 3D view's grid and view presets, DEM and orthophoto grids,
-and point-cloud and mesh exports (with *Apply orientation* ticked in the export dialog)
-then use this frame. The coordinates themselves are never rewritten: like a scale bar's
-factor, the orientation is part of the frame the products are expressed in. It combines
-with [scale bars](guide:georeferencing), and a georeference outranks it.
-
-Like a region, an orientation belongs to the sparse model it was set on and is ignored
-after a new reconstruction until you apply it again.
+**Apply** stores it. The 3D view, DEM and orthophoto grids and exports (with *Apply
+orientation*) then use this frame; the coordinates themselves are never rewritten. It
+combines with [scale bars](guide:georeferencing); a georeference outranks it. Like a
+region, it belongs to its sparse model.

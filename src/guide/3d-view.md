@@ -37,14 +37,10 @@ Drag to steer at any time; the turn carries on from there when you let go. The
 **Turntable** toolbox over the view sets the speed, and its × (or the ribbon button
 again) stops it.
 
-**Record one turn** saves exactly one full turn as a video file, which loops without a
-jump. The recording is the 3D view as it is drawn, at its size on screen. Make the
-window the size you want the video to be, and hide the grid or the cameras first if
-they should not be in it; the legend and the toolboxes are never recorded. The view
-is locked until the turn is done, and **Cancel** discards it. Chrome and Edge save a
-WebM video (VP9), Firefox a WebM (VP8) and Safari an MP4. Some players do not show a
-WebM's length, or cannot jump within it; a video editor, or
-`ffmpeg -i in.webm out.mp4`, writes a copy that every player handles.
+**Record one turn** saves one full, seamlessly looping turn as a video at the view's
+size on screen; hide the grid or cameras first if needed. Chrome, Edge and Firefox save
+WebM, Safari MP4; `ffmpeg -i in.webm out.mp4` converts for players that struggle with
+WebM.
 
 ## Seconds per turn
 <!-- param: secondsPerTurn  default: 24 -->
