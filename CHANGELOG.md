@@ -92,6 +92,11 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **The match view shows the tie points joined through other photos.** A pair's view
+  in **Matches** listed "via PnP" tie points in its legend but never drew them: the tie
+  points both photos see in the model, which this pair did not match directly. They are
+  now drawn in blue, and the legend calls them **via other photos**. With them, the
+  view's counts add up to the list's **Used** column.
 - **Cancelling Project folder… keeps the project list.** On the start screen, cancelling
   the folder dialog of **Project folder…** left an empty workspace with a nameless
   project; the list now stays open until a folder has opened. **Move to folder…** and

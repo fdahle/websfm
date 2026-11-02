@@ -21,20 +21,31 @@ const props = defineProps({
 // Read as [ia, ib] pairs whatever the shape (core/sfm/matchCodec.js).
 const pairList = computed(() => asPairList(props.matches))
 
-// aligned / unused / via-PnP split for the status-bar legend (only meaningful with
+// The tie points of the model that both images see but this pair never matched
+// directly, as [ia, ib]: other photos' matches joined them into one track (track
+// completion, guided extension, a camera placed by PnP). This is why "Used" can
+// exceed "Matches" in the list. Drawn blue.
+const indirectPairs = computed(() => {
+  if (!props.usedKeys) return []
+  const direct = new Set(pairList.value.map(([ia, ib]) => `${ia}:${ib}`))
+  const out = []
+  for (const key of props.usedKeys) {
+    if (direct.has(key)) continue
+    const sep = key.indexOf(':')
+    out.push([Number(key.slice(0, sep)), Number(key.slice(sep + 1))])
+  }
+  return out
+})
+
+// aligned / unused / indirect split for the status-bar legend (only meaningful with
 // usedKeys). `used` = direct matches that triangulated; `unused` = verified inliers
-// that never made the model; `viaPnp` = tie-point correspondences between these two
-// images that are NOT among this pair's direct matches — they entered the model via
-// PnP registration / track extension elsewhere (this is why "Used" can exceed
-// "Matches" in the list).
+// that never made the model; `indirect` = indirectPairs.
 const usedStats = computed(() => {
   if (!props.usedKeys) return null
   let used = 0
   const list = pairList.value
   for (const [ia, ib] of list) if (props.usedKeys.has(`${ia}:${ib}`)) used++
-  const unused = list.length - used
-  const viaPnp = Math.max(0, props.usedKeys.size - used)
-  return { used, unused, viaPnp }
+  return { used, unused: list.length - used, indirect: indirectPairs.value.length }
 })
 
 // Hide the unused (red) matches — dots + lines — in the preview. Preview-local.
@@ -51,6 +62,7 @@ const spillPoints = ref(false)
 const C_USED = '#00e676' // green — became a tie-point
 const C_UNUSED = '#ff5252' // red — verified inlier, not in the model
 const C_NEUTRAL = '#ffd700' // gold — no sparse model to judge against
+const C_INDIRECT = '#40a0ff' // blue — a tie point of both, joined through other photos
 
 const panelsEl = ref(null)
 const leftContainer = ref(null)
@@ -215,8 +227,23 @@ function drawOverlay() {
       ctx.stroke()
     }
   }
+  // Tie points joined through other photos (blue): over the unused, under the aligned.
+  const drawIndirectLines = () => {
+    ctx.globalAlpha = 0.35
+    ctx.strokeStyle = C_INDIRECT
+    for (const [ia, ib] of indirectPairs.value) {
+      if (ia >= kpsA.length || ib >= kpsB.length) continue
+      ctx.beginPath()
+      const a = lPos(ia),
+        b = rPos(ib)
+      ctx.moveTo(a.x, a.y)
+      ctx.lineTo(b.x, b.y)
+      ctx.stroke()
+    }
+  }
   if (used) {
     if (!hideUnused.value) drawLines(false) // unused (red) — suppressed when hiding
+    drawIndirectLines()
     drawLines(true)
   } else drawLines(true)
   ctx.restore()
@@ -234,16 +261,19 @@ function drawOverlay() {
       ctx.rect(rect.left - panelsRect.left, rect.top - panelsRect.top, rect.width, rect.height)
       ctx.clip()
     }
-    for (const [ia, ib] of pairs) {
-      if (used && hideUnused.value && !used.has(`${ia}:${ib}`)) continue
-      const k = side === 'L' ? ia : ib
-      if (k >= kps.length) continue
+    const dot = (k, colour) => {
+      if (k >= kps.length) return
       const p = pos(k)
-      ctx.fillStyle = colorOf(ia, ib)
+      ctx.fillStyle = colour
       ctx.beginPath()
       ctx.arc(p.x, p.y, DOT, 0, Math.PI * 2)
       ctx.fill()
     }
+    for (const [ia, ib] of pairs) {
+      if (used && hideUnused.value && !used.has(`${ia}:${ib}`)) continue
+      dot(side === 'L' ? ia : ib, colorOf(ia, ib))
+    }
+    for (const [ia, ib] of indirectPairs.value) dot(side === 'L' ? ia : ib, C_INDIRECT)
     ctx.restore()
   }
   drawDots('L')
@@ -352,7 +382,12 @@ function onImgLoad(side) {
       <span v-if="usedStats" class="match-legend">
         <span class="swatch used" /> {{ usedStats.used }} aligned <span class="swatch unused" />
         {{ usedStats.unused }} unused
-        <template v-if="usedStats.viaPnp"><span class="swatch pnp" /> {{ usedStats.viaPnp }} via PnP</template>
+        <span
+          v-if="usedStats.indirect"
+          class="legend-indirect"
+          title="Tie points both photos see in the model, though this pair never matched them directly: other photos' matches joined them"
+          ><span class="swatch indirect" /> {{ usedStats.indirect }} via other photos</span
+        >
         <button
           v-if="usedStats.unused"
           class="legend-toggle"
@@ -461,13 +496,16 @@ function onImgLoad(side) {
 .match-legend .swatch:first-child {
   margin-left: 0;
 }
+.match-legend .legend-indirect {
+  margin-left: 6px;
+}
 .match-legend .swatch.used {
   background: #00e676;
 }
 .match-legend .swatch.unused {
   background: #ff5252;
 }
-.match-legend .swatch.pnp {
+.match-legend .swatch.indirect {
   background: #40a0ff;
 }
 
