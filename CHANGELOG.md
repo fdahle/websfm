@@ -6,6 +6,14 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **GCP targets marked for you.** Tools ▸ Images ▸ **Detect targets…** finds the centre of
+  each GCP's black-and-white checker mat in every photo where the model expects it (from
+  its coordinates through the georeference, or from its marks in two other photos) and
+  places the mark, flagged as detected with a score, for you to check in Edit GCPs. Marks
+  you placed yourself always stay. On synthetic mats (turned, blurred, noisy, the guess
+  20 px off) the centre is found to within 0.1 px; on the Aukerman example the place it
+  searches for a removed mark lies within 3 px of where the mark was. Coded targets
+  (AprilTag, ArUco) are not detected yet.
 - **Dialogs remember their settings.** The Reconstruct dialogs (Match Features, Sparse
   Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh) open on the settings of their
   last run in the project, and **Presets ▾** in the title bar saves a set under a name

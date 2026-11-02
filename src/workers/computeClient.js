@@ -240,6 +240,12 @@ export function detectFiducials(url, templates, predictions, options = {}, { onL
   })
 }
 
+// Checker GCP targets near their predictions (workers/ops/detect.js detectTargets):
+// predictions [{ key, x, y, radius, quadRadius }] → { results: [{ key, x, y, score }] }.
+export function detectTargets(url, predictions) {
+  return call('detectTargets', [url, predictions.map((p) => ({ ...p }))])
+}
+
 export function detectFiducialSpots(url, options = {}, { onLog } = {}) {
   // Modal settings are commonly a Vue reactive Proxy. Proxies are not supported
   // by the browser's structured-clone algorithm, so materialize the small,

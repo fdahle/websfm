@@ -15,6 +15,8 @@ import DevConsole from './components/layout/DevConsole.vue'
 import BrowserWarning from './components/layout/BrowserWarning.vue'
 import { useStoppedRuns } from './composables/useStoppedRuns.js'
 import { useProjectMerge } from './composables/useProjectMerge.js'
+import { useDetectTargets } from './composables/useDetectTargets.js'
+import { showToast } from './composables/useToasts.js'
 import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
 import UnsavedChangesCard from './components/layout/UnsavedChangesCard.vue'
@@ -324,6 +326,26 @@ async function onImportProject(sourceId) {
   try {
     const r = await importProjectInto(sourceId, exportProgress.report, () => exportProgress.aborted.value)
     ok = !!r && !r.cancelled
+  } finally {
+    await exportProgress.close(ok)
+  }
+}
+
+// Tools ▸ Images ▸ Detect targets (useDetectTargets), behind the run progress bar.
+const detectTargets = useDetectTargets()
+async function onDetectTargetsRun({ settings, plan }) {
+  useModalsStore().toolModal = null
+  exportProgress.open('Detecting Targets', plan.photos.length, () => {}, { unit: 'photos' })
+  let ok = false
+  try {
+    const r = await detectTargets.run(settings, plan, exportProgress.report)
+    ok = r.found > 0
+    showToast(r.found ? `${r.found} target marks placed` : 'No target found', {
+      detail: r.found
+        ? 'Check them in Edit GCPs, then georeference again.'
+        : 'Try a larger search radius or a lower minimum score.',
+      kind: r.found ? 'success' : 'warn',
+    })
   } finally {
     await exportProgress.close(ok)
   }
@@ -1003,6 +1025,7 @@ provideAppContext({
   moveTab,
   onCameraImport,
   onMetashapeImport,
+  onDetectTargetsRun,
   onCloudImport,
   onCropCloudRun,
   onDemRun,

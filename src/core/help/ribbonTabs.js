@@ -316,6 +316,13 @@ export const TABS = [
                 blurb: 'Score sharpness and exposure; exclude blurry images',
               },
               {
+                id: 'detect-targets',
+                label: 'Detect targets…',
+                icon: 'target',
+                needs: ['sparse', 'gcps'],
+                blurb: 'Mark checkerboard GCP mats where the model expects them',
+              },
+              {
                 id: 'reduce-overlap',
                 label: 'Reduce overlap…',
                 icon: 'image',

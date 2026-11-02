@@ -750,6 +750,14 @@ export const IMAGE_QUALITY_DEFAULTS = {
   minRelative: 0.5,
 }
 
+// Tools ▸ Images ▾ ▸ Detect targets (core/sfm/targetDetect.js, composables/useDetectTargets.js).
+export const TARGET_DEFAULTS = {
+  sizeM: 0.6, // side of the checker mat, metres (common survey mats are 0.5–1 m)
+  searchPx: 30, // how far from the predicted place the centre may be, photo pixels
+  minScore: 0.4, // quadrant contrast (0–1) a detection needs
+  replaceDetected: true, // a new run replaces earlier detections (never marks placed by hand)
+}
+
 // Tools ▸ Images ▾ ▸ Reduce overlap (core/sfm/reduceOverlap.js).
 export const REDUCE_OVERLAP_DEFAULTS = {
   // A photo counts as seeing a point within this angle of the point's mean viewing

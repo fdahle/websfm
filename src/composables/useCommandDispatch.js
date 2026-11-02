@@ -222,6 +222,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     // Images ▾
     'image-quality',
     'reduce-overlap',
+    'detect-targets',
     // Model ▾
     'optimize-cameras',
   ])

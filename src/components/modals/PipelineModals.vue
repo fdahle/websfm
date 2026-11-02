@@ -33,6 +33,7 @@ import GeoreferenceModal from './georef/GeoreferenceModal.vue'
 import GradualSelectionModal from './model/GradualSelectionModal.vue'
 import ImageQualityModal from './images/ImageQualityModal.vue'
 import ReduceOverlapModal from './images/ReduceOverlapModal.vue'
+import DetectTargetsModal from './images/DetectTargetsModal.vue'
 import MatchFeaturesModal from './pipeline/MatchFeaturesModal.vue'
 import MergeCloudsModal from './cloud/MergeCloudsModal.vue'
 import MeshMeasureModal from './mesh/MeshMeasureModal.vue'
@@ -207,6 +208,7 @@ const {
 const {
   applyCrsSuggestion,
   closeReconstructModal,
+  onDetectTargetsRun,
   detectedImageCount,
   detectedMaxKeypoints,
   editableClouds,
@@ -670,6 +672,11 @@ const exportingFootprints = computed(
       :images="images"
       @close="toolModal = null"
       @run="onReduceOverlapRun"
+    />
+    <DetectTargetsModal
+      v-else-if="toolModal === 'detect-targets'"
+      @close="toolModal = null"
+      @run="onDetectTargetsRun"
     />
     <ImageQualityModal
       v-else-if="toolModal === 'image-quality'"

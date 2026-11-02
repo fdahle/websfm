@@ -33,6 +33,7 @@ import { pluralize } from '../../core/textFormat.js'
 import { DETECT_TUNING, IMAGE_QUALITY_TUNING } from '../../core/tuning.js'
 import { DETECT_SIFT_DEFAULTS } from '../../core/defaults.user.js'
 import { faintRetry } from '../../core/features/faintRetry.js'
+import { findCheckerCorner } from '../../core/sfm/targetDetect.js'
 
 // Detection ops (SIFT / learned: SuperPoint, DISK, ALIKED). `rasterize` (OffscreenCanvas pixel decode)
 // stays in the worker and is injected; the STRIDE parse + shared feature-bundle
@@ -1100,6 +1101,31 @@ export function makeDetectOps({ rasterize }) {
     return { result: { ...q, natW: raster.natW, natH: raster.natH } }
   }
 
+  // Checker GCP targets (Tools ▸ Images ▸ Detect targets, core/sfm/targetDetect.js): one
+  // window per prediction { key, x, y (pixel centres), radius, quadRadius }, cut from the
+  // photo at full resolution, searched for the target's centre.
+  // → { results: [{ key, x, y, score, contrast }] } for the targets found.
+  async function detectTargets([url, predictions]) {
+    const bmp = await decodeBitmap(url)
+    try {
+      const results = []
+      for (const p of predictions) {
+        const half = Math.ceil(p.radius + 2 * p.quadRadius + 8)
+        const win = cropGray(bmp, p.x - half, p.y - half, 2 * half + 1, 2 * half + 1)
+        const r = findCheckerCorner(
+          win,
+          { x: p.x - win.originX, y: p.y - win.originY },
+          { radius: p.radius, quadRadius: p.quadRadius },
+        )
+        if (r)
+          results.push({ key: p.key, x: r.x + win.originX, y: r.y + win.originY, score: r.score, contrast: r.contrast })
+      }
+      return { result: { results } }
+    } finally {
+      bmp.close()
+    }
+  }
+
   return {
     detect,
     prepareFiducialTemplates,
@@ -1111,5 +1137,6 @@ export function makeDetectOps({ rasterize }) {
     stitchReseauFrame,
     splitPanoramicStrip,
     imageQuality,
+    detectTargets,
   }
 }
