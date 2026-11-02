@@ -81,3 +81,17 @@ describe('sparseModeEffect', () => {
     )
   })
 })
+
+describe('rolling shutter effect', () => {
+  const on = { ...RECONSTRUCT_DEFAULTS, rollingShutter: 'on' }
+  it('says what the readout model takes its motion from, or why it cannot', () => {
+    expect(sparseEffects(RECONSTRUCT_DEFAULTS, project).rollingShutter).toMatch(/^Off: every row/)
+    expect(sparseEffects(on, { ...project, timedImages: 42 }).rollingShutter).toBe(
+      "42 images with a capture time: each camera's motion is taken from the photos taken just before and " +
+        'after it, and each camera group gets a readout time.',
+    )
+    expect(sparseEffects(on, { ...project, timedImages: 1 }).rollingShutter).toMatch(/only 1 image has a capture time/)
+    expect(sparseEffects({ ...on, baIterations: 0 }, project).rollingShutter).toMatch(/^Not used/)
+    expect(sparseEffects({ ...on, addToModel: true }, project).rollingShutter).toMatch(/^Off while adding images/)
+  })
+})

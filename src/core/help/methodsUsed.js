@@ -66,6 +66,12 @@ export function methodsUsed(f = {}) {
       refs: [f.fisheye ? 'kannala2006' : 'brown1966'],
     })
   }
+  if (f.rollingShutter)
+    out.push({
+      step: 'Rolling shutter',
+      method: 'Readout time per camera group in bundle adjustment, camera motion from the capture times',
+      refs: ['vautherin2016'],
+    })
   if (f.georef)
     out.push({ step: 'Georeferencing', method: 'Similarity from control (unit quaternions)', refs: ['horn1987'] })
   if (f.dense) {

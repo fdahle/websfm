@@ -3,6 +3,7 @@ import init, {
   triangulate_dlt,
   solve_pnp,
   bundle_adjust,
+  bundle_adjust_rs,
   compute_depth_map,
   undistort_brown_pixels,
   GuidedSearch,
@@ -425,6 +426,8 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 //                       (already in this same SfM frame) with independently
 //                       covariance-weighted residuals on top of normal reprojection
 //                       observations. Omit/empty for plain SfM-only BA.
+//   refineReadout     — refine each camera group's rolling-shutter readout time (the
+//                       cameras' `rs` records, below; bundle.rs `bundle_adjust_rs`).
 //   cameraPriors      — [{ camIdx, target:[x,y,z], weights:[wx,wy,wz],
 //                          targetR?:3×3, orientationPrecision?:3×3 }]
 //                       camera-centre constraints in this same SfM frame. The
@@ -437,6 +440,10 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 // is the RMS anchor residual in world units (0 when there are no anchors). `solver` is
 // what the reduced solves did (see BA_SOLVER_KEYS / bundle.rs SolveStats) and `ms` the
 // call's wall clock. `opts.solver` overrides the solver policy (SFM_TUNING.baSolver).
+// A camera may carry `rs: { v:[vx,vy,vz], h, tau }` (rollingShutter.js): its rows are
+// read over `tau` seconds while its centre moves at `v` (model units per second), `h`
+// the frame height. With any such camera the call runs bundle_adjust_rs and returns
+// `readout`, each camera's readout time after the solve (null for the others).
 const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16, k4: 32 }
 // Parse a refine-terms string into the crate's bitmask. Unknown / 'none' tokens
 // contribute nothing (so 'none', '', undefined → 0).
@@ -482,7 +489,14 @@ export function baSolverFlat(solver = {}) {
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
   const threaded = await threadedWasm((opts.solver ?? SFM_TUNING.baSolver)?.threads ?? 0)
-  const adjust = threaded ? threaded.bundle_adjust : bundle_adjust
+  const rsCams = cameras.some((c) => c?.rs?.h > 0)
+  const adjust = rsCams
+    ? threaded
+      ? threaded.bundle_adjust_rs
+      : bundle_adjust_rs
+    : threaded
+      ? threaded.bundle_adjust
+      : bundle_adjust
   const {
     maxIters = 30,
     refineIntrinsics = 'none',
@@ -492,8 +506,9 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     solver = SFM_TUNING.baSolver,
     flatPoints = false,
     fixedCams = null,
+    refineReadout = false,
   } = opts
-  const refineMode = refineModeMask(refineIntrinsics)
+  const refineMode = refineModeMask(refineIntrinsics) | (rsCams && refineReadout ? 64 : 0)
   const nCam = cameras.length
   // `points3d`: [{x, y, z}] or a flat Float64Array [x0,y0,z0, x1,…]. With
   // `flatPoints`, the refined points come back as `pos` (Float64Array) instead of
@@ -599,6 +614,13 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const fixedMask = new Uint8Array(fixedCams?.length ? nCam : 0)
   for (const c of fixedCams ?? []) if (c >= 0 && c < nCam) fixedMask[c] = 1
 
+  // bundle.rs `rs_flat`: [vx, vy, vz, h, τ0] per camera, h 0 for a global shutter.
+  const rsFlat = new Float32Array(rsCams ? nCam * 5 : 0)
+  if (rsCams)
+    cameras.forEach(({ rs }, c) => {
+      if (rs?.h > 0) rsFlat.set([rs.v[0], rs.v[1], rs.v[2], rs.h, rs.tau ?? 0], c * 5)
+    })
+
   const tCall = performance.now()
   const raw = adjust(
     camFlat,
@@ -616,6 +638,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     baSolverFlat(solver),
     fixedMask,
     fisheyeFlat,
+    ...(rsCams ? [rsFlat] : []),
   )
   const ms = performance.now() - tCall
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×8 = fx,fy,cx,cy,k1,k2,k3,k4),
@@ -623,8 +646,10 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   // (BA_SOLVER_KEYS), then a variable-length per-iteration RMS convergence trace.
   const intrBase = nCam * 12 + nPts * 3
   const base = intrBase + nCam * 8
-  const traceBase = base + 4 + BA_SOLVER_KEYS.length
+  const readoutBase = base + 4 + BA_SOLVER_KEYS.length
+  const traceBase = readoutBase + (rsCams ? nCam : 0)
   if (!raw || raw.length < traceBase) return null
+  const readout = rsCams ? cameras.map((c, i) => (c?.rs?.h > 0 ? raw[readoutBase + i] : null)) : null
   const costBefore = raw[base]
   const costAfter = raw[base + 1]
   const anchorRmsAfter = raw[base + 2]
@@ -641,6 +666,8 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
         [raw[b + 6], raw[b + 7], raw[b + 8]],
       ],
       t: [raw[b + 9], raw[b + 10], raw[b + 11]],
+      // The rolling shutter goes with the camera, at the readout time the solve ended with.
+      ...(readout?.[c] != null ? { rs: { ...cameras[c].rs, tau: readout[c] } } : {}),
     }
   })
 
@@ -682,6 +709,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     solver: solverStats,
     ms,
     threads: threaded ? threadedThreads : 1,
+    ...(readout ? { readout } : {}),
   }
 }
 

@@ -79,7 +79,7 @@ export class GuidedSearch {
  * - `refine_mask`: **bitmask** of the shared per-sensor intrinsics to self-calibrate:
  *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3,
  *   32 = k4 (fisheye only). 0 ⇒ poses+points only. The per-group param vector is the
- *   ordered subset `[s?, dcx?, dcy?, k1?, k2?, k3?, k4?]` (kdim ≤ 7). fy stays locked
+ *   ordered subset `[s?, dcx?, dcy?, k1?, k2?, k3?, k4?, τ?]` (kdim ≤ 8; τ: bundle_adjust_rs). fy stays locked
  *   to fx (single scale). A coefficient a group's lens does not have (k4 on a Brown
  *   group, k3 on a two-term fisheye) is held at its seed.
  * - `fixed_cam`: n_cam bytes, non-zero ⇒ that camera's pose is held fixed (local BA:
@@ -108,6 +108,25 @@ export class GuidedSearch {
  * camera-centre residual (both 0 when their respective prior list is empty).
  */
 export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_index: Uint32Array, obs_px: Float32Array, observation_weight: Float32Array, anchor_flat: Float64Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array, fixed_cam: Uint8Array, fisheye_flat: Float32Array): Float32Array;
+
+/**
+ * `bundle_adjust` with a rolling-shutter model (rsh, plan-after-0.7 ▸ RSH). A camera
+ * whose rows are read one after another over the readout time τ sees each row from
+ * a slightly different place: from C + τ·s·v, where v is the camera centre's velocity
+ * (model units per second) and s = (row − cy)/H the row's time from the principal row
+ * as a fraction of the readout. The solver takes the observed row for s (exact to
+ * first order) and applies the shift to the point instead: x_cam = R·(X − τ·s·v) + t,
+ * so the pose and point Jacobians keep their form and τ adds one column, −s·R·v.
+ * The pose is the one at the principal row (what the camera-centre priors constrain).
+ *
+ * - `rs_flat`: n_cam × 5 floats `[vx, vy, vz, H, τ0, …]`; H ≤ 0 (or a short list) ⇒
+ *   that camera reads all rows at once. τ0 is the readout time in seconds; with refine
+ *   bit 64 the group's τ is refined from its first camera's τ0 (the slot follows k4).
+ *
+ * Output: `bundle_adjust`'s, with n_cam floats — each camera's τ after the solve —
+ * between the solver stats and the cost trace.
+ */
+export function bundle_adjust_rs(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_index: Uint32Array, obs_px: Float32Array, observation_weight: Float32Array, anchor_flat: Float64Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array, fixed_cam: Uint8Array, fisheye_flat: Float32Array, rs_flat: Float32Array): Float32Array;
 
 export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number, perturb_start: number, sigma_spatial: number, sigma_color: number, view_selection: number, window_step: number, seed_normals: Float32Array, prior: Float32Array, prior_alpha: number, prior_gamma: number, prior_sig_d: number, prior_sig_n: number, src_depth: Float32Array, geom_weight: number, geom_max: number): Float32Array;
 
@@ -192,6 +211,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly __wbg_guidedsearch_free: (a: number, b: number) => void;
     readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number) => [number, number];
+    readonly bundle_adjust_rs: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number, c1: number, d1: number) => [number, number];
     readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number, c1: number, d1: number, e1: number, f1: number, g1: number, h1: number, i1: number, j1: number, k1: number, l1: number, m1: number, n1: number, o1: number) => [number, number];
     readonly guidedsearch_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => number;
     readonly guidedsearch_search: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => [number, number];

@@ -14,10 +14,31 @@ export function cameraCenter({ R, t }) {
   ]
 }
 
+// A rolling-shutter camera (`cam.rs = { v, h, tau }`, rollingShutter.js) sees a point
+// from where it was when its row was read: X − τ·s·v with s = (row − cy)/h. The row
+// depends on that place, so take it from the global-shutter projection `first` and
+// iterate (the shift is pixels, so a few steps converge far below a pixel's
+// thousandth). `proj(x, y, z)` is the camera's own projection → { u, v } or null.
+export function projectRollingShutter(rs, cy, x, y, z, first, proj) {
+  let p = first
+  for (let i = 0; i < 4 && p; i++) {
+    const k = (rs.tau * (p.v - cy)) / rs.h
+    p = proj(x - k * rs.v[0], y - k * rs.v[1], z - k * rs.v[2])
+  }
+  return p
+}
+
 // Project a world point through { R, t, K } to pixel coords. Returns { u, v } or
 // null when the point lies on the camera plane (|z_cam| ≈ 0). Points *behind* the
 // camera still project (negative depth) — callers gate cheirality separately.
+// A rolling-shutter camera (`cam.rs`) projects through projectRollingShutter.
 export function projectPoint(cam, x, y, z) {
+  const first = projectGlobal(cam, x, y, z)
+  if (!first || !(cam.rs?.h > 0)) return first
+  return projectRollingShutter(cam.rs, cam.K.cy, x, y, z, first, (a, b, c) => projectGlobal(cam, a, b, c))
+}
+
+function projectGlobal(cam, x, y, z) {
   const { R, t, K } = cam
   const xc = R[0][0] * x + R[0][1] * y + R[0][2] * z + t[0]
   const yc = R[1][0] * x + R[1][1] * y + R[1][2] * z + t[1]

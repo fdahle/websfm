@@ -26,6 +26,8 @@ const props = defineProps({
   groundControlAdjustment: { type: Boolean, default: false },
   // For the steps' effect lines: images in a usable matched pair, those pairs, sensors.
   linkedImages: { type: Number, default: 0 },
+  // Images with a capture time (EXIF), which rolling shutter takes the motion from.
+  timedImages: { type: Number, default: 0 },
   pairs: { type: Number, default: 0 },
   sensors: { type: Number, default: 0 },
   // Camera groups that may hold photos of more than one camera: [{ label, groups }].
@@ -115,6 +117,7 @@ const SELF_CAL_HINTS = {
 const effects = computed(() =>
   sparseEffects(modeSettings.value, {
     linkedImages: props.linkedImages,
+    timedImages: props.timedImages,
     pairs: props.pairs,
     sensors: props.sensors,
     splits: props.sensorSplits,
@@ -277,6 +280,28 @@ function run() {
             <option value="f,cxcy,k1,k2,k3,k4">Focal + principal point + k1–k4 (fisheye)</option>
           </select>
           <template #hint>{{ SELF_CAL_HINTS[settings.refineIntrinsics] ?? '' }}</template>
+        </SettingsField>
+      </SettingsStep>
+
+      <SettingsStep
+        step="4"
+        title="Rolling shutter"
+        :effect="effects.rollingShutter"
+        :inactive="adding || !(settings.baIterations > 0) || settings.rollingShutter !== 'on'"
+      >
+        <SettingsField label-for="rollingShutter">
+          <template #label>
+            <FieldHelp op="sparse-reconstruction" param="rollingShutter">Rolling shutter</FieldHelp>
+          </template>
+          <select
+            id="rollingShutter"
+            v-model="settings.rollingShutter"
+            class="field-input field-select"
+            :disabled="adding || !(settings.baIterations > 0)"
+          >
+            <option value="off">Off</option>
+            <option value="on">Estimate the readout time</option>
+          </select>
         </SettingsField>
       </SettingsStep>
     </AdvancedDisclosure>

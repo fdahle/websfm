@@ -62,6 +62,15 @@ trustworthy. Many parameters need many well-spread views: on a weak network, suc
 short strip of wide-angle frames, Auto can bend the block towards its ends. If
 checkpoint errors grow towards the edges under Auto but not under None, keep None.
 
+## Rolling shutter
+<!-- param: rollingShutter default: Off -->
+For drones without a mechanical shutter (most DJI Mini, Air and Mavic models): their
+sensor reads the rows one after another while the drone moves, which bends the block
+with little sign in the residuals and shows as check-point errors. **Estimate the
+readout time** solves it per camera group, the motion taken from the photos' capture
+times. Leave it off for a mechanical or global shutter, and for photos without a
+capture time.
+
 ## Check the result
 Cameras should follow the capture path, most images should register, and the points
 should have a coherent shape. The log reports the run's own checks: a focal length

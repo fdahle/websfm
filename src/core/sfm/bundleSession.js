@@ -28,6 +28,7 @@ import {
 import { compareRobustCost, projectFullXYZ } from './baAcceptance.js'
 import { buildBaObservations, appendObservations, trackPositions, mapObservations } from './baObservations.js'
 import { fmtStats } from './modelStats.js'
+import { attachRollingShutter, captureSeconds } from './rollingShutter.js'
 import { pluralize } from '../textFormat.js'
 
 export function createBundleSession(ctx) {
@@ -52,6 +53,24 @@ export function createBundleSession(ctx) {
   // Defaults + rationale for these live in defaults.user.js (baIterations,
   // refineIntrinsics); `cfg` already merged them.
   const { baIterations, refineIntrinsics } = cfg
+
+  // Rolling shutter (cfg.rollingShutter 'on', rollingShutter.js): before each solve every
+  // registered camera gets its velocity from its neighbours in the current model and its
+  // group's readout time, which the global solves refine (bundle.rs bundle_adjust_rs).
+  const rollingShutter = cfg.rollingShutter === 'on'
+  const rsFrame = (uuid) => {
+    const img = imageByUuid(uuid)
+    if (!img) return null
+    return {
+      t: captureSeconds(img.meta),
+      h: img.sensor?.height || img.meta?.height || null,
+      group: sensorIntByUuid.get(uuid) ?? `image:${uuid}`,
+      film: !!img.sensor?.fiducialCalibration,
+    }
+  }
+  const prepareRollingShutter = () => {
+    if (rollingShutter) attachRollingShutter(cameras, rsFrame)
+  }
 
   // A BA's camera index by image index (−1 = not in the solve), from its uuid → index map.
   const camIdxOfImg = (camIdxOf) => (img) => camIdxOf.get(ids.uuid(img)) ?? -1
@@ -165,6 +184,7 @@ export function createBundleSession(ctx) {
     const freeSet = new Set(free)
     const fixed = [...shared.keys()].filter((u) => !freeSet.has(u))
     const uuidList = [...free, ...fixed]
+    prepareRollingShutter()
     const camList = uuidList.map((u) => cameras.get(u))
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     const ptIds = [...ptSet]
@@ -284,6 +304,7 @@ export function createBundleSession(ctx) {
         return
       }
     }
+    prepareRollingShutter()
     const camList = uuidList.map((u) => cameras.get(u))
     const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
@@ -361,6 +382,7 @@ export function createBundleSession(ctx) {
     const result = await bundleAdjust(camList, kList, posBefore, observations, {
       maxIters: iters,
       refineIntrinsics: refineMode,
+      refineReadout: rollingShutter,
       sensorOfCam,
       solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver,
       flatPoints: true,
@@ -625,6 +647,7 @@ export function createBundleSession(ctx) {
         )
         return
       }
+      prepareRollingShutter()
       const camList = uuidList.map((u) => cameras.get(u))
       const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
       log(
@@ -725,6 +748,7 @@ export function createBundleSession(ctx) {
 
     for (let round = 0; round < 2; round++) {
       const uuidList = [...cameras.keys()]
+      prepareRollingShutter()
       const camList = uuidList.map((u) => cameras.get(u))
       const kList = camList.map((c) => c.K)
       const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)

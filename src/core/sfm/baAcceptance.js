@@ -15,6 +15,7 @@
 // or on the camera costs δ², as in the crate.
 
 import { isObservationList } from './baObservations.js'
+import { projectRollingShutter } from './geometry.js'
 
 /**
  * @param {{R:number[][], t:number[]}} cam
@@ -25,8 +26,19 @@ export function projectFull(cam, K, p) {
   return projectFullXYZ(cam, K, p.x, p.y, p.z)
 }
 
-/** projectFull for a point given as coordinates. */
+/** projectFull for a point given as coordinates; through a rolling shutter for a
+ * camera carrying `rs` (geometry.js projectRollingShutter). */
 export function projectFullXYZ(cam, K, x, y, z) {
+  const first = projectFullGlobal(cam, K, x, y, z)
+  if (!first || !(cam.rs?.h > 0)) return first
+  const p = projectRollingShutter(cam.rs, K.cy, x, y, z, { u: first.x, v: first.y }, (a, b, c) => {
+    const q = projectFullGlobal(cam, K, a, b, c)
+    return q && { u: q.x, v: q.y }
+  })
+  return p && { x: p.u, y: p.v }
+}
+
+function projectFullGlobal(cam, K, x, y, z) {
   const { R, t } = cam
   const xc = R[0][0] * x + R[0][1] * y + R[0][2] * z + t[0]
   const yc = R[1][0] * x + R[1][1] * y + R[1][2] * z + t[1]

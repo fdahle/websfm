@@ -12,7 +12,7 @@ const TERMS = {
 }
 
 // project: { linkedImages (images in a usable matched pair), pairs (usable pairs),
-// sensors, autoReason (why `auto` self-calibrates as it does here, or null),
+// timedImages (images with a capture time), sensors, autoReason (why `auto` self-calibrates as it does here, or null),
 // splits (the camera groups that may hold photos of more than one camera:
 // [{ label, groups }], from core/sensors/splitSuggestions.js) }
 // `splits` is the warning above the steps, '' when there is none.
@@ -20,7 +20,16 @@ const TERMS = {
 // hasProducts }, and the effects describe adding the new images to the model.
 export function sparseEffects(
   s,
-  { linkedImages = 0, pairs = 0, sensors = 0, autoReason = null, modelCameras = 0, newImages = 0, splits = [] } = {},
+  {
+    linkedImages = 0,
+    pairs = 0,
+    timedImages = 0,
+    sensors = 0,
+    autoReason = null,
+    modelCameras = 0,
+    newImages = 0,
+    splits = [],
+  } = {},
 ) {
   if (s.addToModel) {
     return {
@@ -34,6 +43,7 @@ export function sparseEffects(
             "each time; the model's cameras hold them in place."
           : 'Off: the new cameras keep the poses registration found.',
       calibration: "Off while adding images: every camera keeps the model's calibration.",
+      rollingShutter: 'Off while adding images: the new cameras are solved as a global shutter.',
     }
   }
   const register = !pairs
@@ -59,7 +69,16 @@ export function sparseEffects(
           ? `This project${per}: ${autoReason}`
           : `Staged as the model grows${per}, unless a sensor already has a calibrated model.`
         : `Solved for each sensor${per}: ${TERMS[v] ?? v}.`
-  return { register, ba, calibration, splits: splitWarning(splits) }
+  const rollingShutter =
+    s.rollingShutter !== 'on'
+      ? 'Off: every row of a photo is taken as read at the same instant, right for a mechanical or global shutter.'
+      : !(s.baIterations > 0)
+        ? 'Not used: the readout time is estimated inside bundle adjustment, which is off.'
+        : timedImages < 3
+          ? `Nothing to estimate: ${timedImages ? `only ${plural(timedImages, 'image')} has` : 'no image has'} a capture time, which the cameras' motion is taken from.`
+          : `${plural(timedImages, 'image')} with a capture time: each camera's motion is taken from the photos ` +
+            'taken just before and after it, and each camera group gets a readout time.'
+  return { register, ba, calibration, rollingShutter, splits: splitWarning(splits) }
 }
 
 // A camera group with photos of more than one camera gets one calibration for all of

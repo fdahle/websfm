@@ -436,6 +436,9 @@ export function createSparseRun({
                   focalPlaneResUnit: img.meta.focalPlaneResUnit,
                   make: img.meta.make,
                   model: img.meta.model,
+                  // Sparse Model ▸ Rolling shutter takes the cameras' motion from these.
+                  dateTime: img.meta.dateTime,
+                  subSecTime: img.meta.subSecTime,
                 }
               : null,
             sensor: s

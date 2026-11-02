@@ -95,6 +95,8 @@ const { sensors } = storeToRefs(useSensorsStore())
 // What Sparse Reconstruction can build on: the usable matched pairs and the images
 // they link (the same filter as the store's usableMatchCount).
 const { matchStore } = storeToRefs(useMatchesStore())
+// Images with a capture time: Sparse Model ▸ Rolling shutter takes the motion from them.
+const timedImages = computed(() => images.value.filter((im) => im.meta?.dateTime).length)
 const matchedLinks = computed(() => {
   const ids = new Set()
   const off = disabledUuids(images.value)
@@ -338,6 +340,7 @@ const exportingFootprints = computed(
       v-if="reconstructOpen"
       :ground-control-adjustment="georeferenceAfterReconstruct"
       :linked-images="matchedLinks.images"
+      :timed-images="timedImages"
       :pairs="matchedLinks.pairs"
       :sensors="sensors.length"
       :sensor-splits="[...sensorSplits.values()].map((x) => ({ label: x.label, groups: x.groups.length }))"

@@ -36,6 +36,7 @@ import { isFisheyeModel } from './distortion.js'
 import { numStats, fmtStats, modelResiduals as residualsOf, trackHist } from './modelStats.js'
 import { createSelfCalFold } from './selfCalFold.js'
 import { createBundleSession } from './bundleSession.js'
+import { readoutSummary } from './rollingShutter.js'
 import { refineModel, pruneFinalTracks } from './refinePipeline.js'
 import {
   captureRunConfig,
@@ -161,6 +162,8 @@ export async function reconstructSingleModel(input, hooks = {}) {
   // An extension keeps the model's lens: self-calibration would move the fixed cameras'
   // frame under them.
   if (base) cfg.refineIntrinsics = 'none'
+  // Its fixed cameras keep their solve: a readout time estimated now would move them.
+  if (base) cfg.rollingShutter = 'off'
   const log = hooks.onLog ?? (() => {})
 
   // The knobs as requested — captured HERE, before resolveGates and the 'auto'
@@ -767,6 +770,29 @@ export async function reconstructSingleModel(input, hooks = {}) {
       }
     }
     summary.registrationCheck = registrationCheck
+    // Rolling shutter (cfg.rollingShutter): each camera group's estimated readout time.
+    if (cfg.rollingShutter === 'on') {
+      const groups = readoutSummary(cameras, (u) => imageByUuid(u)?.sensorId ?? `image:${u}`)
+      summary.rollingShutter = [...groups].map(([group, g]) => ({
+        sensorId: String(group).startsWith('image:') ? null : group,
+        readoutMs: g.tau * 1000,
+        cameras: g.cameras,
+      }))
+      for (const g of summary.rollingShutter)
+        log(
+          `Rolling shutter: readout ${g.readoutMs.toFixed(1)} ms for ${pluralize(g.cameras, 'camera')}` +
+            (g.sensorId ? '' : ' (a photo without a sensor)'),
+          'info',
+          'Reconstruction',
+        )
+      const without = cameras.size - summary.rollingShutter.reduce((n, g) => n + g.cameras, 0)
+      if (without)
+        log(
+          `Rolling shutter: ${pluralize(without, 'camera')} solved as a global shutter (no capture time, or no photo taken close before or after)`,
+          'info',
+          'Reconstruction',
+        )
+    }
 
     memoryMark('final cleanup + summary')
     report('finalize', 1, 'Finalising model…', { done: cameras.size, total: imgs.length })

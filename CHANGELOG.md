@@ -6,6 +6,19 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Rolling shutter for drones without a mechanical shutter.** Sparse Model ▸ 4 · Rolling
+  shutter ▸ **Estimate the readout time** solves each camera group's readout time in
+  bundle adjustment, with each camera's motion taken from the photos taken just before
+  and after it (their capture times). Off by default until a real drone block with check
+  points measures the gain. A global-shutter solve hides the effect in a bent block with
+  small residuals: on a synthetic two-strip block (10 m/s, 30 ms readout, 50 m) it fit to
+  0.017 px while the points were 8.1 cm off in shape; with the readout time solved (30.005
+  ms recovered from 0) the shape error was 0.003 mm. On 54 photos of a DJI Mavic Air 2
+  (whole-second capture times) it found a 25.7 ms readout, the camera positions fitted
+  the drone's GPS 20 % closer (0.75 against 0.94 RMS) and self-calibration moved the
+  principal point less (5.3 against 11.7 px), at the same 0.87 px reprojection; no check
+  points there, so the default stays off. Dense clouds and orthophotos still project
+  with each photo's middle-row pose.
 - **Metashape interchange, both ways.** Import ▸ **Metashape Cameras**
   reads the XML of Metashape's Export Cameras or Export Markers and takes, as you choose,
   the calibration of each camera, the positions and orientations of the aligned cameras

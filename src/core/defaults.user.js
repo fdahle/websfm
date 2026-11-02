@@ -224,6 +224,11 @@ export const RECONSTRUCT_DEFAULTS = {
   // focal + radial k1 rather than trusting a guessed pinhole), and to 'none' when a
   // calibrated Brown model already exists (don't double-correct).
   refineIntrinsics: 'auto',
+  // 'off' | 'on': estimate each camera group's rolling-shutter readout time in bundle
+  // adjustment, the cameras' motion taken from their capture times (core/sfm/
+  // rollingShutter.js). Off until a real drone block with check points measures the gain
+  // (plan-after-0.7 ▸ RSH); a global-shutter camera gains nothing from it.
+  rollingShutter: 'off',
 }
 
 // Quality presets (WS5): per-modal deltas OVER the defaults above, so `medium` ≡ the

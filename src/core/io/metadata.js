@@ -33,6 +33,12 @@ function metadataValue(root, names) {
   return null
 }
 
+function scalarText(v) {
+  if (v == null || v === '') return null
+  const t = String(v).trim()
+  return /^\d+$/.test(t) ? t : null
+}
+
 function metadataNumber(root, names) {
   const value = metadataValue(root, names)
   if (value == null || value === '') return null
@@ -121,6 +127,9 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
     iso: e.ISO ?? null,
     orientation: e.Orientation ?? null,
     dateTime: e.DateTimeOriginal ?? e.CreateDate ?? null,
+    // The fraction of a second DateTimeOriginal leaves out ("45" = .45 s), where the
+    // camera writes it: the rolling-shutter model takes the cameras' motion from the times.
+    subSecTime: scalarText(e.SubSecTimeOriginal ?? e.SubSecTime),
     gpsLat: e.latitude ?? metadataNumber(e, ['GPSLatitude']) ?? null,
     gpsLon: e.longitude ?? metadataNumber(e, ['GPSLongitude']) ?? null,
     gpsAlt: e.GPSAltitude ?? metadataNumber(e, ['AbsoluteAltitude']) ?? null,

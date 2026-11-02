@@ -115,6 +115,21 @@ export const REFERENCES = {
     venue: 'Vision Algorithms: Theory and Practice, LNCS 1883, 298–372',
     doi: '10.1007/3-540-44480-7_21',
   },
+  vautherin2016: {
+    authors: [
+      'Jonas Vautherin',
+      'Simon Rutishauser',
+      'Klaus Schneider-Zapp',
+      'Hon Fai Choi',
+      'Venera Chovancova',
+      'Alexis Glass',
+      'Christoph Strecha',
+    ],
+    year: 2016,
+    title: 'Photogrammetric accuracy and modeling of rolling shutter cameras',
+    venue: 'ISPRS Annals of the Photogrammetry, Remote Sensing and Spatial Information Sciences III-3, 139–146',
+    doi: '10.5194/isprs-annals-III-3-139-2016',
+  },
   agarwal2010: {
     authors: ['Sameer Agarwal', 'Noah Snavely', 'Steven M. Seitz', 'Richard Szeliski'],
     year: 2010,

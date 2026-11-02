@@ -149,7 +149,7 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  * - `refine_mask`: **bitmask** of the shared per-sensor intrinsics to self-calibrate:
  *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3,
  *   32 = k4 (fisheye only). 0 ⇒ poses+points only. The per-group param vector is the
- *   ordered subset `[s?, dcx?, dcy?, k1?, k2?, k3?, k4?]` (kdim ≤ 7). fy stays locked
+ *   ordered subset `[s?, dcx?, dcy?, k1?, k2?, k3?, k4?, τ?]` (kdim ≤ 8; τ: bundle_adjust_rs). fy stays locked
  *   to fx (single scale). A coefficient a group's lens does not have (k4 on a Brown
  *   group, k3 on a two-term fisheye) is held at its seed.
  * - `fixed_cam`: n_cam bytes, non-zero ⇒ that camera's pose is held fixed (local BA:
@@ -224,6 +224,75 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index
     var v14 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v14;
+}
+
+/**
+ * `bundle_adjust` with a rolling-shutter model (rsh, plan-after-0.7 ▸ RSH). A camera
+ * whose rows are read one after another over the readout time τ sees each row from
+ * a slightly different place: from C + τ·s·v, where v is the camera centre's velocity
+ * (model units per second) and s = (row − cy)/H the row's time from the principal row
+ * as a fraction of the readout. The solver takes the observed row for s (exact to
+ * first order) and applies the shift to the point instead: x_cam = R·(X − τ·s·v) + t,
+ * so the pose and point Jacobians keep their form and τ adds one column, −s·R·v.
+ * The pose is the one at the principal row (what the camera-centre priors constrain).
+ *
+ * - `rs_flat`: n_cam × 5 floats `[vx, vy, vz, H, τ0, …]`; H ≤ 0 (or a short list) ⇒
+ *   that camera reads all rows at once. τ0 is the readout time in seconds; with refine
+ *   bit 64 the group's τ is refined from its first camera's τ0 (the slot follows k4).
+ *
+ * Output: `bundle_adjust`'s, with n_cam floats — each camera's τ after the solve —
+ * between the solver stats and the cost trace.
+ * @param {Float32Array} cameras_flat
+ * @param {Float32Array} intrinsics_flat
+ * @param {Float32Array} pts_flat
+ * @param {Uint32Array} obs_index
+ * @param {Float32Array} obs_px
+ * @param {Float32Array} observation_weight
+ * @param {Float64Array} anchor_flat
+ * @param {Float32Array} anchor_weight
+ * @param {Float32Array} camera_prior_flat
+ * @param {number} max_iters
+ * @param {Int32Array} sensor_of_cam
+ * @param {number} refine_mask
+ * @param {Float32Array} solver_flat
+ * @param {Uint8Array} fixed_cam
+ * @param {Float32Array} fisheye_flat
+ * @param {Float32Array} rs_flat
+ * @returns {Float32Array}
+ */
+export function bundle_adjust_rs(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat) {
+    const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF32ToWasm0(pts_flat, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray32ToWasm0(obs_index, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArrayF32ToWasm0(obs_px, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ptr5 = passArrayF32ToWasm0(observation_weight, wasm.__wbindgen_malloc);
+    const len5 = WASM_VECTOR_LEN;
+    const ptr6 = passArrayF64ToWasm0(anchor_flat, wasm.__wbindgen_malloc);
+    const len6 = WASM_VECTOR_LEN;
+    const ptr7 = passArrayF32ToWasm0(anchor_weight, wasm.__wbindgen_malloc);
+    const len7 = WASM_VECTOR_LEN;
+    const ptr8 = passArrayF32ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
+    const len8 = WASM_VECTOR_LEN;
+    const ptr9 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
+    const len9 = WASM_VECTOR_LEN;
+    const ptr10 = passArrayF32ToWasm0(solver_flat, wasm.__wbindgen_malloc);
+    const len10 = WASM_VECTOR_LEN;
+    const ptr11 = passArray8ToWasm0(fixed_cam, wasm.__wbindgen_malloc);
+    const len11 = WASM_VECTOR_LEN;
+    const ptr12 = passArrayF32ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
+    const len12 = WASM_VECTOR_LEN;
+    const ptr13 = passArrayF32ToWasm0(rs_flat, wasm.__wbindgen_malloc);
+    const len13 = WASM_VECTOR_LEN;
+    const ret = wasm.bundle_adjust_rs(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, max_iters, ptr9, len9, refine_mask, ptr10, len10, ptr11, len11, ptr12, len12, ptr13, len13);
+    var v15 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v15;
 }
 
 /**

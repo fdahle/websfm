@@ -675,6 +675,37 @@ residual to 0.000 px (South Building 0.18 px before) and cost 0–7 % in time:
 | Casa Grande | check points, H / V RMS | 1.246 / 1.170 m | 1.246 / 1.173 m |
 | Iceland 1980s scans, 125 images | check points, H / V RMS | 1.416 / 1.945 m | 1.416 / 1.946 m |
 
+### 4.6b Rolling shutter (`bundle.rs` `bundle_adjust_rs`, `core/sfm/rollingShutter.js`, 2026-11-03)
+
+A CMOS sensor without a mechanical shutter reads its rows over the readout time τ.
+Following Vautherin et al. (2016), a camera's pose is taken at its principal row and
+row r is seen from C + τ·s·v, s = (r − cy)/h, v the camera centre's velocity; the
+angular rate is taken as zero (a gimbal holds the camera). In the solver the shift
+goes on the point: x_cam = R·(X − τ·s·v) + t, with s from the **observed** row (exact
+to first order), so the pose and point Jacobians keep their form and τ adds one
+column, −s·R·v.
+
+Unlike Vautherin et al., who solve each image's linear and angular velocity, WebSfM
+takes v from the camera's neighbours in the current model and their capture times
+(a least-squares line through the centres of up to five photos in capture order, not
+across a pause over 8 s; whole-second EXIF times scatter a two-photo difference) and
+solves **one τ per camera group**, in the global solves (refine bit 64, the slot after
+k4), from 0. A common error in v is then absorbed by τ. Local and survey-constrained
+solves hold τ. A camera without a capture time or neighbour is solved as a global
+shutter; Add to the model forces it off (the fixed cameras would move).
+
+Why a global-shutter solve hides it: every camera moves alike, so the rows' offsets
+are explained by a consistent shear of the block. On the synthetic two-strip block of
+the crate tests (10 m/s, 30 ms, 50 m, f 1000 px) the global solve fits to 0.017 px
+while the points are 8.1 cm RMS off in shape after a similarity; with τ the shape error
+is 0.003 mm, and τ is recovered from 0 as 30.005 ms.
+
+Every JavaScript projection of a camera that carries `rs: { v, h, tau }`
+(`geometry.js projectPoint`, `baAcceptance.js projectFullXYZ`) follows the same model
+by a short fixed point on the row, so the filters and statistics after a solve see the
+residuals the solver minimised. Not yet: the saved model does not keep `rs`, and dense,
+orthophoto and texture project with the principal-row pose (plan-after-0.7 ▸ RSH-4).
+
 ### 4.7 Retriangulation, split-track merge, track filtering
 
 After BA settles: **retriangulate** pairs (`retriangulatePairs`) with the improved
@@ -2294,6 +2325,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Schönberger, J. L. & Frahm, J.-M. (2016). Structure-from-motion revisited. IEEE Conference on Computer Vision and Pattern Recognition (CVPR). https://doi.org/10.1109/CVPR.2016.445
 - Schönberger, J. L., Zheng, E., Frahm, J.-M. & Pollefeys, M. (2016). Pixelwise view selection for unstructured multi-view stereo. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-319-46487-9_31
 - Nuth, C. & Kääb, A. (2011). Co-registration and bias corrections of satellite elevation data sets for quantifying glacier thickness change. The Cryosphere 5(1), 271–290. https://doi.org/10.5194/tc-5-271-2011
+- Vautherin, J., Rutishauser, S., Schneider-Zapp, K., Choi, H. F., Chovancova, V., Glass, A. & Strecha, C. (2016). Photogrammetric accuracy and modeling of rolling shutter cameras. ISPRS Annals of the Photogrammetry, Remote Sensing and Spatial Information Sciences III-3, 139–146. https://doi.org/10.5194/isprs-annals-III-3-139-2016
 - xDEM contributors (2026). xDEM: analysis of digital elevation models for geosciences. Software, Zenodo. https://doi.org/10.5281/zenodo.4809697
 - Shepard, D. (1968). A two-dimensional interpolation function for irregularly-spaced data. Proceedings of the 23rd ACM National Conference, 517–524. https://doi.org/10.1145/800186.810616
 - Stewénius, H., Engels, C. & Nistér, D. (2006). Recent developments on direct relative orientation. ISPRS Journal of Photogrammetry and Remote Sensing 60(4), 284–294. https://doi.org/10.1016/j.isprsjprs.2006.03.005
