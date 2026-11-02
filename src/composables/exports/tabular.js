@@ -5,7 +5,7 @@ import { jsonParts, jsonArrayItemParts, jsonArrayEnd, lazyArray } from '../../co
 import { posesToGeoJson } from '../../core/io/geojson.js'
 import { asPairList } from '../../core/sfm/matchCodec.js'
 import { hasPairMatches } from '../../core/features/matchStorage.js'
-import { estimatedPose, estimatedCalibration } from '../../core/sfm/cameraEstimated.js'
+import { estimatedPose, estimatedCalibration, opkAtCameraGrid } from '../../core/sfm/cameraEstimated.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { ensureProjection, transform } from '../../core/crs.js'
 import { defaultExportName, exportFileName } from '../../core/exportNames.js'
@@ -47,10 +47,24 @@ export function createTabularExports({
   async function estimatedPoses(applyGeoref) {
     const cameras = sparseCloud()?.cameras
     const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
+    // A georeference in a local tangent frame has its origin's axes everywhere: turn each
+    // camera's angles to grid north and the vertical where it is (opkAtCameraGrid).
+    let toCameraGrid = null
+    if (frame.source === 'georef' && frame.sim?.local && frame.crs && frame.crs !== 'local') {
+      await ensureProjection(frame.crs)
+      const place = (x, y) => {
+        const [lon, lat] = transform([x, y], frame.crs, 'EPSG:4326')
+        const [x2, y2] = transform([lon, lat + 1e-5], 'EPSG:4326', frame.crs)
+        const [x1, y1] = transform([lon, lat], 'EPSG:4326', frame.crs)
+        return { lon, lat, gamma: -Math.atan2(x2 - x1, y2 - y1) }
+      }
+      const origin = place(frame.sim.local.e0, frame.sim.local.n0)
+      toCameraGrid = (p) => opkAtCameraGrid(p, place(p.x, p.y), origin)
+    }
     const out = []
     for (const img of images.value) {
       const p = cameras && estimatedPose(cameras.get(img.uuid), frame.sim)
-      if (p) out.push({ imageName: img.name, ...p })
+      if (p) out.push({ imageName: img.name, ...(toCameraGrid ? toCameraGrid(p) : p) })
     }
     return { poses: out, frame }
   }

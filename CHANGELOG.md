@@ -142,6 +142,12 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **Exported camera angles taken where each camera is.** Export ▸ Camera Poses
+  (estimated, georeferenced) now gives each camera's omega/phi/kappa against grid north
+  and the vertical at that camera, as Metashape and Pix4D do, not at the georeference's
+  origin. The two differed by the change of meridian convergence across the block:
+  0.0002° on a small site, about 0.3° over 6 km near the poles. Checked against
+  Metashape-convention XML written and read back: within 0.00001°.
 - **Omega, phi and kappa read the way Metashape and Pix4D write them.** Camera poses
   imported with orientation angles now point the way their file meant, in footprints and
   as priors for Sparse Model; before, WebSfM turned them the opposite way, so a 60°

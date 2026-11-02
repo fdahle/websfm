@@ -112,16 +112,31 @@ test('exports the cameras, calibration and markers for Metashape', async ({ page
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
     const { similarityForExport } = await import('/src/core/products/exportFrame.js')
-    const { estimatedPose } = await import('/src/core/sfm/cameraEstimated.js')
+    const { estimatedPose, opkAtCameraGrid } = await import('/src/core/sfm/cameraEstimated.js')
+    const { transform, ensureProjection } = await import('/src/core/crs.js')
     const recon = useReconstructionStore()
     const { sim, crs } = similarityForExport(await recon.effectiveFrameSpec())
+    await ensureProjection(crs)
+    // As Export ▸ Camera Poses writes them (exports/tabular.js): against grid north at each camera.
+    const place = (x, y) => {
+      const [lon, lat] = transform([x, y], crs, 'EPSG:4326')
+      const [x1, y1] = transform([lon, lat], 'EPSG:4326', crs)
+      const [x2, y2] = transform([lon, lat + 1e-5], 'EPSG:4326', crs)
+      return { lon, lat, gamma: -Math.atan2(x2 - x1, y2 - y1) }
+    }
+    const origin = sim.local ? place(sim.local.e0, sim.local.n0) : null
     const cams = recon.mainSparseCloud.cameras
     return {
       crs,
-      poses: useImagesStore().images.map((im) => ({ name: im.name, ...estimatedPose(cams.get(im.uuid), sim) })),
+      local: !!sim.local,
+      poses: useImagesStore().images.map((im) => {
+        const p = estimatedPose(cams.get(im.uuid), sim)
+        return { name: im.name, ...(origin ? opkAtCameraGrid(p, place(p.x, p.y), origin) : p) }
+      }),
     }
   })
   expect(expected.crs).toBe('EPSG:32617')
+  expect(expected.local).toBe(true)
   const chunk = readMetashapeXml(xml).chunks[0]
   expect(chunk.crs.epsg).toBe('EPSG:4326')
   expect(chunk.markers.map((m) => [m.label, m.locations.length])).toEqual([
@@ -139,9 +154,7 @@ test('exports the cameras, calibration and markers for Metashape', async ({ page
   for (const p of back.poses) {
     const q = expected.poses.find((e) => e.name.startsWith(p.imageName))
     expect(Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z)).toBeLessThan(1e-4)
-    // Metashape takes the angles against grid north at each camera; WebSfM's pose export
-    // against grid north at the georeference's origin (TODO ▸ A07 ▸ MX follow-up).
-    for (const k of ['omega', 'phi', 'kappa']) expect(Math.abs(p[k] - q[k])).toBeLessThan(1e-3)
+    for (const k of ['omega', 'phi', 'kappa']) expect(Math.abs(p[k] - q[k])).toBeLessThan(1e-5)
   }
   expect(errors).toEqual([])
 })

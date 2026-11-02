@@ -155,3 +155,17 @@ describe('estimatedCalibration', () => {
     expect(rows[1]).toMatchObject({ distortionModel: 'fisheye', k1: 0.01, k2: 0.02, selfcalK1: null })
   })
 })
+
+describe('opkAtCameraGrid', () => {
+  it('keeps a camera at the origin and turns one elsewhere by the change of grid north', async () => {
+    const { opkAtCameraGrid } = await import('./cameraEstimated.js')
+    const pose = { x: 0, y: 0, z: 100, omega: 2, phi: -3, kappa: 40 }
+    const here = { lon: 9, lat: 48, gamma: 0.01 }
+    const same = opkAtCameraGrid(pose, here, here)
+    for (const k of ['omega', 'phi', 'kappa']) expect(same[k]).toBeCloseTo(pose[k], 10)
+    // Same place, grid north turned by 0.5°: a nadir camera's kappa follows it.
+    const nadir = { ...pose, omega: 0, phi: 0 }
+    const turned = opkAtCameraGrid(nadir, { ...here, gamma: here.gamma + (0.5 * Math.PI) / 180 }, here)
+    expect(Math.abs(turned.kappa - nadir.kappa)).toBeCloseTo(0.5, 6)
+  })
+})

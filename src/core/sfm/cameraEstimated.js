@@ -6,7 +6,7 @@
 // NOT in the project CRS unless the model has been georeferenced, so callers
 // should label it accordingly.
 
-import { opkFromMatrix } from '../footprint.js'
+import { opkFromMatrix, opkMatrix } from '../footprint.js'
 import { applySimilarity } from '../products/georef.js'
 import { DISTORTION_COEFFS, isFisheyeModel } from './distortion.js'
 
@@ -49,6 +49,47 @@ export function estimatedPose(cam, sim = null) {
   const opk = opkFromMatrix([0, 1, 2].map((i) => [R[0][i], -R[1][i], -R[2][i]]))
   return { x, y, z, omega: opk?.omega ?? null, phi: opk?.phi ?? null, kappa: opk?.kappa ?? null }
 }
+
+// A pose's omega/phi/kappa against grid north at the camera instead of at the frame's
+// origin. A georeference fitted in a local tangent frame (products/localFrame.js) keeps
+// one set of axes for the whole block, the grid's at its origin; Metashape and Pix4D
+// take a camera's angles against the grid and the vertical where the camera is.
+//   at, origin   { lon, lat (degrees), gamma: −atan2(Δx, Δy) of a small step north in
+//                the grid there (radians; metashapeXml.js takes the same angle) }
+export function opkAtCameraGrid(pose, at, origin) {
+  if (![pose.omega, pose.phi, pose.kappa].every(Number.isFinite)) return pose
+  const M = opkMatrix(pose.omega, pose.phi, pose.kappa)
+  // local → geocentric = (G₀·E₀)ᵀ; geocentric → grid at the camera = G·E.
+  const Q = mul3(gridEnu(at), transpose3(gridEnu(origin)))
+  const opk = opkFromMatrix(mul3(Q, M))
+  return opk ? { ...pose, ...opk } : pose
+}
+
+// Rows: grid east, grid north and up at a place, in geocentric axes.
+function gridEnu({ lon, lat, gamma }) {
+  const d = Math.PI / 180
+  const so = Math.sin(lon * d),
+    co = Math.cos(lon * d),
+    sa = Math.sin(lat * d),
+    ca = Math.cos(lat * d)
+  const E = [
+    [-so, co, 0],
+    [-sa * co, -sa * so, ca],
+    [ca * co, ca * so, sa],
+  ]
+  const cg = Math.cos(gamma),
+    sg = Math.sin(gamma)
+  return mul3(
+    [
+      [cg, -sg, 0],
+      [sg, cg, 0],
+      [0, 0, 1],
+    ],
+    E,
+  )
+}
+const mul3 = (A, B) => A.map((r) => B[0].map((_, j) => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]))
+const transpose3 = (A) => A[0].map((_, j) => A.map((r) => r[j]))
 
 // The calibration bundle adjustment ended with, as sensor records for the CSV export
 // (utils/exportCsv.js buildSensorsCsv): per camera group the mean focal length and
