@@ -54,6 +54,7 @@ export function defaultExportName(
     case 'ortho':
       if (tag) return `${base}-${kind}-${tag}`
       if (format === 'cog') return `${base}-${kind}-cog`
+      if (format === 'mbtiles' || format === 'xyz') return `${base}-${kind}-tiles`
       if (kind === 'dem' && format === 'png') return `${base}-dem-hillshade`
       if (kind === 'dem' && format === 'support') return `${base}-dem-support`
       return `${base}-${kind}`

@@ -13,11 +13,13 @@ import { defaultExportName, exportFileName } from '../../core/exportNames.js'
 import { partsToBlob } from '../../utils/blobParts.js'
 import {
   exportOrthoFile,
+  exportWebTiles as workerWebTiles,
   demTool as workerDemTool,
   demAscii as workerDemAscii,
   warpRaster as workerWarpRaster,
 } from '../../workers/computeClient.js'
-import { ensureProjection, projDefinition, isGeographic, transformer } from '../../core/crs.js'
+import { ensureProjection, projDefinition, isGeographic, transformer, metresPerCrsUnit } from '../../core/crs.js'
+import { zoomRange } from '../../core/products/webTiles.js'
 import { rasterGroundScale, rasterUnits } from '../../core/products/rasterUnits.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -202,6 +204,62 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
   // its CRS tagged): the COG export is that file, and the other forms are streamed
   // out of it in the export worker (workers/ops/export.js exportOrtho), so no export
   // ever holds the ortho as one array. The geotransform is the ORTHO's own.
+  // Export ▸ Orthophoto ▸ MBTiles / XYZ tiles (workers/ops/webTiles.js): Web Mercator
+  // tiles from the zoom where the whole orthophoto fits 2 × 2 tiles to the first one as
+  // fine as its pixels.
+  async function exportTiles(o, { format, tileFormat, jpegQuality, fileName }) {
+    const info = crsInfo(o)
+    if (!info.crs) {
+      log('Ortho export: an orthophoto in the local frame has no place on a web map', 'warn', 'Export')
+      return
+    }
+    await ensureProjection(info.crs)
+    const toLonLat = transformer(info.crs, 'EPSG:4326')
+    // The outline's box in degrees, from points along its edges (a projection bends them).
+    const lons = [],
+      lats = []
+    const W = o.width * o.gsd,
+      H = o.height * o.gsd
+    for (let k = 0; k <= 16; k++) {
+      for (const [fx, fy] of [
+        [k / 16, 0],
+        [k / 16, 1],
+        [0, k / 16],
+        [1, k / 16],
+      ]) {
+        const [lon, lat] = toLonLat(o.originX + fx * W, o.originY - fy * H)
+        lons.push(lon)
+        lats.push(lat)
+      }
+    }
+    const bbox = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)]
+    const gsd = o.gsd * (isGeographic(info.crs) ? 111320 : metresPerCrsUnit(info.crs) || 1)
+    const { minZoom, maxZoom } = zoomRange({ gsd, lat: (bbox[1] + bbox[3]) / 2, bbox })
+    const name = exportFileName(fileName, defaultExportName('ortho', { format, base: projectBase() }))
+    const { blob, tiles } = await workerWebTiles(
+      {
+        file: o.cog,
+        geo: { width: o.width, height: o.height, gsd: o.gsd, originX: o.originX, originY: o.originY },
+        from: { def: projDefinition(info.crs) },
+        bbox,
+        minZoom,
+        maxZoom,
+        tileFormat,
+        quality: jpegQuality ?? 0.85,
+        container: format,
+        name: projectBase(),
+      },
+      { onLog: (m, l, c) => log(m, l, c) },
+    )
+    downloadBlob(`${name}.${format === 'mbtiles' ? 'mbtiles' : 'zip'}`, blob)
+    log(
+      `Ortho export: ${pluralize(tiles, 'web map tile')} (zoom ${minZoom}–${maxZoom}) as ` +
+        `${format === 'mbtiles' ? 'MBTiles' : 'an XYZ zip'}`,
+      'success',
+      'Export',
+    )
+  }
+
   async function doExportOrtho(
     {
       format,
@@ -209,6 +267,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       jpegQuality,
       orthoAlpha = true,
       orthoNodata = 0,
+      tileFormat = 'png',
       outputCrs = null,
       resampling = 'bilinear',
       fileName,
@@ -218,6 +277,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     // `product`: the orthophoto to export (Download… on any one), else the main one.
     const o = product ?? ortho.value
     if (!o?.cog) return
+    if (format === 'mbtiles' || format === 'xyz') return exportTiles(o, { format, tileFormat, jpegQuality, fileName })
     if (outputCrs && (format === 'cog' || format === 'geotiff'))
       return exportReprojected('ortho', o, { outputCrs, resampling, fileName })
     const info = crsInfo(o)

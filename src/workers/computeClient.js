@@ -515,6 +515,9 @@ export const demPreview = streamingOp('demPreview')
 // An orthophoto file made from its stored COG — { file, format: 'geotiff'|'png'|'jpeg',
 // deflate, quality, crs } → { blob, width, height } (workers/ops/export.js exportOrtho).
 export const exportOrthoFile = streamingOp('exportOrtho')
+// An orthophoto as Web Mercator map tiles, MBTiles or an XYZ zip
+// (workers/ops/webTiles.js) → { blob, tiles, minZoom, maxZoom }.
+export const exportWebTiles = streamingOp('exportWebTiles')
 export const warpRaster = streamingOp('warpRaster')
 
 // Products — mesh (screened Poisson over the dense cloud, see core/products/mesh.js).

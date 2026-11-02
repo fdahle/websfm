@@ -6,6 +6,13 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **The orthophoto as a web map.** Export ▸ Orthophoto ▸ **MBTiles** or **XYZ tiles**
+  cuts it into Web Mercator map tiles, from the zoom that shows the whole area to the
+  first one as fine as its pixels, in PNG, JPEG or WebP: one file for QGIS, QField or
+  MapLibre, or a `{z}/{x}/{y}` zip for a web server. The finest tiles are resampled from
+  the stored orthophoto and every coarser one is built from its four children, so the
+  orthophoto is read once. MBTiles uses the SQLite library WebSfM already loads for COLMAP
+  databases, only when it is needed; GDAL 3 reads the result in place.
 - **Rolling shutter for drones without a mechanical shutter.** Sparse Model ▸ 4 · Rolling
   shutter ▸ **Estimate the readout time** solves each camera group's readout time in
   bundle adjustment, with each camera's motion taken from the photos taken just before

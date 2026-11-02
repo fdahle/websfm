@@ -179,6 +179,18 @@ const CONFIG = {
       },
       { value: 'png', label: 'PNG + world file (.wld)' },
       { value: 'jpeg', label: 'JPEG + world file' },
+      {
+        value: 'mbtiles',
+        label: 'MBTiles — web map tiles (QGIS, QField, MapLibre)',
+        hint:
+          'Web Mercator tiles in one file, from the zoom that shows the whole area to the one as fine as the ' +
+          'orthophoto: for an offline field map or a web map.',
+      },
+      {
+        value: 'xyz',
+        label: 'XYZ tiles (.zip) — {z}/{x}/{y} folders',
+        hint: 'The same tiles as loose files, for a web server or a static web map.',
+      },
     ],
   },
   poses: {
@@ -314,6 +326,9 @@ const textureFormat = computed(() => settings.value.format === 'glb' || settings
 // nothing, since the format exists to make partial reads cheap.
 const isTiff = computed(() => settings.value.format === 'geotiff' || settings.value.format === 'cog')
 const isCog = computed(() => settings.value.format === 'cog')
+const isWebTiles = computed(
+  () => props.kind === 'ortho' && (settings.value.format === 'mbtiles' || settings.value.format === 'xyz'),
+)
 // LAS/LAZ point format 2 always carries RGB (written when the cloud has colour), so
 // the colour toggle only steers PLY and XYZ (useExports.js exportCloud).
 const isLasFormat = computed(() => settings.value.format === 'las' || settings.value.format === 'laz')
@@ -685,9 +700,17 @@ const orthoNodataApplies = computed(
           class="field-input"
         />
       </SettingsField>
+      <SettingsField v-if="isWebTiles" label-for="tfmt">
+        <template #label><FieldHelp op="orthophoto" param="tileFormat">Tile format</FieldHelp></template>
+        <select id="tfmt" v-model="settings.tileFormat" class="field-input field-select">
+          <option value="png">PNG — transparent edges</option>
+          <option value="jpeg">JPEG — smaller, white edges</option>
+          <option value="webp">WebP — small, transparent (newer viewers)</option>
+        </select>
+      </SettingsField>
       <SettingsField
-        v-if="settings.format === 'jpeg'"
-        :label="`JPEG quality: ${settings.jpegQuality.toFixed(2)}`"
+        v-if="settings.format === 'jpeg' || (isWebTiles && settings.tileFormat !== 'png')"
+        :label="`${isWebTiles ? 'Tile' : 'JPEG'} quality: ${settings.jpegQuality.toFixed(2)}`"
         label-for="jq"
       >
         <input

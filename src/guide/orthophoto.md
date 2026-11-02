@@ -123,8 +123,18 @@ way, products built on the old one are kept and marked outdated.
 The orthophoto is stored as a Cloud-Optimized GeoTIFF, so the **COG** export is that
 file. **GeoTIFF** is one plain file; uncompressed it is limited to 4 GiB. **PNG** and
 **JPEG** (up to 8,192 pixels a side) come with a world file and `.prj`; keep them beside
-the image. Inspect seams, leaning objects, ghosting and holes at full resolution in the
-orthophoto's tab before use.
+the image. **MBTiles** and **XYZ tiles** cut it into Web Mercator map tiles, from the
+zoom that shows the whole area to the first one as fine as its pixels: MBTiles is one
+file for QGIS, QField or MapLibre (an offline field map), XYZ a zip of `{z}/{x}/{y}`
+files for a web server. Inspect seams, leaning objects, ghosting and holes at full
+resolution in the orthophoto's tab before use.
+
+## Tile format
+<!-- param: tileFormat  default: PNG -->
+How each web map tile is stored. **PNG** keeps the edges of the area transparent and
+reads everywhere, but is the largest. **JPEG** is several times smaller, with the
+edges white. **WebP** is small and transparent, for newer viewers (QGIS 3.x, MapLibre,
+current browsers).
 
 ## Alpha band
 <!-- param: orthoAlpha  default: on -->
