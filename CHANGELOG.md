@@ -103,6 +103,9 @@ Notable changes to websfm. The format follows
   blocks the run (rebuild it first), and one built in the co-registered georeference
   adds to the move even when it is out of date for another reason, such as a rebuilt
   dense cloud. **Co-register** also waits while the Copernicus DEM is still downloading.
+- **Match Features no longer promises a full-size detection it skips.** With LightGlue,
+  or when matching a selection, *5 · Repair a split graph* said pieces still apart would
+  be detected again at full size; the run never does that there, and the line now says so.
 - **The match view shows the tie points joined through other photos.** A pair's view
   in **Matches** listed "via PnP" tie points in its legend but never drew them: the tie
   points both photos see in the model, which this pair did not match directly. They are

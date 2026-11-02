@@ -21,6 +21,16 @@ describe('repairEffect', () => {
     )
   })
 
+  it('does not promise a detection the run skips: LightGlue or a selection', () => {
+    const small = { images: 171, scale: 0.385, nativeMax: 10400 }
+    const lg = repairEffect(MATCH_DEFAULTS, MATCH_TUNING, small, { lightglue: true })
+    expect(lg).toContain('With LightGlue, pieces still apart keep their features')
+    expect(lg).not.toContain('detected again at full size (')
+    expect(repairEffect(MATCH_DEFAULTS, MATCH_TUNING, small, { selection: true })).toContain(
+      'A run on a selection never detects its images again',
+    )
+  })
+
   it('counts the SIFT images detected well under their size', () => {
     const im = (detectScale, detector = 'sift', kpStatus = 'done') => ({
       kpStatus,

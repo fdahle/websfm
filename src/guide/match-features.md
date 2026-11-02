@@ -204,8 +204,8 @@ pieces it joined.
 When pieces are still apart after the repair, their images and their best partners in
 the main block are detected again at full size and matched again, to find the detail
 that a reduced detection resolution lost. Only for SIFT images detected under 0.8× of
-their size, and not when more than half the block is apart: detect everything at full
-size then.
+their size and matched by brute force, not on a selection, and not when more than half
+the block is apart: detect everything at full size then.
 
 ## GPU acceleration
 With **Use GPU** on (Settings → Compute), brute-force matching runs on the graphics

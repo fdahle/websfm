@@ -222,7 +222,12 @@ const verifyEffect = computed(() =>
     ? `Matches that do not fit one epipolar geometry (within ${settings.value.ransacThreshPx} px at detection resolution) are discarded.`
     : 'Off — every putative match is kept, including the wrong ones.',
 )
-const repairLine = computed(() => repairEffect(settings.value, MATCH_TUNING, props.smallDetection))
+const repairLine = computed(() =>
+  repairEffect(settings.value, MATCH_TUNING, props.smallDetection, {
+    lightglue: matcher.value === 'lightglue',
+    selection: limited.value,
+  }),
+)
 const acceptFloor = computed(() => Math.min(MATCH_TUNING.rawSkipFloor, settings.value.minMatches))
 const acceptEffect = computed(() =>
   settings.value.geometricVerification

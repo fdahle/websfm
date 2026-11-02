@@ -33,7 +33,14 @@ export function onlyNewPairsEffect(s, { matchedPairs = 0, unpairedImages = 0 } =
 // The effect line of step 5, Repair a split graph, with Detect gaps again at full size.
 //   small: the SIFT images detected at under tuning.gapMaxScale of their size
 //   ({ images, scale: their median detection scale, nativeMax: the largest native side })
-export function repairEffect(s, tuning = MATCH_TUNING, small = { images: 0 }) {
+//   run: { lightglue, selection } — the run never detects gaps again with LightGlue or
+//   on a selection (stores/matching/matchAll.js ▸ gapPossible)
+export function repairEffect(
+  s,
+  tuning = MATCH_TUNING,
+  small = { images: 0 },
+  { lightglue = false, selection = false } = {},
+) {
   if (s.repairSplits === false)
     return 'Off: a block that matching leaves in pieces stays in pieces, and SfM can only place them apart.'
   const repair =
@@ -42,6 +49,10 @@ export function repairEffect(s, tuning = MATCH_TUNING, small = { images: 0 }) {
     `matched again with looser gates; F-RANSAC still verifies them.`
   let gap
   if (s.gapRedetect === false) gap = 'Pieces still apart then keep the features they were detected with.'
+  else if (lightglue)
+    gap = 'With LightGlue, pieces still apart keep their features: only brute-force matching detects them again.'
+  else if (selection)
+    gap = 'A run on a selection never detects its images again: pieces still apart keep their features.'
   else if (!small.images)
     gap = 'Every image was detected at full size or by a learned detector: nothing to detect again.'
   else
