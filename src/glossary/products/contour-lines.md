@@ -33,4 +33,4 @@ grid crossings; strong smoothing pulls closed rings slightly inwards, and 0 keep
 exact crossings. Lines shorter than a set length can be dropped. The result goes on
 the 2D map as a line layer, and downloads as GeoJSON, each line carrying its elevation
 and an index flag, or as DXF for CAD, with index contours on their own layer. The DEM itself is not changed. See
-[Build a DEM](guide:dem).
+[Build DEM](guide:dem).

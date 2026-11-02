@@ -25,4 +25,4 @@ photo's colour.
 In an [orthophoto](help:orthophoto) WebSfM blends in five bands, so the coarsest
 fades over about a hundred pixels either side, after per-photo colour balance has already
 removed most of the exposure difference. See [Seamline](help:seamline) and
-[Build an Orthophoto](guide:orthophoto).
+[Build Orthophoto](guide:orthophoto).

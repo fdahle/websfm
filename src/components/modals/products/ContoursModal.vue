@@ -1,10 +1,10 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { CONTOUR_DEFAULTS } from '../../../core/defaults.user.js'
 import { contourLevels, MAX_CONTOUR_LEVELS } from '../../../core/products/contours.js'
 import { contoursEffects } from '../../../core/stepEffects/contours.js'
@@ -95,7 +95,16 @@ function run() {
     <WarnBox v-if="!dem">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>).</WarnBox>
     <template v-else>
       <SettingsStep step="1" title="Pick the levels" :effect="effects.levels">
-        <SettingsField label="Interval" label-for="ct-int" :unit="unit" :hint="`0 = auto (${autoInterval} ${unit}).`">
+        <SettingsField label-for="ct-int" :unit="unit" :hint="`0 = auto (${autoInterval} ${unit}).`">
+          <template #label
+            ><FieldHelp
+              op="contours"
+              param="interval"
+              :value="settings.interval"
+              :default-value="CONTOUR_DEFAULTS.interval"
+              >Interval</FieldHelp
+            ></template
+          >
           <input
             id="ct-int"
             v-model.number="settings.interval"
@@ -111,7 +120,15 @@ function run() {
           unit="lines"
           hint="Index contours go on their own layer (drawn heavier in GIS/CAD)."
         >
-          <template #label><GlossaryTerm id="contour-lines">Index contour</GlossaryTerm> every</template>
+          <template #label
+            ><FieldHelp
+              op="contours"
+              param="indexEvery"
+              :value="settings.indexEvery"
+              :default-value="CONTOUR_DEFAULTS.indexEvery"
+              >Index contour every</FieldHelp
+            ></template
+          >
           <input
             id="ct-index"
             v-model.number="settings.indexEvery"
@@ -125,11 +142,19 @@ function run() {
       </SettingsStep>
       <SettingsStep step="2" title="Trace and shape" :effect="effects.shape">
         <SettingsField
-          label="Smooth the DEM first"
           label-for="ct-gen"
           unit="cells"
           hint="Gaussian σ. Removes the noise rings of a photogrammetric DEM; 0 traces the heights as they are."
         >
+          <template #label
+            ><FieldHelp
+              op="contours"
+              param="generalize"
+              :value="settings.generalize"
+              :default-value="CONTOUR_DEFAULTS.generalize"
+              >Smooth the DEM first</FieldHelp
+            ></template
+          >
           <input
             id="ct-gen"
             v-model.number="settings.generalize"
@@ -141,7 +166,12 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-        <SettingsField label="Smoothing" label-for="ct-smooth" unit="passes" hint="0 keeps the exact grid crossings.">
+        <SettingsField label-for="ct-smooth" unit="passes" hint="0 keeps the exact grid crossings.">
+          <template #label
+            ><FieldHelp op="contours" param="smooth" :value="settings.smooth" :default-value="CONTOUR_DEFAULTS.smooth"
+              >Smoothing</FieldHelp
+            ></template
+          >
           <input
             id="ct-smooth"
             v-model.number="settings.smooth"
@@ -153,7 +183,16 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-        <SettingsField label="Drop lines shorter than" label-for="ct-min" unit="cells" hint="0 keeps every line.">
+        <SettingsField label-for="ct-min" unit="cells" hint="0 keeps every line.">
+          <template #label
+            ><FieldHelp
+              op="contours"
+              param="minCells"
+              :value="settings.minCells"
+              :default-value="CONTOUR_DEFAULTS.minCells"
+              >Drop lines shorter than</FieldHelp
+            ></template
+          >
           <input
             id="ct-min"
             v-model.number="settings.minCells"
@@ -166,7 +205,8 @@ function run() {
         </SettingsField>
       </SettingsStep>
       <SettingsStep step="3" title="Place and save" :effect="effects.result">
-        <SettingsField label="Download" label-for="ct-fmt">
+        <SettingsField label-for="ct-fmt">
+          <template #label><FieldHelp op="contours" param="format">Download</FieldHelp></template>
           <select id="ct-fmt" v-model="settings.format" class="field-select">
             <option v-if="onMap" value="none">No download</option>
             <option value="geojson">GeoJSON (GIS)</option>

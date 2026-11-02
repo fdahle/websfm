@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -7,7 +8,6 @@ import SettingsStep from '../ui/SettingsStep.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { DECIMATE_MESH_DEFAULTS } from '../../../core/defaults.user.js'
 import { decimateMeshEffects } from '../../../core/stepEffects/decimateMesh.js'
@@ -71,15 +71,19 @@ function run() {
       </SettingsGroup>
       <SettingsStep step="1" title="Collapse edges" :effect="effects.collapse">
         <SettingsField>
-          <template #label><GlossaryTerm id="mesh-decimation">Reduce to</GlossaryTerm></template>
+          <template #label><FieldHelp op="decimate-mesh" param="targetMode">Reduce to</FieldHelp></template>
           <SegmentedControl v-model="settings.targetMode" :options="MODES" />
         </SettingsField>
-        <SettingsField
-          v-if="settings.targetMode === 'ratio'"
-          label="Share of triangles"
-          label-for="dec-ratio"
-          unit="× source"
-        >
+        <SettingsField v-if="settings.targetMode === 'ratio'" label-for="dec-ratio" unit="× source">
+          <template #label
+            ><FieldHelp
+              op="decimate-mesh"
+              param="targetRatio"
+              :value="settings.targetRatio"
+              :default-value="DECIMATE_MESH_DEFAULTS.targetRatio"
+              >Share of triangles</FieldHelp
+            ></template
+          >
           <input
             id="dec-ratio"
             v-model.number="settings.targetRatio"
@@ -90,7 +94,16 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-        <SettingsField v-else label="Triangles" label-for="dec-count">
+        <SettingsField v-else label-for="dec-count">
+          <template #label
+            ><FieldHelp
+              op="decimate-mesh"
+              param="targetTriangles"
+              :value="settings.targetTriangles"
+              :default-value="DECIMATE_MESH_DEFAULTS.targetTriangles"
+              >Triangles</FieldHelp
+            ></template
+          >
           <input
             id="dec-count"
             v-model.number="settings.targetTriangles"
@@ -102,7 +115,14 @@ function run() {
         </SettingsField>
         <SettingsField hint="Keeps an open surface's outline (a terrain edge, a cut) from being eaten away.">
           <label class="checkbox-row"
-            ><input v-model="settings.preserveBoundary" type="checkbox" class="checkbox" /> Preserve the boundary</label
+            ><input v-model="settings.preserveBoundary" type="checkbox" class="checkbox" />
+            <FieldHelp
+              op="decimate-mesh"
+              param="preserveBoundary"
+              :value="settings.preserveBoundary"
+              :default-value="DECIMATE_MESH_DEFAULTS.preserveBoundary"
+              >Preserve the boundary</FieldHelp
+            ></label
           >
         </SettingsField>
       </SettingsStep>

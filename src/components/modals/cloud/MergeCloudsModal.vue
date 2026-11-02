@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -61,7 +62,16 @@ function run() {
       </SettingsStep>
 
       <SettingsStep step="2" title="Remove the overlap" :effect="effects.overlap" :inactive="!(settings.cell > 0)">
-        <SettingsField label="Dedupe cell" label-for="merge-cell" unit="units" hint="0 = plain concatenation.">
+        <SettingsField label-for="merge-cell" unit="units" hint="0 = plain concatenation.">
+          <template #label
+            ><FieldHelp
+              op="merge-clouds"
+              param="cell"
+              :value="settings.cell"
+              :default-value="MERGE_CLOUDS_DEFAULTS.cell"
+              >Dedupe cell</FieldHelp
+            ></template
+          >
           <input id="merge-cell" v-model.number="settings.cell" type="number" min="0" step="any" class="field-input" />
         </SettingsField>
       </SettingsStep>

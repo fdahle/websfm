@@ -1,6 +1,6 @@
 ---
 id: depth-maps
-title: Depth Maps
+title: Build Depth Maps
 summary: Estimates a depth and surface normal for image pixels using neighbouring registered views.
 category: Dense reconstruction
 order: 50

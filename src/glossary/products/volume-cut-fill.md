@@ -33,4 +33,4 @@ under it, which is why the base has to be assumed.
 In WebSfM, **Tools ▸ Measure ▸ Volume** draws the polygon on a DEM and offers a
 best-fit plane, the lowest vertex, a custom height or an imported reference DEM as
 the base. The units are the DEM's horizontal unit squared times its vertical unit,
-and a projected CRS's scale factor is divided out. See [Build a DEM](guide:dem).
+and a projected CRS's scale factor is divided out. See [Build DEM](guide:dem).

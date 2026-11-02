@@ -30,4 +30,4 @@ neighbouring pixels when they shrink a texture for distant viewing, and without 
 margin the chart's edge would pick up the colour of whatever was packed next to it.
 
 Formats: glTF/GLB embeds the pages in the file; OBJ refers to them from a separate
-material (MTL) file. See [Texture a Mesh](guide:texture-mesh).
+material (MTL) file. See [Texture Mesh](guide:texture-mesh).

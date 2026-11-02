@@ -23,4 +23,4 @@ Two choices keep it from doing harm. WebSfM levels **brightness only**: correcti
 red, green and blue separately turned a vine chart purple where its seams met brick.
 And a seam whose two sides differ a lot, which usually means misaligned detail rather
 than a colour shift, pulls less. Corrections are capped at 40 grey levels. See
-[Texture a Mesh](guide:texture-mesh).
+[Texture Mesh](guide:texture-mesh).

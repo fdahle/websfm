@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -7,7 +8,6 @@ import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { SMOOTH_MESH_DEFAULTS } from '../../../core/defaults.user.js'
 import { smoothMeshEffects } from '../../../core/stepEffects/smoothMesh.js'
@@ -55,11 +55,16 @@ function run() {
         />
       </SettingsGroup>
       <SettingsStep step="1" title="Smooth" :effect="effects.smooth">
-        <SettingsField
-          label="Iterations"
-          label-for="smooth-it"
-          hint="Each pass removes finer noise; more passes also soften real edges."
-        >
+        <SettingsField label-for="smooth-it" hint="Each pass removes finer noise; more passes also soften real edges.">
+          <template #label
+            ><FieldHelp
+              op="smooth-mesh"
+              param="iterations"
+              :value="settings.iterations"
+              :default-value="SMOOTH_MESH_DEFAULTS.iterations"
+              >Iterations</FieldHelp
+            ></template
+          >
           <input
             id="smooth-it"
             v-model.number="settings.iterations"
@@ -72,14 +77,29 @@ function run() {
         </SettingsField>
         <SettingsField hint="Keeps the outline of an open surface (a terrain edge) where it is.">
           <label class="checkbox-row"
-            ><input v-model="settings.fixBoundary" type="checkbox" class="checkbox" /> Keep the boundary fixed</label
+            ><input v-model="settings.fixBoundary" type="checkbox" class="checkbox" />
+            <FieldHelp
+              op="smooth-mesh"
+              param="fixBoundary"
+              :value="settings.fixBoundary"
+              :default-value="SMOOTH_MESH_DEFAULTS.fixBoundary"
+              >Keep the boundary fixed</FieldHelp
+            ></label
           >
         </SettingsField>
       </SettingsStep>
       <AdvancedDisclosure label="Advanced settings">
         <SettingsStep step="1" title="Smooth — advanced">
           <SettingsField label-for="smooth-l">
-            <template #label><GlossaryTerm id="mesh-smoothing">λ (smooth)</GlossaryTerm></template>
+            <template #label
+              ><FieldHelp
+                op="smooth-mesh"
+                param="lambda"
+                :value="settings.lambda"
+                :default-value="SMOOTH_MESH_DEFAULTS.lambda"
+                >λ (smooth)</FieldHelp
+              ></template
+            >
             <input
               id="smooth-l"
               v-model.number="settings.lambda"
@@ -90,11 +110,12 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-          <SettingsField
-            label="μ (inflate)"
-            label-for="smooth-m"
-            hint="Must be more negative than −λ, or the mesh shrinks."
-          >
+          <SettingsField label-for="smooth-m" hint="Must be more negative than −λ, or the mesh shrinks.">
+            <template #label
+              ><FieldHelp op="smooth-mesh" param="mu" :value="settings.mu" :default-value="SMOOTH_MESH_DEFAULTS.mu"
+                >μ (inflate)</FieldHelp
+              ></template
+            >
             <input id="smooth-m" v-model.number="settings.mu" type="number" max="0" step="0.01" class="field-input" />
           </SettingsField>
         </SettingsStep>

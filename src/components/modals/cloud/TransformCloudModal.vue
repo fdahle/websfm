@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -86,24 +87,28 @@ function run() {
           :items="clouds"
           hint="Adds a transformed copy; this one is left untouched."
         />
-        <SettingsField label="Define by">
+        <SettingsField>
+          <template #label><FieldHelp op="transform-cloud" param="mode">Define by</FieldHelp></template>
           <SegmentedControl v-model="mode" :options="MODES" />
         </SettingsField>
       </SettingsGroup>
 
       <template v-if="mode === 'params'">
         <SettingsStep step="1" title="Rotate and scale" :effect="effects.rotate">
-          <SettingsField label="Rotate (X, Y, Z)" unit="°" hint="About fixed world axes, X first, then Y, then Z.">
+          <SettingsField unit="°" hint="About fixed world axes, X first, then Y, then Z.">
+            <template #label><FieldHelp op="transform-cloud" param="rotate">Rotate (X, Y, Z)</FieldHelp></template>
             <div class="input-row">
               <input v-model.number="p.rx" type="number" step="any" class="field-input" aria-label="Rotate X" />
               <input v-model.number="p.ry" type="number" step="any" class="field-input" aria-label="Rotate Y" />
               <input v-model.number="p.rz" type="number" step="any" class="field-input" aria-label="Rotate Z" />
             </div>
           </SettingsField>
-          <SettingsField label="Scale" label-for="tf-scale" unit="×">
+          <SettingsField label-for="tf-scale" unit="×">
+            <template #label><FieldHelp op="transform-cloud" param="scale">Scale</FieldHelp></template>
             <input id="tf-scale" v-model.number="p.scale" type="number" min="0.000001" step="any" class="field-input" />
           </SettingsField>
-          <SettingsField label="About" label-for="tf-pivot">
+          <SettingsField label-for="tf-pivot">
+            <template #label><FieldHelp op="transform-cloud" param="pivot">About</FieldHelp></template>
             <select id="tf-pivot" v-model="p.pivot" class="field-select">
               <option value="centre">The cloud's centre</option>
               <option value="origin">The coordinate origin</option>
@@ -111,7 +116,8 @@ function run() {
           </SettingsField>
         </SettingsStep>
         <SettingsStep step="2" title="Move" :effect="effects.move">
-          <SettingsField label="Move (X, Y, Z)" hint="In the cloud's own coordinates.">
+          <SettingsField hint="In the cloud's own coordinates.">
+            <template #label><FieldHelp op="transform-cloud" param="move">Move (X, Y, Z)</FieldHelp></template>
             <div class="input-row">
               <input v-model.number="p.tx" type="number" step="any" class="field-input" aria-label="Move X" />
               <input v-model.number="p.ty" type="number" step="any" class="field-input" aria-label="Move Y" />
@@ -122,10 +128,10 @@ function run() {
       </template>
       <SettingsStep v-else step="1" title="Apply the matrix" :effect="effects.matrix">
         <SettingsField
-          label="Row-major 4×4 (or 3×4)"
           label-for="tf-matrix"
           hint="16 or 12 numbers, separated by spaces, commas or new lines — e.g. pasted from CloudCompare."
         >
+          <template #label><FieldHelp op="transform-cloud" param="matrix">Row-major 4×4 (or 3×4)</FieldHelp></template>
           <textarea id="tf-matrix" v-model="matrixText" rows="4" class="field-input mono" spellcheck="false" />
         </SettingsField>
       </SettingsStep>

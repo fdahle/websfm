@@ -31,4 +31,4 @@ In WebSfM, **Tools ▸ Mesh ▸ Smooth** runs Taubin smoothing with $\lambda = 0
 $\mu = -0.53$, 10 iterations by default. **Keep the boundary fixed** (on by default)
 pins every vertex on an open edge, so a terrain mesh keeps its outline. The
 triangles and colours are unchanged, and the result is a new mesh. See
-[Build a Mesh](guide:mesh).
+[Build Mesh](guide:mesh).

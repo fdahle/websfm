@@ -1,6 +1,6 @@
 ---
 id: import-project
-title: Import a Project
+title: Import Project
 summary: Brings another WebSfM project's photos, features and matches into this one, so two flights, two days or a colleague's block can be joined into one model.
 category: Reconstruction pipeline
 order: 11

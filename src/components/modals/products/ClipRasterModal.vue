@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -121,6 +122,7 @@ function run() {
       </SettingsGroup>
       <SettingsStep step="1" title="Polygon" :effect="effects.polygon">
         <SettingsField>
+          <template #label><FieldHelp op="clip-raster" param="polygon">Polygon</FieldHelp></template>
           <label class="checkbox-row"
             ><input
               v-model="sourceMode"
@@ -153,7 +155,8 @@ function run() {
         </SettingsField>
       </SettingsStep>
       <SettingsStep step="2" title="Save" :effect="effects.save">
-        <SettingsField label="Compression" label-for="clip-comp">
+        <SettingsField label-for="clip-comp">
+          <template #label><FieldHelp op="clip-raster" param="compression">Compression</FieldHelp></template>
           <select id="clip-comp" v-model="compression" class="field-select">
             <option value="deflate">DEFLATE</option>
             <option value="none">None</option>

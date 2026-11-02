@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -6,7 +7,6 @@ import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, cloudOptionLabel } from '../../../composables/useSourcePick.js'
 import { NORMALS_DEFAULTS } from '../../../core/defaults.user.js'
 import { normalsEffects } from '../../../core/stepEffects/normals.js'
@@ -75,17 +75,18 @@ function run() {
         />
       </SettingsGroup>
       <SettingsStep step="1" title="Fit local planes" :effect="effects.fit">
-        <SettingsField
-          label="Neighbours"
-          label-for="nrm-k"
-          hint="More is smoother and slower; fewer keeps sharp edges."
-        >
+        <SettingsField label-for="nrm-k" hint="More is smoother and slower; fewer keeps sharp edges.">
+          <template #label
+            ><FieldHelp op="estimate-normals" param="k" :value="settings.k" :default-value="NORMALS_DEFAULTS.k"
+              >Neighbours</FieldHelp
+            ></template
+          >
           <input id="nrm-k" v-model.number="settings.k" type="number" min="6" max="64" step="1" class="field-input" />
         </SettingsField>
       </SettingsStep>
       <SettingsStep step="2" title="Orient" :effect="effects.orient">
         <SettingsField label-for="nrm-orient">
-          <template #label><GlossaryTerm id="surface-normal">Point normals</GlossaryTerm> face</template>
+          <template #label><FieldHelp op="estimate-normals" param="orient">Point normals face</FieldHelp></template>
           <select id="nrm-orient" v-model="settings.orient" class="field-select">
             <option value="auto">Automatic</option>
             <option value="cameras" :disabled="!hasCameras">Towards the cameras</option>

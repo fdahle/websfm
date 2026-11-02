@@ -29,4 +29,4 @@ stored file. A DEM can be exported as a COG too. Overviews are made by averaging
 each 2×2 block and skipping nodata, rather than keeping every second pixel, which on
 a noisy DEM would read as noise rather than terrain. An imported reference raster
 gets a tiled copy with overviews prepared in the background and saved with the
-project. See [Build an Orthophoto](guide:orthophoto).
+project. See [Build Orthophoto](guide:orthophoto).

@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -73,7 +74,8 @@ function run() {
           ><input type="checkbox" class="checkbox" :checked="has('slope')" @change="toggle('slope')" /> Make a
           <GlossaryTerm id="terrain-derivatives">slope</GlossaryTerm> raster</label
         >
-        <SettingsField v-if="has('slope')" label="Units" label-for="tr-units">
+        <SettingsField v-if="has('slope')" label-for="tr-units">
+          <template #label><FieldHelp op="terrain-derivatives" param="slopeUnits">Units</FieldHelp></template>
           <select id="tr-units" v-model="settings.slopeUnits" class="field-select">
             <option value="degrees">Degrees</option>
             <option value="percent">Percent (rise / run × 100)</option>
@@ -92,12 +94,16 @@ function run() {
           <GlossaryTerm id="terrain-derivatives">hillshade</GlossaryTerm></label
         >
         <template v-if="has('hillshade')">
-          <SettingsField
-            label="Sun azimuth"
-            label-for="tr-az"
-            unit="°"
-            hint="315 = from the north-west, the cartographic convention."
-          >
+          <SettingsField label-for="tr-az" unit="°" hint="315 = from the north-west, the cartographic convention.">
+            <template #label
+              ><FieldHelp
+                op="terrain-derivatives"
+                param="azimuth"
+                :value="settings.azimuth"
+                :default-value="TERRAIN_DEFAULTS.azimuth"
+                >Sun azimuth</FieldHelp
+              ></template
+            >
             <input
               id="tr-az"
               v-model.number="settings.azimuth"
@@ -109,7 +115,16 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-          <SettingsField label="Sun altitude" label-for="tr-alt" unit="°">
+          <SettingsField label-for="tr-alt" unit="°">
+            <template #label
+              ><FieldHelp
+                op="terrain-derivatives"
+                param="altitude"
+                :value="settings.altitude"
+                :default-value="TERRAIN_DEFAULTS.altitude"
+                >Sun altitude</FieldHelp
+              ></template
+            >
             <input
               id="tr-alt"
               v-model.number="settings.altitude"
@@ -123,13 +138,21 @@ function run() {
           </SettingsField>
           <SettingsField hint="Blends four sun directions, so no slope disappears into shadow.">
             <label class="checkbox-row"
-              ><input v-model="settings.multidirectional" type="checkbox" class="checkbox" /> Multidirectional</label
+              ><input v-model="settings.multidirectional" type="checkbox" class="checkbox" />
+              <FieldHelp
+                op="terrain-derivatives"
+                param="multidirectional"
+                :value="settings.multidirectional"
+                :default-value="TERRAIN_DEFAULTS.multidirectional"
+                >Multidirectional</FieldHelp
+              ></label
             >
           </SettingsField>
         </template>
       </SettingsStep>
       <SettingsStep step="4" title="Save" :effect="effects.save" :inactive="!settings.products.length">
-        <SettingsField label="Compression" label-for="tr-comp">
+        <SettingsField label-for="tr-comp">
+          <template #label><FieldHelp op="terrain-derivatives" param="compression">Compression</FieldHelp></template>
           <select id="tr-comp" v-model="settings.compression" class="field-select">
             <option value="deflate">DEFLATE</option>
             <option value="none">None</option>

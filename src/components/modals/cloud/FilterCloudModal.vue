@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -10,7 +11,6 @@ import WarnBox from '../ui/WarnBox.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META } from '../../../core/defaults.user.js'
 import { filterCloudEffects } from '../../../core/stepEffects/filterCloud.js'
 
@@ -116,13 +116,15 @@ function run() {
           ><input type="checkbox" class="checkbox" :checked="has('range')" @change="toggle('range')" /> Enabled</label
         >
         <template v-if="has('range')">
-          <SettingsField label="Elevation (Z)" hint="Leave empty for unbounded.">
+          <SettingsField hint="Leave empty for unbounded.">
+            <template #label><FieldHelp op="filter-cloud" param="zRange">Elevation (Z)</FieldHelp></template>
             <div class="input-row">
               <input v-model.number="settings.zMin" type="number" step="any" class="field-input" placeholder="min" />
               <input v-model.number="settings.zMax" type="number" step="any" class="field-input" placeholder="max" />
             </div>
           </SettingsField>
-          <SettingsField label="Brightness" unit="0–255" hint="Rec. 709 luma. Ignored on a cloud with no colour.">
+          <SettingsField unit="0–255" hint="Rec. 709 luma. Ignored on a cloud with no colour.">
+            <template #label><FieldHelp op="filter-cloud" param="lumaRange">Brightness</FieldHelp></template>
             <div class="input-row">
               <input
                 v-model.number="settings.lumaMin"
@@ -173,7 +175,6 @@ function run() {
       >
         <SettingsStep v-if="has('voxel')" step="2" title="Voxel downsample — advanced">
           <SettingsField
-            label="Cell size"
             label-for="filter-voxel"
             unit="units"
             :hint="
@@ -182,6 +183,15 @@ function run() {
                 : '0 = auto (about one point spacing)'
             "
           >
+            <template #label
+              ><FieldHelp
+                op="filter-cloud"
+                param="voxelCell"
+                :value="settings.voxelCell"
+                :default-value="FILTER_CLOUD_DEFAULTS.voxelCell"
+                >Cell size</FieldHelp
+              ></template
+            >
             <input
               id="filter-voxel"
               v-model.number="settings.voxelCell"
@@ -195,11 +205,19 @@ function run() {
 
         <SettingsStep v-if="has('isolated')" step="3" title="Isolated clusters — advanced">
           <SettingsField
-            label="Cell size"
             label-for="filter-iso-cell"
             unit="units"
             hint="Occupancy grid cell. 0 = auto (about 4× the point spacing)."
           >
+            <template #label
+              ><FieldHelp
+                op="filter-cloud"
+                param="isolatedCell"
+                :value="settings.isolatedCell"
+                :default-value="FILTER_CLOUD_DEFAULTS.isolatedCell"
+                >Cell size</FieldHelp
+              ></template
+            >
             <input
               id="filter-iso-cell"
               v-model.number="settings.isolatedCell"
@@ -210,10 +228,18 @@ function run() {
             />
           </SettingsField>
           <SettingsField
-            label="Min occupied neighbours"
             label-for="filter-iso-nb"
             hint="A low-support cell needs this many of its 26 neighbours occupied to survive."
           >
+            <template #label
+              ><FieldHelp
+                op="filter-cloud"
+                param="isolatedMinNeighbors"
+                :value="settings.isolatedMinNeighbors"
+                :default-value="FILTER_CLOUD_DEFAULTS.isolatedMinNeighbors"
+                >Min occupied neighbours</FieldHelp
+              ></template
+            >
             <input
               id="filter-iso-nb"
               v-model.number="settings.isolatedMinNeighbors"
@@ -225,11 +251,19 @@ function run() {
             />
           </SettingsField>
           <SettingsField
-            label="Max tested support"
             label-for="filter-iso-sup"
             unit="points"
             hint="Cells holding more points than this are never tested — they are real surface."
           >
+            <template #label
+              ><FieldHelp
+                op="filter-cloud"
+                param="isolatedMaxSupport"
+                :value="settings.isolatedMaxSupport"
+                :default-value="FILTER_CLOUD_DEFAULTS.isolatedMaxSupport"
+                >Max tested support</FieldHelp
+              ></template
+            >
             <input
               id="filter-iso-sup"
               v-model.number="settings.isolatedMaxSupport"
@@ -244,10 +278,18 @@ function run() {
 
         <SettingsStep v-if="has('sor')" step="4" title="Statistical outliers — advanced">
           <SettingsField
-            label="Neighbours"
             label-for="filter-sor-k"
             hint="How many nearest neighbours the per-point mean distance averages over."
           >
+            <template #label
+              ><FieldHelp
+                op="filter-cloud"
+                param="sorK"
+                :value="settings.sorK"
+                :default-value="FILTER_CLOUD_DEFAULTS.sorK"
+                >Neighbours</FieldHelp
+              ></template
+            >
             <input
               id="filter-sor-k"
               v-model.number="settings.sorK"
@@ -263,7 +305,15 @@ function run() {
             unit="σ"
             hint="Drop points above mean + ratio × σ. Lower is more aggressive."
           >
-            <template #label><GlossaryTerm id="statistical-outlier-removal">Std-dev ratio</GlossaryTerm></template>
+            <template #label
+              ><FieldHelp
+                op="filter-cloud"
+                param="sorStdRatio"
+                :value="settings.sorStdRatio"
+                :default-value="FILTER_CLOUD_DEFAULTS.sorStdRatio"
+                >Std-dev ratio</FieldHelp
+              ></template
+            >
             <input
               id="filter-sor-std"
               v-model.number="settings.sorStdRatio"

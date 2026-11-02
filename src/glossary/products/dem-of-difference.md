@@ -25,4 +25,4 @@ In WebSfM, the **Volume** tool on the computed DEM can take an imported referenc
 as its base, so the result is gain, loss and net change inside a polygon. Without one,
 the global background terrain (about 30 m cells) can be the base: enough to see a
 large change or an offset of the whole DEM, not a small one. See
-[Build a DEM](guide:dem).
+[Build DEM](guide:dem).

@@ -32,7 +32,7 @@ quarter by default) or to a set count. A collapse that would fold a triangle ove
 make an edge shared by more than two triangles is refused. **Preserve the boundary**
 (on by default) makes collapses along an open edge expensive, so a terrain outline
 or a cut is not eaten away. The merged vertex takes the colour interpolated along
-the collapsed edge, and the result is a new mesh. See [Build a Mesh](guide:mesh).
+the collapsed edge, and the result is a new mesh. See [Build Mesh](guide:mesh).
 
 A large mesh is decimated in **blocks**, one per worker: each block with the vertices
 it shares with another block locked (never moved or removed), so the blocks still meet

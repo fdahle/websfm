@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -7,7 +8,6 @@ import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, referenceOptionLabel } from '../../../composables/useSourcePick.js'
 import { ICP_DEFAULTS } from '../../../core/defaults.user.js'
 import { alignIcpEffects } from '../../../core/stepEffects/alignIcp.js'
@@ -105,11 +105,19 @@ function run() {
       </SettingsGroup>
       <SettingsStep step="1" title="Pair up points" :effect="effects.pair">
         <SettingsField
-          label="Search radius"
           label-for="icp-radius"
           :unit="unitLabel"
           :hint="`0 = auto (${autoRadius.toPrecision(3)}, ten point spacings). Must exceed the current misalignment.`"
         >
+          <template #label
+            ><FieldHelp
+              op="align-icp"
+              param="maxDistance"
+              :value="settings.maxDistance"
+              :default-value="ICP_DEFAULTS.maxDistance"
+              >Search radius</FieldHelp
+            ></template
+          >
           <input
             id="icp-radius"
             v-model.number="settings.maxDistance"
@@ -126,13 +134,29 @@ function run() {
           hint="For clouds from different sensors or reconstructions with a scale mismatch. Point-to-point constrains scale better on flat scenes."
         >
           <label class="checkbox-row"
-            ><input v-model="settings.estimateScale" type="checkbox" class="checkbox" /> Also fit scale</label
+            ><input v-model="settings.estimateScale" type="checkbox" class="checkbox" />
+            <FieldHelp
+              op="align-icp"
+              param="estimateScale"
+              :value="settings.estimateScale"
+              :default-value="ICP_DEFAULTS.estimateScale"
+              >Also fit scale</FieldHelp
+            ></label
           >
         </SettingsField>
       </SettingsStep>
       <AdvancedDisclosure label="Advanced settings">
         <SettingsStep step="1" title="Pair up points — advanced">
-          <SettingsField label="Sample points" label-for="icp-n" hint="Points of the moving cloud used per iteration.">
+          <SettingsField label-for="icp-n" hint="Points of the moving cloud used per iteration.">
+            <template #label
+              ><FieldHelp
+                op="align-icp"
+                param="sampleCount"
+                :value="settings.sampleCount"
+                :default-value="ICP_DEFAULTS.sampleCount"
+                >Sample points</FieldHelp
+              ></template
+            >
             <input
               id="icp-n"
               v-model.number="settings.sampleCount"
@@ -145,7 +169,16 @@ function run() {
           </SettingsField>
         </SettingsStep>
         <SettingsStep step="2" title="Solve the motion — advanced">
-          <SettingsField label="Iterations" label-for="icp-it">
+          <SettingsField label-for="icp-it">
+            <template #label
+              ><FieldHelp
+                op="align-icp"
+                param="maxIterations"
+                :value="settings.maxIterations"
+                :default-value="ICP_DEFAULTS.maxIterations"
+                >Iterations</FieldHelp
+              ></template
+            >
             <input
               id="icp-it"
               v-model.number="settings.maxIterations"
@@ -160,7 +193,13 @@ function run() {
           <SettingsField>
             <label class="checkbox-row"
               ><input v-model="settings.pointToPlane" type="checkbox" class="checkbox" />
-              <GlossaryTerm id="icp">Point-to-plane</GlossaryTerm> (when the reference has normals)</label
+              <FieldHelp
+                op="align-icp"
+                param="pointToPlane"
+                :value="settings.pointToPlane"
+                :default-value="ICP_DEFAULTS.pointToPlane"
+                >Point-to-plane (when the reference has normals)</FieldHelp
+              ></label
             >
           </SettingsField>
         </SettingsStep>

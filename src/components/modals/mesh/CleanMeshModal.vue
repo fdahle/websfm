@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -100,7 +101,8 @@ function run() {
             hint="Closes every opening, including an open surface's outer rim — for objects to 3D-print or measure volume, not for terrain."
           >
             <label class="checkbox-row"
-              ><input v-model="fillAll" type="checkbox" class="checkbox" /> Close all holes (watertight)</label
+              ><input v-model="fillAll" type="checkbox" class="checkbox" />
+              <FieldHelp op="clean-mesh" param="fillAll">Close all holes (watertight)</FieldHelp></label
             >
           </SettingsField>
         </template>
@@ -123,7 +125,16 @@ function run() {
         label="Advanced settings"
       >
         <SettingsStep v-if="has('components')" step="2" title="Remove small pieces — advanced">
-          <SettingsField label="Smaller than" label-for="clean-frac" unit="× largest piece">
+          <SettingsField label-for="clean-frac" unit="× largest piece">
+            <template #label
+              ><FieldHelp
+                op="clean-mesh"
+                param="minFraction"
+                :value="settings.minFraction"
+                :default-value="CLEAN_MESH_DEFAULTS.minFraction"
+                >Smaller than</FieldHelp
+              ></template
+            >
             <input
               id="clean-frac"
               v-model.number="settings.minFraction"
@@ -134,7 +145,16 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-          <SettingsField label="Or fewer than" label-for="clean-min" unit="triangles">
+          <SettingsField label-for="clean-min" unit="triangles">
+            <template #label
+              ><FieldHelp
+                op="clean-mesh"
+                param="minTriangles"
+                :value="settings.minTriangles"
+                :default-value="CLEAN_MESH_DEFAULTS.minTriangles"
+                >Or fewer than</FieldHelp
+              ></template
+            >
             <input
               id="clean-min"
               v-model.number="settings.minTriangles"
@@ -147,11 +167,19 @@ function run() {
         </SettingsStep>
         <SettingsStep v-if="has('longEdges')" step="3" title="Remove long-edge bridges — advanced">
           <SettingsField
-            label="Longer than"
             label-for="clean-edge"
             unit="× median edge"
             hint="Poisson stretches long thin triangles across gaps in the data. Lower removes more."
           >
+            <template #label
+              ><FieldHelp
+                op="clean-mesh"
+                param="maxEdgeFactor"
+                :value="settings.maxEdgeFactor"
+                :default-value="CLEAN_MESH_DEFAULTS.maxEdgeFactor"
+                >Longer than</FieldHelp
+              ></template
+            >
             <input
               id="clean-edge"
               v-model.number="settings.maxEdgeFactor"
@@ -163,7 +191,16 @@ function run() {
           </SettingsField>
         </SettingsStep>
         <SettingsStep v-if="has('holes') && !fillAll" step="4" title="Fill holes — advanced">
-          <SettingsField label="Up to" label-for="clean-hole" unit="edges around the hole">
+          <SettingsField label-for="clean-hole" unit="edges around the hole">
+            <template #label
+              ><FieldHelp
+                op="clean-mesh"
+                param="maxHoleEdges"
+                :value="settings.maxHoleEdges"
+                :default-value="CLEAN_MESH_DEFAULTS.maxHoleEdges"
+                >Up to</FieldHelp
+              ></template
+            >
             <input
               id="clean-hole"
               v-model.number="settings.maxHoleEdges"

@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -165,12 +166,10 @@ function run() {
       </SettingsGroup>
 
       <SettingsStep step="1" title="Set the box" :effect="effects.box">
-        <SettingsField
-          v-for="a in AXES"
-          :key="a.key"
-          :label="a.key"
-          hint="Leave a field empty to leave that side unbounded."
-        >
+        <SettingsField v-for="a in AXES" :key="a.key" hint="Leave a field empty to leave that side unbounded.">
+          <template #label
+            ><FieldHelp op="crop-cloud" param="box">{{ a.key }}</FieldHelp></template
+          >
           <div class="input-row">
             <input v-model.number="settings[a.min]" type="number" step="any" class="field-input" placeholder="min" />
             <input v-model.number="settings[a.max]" type="number" step="any" class="field-input" placeholder="max" />
@@ -182,8 +181,11 @@ function run() {
       </SettingsStep>
       <SettingsStep step="2" title="Keep" :effect="effects.keep">
         <label class="checkbox-row">
-          <input v-model="settings.invert" type="checkbox" class="checkbox" /> Keep outside the box instead
-        </label>
+          <input v-model="settings.invert" type="checkbox" class="checkbox" />
+          <FieldHelp op="crop-cloud" param="invert" :value="settings.invert" :default-value="CROP_CLOUD_DEFAULTS.invert"
+            >Keep outside the box instead</FieldHelp
+          ></label
+        >
       </SettingsStep>
     </template>
 

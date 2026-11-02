@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -6,7 +7,6 @@ import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import { useSourcePick, referenceOptionLabel } from '../../../composables/useSourcePick.js'
 import { DISTANCE_DEFAULTS } from '../../../core/defaults.user.js'
 import { cloudDistanceEffects } from '../../../core/stepEffects/cloudDistance.js'
@@ -78,7 +78,16 @@ function run() {
         />
       </SettingsGroup>
       <SettingsStep step="1" title="Find the nearest" :effect="effects.nearest">
-        <SettingsField label="Ignore beyond" label-for="dist-max" :unit="unitLabel" hint="0 = no limit.">
+        <SettingsField label-for="dist-max" :unit="unitLabel" hint="0 = no limit.">
+          <template #label
+            ><FieldHelp
+              op="cloud-distance"
+              param="maxDistance"
+              :value="settings.maxDistance"
+              :default-value="DISTANCE_DEFAULTS.maxDistance"
+              >Ignore beyond</FieldHelp
+            ></template
+          >
           <input
             id="dist-max"
             v-model.number="settings.maxDistance"
@@ -92,7 +101,13 @@ function run() {
       <SettingsStep step="2" title="Sign" :effect="effects.sign" :inactive="!signable">
         <label class="checkbox-row"
           ><input v-model="settings.signed" type="checkbox" class="checkbox" :disabled="!signable" />
-          <GlossaryTerm id="cloud-distance">Signed</GlossaryTerm> (above / below)</label
+          <FieldHelp
+            op="cloud-distance"
+            param="signed"
+            :value="settings.signed"
+            :default-value="DISTANCE_DEFAULTS.signed"
+            >Signed (above / below)</FieldHelp
+          ></label
         >
       </SettingsStep>
     </template>

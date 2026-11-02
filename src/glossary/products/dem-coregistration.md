@@ -25,4 +25,4 @@ surface) fitted to it.
 [xDEM](https://xdem.readthedocs.io), a Python library for DEM analysis, chains these
 steps the same way, and WebSfM follows its order. The comparison must be on stable
 ground: rock, roads, buildings. On a glacier, the ice that thinned between the two
-dates would otherwise be "corrected" away. See [Co-register a DEM](guide:coregister-dem).
+dates would otherwise be "corrected" away. See [Co-register DEM](guide:coregister-dem).

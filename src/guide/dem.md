@@ -1,6 +1,6 @@
 ---
 id: dem
-title: Build a DEM
+title: Build DEM
 summary: Rasterises a sparse or dense cloud into a gridded elevation surface.
 category: Products and export
 order: 80
@@ -172,8 +172,9 @@ frame.
 - **Contours…** traces lines at an interval (*0* picks one), adds them to the map as a
   layer and downloads them as GeoJSON or DXF. **Smooth the DEM first** and **Drop lines
   shorter than** remove the small rings that height noise makes on flat ground; set
-  both to *0* for the exact trace.
+  both to *0* for the exact trace ([Contour Lines](guide:contours)).
 - **Slope, aspect, hillshade…** writes each as a GeoTIFF on the DEM's grid (Horn's
-  method, as in GDAL).
+  method, as in GDAL; [Slope, Aspect, Hillshade](guide:terrain-derivatives)).
 - **Clip to polygon…** exports the DEM or orthophoto cropped to a saved Area or Volume
-  measurement or a GeoJSON polygon, reprojected when the file names its CRS.
+  measurement or a GeoJSON polygon, reprojected when the file names its CRS
+  ([Clip to Polygon](guide:clip-raster)).

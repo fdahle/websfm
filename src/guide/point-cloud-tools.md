@@ -16,24 +16,24 @@ blocks. Lengths you type are in the cloud's own units; the dialogs say what that
 
 ## Clean
 - **Filter…** chains height/brightness range, voxel thinning, isolated-cluster removal
-  and statistical outlier removal. **Remove outliers…** and **Subsample…** open it with
+  and statistical outlier removal ([Filter Cloud](guide:filter-cloud)). **Remove outliers…** and **Subsample…** open it with
   one step on.
 - **Select (rectangle)** and **Select (lasso)** clean by hand in the 3D view (see
-  [Build the Dense Cloud](guide:dense-cloud)).
+  [Build Dense Cloud](guide:dense-cloud)).
 
 ## Edit
-- **Crop…** keeps or removes an axis-aligned box.
+- **Crop…** keeps or removes an axis-aligned box ([Crop](guide:crop-cloud)).
 - **Transform…** moves, rotates and scales the cloud, or applies a 4×4 matrix pasted
-  from another program, in double precision.
+  from another program, in double precision ([Transform Cloud](guide:transform-cloud)).
 
 ## Combine
 - **Merge…** joins clouds; a **Dedupe cell** keeps only the first cloud's points where
-  they overlap.
+  they overlap ([Merge Clouds](guide:merge-clouds)).
 - **Align by point pairs** aligns two clouds from at least three matching points you
   click in each, with the RMS shown live; **Also fit scale** for different scales.
 - **Align to reference (ICP)…** refines an alignment that is already roughly right,
   within the **search radius**, by point-to-plane [ICP](help:icp), against a cloud or a
-  mesh. The log reports the RMS, rotation and shift.
+  mesh. The log reports the RMS, rotation and shift ([Align to Reference](guide:align-icp)).
 
 ## Measure
 In **Tools ▸ Measure ▾**:
@@ -43,14 +43,16 @@ In **Tools ▸ Measure ▾**:
   GeoJSON.
 - **Distance to reference…** gives every point its distance to another cloud or a mesh,
   signed where the reference has normals, coloured blue → red for change detection.
-  The distance is kept as an attribute and exported with the cloud.
+  The distance is kept as an attribute and exported with the cloud
+  ([Distance to Reference](guide:cloud-distance)).
 - **Section…** cuts a vertical slice along a line and exports it as a CSV profile or
   DXF.
 
 ## Attributes
-- **Estimate normals…** for clouds without them; [meshing](guide:mesh) needs normals.
-- **Classify ground…** labels ground and non-ground points for a terrain model (see
-  [Classify Ground](guide:classify-ground)).
+- **Estimate normals…** for clouds without them; [meshing](guide:mesh) needs normals
+  ([Estimate Normals](guide:estimate-normals)).
+- **Classify points…** labels ground and non-ground points for a terrain model (see
+  [Classify Points](guide:classify-ground)).
 
 ## Exporting attributes
 **Export ▸ Point Cloud** writes attributes with the points: computed distances and

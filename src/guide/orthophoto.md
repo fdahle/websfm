@@ -1,6 +1,6 @@
 ---
 id: orthophoto
-title: Build an Orthophoto
+title: Build Orthophoto
 summary: Reprojects source imagery onto a DEM, mesh, or fitted plane to remove perspective.
 category: Products and export
 order: 90

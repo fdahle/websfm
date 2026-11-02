@@ -30,4 +30,4 @@ the **Seam penalty** setting: higher means fewer, larger charts in the
 
 <!-- TODO(image): assets/view-selection.svg - a mesh coloured by chosen photo: confetti with no seam penalty, large patches with it. -->
 
-See [Texture a Mesh](guide:texture-mesh).
+See [Texture Mesh](guide:texture-mesh).

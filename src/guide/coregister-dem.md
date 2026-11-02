@@ -1,6 +1,6 @@
 ---
 id: coregister-dem
-title: Co-register a DEM
+title: Co-register DEM
 summary: Move a DEM, or the georeference, onto a reference DEM by the shift and tilt that make their stable ground agree.
 category: Products and export
 order: 85

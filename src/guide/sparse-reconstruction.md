@@ -23,7 +23,7 @@ view's corner. The finished model then replaces the live one.
 ## Mode
 <!-- param: addToModel  default: Add to the model when the model can take the new images, otherwise Rebuild -->
 **Add to the model** places the images the model doesn't hold yet (photos added since,
-a block from [Import a Project](guide:import-project), images an earlier run couldn't
+a block from [Import Project](guide:import-project), images an earlier run couldn't
 place) and leaves the rest as it is; match them first with
 [Match only new pairs](guide:match-features). Images that can't be placed are named in
 the console; Quality Report ▸ Sparse ▸ **Try again…** retries them. **Rebuild** builds a
@@ -83,4 +83,5 @@ kept, marked [outdated](help:main-product). Save a copy first to keep the old so
 adding control or gradual selection when residuals suggest a slightly wrong
 calibration. It refuses changes over 20 % and solves that make the residual worse.
 Lens distortion stays; re-run the reconstruction with self-calibration to change it.
-Like gradual selection, it retires the depth maps and georeference.
+Like gradual selection, it retires the depth maps and georeference
+([Optimize Cameras](guide:optimize-cameras)).

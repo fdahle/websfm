@@ -30,4 +30,4 @@ For orthophoto [seamlines](help:seamline) the labels are the photos. A pixel pre
 the photo that looks most straight down on it, and a seam between two photos costs
 their colour difference there, so the cheapest labelling puts the seams where the
 photos agree: along open ground, around buildings and trees. See
-[Build an Orthophoto](guide:orthophoto).
+[Build Orthophoto](guide:orthophoto).

@@ -59,7 +59,7 @@ shift reads as height error. It happens when the control's positions and heights
 from different references, as with Find GCPs.
 
 **Co-register DEM…** removes such an offset: it opens
-[Co-register a DEM](guide:coregister-dem) with this reference and stable ground, which
+[Co-register DEM](guide:coregister-dem) with this reference and stable ground, which
 moves a copy of the DEM, or the georeference, onto the reference.
 
 ## Stable ground

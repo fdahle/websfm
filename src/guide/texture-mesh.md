@@ -1,6 +1,6 @@
 ---
 id: texture-mesh
-title: Texture a Mesh
+title: Texture Mesh
 summary: Paints a mesh with the photos themselves, so it shows the detail of the images rather than the colour of its vertices.
 category: Products and export
 order: 105

@@ -1,6 +1,6 @@
 ---
 id: dense-cloud
-title: Dense Cloud
+title: Build Dense Cloud
 summary: Fuses consistent depth-map samples into a coloured point cloud with normals.
 category: Dense reconstruction
 order: 60

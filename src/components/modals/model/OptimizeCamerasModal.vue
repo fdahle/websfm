@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { OPTIMIZE_CAMERAS_DEFAULTS } from '../../../core/defaults.user.js'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
@@ -49,10 +50,10 @@ function run() {
       </SettingsGroup>
       <SettingsStep step="1" title="Re-adjust the cameras" :effect="effects.refine">
         <SettingsField
-          label="Free parameters"
           label-for="opt-refine"
           hint="The principal point needs a well-spread, strongly overlapping block."
         >
+          <template #label><FieldHelp op="optimize-cameras" param="refine">Free parameters</FieldHelp></template>
           <select id="opt-refine" v-model="refine" class="field-select">
             <option value="f">Focal length</option>
             <option value="f,cxcy">Focal length + principal point</option>

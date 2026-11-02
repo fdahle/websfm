@@ -26,4 +26,4 @@ In WebSfM, **Tools ▸ Measure ▸ Profile** draws a polyline on the DEM in fron
 samples it at about one-cell spacing with holes left as gaps, and reports the length,
 the height range and the relief; **Export profile CSV** downloads distance and height
 per sample. For a vertical slice of a point cloud rather than a DEM, use
-**Section…**. See [Build a DEM](guide:dem).
+**Section…**. See [Build DEM](guide:dem).

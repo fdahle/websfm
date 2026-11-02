@@ -1,4 +1,5 @@
 <script setup>
+import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
@@ -42,7 +43,16 @@ function run() {
         <SourcePicker id="sample-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel" />
       </SettingsGroup>
       <SettingsStep step="1" title="Sample the surface" :effect="effects.sample">
-        <SettingsField label="Number of points" label-for="sample-n">
+        <SettingsField label-for="sample-n">
+          <template #label
+            ><FieldHelp
+              op="sample-mesh"
+              param="count"
+              :value="settings.count"
+              :default-value="SAMPLE_MESH_DEFAULTS.count"
+              >Number of points</FieldHelp
+            ></template
+          >
           <input
             id="sample-n"
             v-model.number="settings.count"

@@ -39,4 +39,4 @@ as a GeoTIFF on the DEM's own grid and CRS (slope in degrees and a hillshade by
 default). A cell next to a hole or the edge uses its own height for the missing
 neighbour, so it still gets a one-sided estimate; a nodata cell stays nodata in
 every product. The hillshade drawn under a DEM on the map is a quicker preview
-computed separately, not this export. See [Build a DEM](guide:dem).
+computed separately, not this export. See [Build DEM](guide:dem).

@@ -81,6 +81,13 @@ Notable changes to websfm. The format follows
   change it, in a few sentences; the hover help of a setting is the same short text.
   Test results and the history of each setting are gone from the app (they stay in this
   changelog). The guide is half as long, about 24,000 words instead of 51,000.
+- **Help for every tool setting.** The settings of Filter, Crop, Transform, Merge,
+  Align to reference (ICP), Estimate normals, Distance to reference, Clean mesh, Smooth,
+  Decimate, Sample to points, Contours, Slope/aspect/hillshade, Clip to polygon and
+  Optimize cameras now carry a **?**: hover it for what the setting does and when to
+  change it, as in the Reconstruct dialogs. Each tool has its own article under
+  **Tools** in the Guide, and the Guide's articles are named as the dialogs they explain
+  (*Build Dense Cloud*, *Build DEM*, …).
 - **Footprints from Poses in numbered steps.** Tools ▸ Model ▾ ▸ **Footprints from
   poses…** now lays out its settings as *1 · Ground* and *2 · Cameras*, each with a line
   saying what it does to this project: what the corners land on, in which height datum,
