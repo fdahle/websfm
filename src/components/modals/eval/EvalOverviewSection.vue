@@ -76,7 +76,7 @@ function fmtDelta(d) {
         <span class="dot"></span>
         <span class="hlabel">{{ r.label }}</span>
         <span class="hval"
-          >{{ fmtVal(r) }}<span v-if="r.unit && r.value != null" class="hunit"> {{ r.unit }}</span></span
+          >{{ fmtVal(r) }}<span v-if="r.unit && r.value != null" class="hunit">{{ r.unit }}</span></span
         >
         <span class="hhint">{{ r.hint }}</span>
         <span class="harrow">›</span>
@@ -89,7 +89,7 @@ function fmtDelta(d) {
         <div v-for="d in runDiff" :key="d.key" class="run-metric" :class="`v-${d.verdict}`">
           <span class="rm-arrow">{{ arrow(d.verdict) }}</span>
           <span class="rm-label">{{ d.label }}</span>
-          <span class="rm-delta">{{ fmtDelta(d) }}{{ d.unit }}</span>
+          <span class="rm-delta">{{ fmtDelta(d) }}{{ d.unit ? ` ${d.unit}` : '' }}</span>
         </div>
       </div>
     </div>
@@ -175,6 +175,7 @@ function fmtDelta(d) {
   font-variant-numeric: tabular-nums;
 }
 .hunit {
+  margin-left: 0.25em;
   font-size: 11px;
   font-weight: 400;
   color: var(--text-dim);
