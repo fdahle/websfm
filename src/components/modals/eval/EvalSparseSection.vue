@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import StatTiles from '../ui/StatTiles.vue'
 import DataTable from '../ui/DataTable.vue'
+import ImageNameList from './ImageNameList.vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { useQualityReport } from '../../../composables/useQualityReport.js'
@@ -29,6 +30,9 @@ const byUuid = computed(() => new Map(imagesStore.images.map((im) => [im.uuid, i
 const maxBin = computed(() => Math.max(1, ...histogram.value.map((b) => b.count)))
 
 const fmt = (v, d = 2) => (v == null ? '—' : v.toFixed(d))
+// An image named in a list, a link when it is still in the project.
+const byName = computed(() => new Map(imagesStore.images.map((im) => [im.name, im])))
+const imageItem = (name, note = '') => ({ key: name, name, imageId: byName.value.get(name)?.id ?? null, note })
 // Sparse Model ▸ Add to the model: which images each extension added (sparseRun.js).
 const extensions = computed(() =>
   (recon.summary?.extensions ?? []).map((e, i) => ({
@@ -37,6 +41,10 @@ const extensions = computed(() =>
     how: e.existingCameras === 'refined' ? 'then every camera refined' : 'model cameras fixed',
     added: e.added ?? [],
     notAdded: e.notAdded ?? [],
+    images: [
+      ...(e.added ?? []).map((name) => imageItem(name)),
+      ...(e.notAdded ?? []).map((name) => imageItem(name, 'not placed')),
+    ],
   })),
 )
 // Photos an extension could not place that the model still lacks.
@@ -109,9 +117,10 @@ const unregistered = computed(() => {
   return imagesStore.images
     .filter((im) => !cameras.value.has(im.uuid))
     .map((im) => ({
-      uuid: im.uuid,
+      key: im.uuid,
       name: im.name,
-      reason: unregisteredReason({
+      imageId: im.id,
+      note: unregisteredReason({
         kpCount: im.kpCount ?? null,
         degree: g.degrees.get(im.uuid) ?? 0,
         componentIndex: g.componentIndex.get(im.uuid) ?? null,
@@ -151,12 +160,7 @@ function onRow(row) {
         }}
         ({{ e.how }})
       </summary>
-      <div class="unreg-list">
-        <span v-for="name in e.added" :key="name" class="unreg-item">{{ name }}</span>
-        <span v-for="name in e.notAdded" :key="`x-${name}`" class="unreg-item"
-          >{{ name }}<span class="unreg-reason"> — not placed</span></span
-        >
-      </div>
+      <ImageNameList :items="e.images" @open-image="emit('open-image', $event)" />
       <p v-if="e === extensions.at(-1) && stillOut.length" class="eval-note">
         <button class="btn" @click="retryAdd">Try again…</button>
         Opens Sparse Reconstruction to add the {{ stillOut.length }} photo{{ stillOut.length === 1 ? '' : 's' }} again
@@ -188,11 +192,7 @@ function onRow(row) {
 
     <details v-if="unregistered.length" class="unreg">
       <summary>Not registered ({{ unregistered.length }})</summary>
-      <div class="unreg-list">
-        <span v-for="im in unregistered" :key="im.uuid" class="unreg-item">
-          {{ im.name }}<span v-if="im.reason" class="unreg-reason"> — {{ im.reason }}</span>
-        </span>
-      </div>
+      <ImageNameList :items="unregistered" @open-image="emit('open-image', $event)" />
     </details>
   </template>
 </template>
@@ -283,22 +283,6 @@ function onRow(row) {
 }
 .unreg summary {
   cursor: pointer;
-  color: var(--text-dim);
-}
-.unreg-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-.unreg-item {
-  background: var(--bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  padding: 2px 8px;
-  color: var(--text);
-}
-.unreg-reason {
   color: var(--text-dim);
 }
 </style>

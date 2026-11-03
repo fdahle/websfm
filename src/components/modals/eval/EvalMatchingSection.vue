@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import StatTiles from '../ui/StatTiles.vue'
 import DataTable from '../ui/DataTable.vue'
+import ImageNameList from './ImageNameList.vue'
 import { useMatchesStore } from '../../../stores/useMatchesStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { graphHealth } from '../../../core/eval/matchGraph.js'
@@ -10,11 +11,12 @@ import { graphHealth } from '../../../core/eval/matchGraph.js'
 // with component MEMBERSHIP (which images fell in each component) and BRIDGE edges
 // ("fragile links" whose failure would split the block). Weak/excluded pairs are
 // excluded — the graph shown is the one SfM actually seeds from.
-const emit = defineEmits(['open-match-list'])
+const emit = defineEmits(['open-match-list', 'open-image'])
 const matchesStore = useMatchesStore()
 const imagesStore = useImagesStore()
 
 const nameByUuid = computed(() => new Map(imagesStore.images.map((im) => [im.uuid, im.name])))
+const idByUuid = computed(() => new Map(imagesStore.images.map((im) => [im.uuid, im.id])))
 const imageIds = computed(() => imagesStore.images.map((im) => im.uuid))
 const nm = (uuid) => nameByUuid.value.get(uuid) ?? uuid
 
@@ -67,6 +69,7 @@ const rows = computed(() =>
   imageIds.value.map((uuid) => ({
     id: uuid,
     name: nm(uuid),
+    imageId: idByUuid.value.get(uuid) ?? null,
     degree: health.value.degrees.get(uuid) ?? 0,
     component: (health.value.componentIndex.get(uuid) ?? 0) + 1,
   })),
@@ -83,7 +86,7 @@ const componentList = computed(() =>
     id: i,
     rank: i + 1,
     size: c.length,
-    names: c.map(nm),
+    images: c.map((uuid) => ({ key: uuid, name: nm(uuid), imageId: idByUuid.value.get(uuid) ?? null })),
   })),
 )
 const bridges = computed(() => health.value.bridges.map((b, i) => ({ id: i, ...b, a: nm(b.idA), b2: nm(b.idB) })))
@@ -99,7 +102,7 @@ const bridges = computed(() => health.value.bridges.map((b, i) => ({ id: i, ...b
         <div class="comp-head">
           #{{ c.rank }} <span class="comp-size">{{ c.size }} image{{ c.size === 1 ? '' : 's' }}</span>
         </div>
-        <div class="comp-names">{{ c.names.join(', ') }}</div>
+        <ImageNameList :items="c.images" @open-image="emit('open-image', $event)" />
       </div>
     </div>
   </details>
@@ -115,9 +118,17 @@ const bridges = computed(() => health.value.bridges.map((b, i) => ({ id: i, ...b
     <p class="eval-note">A bridge pair failing would split the block — check the weakest ones.</p>
   </details>
 
-  <DataTable :columns="columns" :rows="rows" sort-key="degree" sort-dir="asc" empty-text="No images." />
+  <DataTable
+    :columns="columns"
+    :rows="rows"
+    sort-key="degree"
+    sort-dir="asc"
+    empty-text="No images."
+    @row-click="(row) => row.imageId != null && emit('open-image', row.imageId)"
+  />
   <p class="eval-note">
-    Sorted weakest-first. An image in a small or non-largest component often cannot register.
+    Click a row or a name to open that image. Sorted weakest-first. An image in a small or non-largest component often
+    cannot register.
     <button class="link-btn" @click="emit('open-match-list')">Open match list →</button>
   </p>
 </template>
@@ -155,12 +166,6 @@ const bridges = computed(() => health.value.bridges.map((b, i) => ({ id: i, ...b
 .comp-size {
   font-weight: 400;
   color: var(--text-dim);
-}
-.comp-names {
-  font-size: 11px;
-  color: var(--text-dim);
-  line-height: 1.5;
-  margin-top: 2px;
 }
 .bridge-list {
   display: flex;

@@ -325,6 +325,7 @@ select.field-input:hover:not(:disabled):not(:focus) {
   font-variant-numeric: tabular-nums;
 }
 .tile-unit {
+  margin-left: 0.2em;
   font-size: 12px;
   font-weight: 400;
   color: var(--text-dim);

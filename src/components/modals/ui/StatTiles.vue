@@ -14,7 +14,7 @@ defineProps({
   <div class="tiles">
     <div v-for="(t, i) in tiles" :key="i" class="tile" :class="t.tone ? `tone-${t.tone}` : ''">
       <div class="tile-value">
-        {{ t.value }}<span v-if="t.unit" class="tile-unit"> {{ t.unit }}</span>
+        {{ t.value }}<span v-if="t.unit" class="tile-unit">{{ t.unit }}</span>
       </div>
       <div class="tile-label">{{ t.label }}</div>
       <div v-if="t.hint" class="tile-hint">{{ t.hint }}</div>

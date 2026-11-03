@@ -182,6 +182,12 @@ async function onExport() {
   flex-direction: column;
   gap: 12px;
 }
+/* A section's parts keep their own height and the section scrolls. Shrunk to the
+   space left, a table's overflow wrapper became its own tiny scroll box (a short
+   window showed no full row of the Sparse image table). */
+.qsection > :deep(*) {
+  flex-shrink: 0;
+}
 .qempty {
   margin: auto;
   text-align: center;
