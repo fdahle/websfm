@@ -4,6 +4,7 @@ import { textureMesh as workerTextureMesh } from '../../workers/computeClient.js
 import { computeSourceOf } from '../../utils/image.js'
 import { relativeQuality } from '../../core/features/imageQuality.js'
 import { pluralize } from '../../core/textFormat.js'
+import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
 
 // Tools ▸ Mesh ▾ ▸ Texture (dev/planning/plan-texture.md): a NEW mesh with per-vertex
 // UVs and JPEG atlas pages, textured from the registered photos. Like every mesh tool
@@ -32,6 +33,8 @@ export function createMeshTexture({
       return null
     }
     const frameModel = frameModelFor.value
+    // A rolling-shutter photo is read on its principal row's pose (RSH-4).
+    const rsWarps = rollingShutterWarps(cameras, mainSparseCloud.value.points)
     const imagesByUuid = new Map(images.value.map((im) => [im.uuid, im]))
     const views = []
     let unready = 0
@@ -65,6 +68,7 @@ export function createMeshTexture({
         dist,
         selfCal,
         fiducial,
+        rs: rsWarps.get(im.uuid) ?? null,
         mask: settings.useMasks !== false ? (im.mask?.blob ?? null) : null,
       })
     }

@@ -2,7 +2,16 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
-import { captureSeconds, cameraVelocities, attachRollingShutter, readoutSummary } from './rollingShutter.js'
+import {
+  captureSeconds,
+  cameraVelocities,
+  attachRollingShutter,
+  readoutSummary,
+  rollingShutterWarps,
+  rollingShutterPixel,
+} from './rollingShutter.js'
+import { SparsePoints } from './sparsePoints.js'
+import { makeSampleMap } from './displayFrame.js'
 import { bundleAdjust } from './reconstruction.js'
 import { projectPoint } from './geometry.js'
 import { projectFullXYZ } from './baAcceptance.js'
@@ -155,5 +164,120 @@ describe('bundle adjustment with a rolling shutter', () => {
     )
     expect(res.readout).toBeUndefined()
     expect(res.cameras[0].rs).toBeUndefined()
+  })
+})
+
+describe("the photo on the principal row's pose", () => {
+  // A nadir camera 50 m over flat ground, flying 10 m/s along x, read over 30 ms.
+  const R = [
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 0, -1],
+  ]
+  const K = { fx: 1000, fy: 1000, cx: 500, cy: 375 }
+  const rs = { v: [10, 0, 0], h: 750, tau: 0.03 }
+  const cam = { R, t: [0, 0, 50], K, rs }
+  const global = { R, t: [0, 0, 50], K }
+  const ground = [
+    [-12, 9, 0],
+    [3, -15, 0],
+    [14, 14, 0],
+    [0, 0, 0],
+  ]
+  const points = new SparsePoints({
+    pos: Float64Array.from(ground.flat()),
+    viewUuids: ['a'],
+    vcount: Uint32Array.from(ground.map(() => 1)),
+    vcam: new Uint32Array(ground.length),
+    vkp: new Uint32Array(ground.length),
+  })
+
+  it('gives a moving camera its velocity in its own frame and its scene depth', () => {
+    const warps = rollingShutterWarps(
+      new Map([
+        ['a', cam],
+        ['still', { ...global, rs: { v: [0, 0, 0], h: 750, tau: 0.03 } }],
+        ['global', global],
+      ]),
+      points,
+    )
+    expect([...warps.keys()]).toEqual(['a'])
+    const w = warps.get('a')
+    expect(w.w).toEqual([10, 0, 0])
+    expect(w.depth).toBeCloseTo(50, 9)
+    expect(w).toMatchObject({ tau: 0.03, h: 750, plane: null })
+  })
+
+  it("takes an oblique photo's rays to the plane of its points", () => {
+    // Tilted 35° forward, over a grid of ground points.
+    const a = (35 * Math.PI) / 180
+    const Rx = [
+      [1, 0, 0],
+      [0, Math.cos(a), -Math.sin(a)],
+      [0, Math.sin(a), Math.cos(a)],
+    ]
+    const Ro = Rx.map((row) => [0, 1, 2].map((j) => row.reduce((s, x, k) => s + x * R[k][j], 0)))
+    const C = [0, 0, 50]
+    const t = Ro.map((row) => -(row[0] * C[0] + row[1] * C[1] + row[2] * C[2]))
+    const oblique = { R: Ro, t, K, rs: { v: [0, 10, 0], h: 750, tau: 0.03 } }
+    const grid = []
+    for (let gx = -30; gx <= 30; gx += 6) for (let gy = -90; gy <= -5; gy += 5) grid.push([gx, gy, 0])
+    const seen = grid.filter(([x, y]) => {
+      const p = projectPoint({ R: Ro, t, K }, x, y, 0)
+      return p && p.u >= 0 && p.u < 1000 && p.v >= 0 && p.v < 750
+    })
+    const pts = new SparsePoints({
+      pos: Float64Array.from(seen.flat()),
+      viewUuids: ['o'],
+      vcount: Uint32Array.from(seen.map(() => 1)),
+      vcam: new Uint32Array(seen.length),
+      vkp: new Uint32Array(seen.length),
+    })
+    const warp = rollingShutterWarps(new Map([['o', oblique]]), pts).get('o')
+    expect(warp.plane).not.toBeNull()
+    const flat = { ...warp, plane: null }
+    let worstPlane = 0,
+      worstFlat = 0
+    for (const [x, y] of seen) {
+      const p = projectPoint({ R: Ro, t, K }, x, y, 0),
+        q = projectPoint(oblique, x, y, 0)
+      const r = rollingShutterPixel(warp, K, p.u, p.v),
+        f = rollingShutterPixel(flat, K, p.u, p.v)
+      worstPlane = Math.max(worstPlane, Math.hypot(r.x - q.u, r.y - q.v))
+      worstFlat = Math.max(worstFlat, Math.hypot(f.x - q.u, f.y - q.v))
+    }
+    expect(worstPlane).toBeLessThan(1e-6)
+    expect(worstFlat).toBeGreaterThan(0.1)
+  })
+
+  it("sends a pixel of the principal row's pose to where the photo recorded it", () => {
+    const warp = rollingShutterWarps(new Map([['a', cam]]), points).get('a')
+    let most = 0
+    for (const [x, y] of ground) {
+      const p = projectPoint(global, x, y, 0)
+      const q = projectPoint(cam, x, y, 0)
+      most = Math.max(most, Math.hypot(q.u - p.u, q.v - p.v))
+      const r = rollingShutterPixel(warp, K, p.u, p.v)
+      expect(r.x).toBeCloseTo(q.u, 6)
+      expect(r.y).toBeCloseTo(q.v, 6)
+    }
+    // The shift the warp undoes is several pixels at the frame's edge rows.
+    expect(most).toBeGreaterThan(2)
+    // A point 5 m above the plane is off by about a tenth of its shift.
+    const p = projectPoint(global, 3, -15, 5),
+      q = projectPoint(cam, 3, -15, 5)
+    const r = rollingShutterPixel(warp, K, p.u, p.v)
+    expect(Math.hypot(r.x - q.u, r.y - q.v)).toBeLessThan(0.15 * Math.hypot(q.u - p.u, q.v - p.v))
+  })
+
+  it('is applied by the sample map, before any lens', () => {
+    const warp = rollingShutterWarps(new Map([['a', cam]]), points).get('a')
+    const map = makeSampleMap({ K, rs: warp })
+    const p = projectPoint(global, 14, 14, 0),
+      q = projectPoint(cam, 14, 14, 0)
+    const s = map(p.u, p.v)
+    expect(s.x).toBeCloseTo(q.u, 6)
+    expect(s.y).toBeCloseTo(q.v, 6)
+    expect(makeSampleMap({ K })).toBeNull()
   })
 })

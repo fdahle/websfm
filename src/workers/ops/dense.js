@@ -89,9 +89,10 @@ export function makeDenseOps({ rasterize }) {
   // (utils/image.js pyramidSource) — an object would stringify to one shared tag.
   const srcKey = (u) => (typeof u === 'string' ? u : (u?.key ?? String(u)))
 
-  // Any distortion to remove (calibrated OR self-calibrated)?
-  function hasAnyDistortion(dist, selfCal) {
-    return hasDistortion(dist) || hasDistortion(selfCal)
+  // Any distortion to remove (calibrated OR self-calibrated), or a rolling-shutter
+  // photo to move onto its principal row's pose (`rs`, RSH-4)?
+  function hasAnyDistortion(dist, selfCal, rs = null) {
+    return hasDistortion(dist) || hasDistortion(selfCal) || !!rs
   }
 
   // Remove lens distortion from a working-resolution raster. Kfull is the
@@ -104,9 +105,9 @@ export function makeDenseOps({ rasterize }) {
   // (0/1 LUT of canvas pixels off the photo) and, like every undistorted raster,
   // `undist` = { map, sw, sh } to move a photo-space mask the same way (undistortedMask).
   // `photo` = { width, height } of the full-resolution photo.
-  function undistortRaster(r, Kfull, dist, selfCal, photo = null) {
-    if (!hasAnyDistortion(dist, selfCal)) return r
-    const base = makeSampleMap({ K: Kfull, dist, selfCal, outScale: gridScale(r), srcScale: gridScale(r) })
+  function undistortRaster(r, Kfull, dist, selfCal, photo = null, rs = null) {
+    if (!hasAnyDistortion(dist, selfCal, rs)) return r
+    const base = makeSampleMap({ K: Kfull, dist, selfCal, rs, outScale: gridScale(r), srcScale: gridScale(r) })
     const canvas = !hasDistortion(selfCal) && photo ? fisheyeCanvas(Kfull, dist, photo.width, photo.height) : null
     if (!canvas) {
       return { ...r, data: resampleRgba(r, base, r.width, r.height), undist: { map: base, sw: r.width, sh: r.height } }
@@ -496,6 +497,7 @@ export function makeDenseOps({ rasterize }) {
           dist: im.dist || null,
           selfCal: im.selfCal || null,
           fid: im.fid || null,
+          rs: im.rs || null,
           photo: im.width > 0 && im.height > 0 ? { width: im.width, height: im.height } : null,
         },
       ]),
@@ -525,8 +527,8 @@ export function makeDenseOps({ rasterize }) {
       if (meta?.fid) {
         // Film scan: warp into the canonical frame (composes calibrated + self-cal).
         r = warpFilmRaster(r, meta.K, meta.dist, meta.fid, maxDim, meta.selfCal)
-      } else if (meta?.dist || meta?.selfCal) {
-        r = undistortRaster(r, meta.K, meta.dist, meta.selfCal, meta.photo)
+      } else if (meta?.dist || meta?.selfCal || meta?.rs) {
+        r = undistortRaster(r, meta.K, meta.dist, meta.selfCal, meta.photo, meta.rs)
       }
       // A greyscale raster (a film scan) is held as its one channel: four bytes a
       // pixel for every raster still needed filled the tab's buffer pool on a film

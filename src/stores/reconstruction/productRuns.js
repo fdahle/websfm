@@ -25,6 +25,7 @@ import { bufferFailureText } from '../../core/bufferLimit.js'
 import { stampOf } from '../../core/products/productSet.js'
 import { demPointClasses, demClassesLabel } from '../../core/products/cloudStyle.js'
 import { DEM_DEFAULTS, ORTHO_DEFAULTS } from '../../core/defaults.user.js'
+import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
 
 // Generating the computed rasters, split out of useReconstructionStore: the DEM
 // from the densest cloud and the orthophoto over a DEM or mesh surface, each in
@@ -460,6 +461,8 @@ export function createProductRuns({
       // decide visibility): the same image + frame-model join dense used to build them.
       const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
       const frameModel = frameModelFor.value
+      // A rolling-shutter photo moves onto its principal row's pose, as dense read it.
+      const rsWarps = sparse ? rollingShutterWarps(sparse.cameras, sparse.points) : new Map()
       const photos = []
       for (const m of maps) {
         const im = imgByUuid.get(m.uuid),
@@ -479,6 +482,7 @@ export function createProductRuns({
           dist,
           selfCal,
           fiducial,
+          rs: rsWarps.get(m.uuid) ?? null,
         })
       }
       // The machine's memory gate (Settings ▸ Compute): the worker sizes its map/photo

@@ -15,6 +15,7 @@ import { buildTransformsJson } from '../../core/io/transforms.js'
 import { undistortImage } from '../../workers/computeClient.js'
 import { toScaledPx } from '../../core/sfm/geometry.js'
 import { pluralize } from '../../core/textFormat.js'
+import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
 import { defaultExportName, exportFileName } from '../../core/exportNames.js'
 
 // The SfM project exports, split out of useExports: a COLMAP model (text or
@@ -277,6 +278,9 @@ export function createSfmProjectExports({
     const entries = []
     const outImages = []
     let bytesTotal = 0
+    // A rolling-shutter photo is written on its principal row's pose (RSH-4), the pose
+    // the PINHOLE model gives it.
+    const rsWarps = rollingShutterWarps(cloud.cameras, cloud.points)
     progress?.open?.(`Exporting ${targets.length} undistorted images`, targets.length, null, { unit: 'images' })
     try {
       for (let i = 0; i < targets.length; i++) {
@@ -302,6 +306,7 @@ export function createSfmProjectExports({
             dist: frameModel(im).dist,
             selfCal: frameModel(im).selfCal,
             fid,
+            rs: rsWarps.get(uuid) ?? null,
             mode,
             maxDim,
             format,

@@ -2,6 +2,7 @@ import { toRaw } from 'vue'
 import { computeSourceOf } from '../../utils/image.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
+import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
 import {
   qualityToMaxDim,
   fitDepthQuality,
@@ -105,10 +106,14 @@ export function createDense({
         structuredClone({ A: t.A, transform: t.transform ?? null, frame: t.frame }),
       ]),
     )
-    return { frameModel, fidByUuid }
+    // A rolling-shutter photo is resampled onto its principal row's pose as it is read
+    // (core/sfm/rollingShutter.js rollingShutterWarps).
+    const cloud = mainSparseCloud.value
+    const rsWarps = cloud ? rollingShutterWarps(cloud.cameras, cloud.points) : new Map()
+    return { frameModel, fidByUuid, rsWarps }
   }
   // One image's camera as the run hands it to the worker (plain arrays and objects).
-  function depthCamera(uuid, cam, im, { frameModel, fidByUuid }) {
+  function depthCamera(uuid, cam, im, { frameModel, fidByUuid, rsWarps }) {
     const { dist, selfCal } = frameModel(im)
     return {
       R: cam.R.map((row) => [...row]),
@@ -117,6 +122,8 @@ export function createDense({
       dist,
       selfCal,
       fid: fidByUuid.get(uuid) ?? null,
+      // Only when the photo has one, so a global-shutter camera's key is unchanged.
+      ...(rsWarps?.get(uuid) ? { rs: structuredClone(rsWarps.get(uuid)) } : {}),
       // Keep valid depth maps compares the mask too (core/dense/depthReuse.js): its content
       // hash, known from the image record before the mask loads; a mask from before the
       // hash existed keys as present until it is next set.

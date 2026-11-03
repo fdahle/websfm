@@ -44,7 +44,10 @@ export function makeTextureOps({ rasterize } = {}) {
       const rect = canvas ? { x0: -canvas.dx, y0: -canvas.dy, width: canvas.width, height: canvas.height } : undefined
       return { R: v.R, t: v.t, K: v.K, width, height, rect, weight: v.weight ?? 1 }
     })
-    const toPhoto = views.map((v) => makeSampleMap({ K: v.K, dist: v.dist, selfCal: v.selfCal, fiducial: v.fiducial }))
+    // A rolling-shutter photo (`rs`, RSH-4) is read on its principal row's pose too.
+    const toPhoto = views.map((v) =>
+      makeSampleMap({ K: v.K, dist: v.dist, selfCal: v.selfCal, fiducial: v.fiducial, rs: v.rs ?? null }),
+    )
 
     // Where each z-buffer grid pixel lands on the photo (scan pixels), once per view:
     // the usable-pixel LUT and the grid-resolution photo both read it.
@@ -141,6 +144,7 @@ export function makeTextureOps({ rasterize } = {}) {
           dist: v.dist,
           selfCal: v.selfCal,
           fiducial: v.fiducial,
+          rs: v.rs ?? null,
           outScale: scale,
           srcScale: r.scaleXY ?? r.scale,
         })

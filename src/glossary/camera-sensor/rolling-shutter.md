@@ -18,5 +18,6 @@ heights.
 WebSfM can model it in [bundle adjustment](help:bundle-adjustment): each camera's
 pose is the one at its principal row, each row is seen from where the camera had moved
 to by then, the motion taken from the photos taken just before and after it, and the
-readout time is solved per camera group. A mechanical or global shutter has none of
-this, and the model only adds an unknown there.
+readout time is solved per camera group. Depth maps, orthophotos and textures then
+read each photo moved onto its principal row's pose. A mechanical or global shutter
+has none of this, and the model only adds an unknown there.

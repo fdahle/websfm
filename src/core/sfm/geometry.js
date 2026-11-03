@@ -365,7 +365,7 @@ function baselineAxes(list) {
 // Eigen-decomposition of a symmetric 3×3 by cyclic Jacobi rotations. Returns
 // { values: [λ…], vectors: [v…] } with vectors[i] the unit eigenvector for values[i].
 // Dependency-free and plenty accurate for a covariance this small.
-function jacobiEigen3(M) {
+export function jacobiEigen3(M) {
   const a = [M[0].slice(), M[1].slice(), M[2].slice()]
   const v = [
     [1, 0, 0],

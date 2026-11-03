@@ -82,6 +82,7 @@ function makePhotoLoader(images, rasterize, emit) {
         dist: im.dist,
         selfCal: im.selfCal,
         fiducial: im.fiducial,
+        rs: im.rs ?? null,
         outScale,
         srcScale: r.scaleXY ?? r.scale,
       })

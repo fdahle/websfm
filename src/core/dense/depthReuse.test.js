@@ -71,3 +71,23 @@ describe('reusableDepthMaps', () => {
     expect(reusableDepthMaps({ index: { ...index, mapsKey: undefined }, cloud, key, cameraKeys: now })).toEqual([])
   })
 })
+
+describe('depthCameraKey and a rolling-shutter warp', () => {
+  const cam = {
+    R: [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ],
+    t: [0, 0, 5],
+    K: { fx: 1, fy: 1, cx: 0, cy: 0 },
+  }
+  it("keeps a global-shutter camera's key, and changes with the warp", () => {
+    const plain = depthCameraKey(cam)
+    expect(depthCameraKey({ ...cam, rs: null })).toBe(plain)
+    const a = depthCameraKey({ ...cam, rs: { w: [1, 0, 0], tau: 0.02, h: 750, depth: 50 } })
+    const b = depthCameraKey({ ...cam, rs: { w: [1, 0, 0], tau: 0.03, h: 750, depth: 50 } })
+    expect(a).not.toBe(plain)
+    expect(a).not.toBe(b)
+  })
+})

@@ -14,7 +14,7 @@
 // frame rows, seconds), which every projection then honours (geometry.js
 // projectRollingShutter). Pure.
 
-import { cameraCenter } from './geometry.js'
+import { cameraCenter, jacobiEigen3 } from './geometry.js'
 
 // Capture time in seconds (any fixed origin), or null. EXIF DateTimeOriginal holds whole
 // seconds; SubSecTimeOriginal ("45" = .45 s), where the camera writes it, adds the rest.
@@ -118,4 +118,125 @@ export function readoutSummary(cameras, groupOf) {
     out.set(g, rec)
   }
   return out
+}
+
+// ── The photo on the principal row's pose (RSH-4) ──────────────────────────────
+// Dense matching, the orthophoto and the texture work with one pose per photo, the
+// principal row's. A rolling-shutter photo is resampled onto that pose once, where its
+// pixels are read (displayFrame.js makeSampleMap `rs`), so all of them see the
+// corrected image. Each pixel's ray is taken to the plane fitted to the sparse points
+// the photo sees (an oblique photo's ground recedes), else to their median depth: a
+// point off that surface lands off by the shift times its relative distance from it, a
+// few hundredths of a pixel for a shift of a few pixels over a flat site.
+//
+// A warp is { w: R·v (camera-frame velocity, model units/s), tau (s), h (rows), depth
+// (median camera z), plane: { n, d } (camera frame, n·X = d) | null }.
+
+// Each rolling-shutter camera's warp: its velocity in its own frame, its readout time
+// and frame height, and the surface of the sparse points it sees. Cameras without a
+// record, with τ ≈ 0, or that see no point in front of them get none.
+//   cameras  Map uuid → { R, t, K, rs? }
+//   points   SparsePoints (pos, vstart, vcam, viewUuids)
+// → Map uuid → warp
+export function rollingShutterWarps(cameras, points, { minShiftPx = 0.01, maxSamples = 4096 } = {}) {
+  const out = new Map()
+  const want = new Map()
+  for (const [uuid, cam] of cameras) {
+    const rs = cam.rs
+    if (!(rs?.h > 0) || !Number.isFinite(rs.tau) || !rs.v?.every(Number.isFinite)) continue
+    if (!(Math.abs(rs.tau) * Math.hypot(...rs.v) > 0)) continue
+    want.set(uuid, [])
+  }
+  if (!want.size || !points?.pos) return out
+  const { pos, vstart, vcam, viewUuids } = points
+  const n = points.length
+  // Sample the points evenly so a big model costs as much as a small one.
+  const step = Math.max(1, Math.floor(n / (maxSamples * 4)))
+  for (let i = 0; i < n; i += step) {
+    const x = pos[3 * i],
+      y = pos[3 * i + 1],
+      z = pos[3 * i + 2]
+    for (let k = vstart[i]; k < vstart[i + 1]; k++) {
+      const uuid = viewUuids[vcam[k]]
+      const list = want.get(uuid)
+      if (!list || list.length >= maxSamples) continue
+      const { R, t } = cameras.get(uuid)
+      const zc = R[2][0] * x + R[2][1] * y + R[2][2] * z + t[2]
+      if (!(zc > 0)) continue
+      list.push([R[0][0] * x + R[0][1] * y + R[0][2] * z + t[0], R[1][0] * x + R[1][1] * y + R[1][2] * z + t[1], zc])
+    }
+  }
+  for (const [uuid, list] of want) {
+    if (!list.length) continue
+    const zs = list.map((p) => p[2]).sort((a, b) => a - b)
+    const depth = zs[zs.length >> 1]
+    const { R, rs, K } = cameras.get(uuid)
+    const w = [0, 1, 2].map((i) => R[i][0] * rs.v[0] + R[i][1] * rs.v[1] + R[i][2] * rs.v[2])
+    // The largest shift over the frame (half a readout at the edge rows), in pixels:
+    // below `minShiftPx` the photo is left as it is.
+    const f = K?.fx ?? 1
+    const shiftPx = (f * Math.abs(rs.tau) * 0.5 * Math.hypot(w[0], w[1])) / depth
+    if (!(shiftPx >= minShiftPx)) continue
+    out.set(uuid, { w, tau: rs.tau, h: rs.h, depth, plane: fitPlane(list, zs) })
+  }
+  return out
+}
+
+// The plane through camera-frame points, { n, d } with n·X = d > 0, from those between
+// the 10th and 90th depth percentiles (a stray far or near point does not tilt it); null
+// for fewer than 8 points or a cloud that is not flat (its thinnest spread over a fifth
+// of its middle one): the median depth then stands in.
+function fitPlane(list, zs) {
+  if (list.length < 8) return null
+  const lo = zs[Math.floor(0.1 * (zs.length - 1))],
+    hi = zs[Math.ceil(0.9 * (zs.length - 1))]
+  const pts = list.filter((p) => p[2] >= lo && p[2] <= hi)
+  if (pts.length < 8) return null
+  const c = [0, 1, 2].map((k) => pts.reduce((s, p) => s + p[k], 0) / pts.length)
+  const M = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
+  for (const p of pts) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) M[a][b] += (p[a] - c[a]) * (p[b] - c[b])
+  const { values, vectors } = jacobiEigen3(M)
+  const order = [0, 1, 2].sort((a, b) => values[a] - values[b])
+  if (!(values[order[0]] <= 0.2 * values[order[1]])) return null
+  let nrm = vectors[order[0]]
+  let d = nrm[0] * c[0] + nrm[1] * c[1] + nrm[2] * c[2]
+  if (d < 0) {
+    nrm = nrm.map((x) => -x)
+    d = -d
+  }
+  if (!(d > 0)) return null
+  return { n: nrm, d }
+}
+
+// A pixel of the principal row's (global-shutter) image → the pixel of the photo that
+// recorded the same scene point: the ray through (x, y) to the warp's surface, seen from
+// where the camera was when it read that point's row (iterated, as
+// projectRollingShutter does). Both in the camera's pinhole frame (K).
+export function rollingShutterPixel(warp, K, x, y) {
+  const { w, tau, h, depth, plane } = warp
+  const rx = (x - K.cx) / K.fx,
+    ry = (y - K.cy) / K.fy
+  // Depth of the ray's point: on the plane, unless the ray grazes it (then the median).
+  let z = depth
+  if (plane) {
+    const den = plane.n[0] * rx + plane.n[1] * ry + plane.n[2]
+    const zp = den > 0 ? plane.d / den : NaN
+    if (zp > depth / 4 && zp < depth * 4) z = zp
+  }
+  const X = z * rx,
+    Y = z * ry
+  let u = x,
+    v = y
+  for (let i = 0; i < 4; i++) {
+    const k = (tau * (v - K.cy)) / h
+    const zc = z - k * w[2]
+    if (!(zc > 1e-9)) return { x, y }
+    u = (K.fx * (X - k * w[0])) / zc + K.cx
+    v = (K.fy * (Y - k * w[1])) / zc + K.cy
+  }
+  return { x: u, y: v }
 }

@@ -57,6 +57,9 @@ export const depthCameraKey = (c) =>
     selfCal: c.selfCal ?? null,
     fid: c.fid ?? null,
     mask: c.maskKey ?? null,
+    // A rolling-shutter photo's warp (RSH-4); absent for a global shutter, so the keys
+    // of maps saved before it existed still match.
+    ...(c.rs ? { rs: c.rs } : {}),
   })
 
 // The saved maps a run with `key` can keep: index = the saved depth index (its `maps`,

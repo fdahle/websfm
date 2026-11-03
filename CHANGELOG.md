@@ -72,8 +72,11 @@ Notable changes to websfm. The format follows
   principal point less (5.3 against 11.7 px), at about the same reprojection (0.86 against
   0.88 px RMS); no check points there, so the default stays off. The model keeps each camera's readout, so GCP
   and check-point marks are triangulated from the pose at their own row, and the GCP
-  guides and Detect targets look where that row sees them; dense clouds, orthophotos and
-  textures still read each photo with its middle-row pose.
+  guides and Detect targets look where that row sees them. Depth maps, orthophotos,
+  textures and Export ▸ Undistorted Images read each such photo resampled onto its
+  middle-row pose, every pixel moved by where the camera was when its row was read (the
+  photo's sparse points give the depth that takes), so the dense cloud and the mosaic
+  follow the corrected block.
 - **Metashape interchange, both ways.** Import ▸ **Metashape Cameras**
   reads the XML of Metashape's Export Cameras or Export Markers and takes, as you choose,
   the calibration of each camera, the positions and orientations of the aligned cameras

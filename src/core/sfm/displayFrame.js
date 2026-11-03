@@ -20,6 +20,7 @@
 import { distortPixel, undistortPixel, hasDistortion, distortionOf } from './distortion.js'
 import { canonicalToScan, scanToCanonical } from './fiducials.js'
 import { toScaledPx, fromScaledPx, scaleAxes } from './geometry.js'
+import { rollingShutterPixel } from './rollingShutter.js'
 
 // Apply both distortion bags: ideal pinhole pixel → the pixel the lens recorded.
 // `Kw` must be the K the coefficients were fitted against (working-res if the
@@ -76,19 +77,37 @@ export function makePinholeToMark({ K, dist = null, selfCal = null, fiducial = n
 // Returns **null** when the whole chain is the identity (no bags, no fiducial, both
 // scales 1); callers treat null as "no work to do", which is the common
 // EXIF-only digital case.
-export function makeSampleMap({ K, dist = null, selfCal = null, fiducial = null, outScale = 1, srcScale = 1 } = {}) {
+//
+// `rs`: a rolling-shutter photo's warp (rollingShutter.js rollingShutterWarps): the
+// output grid is the principal row's pose, so each pixel first moves to where the
+// photo recorded it, in the pinhole frame, before the lens.
+export function makeSampleMap({
+  K,
+  dist = null,
+  selfCal = null,
+  fiducial = null,
+  outScale = 1,
+  srcScale = 1,
+  rs = null,
+} = {}) {
   const needsDist = !!K && (hasDistortion(dist) || hasDistortion(selfCal))
+  const needsRs = !!K && !!rs
   // Either scale may be per axis [sx, sy] (geometry.js scaleAxes): a raster resized to
   // a rounded size has slightly different factors per axis.
   const [ox, oy] = scaleAxes(outScale),
     [qx, qy] = scaleAxes(srcScale)
   const needsScale = ox !== 1 || oy !== 1 || qx !== 1 || qy !== 1
-  if (!needsDist && !fiducial && !needsScale) return null
+  if (!needsDist && !fiducial && !needsScale && !needsRs) return null
   return (u, v) => {
     // Into K's own (full-resolution canonical) frame — pixel-centre aligned
     // (geometry.js toScaledPx), the same convention scaleK uses.
     let x = ox === 1 ? u : fromScaledPx(u, ox)
     let y = oy === 1 ? v : fromScaledPx(v, oy)
+    if (needsRs) {
+      const r = rollingShutterPixel(rs, K, x, y)
+      x = r.x
+      y = r.y
+    }
     if (needsDist) {
       const d = distortComposed(x, y, K, dist, selfCal)
       x = d.x

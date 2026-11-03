@@ -703,8 +703,26 @@ is 0.003 mm, and τ is recovered from 0 as 30.005 ms.
 Every JavaScript projection of a camera that carries `rs: { v, h, tau }`
 (`geometry.js projectPoint`, `baAcceptance.js projectFullXYZ`) follows the same model
 by a short fixed point on the row, so the filters and statistics after a solve see the
-residuals the solver minimised. Not yet: the saved model does not keep `rs`, and dense,
-orthophoto and texture project with the principal-row pose (plan-after-0.7 ▸ RSH-4).
+residuals the solver minimised. The saved model keeps `rs`.
+
+**Products (RSH-4).** Dense matching, the orthophoto, the texture and the undistorted
+image export work with one pose per photo, the principal row's. A rolling-shutter photo
+is resampled onto that pose where its pixels are read: the sample map
+(`displayFrame.js makeSampleMap`, option `rs`) takes a pixel (x, y) of the
+principal-row image, places its ray on the plane fitted to the sparse points the photo
+sees (camera frame, least squares over the points between the 10th and 90th depth
+percentiles; the median depth d when they are fewer than 8, not flat, or the ray grazes
+the plane), X_cam = z·K⁻¹(x, y, 1), and projects X_cam − k·w with w = R·v and
+k = τ·(row − cy)/h, iterated on the row as in projectPoint
+(`rollingShutter.js rollingShutterPixel`), before the lens and the film transform. A
+point a fraction ε of its depth off that plane lands off by ε times the shift, so for a
+few pixels of shift over a flat site the warp is exact to a few hundredths of a pixel
+(unit tests: exact on the plane for a photo tilted 35°, where a plane parallel to the
+image misses by over 0.1 px; 5 m relief at 50 m keeps the error under 15 % of a shift
+of 3–4 px). A photo whose largest shift is under 0.01 px is left as it is. The
+depth maps' reuse key includes the warp, so maps built before a readout time was solved
+are computed again. Footprints still project their corners with the principal-row pose
+(a fraction of the shift at the frame's edge rows).
 
 ### 4.6c Multispectral rigs (`bundle.rs` `bundle_adjust_rig`, `core/sfm/rigModel.js`, 2026-11-03)
 

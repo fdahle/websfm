@@ -28,7 +28,20 @@ export function makeUndistortOps({ rasterize }) {
   //   maxDim  — 0/null ⇒ native resolution
   // → { bytes, width, height, K, rect, mime } with `bytes` transferred.
   async function undistortImage(
-    [{ url, K, dist = null, selfCal = null, fid = null, mode = 'crop', maxDim = 0, format = 'jpeg', quality = 0.92 }],
+    [
+      {
+        url,
+        K,
+        dist = null,
+        selfCal = null,
+        fid = null,
+        rs = null,
+        mode = 'crop',
+        maxDim = 0,
+        format = 'jpeg',
+        quality = 0.92,
+      },
+    ],
     { emit },
   ) {
     const log = (m, l = 'info') => emit('log', [m, l, 'Export'])
@@ -48,7 +61,7 @@ export function makeUndistortOps({ rasterize }) {
       fiducial: fid,
       scale: outScale,
     })
-    const map = makeSampleMap({ K, dist, selfCal, fiducial: fid, outScale, srcScale })
+    const map = makeSampleMap({ K, dist, selfCal, fiducial: fid, rs, outScale, srcScale })
 
     let data = resampleRgba(r, map, ow, oh)
 
