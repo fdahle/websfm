@@ -437,7 +437,7 @@ function onShellClose() {
 
 // One list of steps (useStepLayout.js): each registers for the step chain, its tuning
 // folded in place.
-provideStepLayout()
+provideStepLayout('detect-features')
 </script>
 
 <template>

@@ -150,8 +150,9 @@ Notable changes to websfm. The format follows
   Fast, ③ median 10 %, ④ ≥ 2 views agree); a click on the header opens or closes it.
   Open, a step shows what it does and the choices you make per project; **Show advanced
   settings** in the footer (the same switch as in Settings ▸ Display) adds the finer
-  settings of every open step, and a closed step stays closed. A step that is switched
-  off reads "off" but stays as usable as the others. The Advanced section that repeated
+  settings of every open step, and a closed step stays closed. Each dialog remembers
+  which steps you opened or closed. A step that is switched off reads "off" but stays
+  as usable as the others. The Advanced section that repeated
   the steps is gone from the Reconstruct dialogs (Detect and Match Features, Sparse
   Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh) and the Tools dialogs with
   finer settings (Texture, Filter Cloud, Classify Points, Clean and Smooth Mesh, Align to

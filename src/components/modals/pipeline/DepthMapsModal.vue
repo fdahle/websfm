@@ -121,7 +121,7 @@ const effects = computed(() =>
 )
 // One list of steps (useStepLayout.js): the steps register for the chain; each step's
 // tuning folds in place.
-provideStepLayout()
+provideStepLayout('depth-maps')
 
 // What the run receives: the store keys kept maps on exactly this (depthReuse.js).
 const runSettings = computed(() => {

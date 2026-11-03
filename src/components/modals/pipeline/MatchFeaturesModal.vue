@@ -359,7 +359,7 @@ function run() {
 
 // One list of steps (useStepLayout.js): each registers for the step chain, its tuning
 // folded in place.
-provideStepLayout()
+provideStepLayout('match-features')
 </script>
 
 <template>

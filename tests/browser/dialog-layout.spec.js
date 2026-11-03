@@ -74,5 +74,25 @@ test('Depth Maps: each step a group, its advanced settings behind one switch', a
   await dialog.getByLabel('Enabled').nth(1).check()
   await advanced.uncheck()
   await expect(dialog.locator('#minNcc')).toBeHidden()
+
+  // The steps the user opened or closed stay so when the dialog opens again.
+  await head(1).click()
+  await head(4).click()
+  const reopen = async () => {
+    await page.evaluate(async () => {
+      const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+      useModalsStore().depthMapsOpen = false
+    })
+    await expect(dialog).toHaveCount(0)
+    await page.evaluate(async () => {
+      const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+      useModalsStore().depthMapsOpen = true
+    })
+    await expect(dialog).toBeVisible()
+  }
+  await reopen()
+  await expect(head(1)).toHaveAttribute('aria-expanded', 'true')
+  await expect(head(4)).toHaveAttribute('aria-expanded', 'false')
+  await expect(head(3)).toHaveAttribute('aria-expanded', 'true')
   expect(errors).toEqual([])
 })
