@@ -19,6 +19,10 @@ photos by hand; then [Georeference](guide:georeferencing) again with the new mar
 searched whole, even before Align. Tag 7 is the GCP with 7 as the only number in its
 name ("7", "Tag 7", "GCP-07"); a tag no GCP is named after becomes a new marker.
 
+To review, double-click a GCP in the sidebar: its marks sit side by side, each centred
+on its crosshair. **✓** accepts a detected mark (it is then yours), **×** removes it,
+and **Accept** in the header takes the rest.
+
 ## Target type
 <!-- param: kind  default: Checker mat -->
 **Checker mat**, the black-and-white squares of most drone surveys, is found where the
@@ -51,5 +55,5 @@ log. A tag's score is 1 when it read without error, lower for each corrected bit
 
 ## Replace earlier detections
 <!-- param: replaceDetected  default: on -->
-A new run replaces marks an earlier run detected. Marks you placed or moved yourself
+A new run replaces marks an earlier run detected. Marks you placed, moved or accepted
 always stay.

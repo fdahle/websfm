@@ -1,13 +1,15 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useImagesStore } from '../../stores/useImagesStore.js'
+import { useGcpsStore } from '../../stores/useGcpsStore.js'
 import { pluralize } from '../../core/textFormat.js'
 
 // Multi-image GCP inspector: one panel per registered observation, each cropped
 // and zoomed to centre the GCP's marked pixel, with a crosshair marker. Opened
 // by double-clicking a GCP in the sidebar. Marking still happens in the full
 // image view (a panel's "Open" jumps there); a bad mark can be dropped here,
-// where the crops make it easy to spot.
+// where the crops make it easy to spot, and a mark Detect targets placed accepted
+// (it is then yours: a later run does not replace it).
 const props = defineProps({
   gcp: { type: Object, default: null }, // { id, name, x, y, z, observations }
   images: { type: Array, default: () => [] }, // full image list (resolve imageId → url)
@@ -61,6 +63,16 @@ const panels = computed(() => {
   return out
 })
 
+// Accept a detected mark where it is: it loses its flag and counts as placed by hand.
+const gcpsStore = useGcpsStore()
+const detectedPanels = computed(() => panels.value.filter((p) => p.detected != null))
+function accept(p) {
+  gcpsStore.setObservation(props.gcp.id, p.imageId, p.name, p.px, p.py, null)
+}
+function acceptAll() {
+  for (const p of detectedPanels.value) accept(p)
+}
+
 const missingCount = computed(
   () => (props.gcp?.observations || []).filter((o) => o.imageId == null && o.px != null).length,
 )
@@ -100,6 +112,14 @@ function fmtCoord(v) {
           +{{ missingCount }} not loaded
         </span>
       </div>
+      <button
+        v-if="detectedPanels.length"
+        class="btn btn-sm"
+        title="Keep every mark Detect targets placed here as yours; remove the bad ones first"
+        @click="acceptAll"
+      >
+        Accept {{ pluralize(detectedPanels.length, 'detection') }}
+      </button>
       <div class="gcp-zoom">
         <button class="zoom-btn" title="Zoom out" @click="zoomOut">−</button>
         <span class="zoom-val">{{ zoom.toFixed(2) }}×</span>
@@ -138,6 +158,14 @@ function fmtCoord(v) {
           <span v-if="p.reprojPx != null" class="panel-reproj" title="Reprojection error (px)"
             >{{ p.reprojPx.toFixed(1) }}px</span
           >
+          <button
+            v-if="p.detected != null"
+            class="panel-accept"
+            :title="`Accept the detected mark in ${p.name}: it counts as yours`"
+            @click="accept(p)"
+          >
+            ✓
+          </button>
           <button
             class="panel-remove"
             :title="`Remove the mark in ${p.name}`"
@@ -347,6 +375,19 @@ function fmtCoord(v) {
 }
 .panel-remove:hover {
   color: #e55;
+}
+.panel-accept {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-dim, #9a9aa5);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.panel-accept:hover {
+  color: var(--accent);
 }
 
 .gcp-empty {

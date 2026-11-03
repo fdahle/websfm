@@ -164,3 +164,30 @@ test('reads AprilTags anywhere in a photo, and runs from the dialog', async ({ p
     .toMatch(/^Detect targets: 0 AprilTag marks placed in 5 photos on \d+ workers?/)
   expect(errors).toEqual([])
 })
+
+// Reviewing detected marks in the GCP's marks view: ✓ accepts one (it loses its flag),
+// Accept in the header takes the rest.
+test('accepts detected marks in the GCP view', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough')
+  test.setTimeout(120_000)
+  await openFixture(page)
+  await page.evaluate(async () => {
+    const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
+    const store = useGcpsStore()
+    const g = store.gcps.find((x) => x.name === 'Bar end A')
+    for (const o of g.observations) store.setObservation(g.id, o.imageId, o.imageName, o.px, o.py, { score: 0.9 })
+  })
+  await page.locator('.section-hd', { hasText: 'Control & Markers' }).click()
+  await page.getByText('Bar end A', { exact: true }).first().dblclick()
+  const view = page.locator('.gcp-view')
+  await expect(view.locator('.panel-detected')).toHaveCount(4)
+  await view.locator('.panel-accept').first().click()
+  await expect(view.locator('.panel-detected')).toHaveCount(3)
+  await view.getByRole('button', { name: 'Accept 3 detections' }).click()
+  await expect(view.locator('.panel-detected')).toHaveCount(0)
+  const flagged = await page.evaluate(async () => {
+    const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
+    return useGcpsStore().gcps.flatMap((g) => g.observations.filter((o) => o.source || o.score != null)).length
+  })
+  expect(flagged).toBe(0)
+})

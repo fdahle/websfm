@@ -12,7 +12,8 @@ Notable changes to websfm. The format follows
   Edit GCPs. A checker mat is looked for from its coordinates through the georeference,
   or from its marks in two other photos. An AprilTag needs no model, even before Align:
   tag 7 marks the GCP with 7 as the only number in its name, or a new marker "Tag 7".
-  Marks you placed yourself always stay. On synthetic mats (turned, blurred, noisy, the
+  Marks you placed yourself always stay. In a GCP's marks view (double-click it in the
+  sidebar) ✓ accepts a detected mark and **Accept** takes them all. On synthetic mats (turned, blurred, noisy, the
   guess 20 px off) the centre is found to within 0.1 px; on the Aukerman example the
   place it searches for a removed mark lies within 3 px of where the mark was. On
   rendered tags (turned, in perspective, blurred, noisy, two bits wrong) the tag's centre
