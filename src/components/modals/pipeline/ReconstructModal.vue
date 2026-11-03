@@ -188,8 +188,33 @@ function run() {
       @select="selectPreset"
     />
 
+    <SettingsStep step="1" title="Register images" :effect="effects.register" />
+
+    <SettingsStep step="2" title="Bundle adjustment" :effect="effects.ba" :inactive="!(settings.baIterations > 0)" />
+
+    <SettingsStep
+      step="3"
+      title="Self-calibration"
+      :effect="effects.calibration"
+      :inactive="adding || !(settings.baIterations > 0) || settings.refineIntrinsics === 'none'"
+    />
+
+    <SettingsStep
+      step="4"
+      title="Rolling shutter"
+      :effect="effects.rollingShutter"
+      :inactive="adding || !(settings.baIterations > 0) || settings.rollingShutter !== 'on'"
+    />
+
+    <SettingsStep
+      step="5"
+      title="Camera rig"
+      :effect="effects.cameraRig"
+      :inactive="adding || !cameraRigs.length || settings.cameraRig === 'off'"
+    />
+
     <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="1" title="Register images" :effect="effects.register">
+      <SettingsStep step="1" title="Register images — advanced">
         <SettingsField
           label-for="minMatches"
           unit="pts"
@@ -244,7 +269,7 @@ function run() {
         </SettingsField>
       </SettingsStep>
 
-      <SettingsStep step="2" title="Bundle adjustment" :effect="effects.ba" :inactive="!(settings.baIterations > 0)">
+      <SettingsStep step="2" title="Bundle adjustment — advanced">
         <SettingsField
           label-for="baIter"
           hint="Bundle-adjustment iterations per pass. 0 skips bundle adjustment — and with it self-calibration."
@@ -271,12 +296,7 @@ function run() {
         </SettingsField>
       </SettingsStep>
 
-      <SettingsStep
-        step="3"
-        title="Self-calibration"
-        :effect="effects.calibration"
-        :inactive="adding || !(settings.baIterations > 0) || settings.refineIntrinsics === 'none'"
-      >
+      <SettingsStep step="3" title="Self-calibration — advanced">
         <SettingsField label-for="refineIntr">
           <template #label>
             <FieldHelp op="sparse-reconstruction" param="refineIntrinsics">Self-calibration</FieldHelp>
@@ -300,12 +320,7 @@ function run() {
         </SettingsField>
       </SettingsStep>
 
-      <SettingsStep
-        step="4"
-        title="Rolling shutter"
-        :effect="effects.rollingShutter"
-        :inactive="adding || !(settings.baIterations > 0) || settings.rollingShutter !== 'on'"
-      >
+      <SettingsStep step="4" title="Rolling shutter — advanced">
         <SettingsField label-for="rollingShutter">
           <template #label>
             <FieldHelp op="sparse-reconstruction" param="rollingShutter">Rolling shutter</FieldHelp>
@@ -322,12 +337,7 @@ function run() {
         </SettingsField>
       </SettingsStep>
 
-      <SettingsStep
-        step="5"
-        title="Camera rig"
-        :effect="effects.cameraRig"
-        :inactive="adding || !cameraRigs.length || settings.cameraRig === 'off'"
-      >
+      <SettingsStep step="5" title="Camera rig — advanced">
         <SettingsField label-for="cameraRig">
           <template #label>
             <FieldHelp op="sparse-reconstruction" param="cameraRig">Multispectral rig</FieldHelp>

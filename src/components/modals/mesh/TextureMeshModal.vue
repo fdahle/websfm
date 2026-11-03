@@ -7,11 +7,13 @@ import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import PresetCards from '../ui/PresetCards.vue'
+import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
-import { TEXTURE_DEFAULTS } from '../../../core/defaults.user.js'
+import { TEXTURE_DEFAULTS, TEXTURE_PRESETS, TEXTURE_PRESET_META } from '../../../core/defaults.user.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { textureEffects } from '../../../core/stepEffects/texture.js'
 
@@ -28,6 +30,14 @@ const emit = defineEmits(['close', 'run'])
 // The last run's settings in this project, and saved presets (useDialogSettings).
 const dialog = useDialogSettings('texture-mesh', TEXTURE_DEFAULTS)
 const settings = dialog.settings
+// Quality cards: texel scale and the atlas's page cap (deltas; Full ≡ the defaults).
+const { baseId, activePreset, selectPreset } = usePresetSettings({
+  settings,
+  defaults: TEXTURE_DEFAULTS,
+  presets: TEXTURE_PRESETS,
+  cards: TEXTURE_PRESET_META,
+  initialId: 'high',
+})
 // Settings ▸ Compute: the WebGPU depth pass and the memory gate the page count obeys.
 const { useGpu, memBudgetBytes } = useComputeSettings()
 const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
@@ -92,79 +102,15 @@ function run() {
         </p>
         <p v-if="!cameraCount" class="warn-box">Texturing needs registered cameras: build the sparse model first.</p>
       </SettingsGroup>
-      <SettingsStep step="1" title="Which photos see each triangle" :effect="effects.visibility">
-        <SettingsField hint="Masked pixels (people, sky, the drone's legs) are never used.">
-          <template #label
-            ><FieldHelp
-              op="texture-mesh"
-              param="useMasks"
-              :value="settings.useMasks"
-              :default-value="TEXTURE_DEFAULTS.useMasks"
-              >Use masks</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.useMasks" type="checkbox" class="checkbox" /> Leave masked pixels out</label
-          >
-        </SettingsField>
-        <SettingsField hint="For people, vehicles or anything else that moved between photos.">
-          <template #label
-            ><FieldHelp
-              op="texture-mesh"
-              param="photoConsistency"
-              :value="settings.photoConsistency"
-              :default-value="TEXTURE_DEFAULTS.photoConsistency"
-              >Ignore what only some photos see</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.photoConsistency" type="checkbox" class="checkbox" /> Check each face's photos
-            against each other</label
-          >
-        </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="2" title="Choose one photo per triangle" :effect="effects.selection">
-        <SettingsField label-for="tex-unseen">
-          <template #label><FieldHelp op="texture-mesh" param="unseen">Faces no photo sees</FieldHelp></template>
-          <select id="tex-unseen" v-model="settings.unseen" class="field-input field-select">
-            <option v-for="u in UNSEEN" :key="u.value" :value="u.value">{{ u.label }}</option>
-          </select>
-        </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="3" title="Pack the atlas" :effect="effects.atlas">
-        <SettingsField label-for="tex-res">
-          <template #label><FieldHelp op="texture-mesh" param="maxScale">Texture resolution</FieldHelp></template>
-          <select id="tex-res" v-model.number="settings.maxScale" class="field-input field-select">
-            <option v-for="r in RESOLUTIONS" :key="r.value" :value="r.value">{{ r.label }}</option>
-          </select>
-        </SettingsField>
-        <SettingsField label-for="tex-page" unit="px">
-          <template #label><FieldHelp op="texture-mesh" param="pageSize">Page size</FieldHelp></template>
-          <select id="tex-page" v-model.number="settings.pageSize" class="field-input field-select">
-            <option v-for="p in PAGE_SIZES" :key="p" :value="p">{{ p }} × {{ p }}</option>
-          </select>
-        </SettingsField>
-        <SettingsField label-for="tex-pages" unit="pages">
-          <template #label
-            ><FieldHelp
-              op="texture-mesh"
-              param="maxPages"
-              :value="settings.maxPages"
-              :default-value="TEXTURE_DEFAULTS.maxPages"
-              >Maximum pages</FieldHelp
-            ></template
-          >
-          <input
-            id="tex-pages"
-            v-model.number="settings.maxPages"
-            type="number"
-            min="1"
-            max="64"
-            step="1"
-            class="field-input"
-          />
-        </SettingsField>
-      </SettingsStep>
+      <PresetCards
+        :model-value="activePreset"
+        :base-id="baseId"
+        :presets="TEXTURE_PRESET_META"
+        @select="selectPreset"
+      />
+      <SettingsStep step="1" title="Which photos see each triangle" :effect="effects.visibility" />
+      <SettingsStep step="2" title="Choose one photo per triangle" :effect="effects.selection" />
+      <SettingsStep step="3" title="Pack the atlas" :effect="effects.atlas" />
       <SettingsStep step="4" title="Level colours" :effect="effects.colour" :inactive="!settings.levelColours">
         <SettingsField hint="Matches the exposure and white balance of neighbouring photos.">
           <template #label
@@ -182,7 +128,44 @@ function run() {
         </SettingsField>
       </SettingsStep>
       <AdvancedDisclosure label="Advanced settings">
+        <SettingsStep step="1" title="Which photos see each triangle — advanced">
+          <SettingsField hint="Masked pixels (people, sky, the drone's legs) are never used.">
+            <template #label
+              ><FieldHelp
+                op="texture-mesh"
+                param="useMasks"
+                :value="settings.useMasks"
+                :default-value="TEXTURE_DEFAULTS.useMasks"
+                >Use masks</FieldHelp
+              ></template
+            >
+            <label class="checkbox-row"
+              ><input v-model="settings.useMasks" type="checkbox" class="checkbox" /> Leave masked pixels out</label
+            >
+          </SettingsField>
+          <SettingsField hint="For people, vehicles or anything else that moved between photos.">
+            <template #label
+              ><FieldHelp
+                op="texture-mesh"
+                param="photoConsistency"
+                :value="settings.photoConsistency"
+                :default-value="TEXTURE_DEFAULTS.photoConsistency"
+                >Ignore what only some photos see</FieldHelp
+              ></template
+            >
+            <label class="checkbox-row"
+              ><input v-model="settings.photoConsistency" type="checkbox" class="checkbox" /> Check each face's photos
+              against each other</label
+            >
+          </SettingsField>
+        </SettingsStep>
         <SettingsStep step="2" title="Choose one photo per triangle — advanced">
+          <SettingsField label-for="tex-unseen">
+            <template #label><FieldHelp op="texture-mesh" param="unseen">Faces no photo sees</FieldHelp></template>
+            <select id="tex-unseen" v-model="settings.unseen" class="field-input field-select">
+              <option v-for="u in UNSEEN" :key="u.value" :value="u.value">{{ u.label }}</option>
+            </select>
+          </SettingsField>
           <SettingsField label-for="tex-smooth">
             <template #label
               ><FieldHelp
@@ -200,6 +183,40 @@ function run() {
               min="0"
               max="5"
               step="0.1"
+              class="field-input"
+            />
+          </SettingsField>
+        </SettingsStep>
+        <SettingsStep step="3" title="Pack the atlas — advanced">
+          <SettingsField label-for="tex-res">
+            <template #label><FieldHelp op="texture-mesh" param="maxScale">Texture resolution</FieldHelp></template>
+            <select id="tex-res" v-model.number="settings.maxScale" class="field-input field-select">
+              <option v-for="r in RESOLUTIONS" :key="r.value" :value="r.value">{{ r.label }}</option>
+            </select>
+          </SettingsField>
+          <SettingsField label-for="tex-page" unit="px">
+            <template #label><FieldHelp op="texture-mesh" param="pageSize">Page size</FieldHelp></template>
+            <select id="tex-page" v-model.number="settings.pageSize" class="field-input field-select">
+              <option v-for="p in PAGE_SIZES" :key="p" :value="p">{{ p }} × {{ p }}</option>
+            </select>
+          </SettingsField>
+          <SettingsField label-for="tex-pages" unit="pages">
+            <template #label
+              ><FieldHelp
+                op="texture-mesh"
+                param="maxPages"
+                :value="settings.maxPages"
+                :default-value="TEXTURE_DEFAULTS.maxPages"
+                >Maximum pages</FieldHelp
+              ></template
+            >
+            <input
+              id="tex-pages"
+              v-model.number="settings.maxPages"
+              type="number"
+              min="1"
+              max="64"
+              step="1"
               class="field-input"
             />
           </SettingsField>

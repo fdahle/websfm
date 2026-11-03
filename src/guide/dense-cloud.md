@@ -11,7 +11,8 @@ several maps agree on into a coloured [point cloud](help:point-cloud) with norma
 ## Point density
 <!-- param: step default: 1 px -->
 One point every N depth-map pixels. `1` keeps full density; a larger step gives a
-smaller cloud for previews or export. If the cloud wouldn't fit the memory budget,
+smaller cloud for previews or export. The **Light**, **Medium** and **Full** cards set
+it to 4, 2 and 1. If the cloud wouldn't fit the memory budget,
 fusion raises the step itself (up to 4 px) and says so.
 
 ## Auto thresholds

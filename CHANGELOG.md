@@ -145,6 +145,15 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **Dialogs laid out alike.** Every processing dialog now shows its steps with what each
+  will do, keeps the settings whose defaults suit almost every project under one
+  **Advanced settings** section, and leaves only the choices you make per project in
+  view. Dense Cloud, Orthophoto and Texture Mesh gain quality cards: **Light / Medium /
+  Full** point density (every 4th, 2nd or every pixel), **Fast / Balanced** mosaics (nadir
+  seams with feathering against graph cut with multiband blending, 68 s against 116 s
+  on an 80-photo quarry block) and **Draft / Medium / Full** texture resolution. DEM,
+  Orthophoto, Classify Points and Contour Lines move their tuning under Advanced; Sparse
+  Model and Depth Maps show their steps' effects above it instead of inside it.
 - **Measuring in one window.** Ruler, Area, Profile and Volume show their result in the
   measuring window itself, under the point buttons, instead of in a second panel; on the
   2D map the window's **Layer** field picks the raster to measure, and Profile and Volume

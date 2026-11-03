@@ -37,6 +37,8 @@ async function openDem(page) {
   await page.locator('.ribbon').getByRole('button', { name: 'DEM', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Build DEM' })
   await expect(dialog).toBeVisible()
+  // Surface aggregation is tuning: under Advanced settings.
+  await dialog.getByRole('button', { name: /Advanced settings/ }).click()
   return dialog
 }
 

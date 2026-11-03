@@ -79,7 +79,8 @@ Mosaic only: where seams between photos run. **Graph cut** places them where
 neighbouring photos agree, along open ground and around buildings and trees
 ([graph cut](help:graph-cut)). **Most nadir photo** gives each area to the photo looking
 most straight down, so seams run halfway between photo centres and can cut through
-roofs and trees.
+roofs and trees. The **Fast** card takes it with feathered seams, about 40 % quicker;
+**Balanced** takes graph cut with multiband blending.
 
 ## Colour balance
 <!-- param: colourBalance default: on -->

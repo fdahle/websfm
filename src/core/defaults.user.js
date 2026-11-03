@@ -344,6 +344,18 @@ export const DENSE_FUSE_DEFAULTS = {
   // in place of the main one (true). Off, so a rebuild never loses a result by default.
   replaceMain: false,
 }
+// Dense quality cards: point density by the sample step (deltas; high ≡ the defaults,
+// every pixel). A step of n keeps about 1/n² of the points.
+export const DENSE_FUSE_PRESETS = {
+  low: { step: 4 },
+  medium: { step: 2 },
+  high: {},
+}
+export const DENSE_FUSE_PRESET_META = [
+  { id: 'low', label: 'Light', blurb: 'Every 4th pixel · ~1/16 of the points, quick' },
+  { id: 'medium', label: 'Medium', blurb: 'Every 2nd pixel · ~¼ of the points' },
+  { id: 'high', label: 'Full', blurb: 'Every pixel · densest · default' },
+]
 
 // Reconstruct ▸ Find GCPs (composables/useFindGcps.js, FindGcpsModal.vue).
 export const FIND_GCPS_DEFAULTS = {
@@ -436,6 +448,17 @@ export const ORTHO_DEFAULTS = {
   // in place of the main one (true). Off, so a rebuild never loses a result by default.
   replaceMain: false,
 }
+// Orthophoto quality cards: the mosaic's seamlines and seam blending, its cost lever
+// (deltas; medium ≡ defaults). Quarry-80 (METHODS §8.2.1): nadir + feather 68 s, graph
+// cut + multiband 116 s; graph cut keeps seams off roofs, multiband ~7 % more detail.
+export const ORTHO_PRESETS = {
+  low: { seamline: 'nadir', seamBlend: 'feather' },
+  medium: {},
+}
+export const ORTHO_PRESET_META = [
+  { id: 'low', label: 'Fast', blurb: 'Nadir seams, feathered · ~40 % quicker' },
+  { id: 'medium', label: 'Balanced', blurb: 'Seams around roofs and trees, multiband · default' },
+]
 
 // Product export (core/products/exporters.js + geotiff.js). Mirrored by ExportModal.vue.
 // `format` is not here — it's chosen dynamically per export kind in the modal.
@@ -566,6 +589,18 @@ export const TEXTURE_DEFAULTS = {
   // look different from different angles (a vine standing off a wall: South Building).
   photoConsistency: false,
 }
+// Texture quality cards: the finest texel scale and the page cap (deltas; high ≡ the
+// defaults, native photo pixels on up to 8 pages).
+export const TEXTURE_PRESETS = {
+  low: { maxScale: 0.25, maxPages: 2 },
+  medium: { maxScale: 0.5, maxPages: 4 },
+  high: {},
+}
+export const TEXTURE_PRESET_META = [
+  { id: 'low', label: 'Draft', blurb: '¼ of the photo pixels · up to 2 pages' },
+  { id: 'medium', label: 'Medium', blurb: '½ of the photo pixels · up to 4 pages' },
+  { id: 'high', label: 'Full', blurb: 'Native photo pixels · up to 8 pages · default' },
+]
 
 // Cloud editing (core/products/cloudEdit.js). Mirrored by FilterCloudModal.vue /
 // CropCloudModal.vue / MergeCloudsModal.vue. These edit **dense** clouds only — a

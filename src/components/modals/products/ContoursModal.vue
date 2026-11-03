@@ -6,6 +6,7 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import { CONTOUR_DEFAULTS } from '../../../core/defaults.user.js'
 import { contourLevels, MAX_CONTOUR_LEVELS } from '../../../core/products/contours.js'
@@ -149,70 +150,7 @@ function run() {
           />
         </SettingsField>
       </SettingsStep>
-      <SettingsStep step="2" title="Trace and shape" :effect="effects.shape">
-        <SettingsField
-          label-for="ct-gen"
-          unit="cells"
-          hint="Gaussian σ. Removes the noise rings of a photogrammetric DEM; 0 traces the heights as they are."
-        >
-          <template #label
-            ><FieldHelp
-              op="contours"
-              param="generalize"
-              :value="settings.generalize"
-              :default-value="CONTOUR_DEFAULTS.generalize"
-              >Smooth the DEM first</FieldHelp
-            ></template
-          >
-          <input
-            id="ct-gen"
-            v-model.number="settings.generalize"
-            :aria-invalid="numbers.bad.generalize"
-            type="number"
-            min="0"
-            max="20"
-            step="0.5"
-            class="field-input"
-          />
-        </SettingsField>
-        <SettingsField label-for="ct-smooth" unit="passes" hint="0 keeps the exact grid crossings.">
-          <template #label
-            ><FieldHelp op="contours" param="smooth" :value="settings.smooth" :default-value="CONTOUR_DEFAULTS.smooth"
-              >Smoothing</FieldHelp
-            ></template
-          >
-          <input
-            id="ct-smooth"
-            v-model.number="settings.smooth"
-            :aria-invalid="numbers.bad.smooth"
-            type="number"
-            min="0"
-            max="10"
-            step="1"
-            class="field-input"
-          />
-        </SettingsField>
-        <SettingsField label-for="ct-min" unit="cells" hint="0 keeps every line.">
-          <template #label
-            ><FieldHelp
-              op="contours"
-              param="minCells"
-              :value="settings.minCells"
-              :default-value="CONTOUR_DEFAULTS.minCells"
-              >Drop lines shorter than</FieldHelp
-            ></template
-          >
-          <input
-            id="ct-min"
-            v-model.number="settings.minCells"
-            :aria-invalid="numbers.bad.minCells"
-            type="number"
-            min="0"
-            step="1"
-            class="field-input"
-          />
-        </SettingsField>
-      </SettingsStep>
+      <SettingsStep step="2" title="Trace and shape" :effect="effects.shape" />
       <SettingsStep step="3" title="Place and save" :effect="effects.result">
         <SettingsField label-for="ct-fmt">
           <template #label><FieldHelp op="contours" param="format">Download</FieldHelp></template>
@@ -224,6 +162,72 @@ function run() {
         </SettingsField>
         <FileNameField v-if="settings.format !== 'none'" v-model="fileName" :default-name="defaultName" />
       </SettingsStep>
+      <AdvancedDisclosure label="Advanced settings">
+        <SettingsStep step="2" title="Trace and shape — advanced">
+          <SettingsField
+            label-for="ct-gen"
+            unit="cells"
+            hint="Gaussian σ. Removes the noise rings of a photogrammetric DEM; 0 traces the heights as they are."
+          >
+            <template #label
+              ><FieldHelp
+                op="contours"
+                param="generalize"
+                :value="settings.generalize"
+                :default-value="CONTOUR_DEFAULTS.generalize"
+                >Smooth the DEM first</FieldHelp
+              ></template
+            >
+            <input
+              id="ct-gen"
+              v-model.number="settings.generalize"
+              :aria-invalid="numbers.bad.generalize"
+              type="number"
+              min="0"
+              max="20"
+              step="0.5"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField label-for="ct-smooth" unit="passes" hint="0 keeps the exact grid crossings.">
+            <template #label
+              ><FieldHelp op="contours" param="smooth" :value="settings.smooth" :default-value="CONTOUR_DEFAULTS.smooth"
+                >Smoothing</FieldHelp
+              ></template
+            >
+            <input
+              id="ct-smooth"
+              v-model.number="settings.smooth"
+              :aria-invalid="numbers.bad.smooth"
+              type="number"
+              min="0"
+              max="10"
+              step="1"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField label-for="ct-min" unit="cells" hint="0 keeps every line.">
+            <template #label
+              ><FieldHelp
+                op="contours"
+                param="minCells"
+                :value="settings.minCells"
+                :default-value="CONTOUR_DEFAULTS.minCells"
+                >Drop lines shorter than</FieldHelp
+              ></template
+            >
+            <input
+              id="ct-min"
+              v-model.number="settings.minCells"
+              :aria-invalid="numbers.bad.minCells"
+              type="number"
+              min="0"
+              step="1"
+              class="field-input"
+            />
+          </SettingsField>
+        </SettingsStep>
+      </AdvancedDisclosure>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

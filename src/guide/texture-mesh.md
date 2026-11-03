@@ -49,7 +49,9 @@ slightly less direct views; **0** takes the best photo per triangle and scatters
 ## Texture resolution
 <!-- param: maxScale default: Native photo pixels -->
 The finest texel size in photo pixels. **Native photo pixels** keeps all the detail; it
-is lowered automatically when the atlas would exceed **Maximum pages**.
+is lowered automatically when the atlas would exceed **Maximum pages**. The **Draft**,
+**Medium** and **Full** cards set it with the page cap: a quarter of the photo pixels on
+up to 2 pages, half on up to 4, native on up to 8.
 
 ## Page size
 <!-- param: pageSize default: 4096 -->

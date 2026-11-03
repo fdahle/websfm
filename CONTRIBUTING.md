@@ -188,8 +188,14 @@ volume) is a workbench: it uses the same fields but no numbered steps.
 5. **Basic or Advanced:** a setting goes under Advanced only when its default suits
    almost every project. A filter or cleanup chain shows each stage's on/off switch
    in its step and keeps the stage's tuning under Advanced. A dialog with only a few
-   settings has no Advanced part.
-6. **Fields:** what the source is (cloud, mesh, model) sits above the steps as a
+   settings has no Advanced part. Every step stays in view with its effect line, even
+   when all its fields are under Advanced; the one **Advanced settings** section follows
+   the steps (the output step comes last).
+6. **Quality cards:** where a dialog has a real quality-against-time ladder (resolution,
+   density, the mosaic method), cards at the top set it (Fast · Balanced · Detailed, or
+   the dialog's own words); the card names say what they change, and the CHANGELOG
+   gives the measurement behind them.
+7. **Fields:** what the source is (cloud, mesh, model) sits above the steps as a
    *Source* group. A select is `class="field-select"`: it is as wide as its longest
    option, not the dialog, like a number field is as wide as its number. A free-text
    field (a file name) is `field-input wide`.

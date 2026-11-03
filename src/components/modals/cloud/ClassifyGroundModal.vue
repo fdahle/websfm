@@ -130,27 +130,6 @@ function run() {
         </p>
       </SettingsGroup>
       <SettingsStep step="1" title="Drop the cloth" :effect="effects.cloth" :inactive="noScale">
-        <SettingsField label-for="gnd-res" unit="m" hint="Coarser spans wider roofs; finer follows steeper ground.">
-          <template #label>
-            <FieldHelp
-              op="classify-ground"
-              param="clothResolution"
-              :value="settings.clothResolution"
-              :default-value="GROUND_DEFAULTS.clothResolution"
-              >Cloth resolution</FieldHelp
-            >
-          </template>
-          <input
-            id="gnd-res"
-            v-model.number="settings.clothResolution"
-            :aria-invalid="numbers.bad.clothResolution"
-            type="number"
-            min="0.05"
-            max="50"
-            step="0.5"
-            class="field-input"
-          />
-        </SettingsField>
         <SettingsField label-for="gnd-rigid" hint="How stiff the cloth is: steep ground needs a soft cloth.">
           <template #label><FieldHelp op="classify-ground" param="rigidness">Terrain</FieldHelp></template>
           <select id="gnd-rigid" v-model.number="settings.rigidness" class="field-input field-select">
@@ -159,51 +138,8 @@ function run() {
             <option :value="3">Flat (stiff cloth)</option>
           </select>
         </SettingsField>
-        <SettingsField hint="Spread the cloth onto continuous steep ground it settled below.">
-          <template #label>
-            <FieldHelp
-              op="classify-ground"
-              param="slopeSmoothing"
-              :value="settings.slopeSmoothing"
-              :default-value="GROUND_DEFAULTS.slopeSmoothing"
-              >Slope smoothing</FieldHelp
-            >
-          </template>
-          <label class="checkbox-row"
-            ><input v-model="settings.slopeSmoothing" type="checkbox" class="checkbox" /> Enabled</label
-          >
-        </SettingsField>
       </SettingsStep>
-      <SettingsStep step="2" title="Label the points" :effect="effects.label" :inactive="noScale">
-        <SettingsField label-for="gnd-thr" unit="m" hint="Points this close to the cloth are ground.">
-          <template #label>
-            <FieldHelp
-              op="classify-ground"
-              param="classThreshold"
-              :value="settings.classThreshold"
-              :default-value="GROUND_DEFAULTS.classThreshold"
-              >Ground tolerance</FieldHelp
-            >
-          </template>
-          <input
-            id="gnd-thr"
-            v-model.number="settings.classThreshold"
-            :aria-invalid="numbers.bad.classThreshold"
-            type="number"
-            min="0.01"
-            max="10"
-            step="0.1"
-            class="field-input"
-          />
-        </SettingsField>
-        <SettingsField label-for="gnd-extent" hint="The same area a DEM covers by default.">
-          <template #label><FieldHelp op="classify-ground" param="extent">Extent</FieldHelp></template>
-          <select id="gnd-extent" v-model="settings.extent" class="field-input field-select">
-            <option value="core">Dense core of the cloud</option>
-            <option value="all">All points</option>
-          </select>
-        </SettingsField>
-      </SettingsStep>
+      <SettingsStep step="2" title="Label the points" :effect="effects.label" :inactive="noScale" />
       <SettingsStep step="3" title="Buildings" :effect="effects.buildings" :inactive="noScale || !settings.buildings">
         <SettingsField hint="Roofs and walls large and high enough to be a building.">
           <template #label>
@@ -219,7 +155,97 @@ function run() {
             ><input v-model="settings.buildings" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
-        <AdvancedDisclosure v-if="settings.buildings" label="3 · Buildings — advanced">
+      </SettingsStep>
+      <SettingsStep
+        step="4"
+        title="Vegetation"
+        :effect="effects.vegetation"
+        :inactive="noScale || !settings.vegetation"
+      >
+        <SettingsField hint="Trees, shrubs and low plants, by their height above the cloth.">
+          <template #label>
+            <FieldHelp
+              op="classify-ground"
+              param="vegetation"
+              :value="settings.vegetation"
+              :default-value="CLASSIFY_DEFAULTS.vegetation"
+              >Find vegetation</FieldHelp
+            >
+          </template>
+          <label class="checkbox-row"
+            ><input v-model="settings.vegetation" type="checkbox" class="checkbox" /> Enabled</label
+          >
+        </SettingsField>
+      </SettingsStep>
+      <AdvancedDisclosure label="Advanced settings">
+        <SettingsStep step="1" title="Drop the cloth — advanced">
+          <SettingsField label-for="gnd-res" unit="m" hint="Coarser spans wider roofs; finer follows steeper ground.">
+            <template #label>
+              <FieldHelp
+                op="classify-ground"
+                param="clothResolution"
+                :value="settings.clothResolution"
+                :default-value="GROUND_DEFAULTS.clothResolution"
+                >Cloth resolution</FieldHelp
+              >
+            </template>
+            <input
+              id="gnd-res"
+              v-model.number="settings.clothResolution"
+              :aria-invalid="numbers.bad.clothResolution"
+              type="number"
+              min="0.05"
+              max="50"
+              step="0.5"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField hint="Spread the cloth onto continuous steep ground it settled below.">
+            <template #label>
+              <FieldHelp
+                op="classify-ground"
+                param="slopeSmoothing"
+                :value="settings.slopeSmoothing"
+                :default-value="GROUND_DEFAULTS.slopeSmoothing"
+                >Slope smoothing</FieldHelp
+              >
+            </template>
+            <label class="checkbox-row"
+              ><input v-model="settings.slopeSmoothing" type="checkbox" class="checkbox" /> Enabled</label
+            >
+          </SettingsField>
+        </SettingsStep>
+        <SettingsStep step="2" title="Label the points — advanced">
+          <SettingsField label-for="gnd-thr" unit="m" hint="Points this close to the cloth are ground.">
+            <template #label>
+              <FieldHelp
+                op="classify-ground"
+                param="classThreshold"
+                :value="settings.classThreshold"
+                :default-value="GROUND_DEFAULTS.classThreshold"
+                >Ground tolerance</FieldHelp
+              >
+            </template>
+            <input
+              id="gnd-thr"
+              v-model.number="settings.classThreshold"
+              :aria-invalid="numbers.bad.classThreshold"
+              type="number"
+              min="0.01"
+              max="10"
+              step="0.1"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField label-for="gnd-extent" hint="The same area a DEM covers by default.">
+            <template #label><FieldHelp op="classify-ground" param="extent">Extent</FieldHelp></template>
+            <select id="gnd-extent" v-model="settings.extent" class="field-input field-select">
+              <option value="core">Dense core of the cloud</option>
+              <option value="all">All points</option>
+            </select>
+          </SettingsField>
+        </SettingsStep>
+        <SettingsStep v-if="settings.buildings" step="3" title="Buildings — advanced">
           <SettingsField label-for="cls-bh" unit="m" hint="Above the cloth, at the surface's highest point.">
             <template #label>
               <FieldHelp
@@ -262,29 +288,8 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </AdvancedDisclosure>
-      </SettingsStep>
-      <SettingsStep
-        step="4"
-        title="Vegetation"
-        :effect="effects.vegetation"
-        :inactive="noScale || !settings.vegetation"
-      >
-        <SettingsField hint="Trees, shrubs and low plants, by their height above the cloth.">
-          <template #label>
-            <FieldHelp
-              op="classify-ground"
-              param="vegetation"
-              :value="settings.vegetation"
-              :default-value="CLASSIFY_DEFAULTS.vegetation"
-              >Find vegetation</FieldHelp
-            >
-          </template>
-          <label class="checkbox-row"
-            ><input v-model="settings.vegetation" type="checkbox" class="checkbox" /> Enabled</label
-          >
-        </SettingsField>
-        <AdvancedDisclosure v-if="settings.vegetation" label="4 · Vegetation — advanced">
+        </SettingsStep>
+        <SettingsStep v-if="settings.vegetation" step="4" title="Vegetation — advanced">
           <SettingsField label-for="cls-low" unit="m" hint="Low vegetation reaches at most this far above the cloth.">
             <template #label>
               <FieldHelp
@@ -327,8 +332,8 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </AdvancedDisclosure>
-      </SettingsStep>
+        </SettingsStep>
+      </AdvancedDisclosure>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>

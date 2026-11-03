@@ -9,6 +9,7 @@ import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import OutputStep from '../ui/OutputStep.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { DEM_DEFAULTS } from '../../../core/defaults.user.js'
@@ -223,20 +224,6 @@ const effects = computed(() => {
         @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)"
       />
 
-      <!-- The raw min/max lets far background (an oblique capture sees almost to the
-           horizon) set the raster size; the dense core keeps the site. The run logs
-           how many points the core leaves out. -->
-      <SettingsField
-        label-for="dem-extent"
-        hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent."
-      >
-        <template #label><FieldHelp op="dem" param="extent">Extent</FieldHelp></template>
-        <select id="dem-extent" v-model="settings.extent" class="field-input field-select">
-          <option value="core">Dense core of the cloud</option>
-          <option value="all">All points</option>
-        </select>
-      </SettingsField>
-
       <RasterSizeField
         id="dem"
         op="dem"
@@ -252,60 +239,9 @@ const effects = computed(() => {
       />
     </SettingsStep>
 
-    <SettingsStep step="3" title="Height per cell" :effect="effects.cell">
-      <SettingsField label-for="dem-agg" hint="How multiple points in one cell collapse to a single height.">
-        <template #label><FieldHelp op="dem" param="aggregate">Surface aggregation</FieldHelp></template>
-        <select id="dem-agg" v-model="settings.aggregate" class="field-input field-select">
-          <option value="median">Median (the cell's surface)</option>
-          <option value="max">Max (top surface: roofs, canopy)</option>
-          <option value="mean">Mean</option>
-          <option value="min">Min (ground-ish)</option>
-        </select>
-      </SettingsField>
-    </SettingsStep>
+    <SettingsStep step="3" title="Height per cell" :effect="effects.cell" />
 
     <SettingsStep step="4" title="Fill gaps" :effect="effects.fill">
-      <SettingsField
-        label-for="dem-fill-method"
-        hint="IDW blends nearby heights smoothly; nearest neighbour preserves steps. Disable to keep nodata gaps."
-      >
-        <template #label><FieldHelp op="dem" param="fillMethod">Gap interpolation</FieldHelp></template>
-        <select id="dem-fill-method" v-model="settings.fillMethod" class="field-input field-select">
-          <option value="idw">Inverse distance (smooth)</option>
-          <option value="nearest">Nearest neighbour</option>
-          <option value="none">None (keep gaps)</option>
-        </select>
-      </SettingsField>
-
-      <!-- The radius never expands the raster extent; it only fills cells with a
-           measured neighbour inside this search distance. -->
-      <SettingsField
-        v-if="settings.fillMethod !== 'none'"
-        label-for="dem-fill"
-        unit="px"
-        :hint="
-          isSparseSource
-            ? 'Fill empty cells with measured neighbours inside this radius. On a sparse source, a large radius invents surface between distant tie points.'
-            : 'Fill empty cells only when an original measured cell lies within this radius.'
-        "
-      >
-        <template #label
-          ><FieldHelp op="dem" param="fillRadius" :value="settings.fillRadius" :default-value="DEM_DEFAULTS.fillRadius"
-            >Interpolation radius</FieldHelp
-          ></template
-        >
-        <input
-          id="dem-fill"
-          v-model.number="settings.fillRadius"
-          :aria-invalid="numbers.bad.fillRadius"
-          type="number"
-          min="1"
-          max="32"
-          step="1"
-          class="field-input"
-        />
-      </SettingsField>
-
       <SettingsField
         hint="Interpolate every gap the survey surrounds, such as the ground under a removed building. Gaps at the edge stay empty."
       >
@@ -319,6 +255,81 @@ const effects = computed(() => {
         >
       </SettingsField>
     </SettingsStep>
+
+    <AdvancedDisclosure label="Advanced settings">
+      <SettingsStep step="2" title="Grid — advanced">
+        <!-- The raw min/max lets far background (an oblique capture sees almost to the
+             horizon) set the raster size; the dense core keeps the site. The run logs
+             how many points the core leaves out. -->
+        <SettingsField
+          label-for="dem-extent"
+          hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent."
+        >
+          <template #label><FieldHelp op="dem" param="extent">Extent</FieldHelp></template>
+          <select id="dem-extent" v-model="settings.extent" class="field-input field-select">
+            <option value="core">Dense core of the cloud</option>
+            <option value="all">All points</option>
+          </select>
+        </SettingsField>
+      </SettingsStep>
+      <SettingsStep step="3" title="Height per cell — advanced">
+        <SettingsField label-for="dem-agg" hint="How multiple points in one cell collapse to a single height.">
+          <template #label><FieldHelp op="dem" param="aggregate">Surface aggregation</FieldHelp></template>
+          <select id="dem-agg" v-model="settings.aggregate" class="field-input field-select">
+            <option value="median">Median (the cell's surface)</option>
+            <option value="max">Max (top surface: roofs, canopy)</option>
+            <option value="mean">Mean</option>
+            <option value="min">Min (ground-ish)</option>
+          </select>
+        </SettingsField>
+      </SettingsStep>
+      <SettingsStep step="4" title="Fill gaps — advanced">
+        <SettingsField
+          label-for="dem-fill-method"
+          hint="IDW blends nearby heights smoothly; nearest neighbour preserves steps. Disable to keep nodata gaps."
+        >
+          <template #label><FieldHelp op="dem" param="fillMethod">Gap interpolation</FieldHelp></template>
+          <select id="dem-fill-method" v-model="settings.fillMethod" class="field-input field-select">
+            <option value="idw">Inverse distance (smooth)</option>
+            <option value="nearest">Nearest neighbour</option>
+            <option value="none">None (keep gaps)</option>
+          </select>
+        </SettingsField>
+
+        <!-- The radius never expands the raster extent; it only fills cells with a
+             measured neighbour inside this search distance. -->
+        <SettingsField
+          v-if="settings.fillMethod !== 'none'"
+          label-for="dem-fill"
+          unit="px"
+          :hint="
+            isSparseSource
+              ? 'Fill empty cells with measured neighbours inside this radius. On a sparse source, a large radius invents surface between distant tie points.'
+              : 'Fill empty cells only when an original measured cell lies within this radius.'
+          "
+        >
+          <template #label
+            ><FieldHelp
+              op="dem"
+              param="fillRadius"
+              :value="settings.fillRadius"
+              :default-value="DEM_DEFAULTS.fillRadius"
+              >Interpolation radius</FieldHelp
+            ></template
+          >
+          <input
+            id="dem-fill"
+            v-model.number="settings.fillRadius"
+            :aria-invalid="numbers.bad.fillRadius"
+            type="number"
+            min="1"
+            max="32"
+            step="1"
+            class="field-input"
+          />
+        </SettingsField>
+      </SettingsStep>
+    </AdvancedDisclosure>
 
     <OutputStep
       v-model="settings.replaceMain"

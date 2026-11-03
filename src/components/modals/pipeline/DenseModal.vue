@@ -6,9 +6,11 @@ import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import PresetCards from '../ui/PresetCards.vue'
+import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
-import { DENSE_FUSE_DEFAULTS } from '../../../core/defaults.user.js'
+import { DENSE_FUSE_DEFAULTS, DENSE_FUSE_PRESETS, DENSE_FUSE_PRESET_META } from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { denseEffects } from '../../../core/stepEffects/dense.js'
 import OutputStep from '../ui/OutputStep.vue'
@@ -31,6 +33,14 @@ const { memBudgetBytes, memBudgetRamBytes } = useComputeSettings()
 // The last run's settings in this project, and saved presets (useDialogSettings).
 const dialog = useDialogSettings('dense-cloud', DENSE_FUSE_DEFAULTS)
 const settings = dialog.settings
+// Quality cards: point density, the sample step (deltas; Full ≡ the defaults).
+const { baseId, activePreset, selectPreset } = usePresetSettings({
+  settings,
+  defaults: DENSE_FUSE_DEFAULTS,
+  presets: DENSE_FUSE_PRESETS,
+  cards: DENSE_FUSE_PRESET_META,
+  initialId: 'high',
+})
 // Run stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step); the hidden manual thresholds are only checked when shown.
 const numbers = computed(() =>
@@ -72,122 +82,155 @@ function run() {
       <span class="modal-title">Build Dense Cloud</span>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
-    <SettingsStep step="1" title="Sample the depth maps" :effect="effects.sample">
-      <SettingsField
-        label-for="step"
-        unit="px"
-        hint="Emit one point every N pixels. 1 = densest (largest cloud); higher = decimated."
-      >
-        <template #label>
-          <FieldHelp op="dense-cloud" param="step" :value="settings.step" :default-value="DENSE_FUSE_DEFAULTS.step"
-            >Point density (sample step)</FieldHelp
-          >
-        </template>
-        <input
-          id="step"
-          v-model.number="settings.step"
-          :aria-invalid="numbers.bad.step"
-          type="number"
-          min="1"
-          max="8"
-          step="1"
-          class="field-input"
-        />
+    <PresetCards
+      :model-value="activePreset"
+      :base-id="baseId"
+      :presets="DENSE_FUSE_PRESET_META"
+      @select="selectPreset"
+    />
+
+    <SettingsStep step="1" title="Sample the depth maps" :effect="effects.sample" />
+
+    <SettingsStep step="2" title="Agree across depth maps" :effect="effects.agree" />
+
+    <SettingsStep step="3" title="Geometric gates" :effect="effects.gates" />
+
+    <SettingsStep
+      step="4"
+      title="Remove isolated points"
+      :effect="effects.isolated"
+      :inactive="!settings.removeIsolated"
+    >
+      <SettingsField hint="Drop lone low-support cells with too few neighbours (fusion flyers).">
+        <template #label
+          ><FieldHelp
+            op="dense-cloud"
+            param="removeIsolated"
+            :value="settings.removeIsolated"
+            :default-value="DENSE_FUSE_DEFAULTS.removeIsolated"
+            >Remove isolated points</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="settings.removeIsolated" type="checkbox" class="checkbox" /> Enabled</label
+        >
       </SettingsField>
     </SettingsStep>
 
-    <SettingsStep step="2" title="Agree across depth maps" :effect="effects.agree">
-      <SettingsField hint="Min-views from the image count, the default cost gate. Turn off to set them by hand.">
-        <template #label
-          ><FieldHelp op="dense-cloud" param="auto" :value="settings.auto" :default-value="DENSE_FUSE_DEFAULTS.auto"
-            >Auto thresholds</FieldHelp
+    <AdvancedDisclosure label="Advanced settings">
+      <SettingsStep step="1" title="Sample the depth maps — advanced">
+        <SettingsField
+          label-for="step"
+          unit="px"
+          hint="Emit one point every N pixels. 1 = densest (largest cloud); higher = decimated."
+        >
+          <template #label>
+            <FieldHelp op="dense-cloud" param="step" :value="settings.step" :default-value="DENSE_FUSE_DEFAULTS.step"
+              >Point density (sample step)</FieldHelp
+            >
+          </template>
+          <input
+            id="step"
+            v-model.number="settings.step"
+            :aria-invalid="numbers.bad.step"
+            type="number"
+            min="1"
+            max="8"
+            step="1"
+            class="field-input"
+          />
+        </SettingsField>
+      </SettingsStep>
+      <SettingsStep step="2" title="Agree across depth maps — advanced">
+        <SettingsField hint="Min-views from the image count, the default cost gate. Turn off to set them by hand.">
+          <template #label
+            ><FieldHelp op="dense-cloud" param="auto" :value="settings.auto" :default-value="DENSE_FUSE_DEFAULTS.auto"
+              >Auto thresholds</FieldHelp
+            >
+            (recommended)</template
           >
-          (recommended)</template
-        >
-        <label class="checkbox-row"><input v-model="settings.auto" type="checkbox" class="checkbox" /> Enabled</label>
-      </SettingsField>
+          <label class="checkbox-row"><input v-model="settings.auto" type="checkbox" class="checkbox" /> Enabled</label>
+        </SettingsField>
 
-      <SettingsField
-        v-if="!settings.auto"
-        label-for="minViews"
-        hint="A point is kept only if this many other depth maps agree on it. Higher = cleaner, sparser."
-      >
-        <template #label
-          ><FieldHelp
-            op="dense-cloud"
-            param="minViews"
-            :value="settings.minViews"
-            :default-value="DENSE_FUSE_DEFAULTS.minViews"
-            >Min consistent views</FieldHelp
-          ></template
+        <SettingsField
+          v-if="!settings.auto"
+          label-for="minViews"
+          hint="A point is kept only if this many other depth maps agree on it. Higher = cleaner, sparser."
         >
-        <input
-          id="minViews"
-          v-model.number="settings.minViews"
-          :aria-invalid="numbers.bad.minViews"
-          type="number"
-          min="1"
-          max="8"
-          step="1"
-          class="field-input"
-        />
-      </SettingsField>
+          <template #label
+            ><FieldHelp
+              op="dense-cloud"
+              param="minViews"
+              :value="settings.minViews"
+              :default-value="DENSE_FUSE_DEFAULTS.minViews"
+              >Min consistent views</FieldHelp
+            ></template
+          >
+          <input
+            id="minViews"
+            v-model.number="settings.minViews"
+            :aria-invalid="numbers.bad.minViews"
+            type="number"
+            min="1"
+            max="8"
+            step="1"
+            class="field-input"
+          />
+        </SettingsField>
 
-      <SettingsField
-        label-for="depthTol"
-        unit="%"
-        hint="How closely a reprojected depth must match to count as agreement."
-      >
-        <template #label
-          ><FieldHelp
-            op="dense-cloud"
-            param="depthTolPct"
-            :value="settings.depthTolPct"
-            :default-value="DENSE_FUSE_DEFAULTS.depthTolPct"
-            >Depth agreement tolerance</FieldHelp
-          ></template
+        <SettingsField
+          label-for="depthTol"
+          unit="%"
+          hint="How closely a reprojected depth must match to count as agreement."
         >
-        <input
-          id="depthTol"
-          v-model.number="settings.depthTolPct"
-          :aria-invalid="numbers.bad.depthTolPct"
-          type="number"
-          min="0.1"
-          max="10"
-          step="0.1"
-          class="field-input"
-        />
-      </SettingsField>
+          <template #label
+            ><FieldHelp
+              op="dense-cloud"
+              param="depthTolPct"
+              :value="settings.depthTolPct"
+              :default-value="DENSE_FUSE_DEFAULTS.depthTolPct"
+              >Depth agreement tolerance</FieldHelp
+            ></template
+          >
+          <input
+            id="depthTol"
+            v-model.number="settings.depthTolPct"
+            :aria-invalid="numbers.bad.depthTolPct"
+            type="number"
+            min="0.1"
+            max="10"
+            step="0.1"
+            class="field-input"
+          />
+        </SettingsField>
 
-      <SettingsField
-        v-if="!settings.auto"
-        label-for="maxCost"
-        hint="Discard pixels whose PatchMatch cost exceeds this (0 = perfect … 2 = none). Lower = stricter."
-      >
-        <template #label
-          ><FieldHelp
-            op="dense-cloud"
-            param="maxCost"
-            :value="settings.maxCost"
-            :default-value="DENSE_FUSE_DEFAULTS.maxCost"
-            >Max matching cost</FieldHelp
-          ></template
+        <SettingsField
+          v-if="!settings.auto"
+          label-for="maxCost"
+          hint="Discard pixels whose PatchMatch cost exceeds this (0 = perfect … 2 = none). Lower = stricter."
         >
-        <input
-          id="maxCost"
-          v-model.number="settings.maxCost"
-          :aria-invalid="numbers.bad.maxCost"
-          type="number"
-          min="0.1"
-          max="2"
-          step="0.1"
-          class="field-input"
-        />
-      </SettingsField>
-    </SettingsStep>
-
-    <AdvancedDisclosure label="Geometric outlier filters">
-      <SettingsStep step="3" title="Geometric gates" :effect="effects.gates">
+          <template #label
+            ><FieldHelp
+              op="dense-cloud"
+              param="maxCost"
+              :value="settings.maxCost"
+              :default-value="DENSE_FUSE_DEFAULTS.maxCost"
+              >Max matching cost</FieldHelp
+            ></template
+          >
+          <input
+            id="maxCost"
+            v-model.number="settings.maxCost"
+            :aria-invalid="numbers.bad.maxCost"
+            type="number"
+            min="0.1"
+            max="2"
+            step="0.1"
+            class="field-input"
+          />
+        </SettingsField>
+      </SettingsStep>
+      <SettingsStep step="3" title="Geometric gates — advanced">
         <SettingsField
           label-for="minTriAngle"
           unit="°"
@@ -238,28 +281,6 @@ function run() {
             step="5"
             class="field-input"
           />
-        </SettingsField>
-      </SettingsStep>
-
-      <SettingsStep
-        step="4"
-        title="Remove isolated points"
-        :effect="effects.isolated"
-        :inactive="!settings.removeIsolated"
-      >
-        <SettingsField hint="Drop lone low-support cells with too few neighbours (fusion flyers).">
-          <template #label
-            ><FieldHelp
-              op="dense-cloud"
-              param="removeIsolated"
-              :value="settings.removeIsolated"
-              :default-value="DENSE_FUSE_DEFAULTS.removeIsolated"
-              >Remove isolated points</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.removeIsolated" type="checkbox" class="checkbox" /> Enabled</label
-          >
         </SettingsField>
       </SettingsStep>
     </AdvancedDisclosure>
