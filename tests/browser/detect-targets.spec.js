@@ -236,7 +236,19 @@ test('accepts detected marks in the GCP view', async ({ page, browserName }) => 
   await expect(view.locator('.panel-detected')).toHaveCount(4)
   await view.locator('.panel-accept').first().click()
   await expect(view.locator('.panel-detected')).toHaveCount(3)
-  await view.getByRole('button', { name: 'Accept 3 detections' }).click()
+  // The keys act on the highlighted mark: S moves on, A accepts it.
+  const current = view.locator('.gcp-panel.current')
+  const first = await current.getAttribute('data-image-id')
+  await page.keyboard.press('s')
+  await expect(current).not.toHaveAttribute('data-image-id', first)
+  await page.keyboard.press('a')
+  await expect(view.locator('.panel-detected')).toHaveCount(2)
+  await expect(current).not.toHaveAttribute('data-image-id', first)
+  // The skipped mark comes back once the others are done.
+  await page.keyboard.press('a')
+  await expect(view.locator('.panel-detected')).toHaveCount(1)
+  await expect(current).toHaveAttribute('data-image-id', first)
+  await view.getByRole('button', { name: 'Accept 1 detection' }).click()
   await expect(view.locator('.panel-detected')).toHaveCount(0)
   const flagged = await page.evaluate(async () => {
     const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')

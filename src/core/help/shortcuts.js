@@ -23,6 +23,7 @@ export const SHORTCUT_GROUPS = [
   { id: 'measure3d', title: '3D view ▸ Measure' },
   { id: 'region3d', title: '3D view ▸ Region' },
   { id: 'measure2d', title: 'DEM, orthophoto and map ▸ Measure' },
+  { id: 'gcpMarks', title: 'GCP marks view ▸ Detected marks' },
 ]
 
 const TABLE = [
@@ -106,6 +107,17 @@ const TABLE = [
   { id: 'measure3d.undo', group: 'measure3d', keys: ['Backspace', 'Delete'], does: 'Remove the last point' },
   { id: 'measure3d.clear', group: 'measure3d', keys: ['Escape'], does: 'Clear the drawing; again to stop measuring' },
   { id: 'region3d.abort', group: 'region3d', keys: ['Escape'], does: 'During a drag: put the box back' },
+
+  // ── Reviewing detected marks (ViewerGcp.vue): the highlighted one is the first left ──
+  { id: 'gcpMarks.accept', group: 'gcpMarks', keys: ['A'], does: 'Accept the highlighted detected mark' },
+  {
+    id: 'gcpMarks.reject',
+    group: 'gcpMarks',
+    keys: ['X', 'Delete'],
+    does: 'Remove the highlighted detected mark',
+  },
+  { id: 'gcpMarks.skip', group: 'gcpMarks', keys: ['S'], does: 'Leave it for now: highlight the next detected mark' },
+  { id: 'gcpMarks.acceptAll', group: 'gcpMarks', keys: ['Shift+A'], does: 'Accept every detected mark here' },
 
   // ── Measuring on a raster or the map (RasterMeasurements.vue) ──
   { id: 'measure2d.finish', group: 'measure2d', keys: ['Enter'], does: 'Finish the line or area' },

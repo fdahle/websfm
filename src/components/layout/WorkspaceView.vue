@@ -442,6 +442,7 @@ watch(activeTabId, (id) => {
           :gcp="gcps.find((g) => g.id === tab.gcpId) ?? null"
           :images="images"
           :report="gcpReport.find((r) => r.gcpId === tab.gcpId) ?? null"
+          :active="activeTabId === tab.id"
           @jump-to-image="jumpToImage"
           @remove-observation="confirmRemoveGcpObservation"
         />

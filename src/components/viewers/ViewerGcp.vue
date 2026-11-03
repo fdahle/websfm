@@ -1,8 +1,11 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { useGcpsStore } from '../../stores/useGcpsStore.js'
 import { pluralize } from '../../core/textFormat.js'
+import { matches } from '../../core/help/shortcuts.js'
+import { keyLabel } from '../../utils/shortcutLabels.js'
+import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 
 // Multi-image GCP inspector: one panel per registered observation, each cropped
 // and zoomed to centre the GCP's marked pixel, with a crosshair marker. Opened
@@ -15,6 +18,8 @@ const props = defineProps({
   images: { type: Array, default: () => [] }, // full image list (resolve imageId → url)
   // Accuracy-report entry for this GCP: { observations: [{ imageId, reprojPx }] }.
   report: { type: Object, default: null },
+  // The tab is the one shown: only then do its keys act.
+  active: { type: Boolean, default: true },
 })
 const emit = defineEmits(['jump-to-image', 'remove-observation'])
 
@@ -73,6 +78,46 @@ function acceptAll() {
   for (const p of detectedPanels.value) accept(p)
 }
 
+// Keyboard review (core/help/shortcuts.js gcpMarks.*): one detected mark is highlighted,
+// the first left after those skipped; A accepts it, X removes it, S moves on.
+const skipped = ref(new Set())
+const current = computed(
+  () => detectedPanels.value.find((p) => !skipped.value.has(p.imageId)) ?? detectedPanels.value[0] ?? null,
+)
+watch(
+  () => props.gcp?.id,
+  () => (skipped.value = new Set()),
+)
+const gridEl = ref(null)
+watch(current, async (p) => {
+  if (!p || !props.active) return
+  await nextTick()
+  gridEl.value?.querySelector(`[data-image-id="${p.imageId}"]`)?.scrollIntoView?.({ block: 'nearest' })
+})
+function onKey(e) {
+  if (!props.active || !props.gcp || !viewerMayHandleKey(e)) return
+  const p = current.value
+  if (matches(e, 'gcpMarks.acceptAll')) {
+    if (!detectedPanels.value.length) return
+    acceptAll()
+  } else if (matches(e, 'gcpMarks.accept')) {
+    if (!p) return
+    accept(p)
+  } else if (matches(e, 'gcpMarks.reject')) {
+    if (!p) return
+    emit('remove-observation', { gcpId: props.gcp.id, imageId: p.imageId })
+  } else if (matches(e, 'gcpMarks.skip')) {
+    if (!p) return
+    const next = new Set(skipped.value)
+    next.add(p.imageId)
+    // Past the last one, start again from the first.
+    skipped.value = detectedPanels.value.every((q) => next.has(q.imageId)) ? new Set() : next
+  } else return
+  e.preventDefault()
+}
+onMounted(() => window.addEventListener('keydown', onKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+
 const missingCount = computed(
   () => (props.gcp?.observations || []).filter((o) => o.imageId == null && o.px != null).length,
 )
@@ -115,7 +160,7 @@ function fmtCoord(v) {
       <button
         v-if="detectedPanels.length"
         class="btn btn-sm"
-        title="Keep every mark Detect targets placed here as yours; remove the bad ones first"
+        :title="`Keep every mark Detect targets placed here as yours; remove the bad ones first (${keyLabel('gcpMarks.acceptAll')})`"
         @click="acceptAll"
       >
         Accept {{ pluralize(detectedPanels.length, 'detection') }}
@@ -127,8 +172,14 @@ function fmtCoord(v) {
       </div>
     </div>
 
-    <div v-if="panels.length" class="gcp-grid">
-      <div v-for="p in panels" :key="p.imageId" class="gcp-panel">
+    <div v-if="panels.length" ref="gridEl" class="gcp-grid">
+      <div
+        v-for="p in panels"
+        :key="p.imageId"
+        class="gcp-panel"
+        :class="{ current: current && p.imageId === current.imageId }"
+        :data-image-id="p.imageId"
+      >
         <div class="panel-viewport">
           <img
             class="panel-img"
@@ -161,14 +212,18 @@ function fmtCoord(v) {
           <button
             v-if="p.detected != null"
             class="panel-accept"
-            :title="`Accept the detected mark in ${p.name}: it counts as yours`"
+            :title="`Accept the detected mark in ${p.name}: it counts as yours (${keyLabel('gcpMarks.accept')} on the highlighted one)`"
             @click="accept(p)"
           >
             ✓
           </button>
           <button
             class="panel-remove"
-            :title="`Remove the mark in ${p.name}`"
+            :title="
+              p.detected != null
+                ? `Remove the mark in ${p.name} (${keyLabel('gcpMarks.reject')} on the highlighted one)`
+                : `Remove the mark in ${p.name}`
+            "
             @click="emit('remove-observation', { gcpId: gcp.id, imageId: p.imageId })"
           >
             ×
@@ -271,6 +326,11 @@ function fmtCoord(v) {
   border-radius: 6px;
   overflow: hidden;
   background: #0d0d12;
+}
+/* The detected mark the keys act on (A accept, X remove, S next). */
+.gcp-panel.current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .panel-viewport {
   position: relative;
