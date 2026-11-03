@@ -120,17 +120,9 @@ const effects = computed(() =>
     gpu: gpuOn.value,
   }),
 )
-// One list of steps (useStepLayout.js): the chain's facts, each step's tuning in place.
+// One list of steps (useStepLayout.js): the steps register for the chain; each step's
+// tuning folds in place.
 provideStepLayout()
-const chain = computed(() => {
-  const e = effects.value
-  return [
-    { step: 1, title: 'Working resolution and source views', ...e.resolution },
-    { step: 2, title: 'PatchMatch', ...e.patchMatch },
-    { step: 3, title: 'Clean each depth map', ...e.speckle, inactive: !settings.value.speckleFilter },
-    { step: 4, title: 'Check across views', ...e.crossView, inactive: !settings.value.geomConsistency },
-  ]
-})
 
 // What the run receives: the store keys kept maps on exactly this (depthReuse.js).
 const runSettings = computed(() => {
@@ -197,7 +189,7 @@ function run() {
       @select="selectQuality"
     />
 
-    <StepChain :steps="chain" />
+    <StepChain />
 
     <SettingsStep
       step="1"

@@ -1,4 +1,4 @@
-import { provide, inject, reactive, ref } from 'vue'
+import { computed, provide, inject, reactive, ref, shallowReactive } from 'vue'
 import { useUiSettings } from './useUiSettings.js'
 
 // The steps of a processing dialog laid out once (dev/planning/plan-dialog-layout.md):
@@ -13,8 +13,21 @@ export function provideStepLayout() {
   const { advancedSettingsExpanded, setAdvancedSettingsExpanded } = useUiSettings()
   const opened = reactive(new Set())
   const showAll = ref(!!advancedSettingsExpanded.value)
+  // Every step the dialog renders registers itself here (SettingsStep): the chain lists
+  // them in step order. A step the dialog leaves out (v-if on it) is not part of the run.
+  const registry = shallowReactive(new Map()) // token → computed { step, title, short, long, inactive }
+  const steps = computed(() =>
+    [...registry.values()].map((r) => r.value).sort((a, b) => Number(a.step) - Number(b.step)),
+  )
   const layout = {
     showAll,
+    steps,
+    register(token, info) {
+      registry.set(token, info)
+    },
+    unregister(token) {
+      registry.delete(token)
+    },
     setShowAll(v) {
       showAll.value = !!v
       setAdvancedSettingsExpanded(!!v)

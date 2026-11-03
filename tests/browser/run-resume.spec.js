@@ -354,7 +354,7 @@ test('a depth run keeps the maps whose camera and settings did not change', asyn
     useModalsStore().depthMapsOpen = true
   })
   const dialog = page.getByRole('dialog', { name: 'Build Depth Maps' })
-  await dialog.getByText('Show all settings').click()
+  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
   await dialog.getByText('Low', { exact: true }).first().click()
   await dialog.getByLabel('Method').selectOption('fast')
   await expect(dialog.getByText(/All 5 saved depth maps are kept/)).toBeVisible()
@@ -441,7 +441,7 @@ test('Sparse Reconstruction opens with the settings it is handed', async ({ page
     useModalsStore().reconstructOpen = true
   })
   const dialog = page.getByRole('dialog', { name: 'Sparse Reconstruction' })
-  await dialog.getByText('Advanced settings').click()
+  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
   await expect(dialog.locator('#minMatches')).toHaveValue('12')
   await expect(dialog.locator('#reprj')).toHaveValue('6')
   await dialog.getByRole('button', { name: 'Cancel' }).click()
@@ -450,6 +450,6 @@ test('Sparse Reconstruction opens with the settings it is handed', async ({ page
     const { useModalsStore } = await import('/src/stores/useModalsStore.js')
     useModalsStore().reconstructOpen = true
   })
-  await dialog.getByText('Advanced settings').click()
+  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
   await expect(dialog.locator('#minMatches')).toHaveValue('20')
 })

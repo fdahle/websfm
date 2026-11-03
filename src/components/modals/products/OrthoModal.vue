@@ -9,7 +9,9 @@ import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import OutputStep from '../ui/OutputStep.vue'
@@ -18,7 +20,8 @@ import { ORTHO_DEFAULTS, ORTHO_PRESETS, ORTHO_PRESET_META } from '../../../core/
 import { orthoCostCeiling } from '../../../core/products/ortho.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
-import { orthoEffects, frameText } from '../../../core/stepEffects/raster.js'
+import { orthoEffects, orthoShorts, frameText } from '../../../core/stepEffects/raster.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 
 // Build Orthophoto. Reprojects each cell of a SURFACE through the cached depth
 // maps (occlusion via their depth planes, colour from their RGB planes). The
@@ -197,16 +200,31 @@ onBeforeUnmount(() => clearTimeout(estimateTimer))
 
 // What each step does to this project (core/stepEffects/raster.js).
 const effects = computed(() =>
-  orthoEffects(settings.value, {
-    surface: chosen.value,
-    estimate: estimate.value,
-    unit: outputUnit.value,
-    frame: framePicked.value
-      ? frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale })
-      : null,
-    costCeiling: costCeiling.value,
-  }),
+  withShorts(
+    orthoEffects(settings.value, {
+      surface: chosen.value,
+      estimate: estimate.value,
+      unit: outputUnit.value,
+      frame: framePicked.value
+        ? frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale })
+        : null,
+      costCeiling: costCeiling.value,
+    }),
+    orthoShorts(settings.value, {
+      surface: chosen.value,
+      estimate: estimate.value,
+      unit: outputUnit.value,
+      frame: framePicked.value
+        ? frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale })
+        : null,
+      costCeiling: costCeiling.value,
+    }),
+  ),
 )
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -216,6 +234,8 @@ const effects = computed(() =>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="ORTHO_PRESET_META" @select="selectPreset" />
+
+    <StepChain />
 
     <SettingsStep step="1" title="Surface" :effect="effects.surface">
       <SettingsField
@@ -241,7 +261,7 @@ const effects = computed(() =>
       </WarnBox>
     </SettingsStep>
 
-    <SettingsStep step="2" title="Grid" :effect="effects.grid">
+    <SettingsStep step="2" title="Grid" :effect="effects.grid" :more="framePicked ? 1 : 0">
       <!-- A DEM already fixes the frame; mesh/plane surfaces are built here, so
            they need the same choice Build DEM offers. v-show, not v-if: the field
            keeps the frame valid (and remembers an applied CRS suggestion) while a
@@ -271,31 +291,28 @@ const effects = computed(() =>
         :invalid="numbers.bad"
         :estimate="estimate"
       />
-    </SettingsStep>
 
-    <SettingsStep step="3" title="Which photos see each cell" :effect="effects.visibility" />
-
-    <SettingsStep step="4" title="Combine the photos" :effect="effects.blend" />
-
-    <SettingsStep step="5" title="Fill gaps" :effect="effects.fill" :inactive="settings.fillMethod === 'none'" />
-
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep v-if="framePicked" step="2" title="Grid — advanced">
-        <!-- The raw min/max lets far background (an oblique capture sees almost to the
+      <template #tuning>
+        <template v-if="framePicked">
+          <!-- The raw min/max lets far background (an oblique capture sees almost to the
              horizon) set the raster size; the dense core keeps the site. The run logs
              how many points the core leaves out. -->
-        <SettingsField
-          label-for="ortho-extent"
-          hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent."
-        >
-          <template #label><FieldHelp op="orthophoto" param="extent">Extent</FieldHelp></template>
-          <select id="ortho-extent" v-model="settings.extent" class="field-input field-select">
-            <option value="core">Dense core of the surface</option>
-            <option value="all">All points</option>
-          </select>
-        </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="3" title="Which photos see each cell — advanced">
+          <SettingsField
+            label-for="ortho-extent"
+            hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent."
+          >
+            <template #label><FieldHelp op="orthophoto" param="extent">Extent</FieldHelp></template>
+            <select id="ortho-extent" v-model="settings.extent" class="field-input field-select">
+              <option value="core">Dense core of the surface</option>
+              <option value="all">All points</option>
+            </select>
+          </SettingsField>
+        </template>
+      </template>
+    </SettingsStep>
+
+    <SettingsStep step="3" title="Which photos see each cell" :effect="effects.visibility" :more="2">
+      <template #tuning>
         <SettingsField
           label-for="ortho-tol"
           unit="%"
@@ -352,8 +369,11 @@ const effects = computed(() =>
           {{ fmtCost(depthSettings.minNcc) }}, which already removed every pixel with a cost above
           {{ fmtCost(costCeiling) }}. Set a value below {{ fmtCost(costCeiling) }} to drop more.
         </WarnBox>
-      </SettingsStep>
-      <SettingsStep step="4" title="Combine the photos — advanced">
+      </template>
+    </SettingsStep>
+
+    <SettingsStep step="4" title="Combine the photos" :effect="effects.blend" :more="5">
+      <template #tuning>
         <SettingsField label-for="ortho-blend" :hint="blendHint">
           <template #label><FieldHelp op="orthophoto" param="blend">View blending</FieldHelp></template>
           <select id="ortho-blend" v-model="settings.blend" class="field-input field-select">
@@ -423,8 +443,17 @@ const effects = computed(() =>
             />
           </SettingsField>
         </template>
-      </SettingsStep>
-      <SettingsStep step="5" title="Fill gaps — advanced">
+      </template>
+    </SettingsStep>
+
+    <SettingsStep
+      step="5"
+      title="Fill gaps"
+      :effect="effects.fill"
+      :inactive="settings.fillMethod === 'none'"
+      :more="2"
+    >
+      <template #tuning>
         <SettingsField
           label-for="ortho-fill-method"
           hint="Fills small transparent pixels from nearby successfully projected colours, but never outside the selected surface."
@@ -463,8 +492,8 @@ const effects = computed(() =>
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
 
     <OutputStep
       v-model="settings.replaceMain"
@@ -476,6 +505,8 @@ const effects = computed(() =>
     />
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!canRun || !numbers.valid" :title="numbers.reason" @click="run">
         Build Orthophoto

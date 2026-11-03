@@ -12,3 +12,11 @@ export const fmtLength = (v, unit) => `${Number(v.toPrecision(3)).toLocaleString
 // The longest a step's short fact may be: one chip of a dialog's step chain
 // (dev/planning/plan-dialog-layout.md). The effects' tests hold each `short` to it.
 export const SHORT_MAX = 40
+
+// Pair a dialog's long effects with their short facts: { key: { short, long } } for every
+// key `shorts` has; the other keys (a warning line) stay as they are.
+export function withShorts(longs, shorts) {
+  const out = { ...longs }
+  for (const [k, short] of Object.entries(shorts)) if (k in longs) out[k] = { short, long: longs[k] }
+  return out
+}

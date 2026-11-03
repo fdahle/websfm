@@ -6,10 +6,12 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import WarnBox from '../ui/WarnBox.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import { useDatasetRecommendations } from '../../../composables/useDatasetRecommendations.js'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
@@ -20,7 +22,8 @@ import {
   EXTEND_DEFAULTS,
 } from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
-import { sparseEffects, sparseModeEffect } from '../../../core/stepEffects/sparse.js'
+import { sparseEffects, sparseShorts, sparseModeEffect } from '../../../core/stepEffects/sparse.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 
 const props = defineProps({
   // Set when Georeference hands off here for its GCP-constrained adjustment path.
@@ -124,17 +127,30 @@ const SELF_CAL_HINTS = {
 // nothing to override for self-calibration — `auto` resolves per project inside
 // core/sfm/sfm.js — but it knows WHICH branch this project takes, so the step says it.
 const effects = computed(() =>
-  sparseEffects(modeSettings.value, {
-    linkedImages: props.linkedImages,
-    timedImages: props.timedImages,
-    rigs: props.cameraRigs,
-    pairs: props.pairs,
-    sensors: props.sensors,
-    splits: props.sensorSplits,
-    autoReason: recommendations.value.sfm?.refineIntrinsics?.reason ?? null,
-    modelCameras: props.modelCameras,
-    newImages: props.newImages,
-  }),
+  withShorts(
+    sparseEffects(modeSettings.value, {
+      linkedImages: props.linkedImages,
+      timedImages: props.timedImages,
+      rigs: props.cameraRigs,
+      pairs: props.pairs,
+      sensors: props.sensors,
+      splits: props.sensorSplits,
+      autoReason: recommendations.value.sfm?.refineIntrinsics?.reason ?? null,
+      modelCameras: props.modelCameras,
+      newImages: props.newImages,
+    }),
+    sparseShorts(modeSettings.value, {
+      linkedImages: props.linkedImages,
+      timedImages: props.timedImages,
+      rigs: props.cameraRigs,
+      pairs: props.pairs,
+      sensors: props.sensors,
+      splits: props.sensorSplits,
+      autoReason: recommendations.value.sfm?.refineIntrinsics?.reason ?? null,
+      modelCameras: props.modelCameras,
+      newImages: props.newImages,
+    }),
+  ),
 )
 const adding = computed(() => mode.value === 'add')
 const blocked = computed(() => adding.value && !!props.extendBlocker)
@@ -143,6 +159,10 @@ function run() {
   dialog.remember()
   emit('run', adding.value ? { ...modeSettings.value } : { ...settings.value })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -188,33 +208,10 @@ function run() {
       @select="selectPreset"
     />
 
-    <SettingsStep step="1" title="Register images" :effect="effects.register" />
+    <StepChain />
 
-    <SettingsStep step="2" title="Bundle adjustment" :effect="effects.ba" :inactive="!(settings.baIterations > 0)" />
-
-    <SettingsStep
-      step="3"
-      title="Self-calibration"
-      :effect="effects.calibration"
-      :inactive="adding || !(settings.baIterations > 0) || settings.refineIntrinsics === 'none'"
-    />
-
-    <SettingsStep
-      step="4"
-      title="Rolling shutter"
-      :effect="effects.rollingShutter"
-      :inactive="adding || !(settings.baIterations > 0) || settings.rollingShutter !== 'on'"
-    />
-
-    <SettingsStep
-      step="5"
-      title="Camera rig"
-      :effect="effects.cameraRig"
-      :inactive="adding || !cameraRigs.length || settings.cameraRig === 'off'"
-    />
-
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="1" title="Register images — advanced">
+    <SettingsStep step="1" title="Register images" :effect="effects.register" :more="2">
+      <template #tuning>
         <SettingsField
           label-for="minMatches"
           unit="pts"
@@ -267,9 +264,17 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep step="2" title="Bundle adjustment — advanced">
+    <SettingsStep
+      step="2"
+      title="Bundle adjustment"
+      :effect="effects.ba"
+      :inactive="!(settings.baIterations > 0)"
+      :more="1"
+    >
+      <template #tuning>
         <SettingsField
           label-for="baIter"
           hint="Bundle-adjustment iterations per pass. 0 skips bundle adjustment — and with it self-calibration."
@@ -294,9 +299,17 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep step="3" title="Self-calibration — advanced">
+    <SettingsStep
+      step="3"
+      title="Self-calibration"
+      :effect="effects.calibration"
+      :inactive="adding || !(settings.baIterations > 0) || settings.refineIntrinsics === 'none'"
+      :more="1"
+    >
+      <template #tuning>
         <SettingsField label-for="refineIntr">
           <template #label>
             <FieldHelp op="sparse-reconstruction" param="refineIntrinsics">Self-calibration</FieldHelp>
@@ -318,9 +331,17 @@ function run() {
           </select>
           <template #hint>{{ SELF_CAL_HINTS[settings.refineIntrinsics] ?? '' }}</template>
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep step="4" title="Rolling shutter — advanced">
+    <SettingsStep
+      step="4"
+      title="Rolling shutter"
+      :effect="effects.rollingShutter"
+      :inactive="adding || !(settings.baIterations > 0) || settings.rollingShutter !== 'on'"
+      :more="1"
+    >
+      <template #tuning>
         <SettingsField label-for="rollingShutter">
           <template #label>
             <FieldHelp op="sparse-reconstruction" param="rollingShutter">Rolling shutter</FieldHelp>
@@ -335,9 +356,17 @@ function run() {
             <option value="on">Estimate the readout time</option>
           </select>
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep step="5" title="Camera rig — advanced">
+    <SettingsStep
+      step="5"
+      title="Camera rig"
+      :effect="effects.cameraRig"
+      :inactive="adding || !cameraRigs.length || settings.cameraRig === 'off'"
+      :more="1"
+    >
+      <template #tuning>
         <SettingsField label-for="cameraRig">
           <template #label>
             <FieldHelp op="sparse-reconstruction" param="cameraRig">Multispectral rig</FieldHelp>
@@ -352,10 +381,12 @@ function run() {
             <option value="off">One pose per photo</option>
           </select>
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button
         class="btn btn-primary"

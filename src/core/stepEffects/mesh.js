@@ -42,3 +42,14 @@ export function meshEffects(s, { source = null } = {}) {
     : 'Off: the mesh has no colour (Texture can add a photo texture later).'
   return { solve, trim, holes, floaters, colour }
 }
+
+// The steps' short facts for Build Mesh's step chain (≤ SHORT_MAX characters).
+export function meshShorts(s, { source = null } = {}) {
+  return {
+    solve: source ? `depth ${s.depth} · screening ${s.screening}` : 'no dense cloud',
+    trim: s.trim === 'off' ? 'off' : s.trim,
+    holes: s.trim === 'off' ? 'nothing trimmed' : s.fillHoles ? 'small holes closed' : 'off',
+    floaters: s.removeFloaters ? `< ${s.minPiecePct} % pieces out` : 'off',
+    colour: s.colorize ? 'from the cloud' : 'off',
+  }
+}

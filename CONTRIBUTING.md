@@ -174,23 +174,27 @@ Contours, Optimize cameras, Detect fiducials …), and any new one. A dialog bui
 live preview, a result table or a readout (Auto mask, Reseau, Section, Mesh area &
 volume) is a workbench: it uses the same fields but no numbered steps.
 
-1. Each stage is a `<SettingsStep step="n" title="…" :effect="…">` holding the
-   settings that act there. Presets, the source and mode choices may sit above the
-   steps; an Advanced part repeats the step's number (*2 · Trim — advanced*).
-2. Each step has a one-line **effect**: what it does to *this* project with the
-   current values ("42 depth maps at up to 1,500 px …", "Off: lone points stay in the
-   cloud"), from the same rules the run applies. Write it as a pure function in
-   `src/core/stepEffects/<dialog>.js`, with a unit test, and pass the project data the
-   line needs into the dialog as props.
-3. A step that cannot matter in the current configuration is `inactive` (dimmed), and
-   its effect says why.
-4. The guide article lists its setting sections in the same order as the steps.
-5. **Basic or Advanced:** a setting goes under Advanced only when its default suits
-   almost every project. A filter or cleanup chain shows each stage's on/off switch
-   in its step and keeps the stage's tuning under Advanced. A dialog with only a few
-   settings has no Advanced part. Every step stays in view with its effect line, even
-   when all its fields are under Advanced; the one **Advanced settings** section follows
-   the steps (the output step comes last).
+1. Each stage is a `<SettingsStep step="n" title="…" :effect="…">`, listed **once**, in
+   run order. Its everyday fields (a mode, a resolution, a cleanup stage's on/off
+   switch) are its content; the fields whose defaults suit almost every project go in
+   its `#tuning` slot, which folds out in place behind **⚙ n more** (`:more` counts
+   them). Presets, the source and mode choices may sit above the steps.
+2. The dialog calls `provideStepLayout()` (`composables/useStepLayout.js`), puts a
+   `<StepChain />` under its cards and `<ShowAllSettings />` first in its footer. The
+   steps register with the chain themselves; a step with no everyday field is not
+   drawn until opened from the chain or by Show all settings.
+3. Each step's **effect** comes in two lengths, from the same rules the run applies:
+   the long line an open step shows ("42 depth maps at up to 1,500 px …", "Off: lone
+   points stay in the cloud") and the short fact its chip shows ("1,500 px · 10
+   views", "off"; at most `SHORT_MAX`, 40 characters, no sentence). Write them as pure
+   functions in `src/core/stepEffects/<dialog>.js` (`…Effects` and `…Shorts`, paired
+   by `withShorts`), with unit tests, and pass the project data into the dialog as
+   props.
+4. A step that cannot matter in the current configuration is `inactive` (dimmed, also
+   in the chain), and its long effect says why.
+5. The guide article lists its setting sections in the same order as the steps. A
+   dialog with only a few settings (about five) and no tuning has neither chain nor
+   folding: its steps simply hold their fields.
 6. **Quality cards:** where a dialog has a real quality-against-time ladder (resolution,
    density, the mosaic method), cards at the top set it (Fast · Balanced · Detailed, or
    the dialog's own words); the card names say what they change, and the CHANGELOG

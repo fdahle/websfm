@@ -29,3 +29,13 @@ export function fiducialDetectEffects(s, { images = 0 } = {}) {
     `${s.generateMasks ? '; a background mask outside the film frame is added' : ''}.`
   return { search, match, store }
 }
+
+const WHERE_SHORT = { 'corners': 'corners', 'sides': 'edge midpoints', 'corners+sides': 'corners + edges' }
+// The steps' short facts for Detect Fiducials' step chain (≤ SHORT_MAX characters).
+export function fiducialDetectShorts(s, { images = 0 } = {}) {
+  return {
+    search: !images ? 'no images' : `${plural(images, 'image')} · ${WHERE_SHORT[s.positions] ?? 'corners'}`,
+    match: s.family === 'frame' ? 'film corner' : `${s.polarity ?? 'auto'} marks`,
+    store: `${s.overwrite ? 'replace' : 'keep accepted'}${s.generateMasks ? ' · mask' : ''}`,
+  }
+}

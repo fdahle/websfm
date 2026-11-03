@@ -29,3 +29,14 @@ export function textureEffects(s, { triangles = 0, cameras = 0 } = {}) {
     : 'Off: each photo keeps its own exposure, so brightness can step at a seam.'
   return { visibility, selection, atlas, colour }
 }
+
+const SCALE_SHORT = { 1: 'native', 0.5: '½', 0.25: '¼' }
+// The steps' short facts for Texture Mesh's step chain (≤ SHORT_MAX characters).
+export function textureShorts(s, { cameras = 0 } = {}) {
+  return {
+    visibility: !cameras ? 'no cameras' : `${plural(cameras, 'photo')}${s.useMasks ? ' · masks' : ''}`,
+    selection: `seam penalty ${s.smoothness}`,
+    atlas: `${SCALE_SHORT[s.maxScale] ?? `${s.maxScale}×`} res · ≤ ${plural(s.maxPages, 'page')}`,
+    colour: s.levelColours ? 'levelled' : 'off',
+  }
+}

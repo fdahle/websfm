@@ -22,7 +22,12 @@ const result = computed(() => outputEffect(replace.value, props.plan, props.noun
 </script>
 
 <template>
-  <SettingsStep :step="step" title="Output" :effect="result.effect" :inactive="result.inactive">
+  <SettingsStep
+    :step="step"
+    title="Output"
+    :effect="{ short: result.short, long: result.effect }"
+    :inactive="result.inactive"
+  >
     <SettingsField
       :hint="`Off: older ${noun}s stay, and the new one becomes the main one (the input of the next step). On: the new one takes the main one's place and name.`"
     >

@@ -163,7 +163,7 @@ test('Classify points labels a cloud and Build DEM ▸ Ground only makes a DTM u
     useModalsStore().demOpen = true
   })
   const dialog = page.getByRole('dialog', { name: 'Build DEM' })
-  await dialog.getByLabel('Points').selectOption('ground')
+  await dialog.locator('#dem-points').selectOption('ground')
   // Fill holes, on for a DTM; the Output step's Replace the main DEM follows it.
   await expect(dialog.getByRole('checkbox').first()).toBeChecked()
   await dialog.getByRole('button', { name: 'Build DTM', exact: true }).click()
@@ -188,7 +188,7 @@ test('Classify points labels a cloud and Build DEM ▸ Ground only makes a DTM u
     const { useModalsStore } = await import('/src/stores/useModalsStore.js')
     useModalsStore().demOpen = true
   })
-  await dialog.getByLabel('Points').selectOption('classes')
+  await dialog.locator('#dem-points').selectOption('classes')
   await dialog.getByLabel('High vegetation').uncheck()
   await dialog.getByLabel('Building').check()
   await dialog.getByRole('button', { name: 'Build DEM', exact: true }).click()

@@ -54,3 +54,23 @@ export function classifyGroundEffects(s, { noScale = false, extent = null, strea
         `above the cloth, medium up to ${fmtLength(s.mediumVegetationMax, 'm')}, high above.`
   return { cloth, label, buildings, vegetation }
 }
+
+const TERRAIN_SHORT = { 1: 'steep', 2: 'rolling', 3: 'flat' }
+// The steps' short facts for Classify Points' step chain (≤ SHORT_MAX characters).
+export function classifyGroundShorts(s, { noScale = false } = {}) {
+  s = { ...CLASSIFY_DEFAULTS, ...s }
+  if (noScale)
+    return { cloth: 'needs scale', label: 'needs scale', buildings: 'needs scale', vegetation: 'needs scale' }
+  return {
+    cloth: `${fmtLength(s.clothResolution, 'm')} cloth · ${TERRAIN_SHORT[s.rigidness] ?? 'rolling'}`,
+    label: `ground within ${fmtLength(s.classThreshold, 'm')}`,
+    buildings:
+      s.buildings === false
+        ? 'off'
+        : `≥ ${fmtLength(s.minBuildingHeight, 'm')} · ≥ ${fmtLength(s.minBuildingArea, 'm²')}`,
+    vegetation:
+      s.vegetation === false
+        ? 'off'
+        : `low ≤ ${fmtLength(s.lowVegetationMax, 'm')} · medium ≤ ${fmtLength(s.mediumVegetationMax, 'm')}`,
+  }
+}

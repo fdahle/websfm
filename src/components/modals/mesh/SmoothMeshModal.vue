@@ -5,12 +5,15 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { SMOOTH_MESH_DEFAULTS } from '../../../core/defaults.user.js'
-import { smoothMeshEffects } from '../../../core/stepEffects/smoothMesh.js'
+import { smoothMeshEffects, smoothMeshShorts } from '../../../core/stepEffects/smoothMesh.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 
 // Smooth Mesh (Tools ▸ Mesh ▾) — Taubin λ/μ smoothing (core/products/meshEdit.js
 // `taubinSmooth`). Unlike repeated Laplacian smoothing it does not shrink the
@@ -28,7 +31,12 @@ const valid = computed(
   () => settings.value.iterations >= 1 && settings.value.lambda > 0 && settings.value.mu < -settings.value.lambda,
 )
 // What the step does to this mesh (core/stepEffects/smoothMesh.js).
-const effects = computed(() => smoothMeshEffects(settings.value, { triangles: source.value?.count ?? 0 }))
+const effects = computed(() =>
+  withShorts(
+    smoothMeshEffects(settings.value, { triangles: source.value?.count ?? 0 }),
+    smoothMeshShorts(settings.value, { triangles: source.value?.count ?? 0 }),
+  ),
+)
 
 function run() {
   const s = settings.value
@@ -38,6 +46,10 @@ function run() {
     name: `${source.value?.name ?? 'Mesh'} (smoothed)`,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -54,7 +66,9 @@ function run() {
           hint="The result is a new mesh; this one is left untouched."
         />
       </SettingsGroup>
-      <SettingsStep step="1" title="Smooth" :effect="effects.smooth">
+      <StepChain />
+
+      <SettingsStep step="1" title="Smooth" :effect="effects.smooth" :more="2">
         <SettingsField label-for="smooth-it" hint="Each pass removes finer noise; more passes also soften real edges.">
           <template #label
             ><FieldHelp
@@ -87,9 +101,8 @@ function run() {
             ></label
           >
         </SettingsField>
-      </SettingsStep>
-      <AdvancedDisclosure label="Advanced settings">
-        <SettingsStep step="1" title="Smooth — advanced">
+
+        <template #tuning>
           <SettingsField label-for="smooth-l">
             <template #label
               ><FieldHelp
@@ -118,10 +131,12 @@ function run() {
             >
             <input id="smooth-m" v-model.number="settings.mu" type="number" max="0" step="0.01" class="field-input" />
           </SettingsField>
-        </SettingsStep>
-      </AdvancedDisclosure>
+        </template>
+      </SettingsStep>
     </template>
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!source || !valid" @click="run">Smooth</button>
     </template>

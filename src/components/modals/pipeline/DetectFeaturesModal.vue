@@ -2,8 +2,10 @@
 import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -381,6 +383,27 @@ const keepEffect = computed(() => {
     : `At most ${k} keypoints per image are kept, largest features first${where}.`
 })
 
+// The steps' short facts for the step chain, on the largest image (the strip's caption
+// names it); the long effects above are what an open step says.
+const largest = computed(() => plan.value?.largest ?? null)
+const resizeStep = computed(() => ({
+  short: !largest.value
+    ? 'resize'
+    : largest.value.scale < 1
+      ? `${dims(largest.value.width, largest.value.height)} resized`
+      : 'not resized',
+  long: resizeEffect.value,
+}))
+const tileStep = computed(() => ({
+  short: largest.value?.tiles > 1 ? `${largest.value.tilesX}×${largest.value.tilesY} tiles` : 'one pass',
+  long: tileEffect.value,
+}))
+const detectStep = computed(() => ({ short: isLearned.value ? learnedLabel.value : 'SIFT', long: detectEffect.value }))
+const keepStep = computed(() => ({
+  short: `≤ ${fmt(activeSettings.value.maxKeypoints)} keypoints`,
+  long: keepEffect.value,
+}))
+
 // Clicking Run while images are oversized opens a confirmation dialog rather than
 // dispatching straight into a failure — the user goes back to adjust Tiling/resolution
 // themselves, or runs anyway.
@@ -412,6 +435,10 @@ function onShellClose() {
   if (awaitingOversizeChoice.value) awaitingOversizeChoice.value = false
   else emit('close')
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -488,36 +515,11 @@ function onShellClose() {
     <div class="plan-strip">
       <template v-if="plan">
         <div class="plan-caption">
-          What happens to the largest of {{ fmt(plan.count) }} image{{ plan.count !== 1 ? 's' : ''
+          What happens to the largest of {{ fmt(plan.count) }} image{{ plan.count !== 1 ? 's' : '' }},
+          {{ dims(plan.largest.natW, plan.largest.natH)
           }}<span v-if="plan.unknown"> ({{ fmt(plan.unknown) }} without a known size yet)</span>:
         </div>
-        <div class="plan-chain">
-          <span class="plan-chip"
-            ><b>{{ dims(plan.largest.natW, plan.largest.natH) }}</b> native</span
-          >
-          <span class="plan-arrow">→</span>
-          <span class="plan-chip" :class="{ dim: plan.largest.scale >= 1 }">
-            <span class="plan-n">1</span>
-            <template v-if="plan.largest.scale < 1"
-              ><b>{{ dims(plan.largest.width, plan.largest.height) }}</b> resized</template
-            >
-            <template v-else>not resized</template>
-          </span>
-          <span class="plan-arrow">→</span>
-          <span class="plan-chip" :class="{ dim: plan.largest.tiles <= 1 }">
-            <span class="plan-n">2</span>
-            <template v-if="plan.largest.tiles > 1"
-              ><b>{{ plan.largest.tilesX }}×{{ plan.largest.tilesY }}</b> tiles</template
-            >
-            <template v-else>one pass</template>
-          </span>
-          <span class="plan-arrow">→</span>
-          <span class="plan-chip"><span class="plan-n">3</span>{{ isLearned ? learnedLabel : 'SIFT' }}</span>
-          <span class="plan-arrow">→</span>
-          <span class="plan-chip"
-            ><span class="plan-n">4</span>≤ <b>{{ fmt(activeSettings.maxKeypoints) }}</b> keypoints</span
-          >
-        </div>
+        <StepChain />
       </template>
       <div v-else-if="!runImages.length" class="plan-caption">
         Every image already has keypoints — Append mode has nothing to do. Switch to Overwrite to re-detect.
@@ -525,8 +527,8 @@ function onShellClose() {
       <div v-else class="plan-caption">Image sizes are still being read…</div>
     </div>
 
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="1" title="Resize to detection resolution" :effect="resizeEffect">
+    <SettingsStep step="1" title="Resize to detection resolution" :effect="resizeStep" :more="2">
+      <template #tuning>
         <SettingsField
           label-for="maxDimMode"
           :hint="
@@ -571,9 +573,10 @@ function onShellClose() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-
-      <SettingsStep step="2" title="Split into tiles" :effect="tileEffect" :inactive="!tilingOn || tilingIdle">
+      </template>
+    </SettingsStep>
+    <SettingsStep step="2" title="Split into tiles" :effect="tileStep" :inactive="!tilingOn || tilingIdle" :more="3">
+      <template #tuning>
         <SettingsField
           label-for="tiling"
           :hint="
@@ -646,9 +649,10 @@ function onShellClose() {
           {{ learnedLabel }}'s single-pass size limit at this resolution and <strong>fail</strong>. Turn
           <strong>Tiling</strong> on, or lower the detection resolution.
         </WarnBox>
-      </SettingsStep>
-
-      <SettingsStep step="3" :title="`Detect (${isLearned ? learnedLabel : 'SIFT'})`" :effect="detectEffect">
+      </template>
+    </SettingsStep>
+    <SettingsStep step="3" :title="`Detect (${isLearned ? learnedLabel : 'SIFT'})`" :effect="detectStep" :more="2">
+      <template #tuning>
         <SettingsField v-if="!isLearned" label-for="contrast" hint="Higher = fewer but more distinctive keypoints.">
           <template #label>
             <FieldHelp
@@ -682,9 +686,10 @@ function onShellClose() {
             ><input id="faintRetry" v-model="siftSettings.faintRetry" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
-      </SettingsStep>
-
-      <SettingsStep step="4" title="Keep the strongest" :effect="keepEffect">
+      </template>
+    </SettingsStep>
+    <SettingsStep step="4" title="Keep the strongest" :effect="keepStep" :more="2">
+      <template #tuning>
         <SettingsField v-if="!isLearned" label-for="maxKp">
           <template #label
             ><FieldHelp
@@ -727,10 +732,12 @@ function onShellClose() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button
         class="btn btn-primary"
@@ -782,48 +789,6 @@ function onShellClose() {
   gap: 6px;
 }
 .plan-caption {
-  font-size: 11px;
-  color: var(--text-dim);
-}
-.plan-chain {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-.plan-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  font-size: 11px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.plan-chip.dim {
-  color: var(--text-dim);
-  border-style: dashed;
-}
-.plan-n {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 700;
-  color: #fff;
-  background: var(--accent);
-}
-.plan-chip.dim .plan-n {
-  background: var(--text-dim);
-}
-.plan-arrow {
   font-size: 11px;
   color: var(--text-dim);
 }

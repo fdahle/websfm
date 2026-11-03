@@ -24,7 +24,8 @@ Rules that are easy to miss:
   bound by reads): say so in a comment. Log how many workers a run used.
 - A dialog that runs a processing step (Reconstruct, and every Tools dialog with
   settings and a Run button) shows its settings as numbered `SettingsStep`s in run
-  order, each with a live effect line from `src/core/stepEffects/`
+  order, each listed once: a short fact in the `StepChain`, its tuning folded in place
+  (`#tuning`), effects from `src/core/stepEffects/` in two lengths
   ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Dialogs of a processing step*).
 - Keyboard shortcuts live in `src/core/help/shortcuts.js`: a handler tests
   `matches(e, id)` and a tooltip shows `keyLabel(id)`; never compare `e.key` or type

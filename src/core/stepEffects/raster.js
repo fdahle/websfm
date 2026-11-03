@@ -128,3 +128,50 @@ export function orthoEffects(s, { surface = null, estimate = null, unit, frame, 
         'never outside the surface; larger unseen areas stay transparent.'
   return { surface: surfaceLine, grid, visibility, blend, fill }
 }
+
+// The grid's short fact: its size, or what stands in for it.
+function gridShort(estimate, unit) {
+  if (estimate === 'loading') return 'sizing…'
+  if (!estimate || estimate.unavailable) return 'grid'
+  return `${estimate.approx ? '≈ ' : ''}${fmtCount(estimate.width)} × ${fmtCount(estimate.height)} px · ${fmtGsd(estimate.gsd)} ${unit}`
+}
+const AGG_SHORT = { max: 'highest point', median: 'median height', mean: 'mean height', min: 'lowest point' }
+
+// The steps' short facts for Build DEM's step chain (≤ SHORT_MAX characters).
+export function demShorts(s, { source = null, estimate = null, unit } = {}) {
+  const classes = demPointClasses(s)
+  return {
+    points: !source
+      ? 'no cloud'
+      : s.points === 'ground'
+        ? 'ground (DTM)'
+        : classes
+          ? 'chosen classes'
+          : 'all points (DSM)',
+    grid: gridShort(estimate, unit),
+    cell: AGG_SHORT[s.aggregate] ?? s.aggregate,
+    fill:
+      s.fillMethod === 'none'
+        ? s.fillHoles
+          ? 'enclosed gaps only'
+          : 'gaps stay'
+        : `${s.fillMethod === 'nearest' ? 'nearest' : 'IDW'} ≤ ${s.fillRadius} cells${s.fillHoles ? ' + holes' : ''}`,
+  }
+}
+
+// The steps' short facts for Build Orthophoto's step chain.
+export function orthoShorts(s, { surface = null, estimate = null, unit } = {}) {
+  return {
+    surface: surface?.available ? `on the ${SURFACE_WORD[s.surface] ?? surface.label}` : 'no surface',
+    grid: gridShort(estimate, unit),
+    visibility: `within ${s.depthTolRel} %${s.maxCost > 0 ? ` · cost ≤ ${s.maxCost}` : ''}`,
+    blend:
+      s.blend !== 'mosaic'
+        ? s.blend === 'best'
+          ? 'best match per pixel'
+          : 'average of photos'
+        : `mosaic · ${s.seamline === 'graphcut' ? 'graph cut' : 'nadir'} · ${s.seamBlend === 'multiband' ? 'multiband' : 'feather'}`,
+    fill:
+      s.fillMethod === 'none' ? 'gaps stay' : `${s.fillMethod === 'nearest' ? 'nearest' : 'IDW'} ≤ ${s.fillRadius} px`,
+  }
+}

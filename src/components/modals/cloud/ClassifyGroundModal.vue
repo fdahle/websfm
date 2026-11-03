@@ -4,7 +4,9 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -12,7 +14,8 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import { useSourcePick, cloudOptionLabel } from '../../../composables/useSourcePick.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { GROUND_DEFAULTS, CLASSIFY_DEFAULTS } from '../../../core/defaults.user.js'
-import { classifyGroundEffects } from '../../../core/stepEffects/classifyGround.js'
+import { classifyGroundEffects, classifyGroundShorts } from '../../../core/stepEffects/classifyGround.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 import { cloudUnits } from '../../../core/products/cloudUnits.js'
 import { anyCloudBounds, isStreamed } from '../../../core/lod/streamed.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
@@ -74,12 +77,20 @@ const extent = computed(() => {
   return [sides[0] * units.value.scale, sides[1] * units.value.scale]
 })
 const effects = computed(() =>
-  classifyGroundEffects(settings.value, {
-    noScale: noScale.value,
-    extent: extent.value,
-    streamed: isStreamed(source.value),
-    colour: colour.value,
-  }),
+  withShorts(
+    classifyGroundEffects(settings.value, {
+      noScale: noScale.value,
+      extent: extent.value,
+      streamed: isStreamed(source.value),
+      colour: colour.value,
+    }),
+    classifyGroundShorts(settings.value, {
+      noScale: noScale.value,
+      extent: extent.value,
+      streamed: isStreamed(source.value),
+      colour: colour.value,
+    }),
+  ),
 )
 
 function run() {
@@ -102,6 +113,10 @@ function run() {
     name: `${source.value?.name ?? 'Cloud'} (${vegetation || buildings ? 'classified' : 'ground'})`,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -129,7 +144,9 @@ function run() {
           metres.
         </p>
       </SettingsGroup>
-      <SettingsStep step="1" title="Drop the cloth" :effect="effects.cloth" :inactive="noScale">
+      <StepChain />
+
+      <SettingsStep step="1" title="Drop the cloth" :effect="effects.cloth" :inactive="noScale" :more="2">
         <SettingsField label-for="gnd-rigid" hint="How stiff the cloth is: steep ground needs a soft cloth.">
           <template #label><FieldHelp op="classify-ground" param="rigidness">Terrain</FieldHelp></template>
           <select id="gnd-rigid" v-model.number="settings.rigidness" class="field-input field-select">
@@ -138,47 +155,8 @@ function run() {
             <option :value="3">Flat (stiff cloth)</option>
           </select>
         </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="2" title="Label the points" :effect="effects.label" :inactive="noScale" />
-      <SettingsStep step="3" title="Buildings" :effect="effects.buildings" :inactive="noScale || !settings.buildings">
-        <SettingsField hint="Roofs and walls large and high enough to be a building.">
-          <template #label>
-            <FieldHelp
-              op="classify-ground"
-              param="buildings"
-              :value="settings.buildings"
-              :default-value="CLASSIFY_DEFAULTS.buildings"
-              >Find buildings</FieldHelp
-            >
-          </template>
-          <label class="checkbox-row"
-            ><input v-model="settings.buildings" type="checkbox" class="checkbox" /> Enabled</label
-          >
-        </SettingsField>
-      </SettingsStep>
-      <SettingsStep
-        step="4"
-        title="Vegetation"
-        :effect="effects.vegetation"
-        :inactive="noScale || !settings.vegetation"
-      >
-        <SettingsField hint="Trees, shrubs and low plants, by their height above the cloth.">
-          <template #label>
-            <FieldHelp
-              op="classify-ground"
-              param="vegetation"
-              :value="settings.vegetation"
-              :default-value="CLASSIFY_DEFAULTS.vegetation"
-              >Find vegetation</FieldHelp
-            >
-          </template>
-          <label class="checkbox-row"
-            ><input v-model="settings.vegetation" type="checkbox" class="checkbox" /> Enabled</label
-          >
-        </SettingsField>
-      </SettingsStep>
-      <AdvancedDisclosure label="Advanced settings">
-        <SettingsStep step="1" title="Drop the cloth — advanced">
+
+        <template #tuning>
           <SettingsField label-for="gnd-res" unit="m" hint="Coarser spans wider roofs; finer follows steeper ground.">
             <template #label>
               <FieldHelp
@@ -214,8 +192,10 @@ function run() {
               ><input v-model="settings.slopeSmoothing" type="checkbox" class="checkbox" /> Enabled</label
             >
           </SettingsField>
-        </SettingsStep>
-        <SettingsStep step="2" title="Label the points — advanced">
+        </template>
+      </SettingsStep>
+      <SettingsStep step="2" title="Label the points" :effect="effects.label" :inactive="noScale" :more="2">
+        <template #tuning>
           <SettingsField label-for="gnd-thr" unit="m" hint="Points this close to the cloth are ground.">
             <template #label>
               <FieldHelp
@@ -244,98 +224,151 @@ function run() {
               <option value="all">All points</option>
             </select>
           </SettingsField>
-        </SettingsStep>
-        <SettingsStep v-if="settings.buildings" step="3" title="Buildings — advanced">
-          <SettingsField label-for="cls-bh" unit="m" hint="Above the cloth, at the surface's highest point.">
-            <template #label>
-              <FieldHelp
-                op="classify-ground"
-                param="minBuildingHeight"
-                :value="settings.minBuildingHeight"
-                :default-value="CLASSIFY_DEFAULTS.minBuildingHeight"
-                >Minimum height</FieldHelp
-              >
-            </template>
-            <input
-              id="cls-bh"
-              v-model.number="settings.minBuildingHeight"
-              :aria-invalid="numbers.bad.minBuildingHeight"
-              type="number"
-              min="0.5"
-              max="100"
-              step="0.5"
-              class="field-input"
-            />
-          </SettingsField>
-          <SettingsField label-for="cls-ba" unit="m²" hint="The surface of one roof or wall plane.">
-            <template #label>
-              <FieldHelp
-                op="classify-ground"
-                param="minBuildingArea"
-                :value="settings.minBuildingArea"
-                :default-value="CLASSIFY_DEFAULTS.minBuildingArea"
-                >Minimum area</FieldHelp
-              >
-            </template>
-            <input
-              id="cls-ba"
-              v-model.number="settings.minBuildingArea"
-              :aria-invalid="numbers.bad.minBuildingArea"
-              type="number"
-              min="1"
-              max="10000"
-              step="5"
-              class="field-input"
-            />
-          </SettingsField>
-        </SettingsStep>
-        <SettingsStep v-if="settings.vegetation" step="4" title="Vegetation — advanced">
-          <SettingsField label-for="cls-low" unit="m" hint="Low vegetation reaches at most this far above the cloth.">
-            <template #label>
-              <FieldHelp
-                op="classify-ground"
-                param="lowVegetationMax"
-                :value="settings.lowVegetationMax"
-                :default-value="CLASSIFY_DEFAULTS.lowVegetationMax"
-                >Low up to</FieldHelp
-              >
-            </template>
-            <input
-              id="cls-low"
-              v-model.number="settings.lowVegetationMax"
-              :aria-invalid="numbers.bad.lowVegetationMax"
-              type="number"
-              min="0.1"
-              max="50"
-              step="0.5"
-              class="field-input"
-            />
-          </SettingsField>
-          <SettingsField label-for="cls-med" unit="m" hint="Medium vegetation up to this; higher is high vegetation.">
-            <template #label>
-              <FieldHelp
-                op="classify-ground"
-                param="mediumVegetationMax"
-                :value="settings.mediumVegetationMax"
-                :default-value="CLASSIFY_DEFAULTS.mediumVegetationMax"
-                >Medium up to</FieldHelp
-              >
-            </template>
-            <input
-              id="cls-med"
-              v-model.number="settings.mediumVegetationMax"
-              :aria-invalid="numbers.bad.mediumVegetationMax"
-              type="number"
-              min="0.2"
-              max="100"
-              step="0.5"
-              class="field-input"
-            />
-          </SettingsField>
-        </SettingsStep>
-      </AdvancedDisclosure>
+        </template>
+      </SettingsStep>
+
+      <SettingsStep
+        step="3"
+        title="Buildings"
+        :effect="effects.buildings"
+        :inactive="noScale || !settings.buildings"
+        :more="settings.buildings ? 2 : 0"
+      >
+        <SettingsField hint="Roofs and walls large and high enough to be a building.">
+          <template #label>
+            <FieldHelp
+              op="classify-ground"
+              param="buildings"
+              :value="settings.buildings"
+              :default-value="CLASSIFY_DEFAULTS.buildings"
+              >Find buildings</FieldHelp
+            >
+          </template>
+          <label class="checkbox-row"
+            ><input v-model="settings.buildings" type="checkbox" class="checkbox" /> Enabled</label
+          >
+        </SettingsField>
+
+        <template #tuning>
+          <template v-if="settings.buildings">
+            <SettingsField label-for="cls-bh" unit="m" hint="Above the cloth, at the surface's highest point.">
+              <template #label>
+                <FieldHelp
+                  op="classify-ground"
+                  param="minBuildingHeight"
+                  :value="settings.minBuildingHeight"
+                  :default-value="CLASSIFY_DEFAULTS.minBuildingHeight"
+                  >Minimum height</FieldHelp
+                >
+              </template>
+              <input
+                id="cls-bh"
+                v-model.number="settings.minBuildingHeight"
+                :aria-invalid="numbers.bad.minBuildingHeight"
+                type="number"
+                min="0.5"
+                max="100"
+                step="0.5"
+                class="field-input"
+              />
+            </SettingsField>
+            <SettingsField label-for="cls-ba" unit="m²" hint="The surface of one roof or wall plane.">
+              <template #label>
+                <FieldHelp
+                  op="classify-ground"
+                  param="minBuildingArea"
+                  :value="settings.minBuildingArea"
+                  :default-value="CLASSIFY_DEFAULTS.minBuildingArea"
+                  >Minimum area</FieldHelp
+                >
+              </template>
+              <input
+                id="cls-ba"
+                v-model.number="settings.minBuildingArea"
+                :aria-invalid="numbers.bad.minBuildingArea"
+                type="number"
+                min="1"
+                max="10000"
+                step="5"
+                class="field-input"
+              />
+            </SettingsField>
+          </template>
+        </template>
+      </SettingsStep>
+      <SettingsStep
+        step="4"
+        title="Vegetation"
+        :effect="effects.vegetation"
+        :inactive="noScale || !settings.vegetation"
+        :more="settings.vegetation ? 2 : 0"
+      >
+        <SettingsField hint="Trees, shrubs and low plants, by their height above the cloth.">
+          <template #label>
+            <FieldHelp
+              op="classify-ground"
+              param="vegetation"
+              :value="settings.vegetation"
+              :default-value="CLASSIFY_DEFAULTS.vegetation"
+              >Find vegetation</FieldHelp
+            >
+          </template>
+          <label class="checkbox-row"
+            ><input v-model="settings.vegetation" type="checkbox" class="checkbox" /> Enabled</label
+          >
+        </SettingsField>
+
+        <template #tuning>
+          <template v-if="settings.vegetation">
+            <SettingsField label-for="cls-low" unit="m" hint="Low vegetation reaches at most this far above the cloth.">
+              <template #label>
+                <FieldHelp
+                  op="classify-ground"
+                  param="lowVegetationMax"
+                  :value="settings.lowVegetationMax"
+                  :default-value="CLASSIFY_DEFAULTS.lowVegetationMax"
+                  >Low up to</FieldHelp
+                >
+              </template>
+              <input
+                id="cls-low"
+                v-model.number="settings.lowVegetationMax"
+                :aria-invalid="numbers.bad.lowVegetationMax"
+                type="number"
+                min="0.1"
+                max="50"
+                step="0.5"
+                class="field-input"
+              />
+            </SettingsField>
+            <SettingsField label-for="cls-med" unit="m" hint="Medium vegetation up to this; higher is high vegetation.">
+              <template #label>
+                <FieldHelp
+                  op="classify-ground"
+                  param="mediumVegetationMax"
+                  :value="settings.mediumVegetationMax"
+                  :default-value="CLASSIFY_DEFAULTS.mediumVegetationMax"
+                  >Medium up to</FieldHelp
+                >
+              </template>
+              <input
+                id="cls-med"
+                v-model.number="settings.mediumVegetationMax"
+                :aria-invalid="numbers.bad.mediumVegetationMax"
+                type="number"
+                min="0.2"
+                max="100"
+                step="0.5"
+                class="field-input"
+              />
+            </SettingsField>
+          </template>
+        </template>
+      </SettingsStep>
     </template>
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button
         class="btn btn-primary"

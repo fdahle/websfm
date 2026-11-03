@@ -93,6 +93,27 @@ export function sparseEffects(
   return { register, ba, calibration, rollingShutter, cameraRig, splits: splitWarning(splits) }
 }
 
+// The steps' short facts for the dialog's step chain (≤ SHORT_MAX characters).
+export function sparseShorts(s, { linkedImages = 0, pairs = 0, timedImages = 0, rigs = [], newImages = 0 } = {}) {
+  const ba = s.baIterations > 0
+  if (s.addToModel)
+    return {
+      register: `${plural(newImages, 'new image')}`,
+      ba: ba ? 'new cameras only' : 'off',
+      calibration: "the model's",
+      rollingShutter: 'off',
+      cameraRig: 'off',
+    }
+  const v = s.refineIntrinsics
+  return {
+    register: !pairs ? 'match first' : `${plural(linkedImages, 'image')} · ${s.reprjThreshold} px`,
+    ba: ba ? `≤ ${plural(s.baIterations, 'iteration')}` : 'off',
+    calibration: !ba ? 'not used' : v === 'none' ? 'off' : v === 'auto' ? 'auto' : v.replace(/,/g, ', '),
+    rollingShutter: s.rollingShutter !== 'on' ? 'off' : timedImages < 3 ? 'no capture times' : 'readout estimated',
+    cameraRig: !rigs.length ? 'no rig' : s.cameraRig === 'off' ? 'off' : `${plural(rigs[0].captures, 'capture')}`,
+  }
+}
+
 // A camera group with photos of more than one camera gets one calibration for all of
 // them, whatever self-calibration does.
 function splitWarning(splits) {

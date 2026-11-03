@@ -5,14 +5,17 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import { FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META } from '../../../core/defaults.user.js'
-import { filterCloudEffects } from '../../../core/stepEffects/filterCloud.js'
+import { filterCloudEffects, filterCloudShorts } from '../../../core/stepEffects/filterCloud.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 
 // Filter Cloud — remove noise from a dense cloud. Non-destructive: the run adds a
 // NEW cloud. Defaults are the single source of truth in core/defaults.user.js;
@@ -60,7 +63,12 @@ const { baseId, activePreset, selectPreset } = usePresetSettings({
 // falls back to its own estimate otherwise.
 const voxelAuto = computed(() => (settings.value.voxelCell > 0 ? settings.value.voxelCell : props.mergeCell))
 // What each step does to this cloud (core/stepEffects/filterCloud.js).
-const effects = computed(() => filterCloudEffects(settings.value, { mergeCell: props.mergeCell }))
+const effects = computed(() =>
+  withShorts(
+    filterCloudEffects(settings.value, { mergeCell: props.mergeCell }),
+    filterCloudShorts(settings.value, { mergeCell: props.mergeCell }),
+  ),
+)
 
 function run() {
   const s = settings.value
@@ -81,6 +89,10 @@ function run() {
     name: `${source.value?.name ?? 'Cloud'} (filtered)`,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -100,6 +112,8 @@ function run() {
         :presets="FILTER_CLOUD_PRESET_META"
         @select="selectPreset"
       />
+
+      <StepChain />
 
       <SettingsGroup title="Source">
         <SourcePicker
@@ -149,186 +163,206 @@ function run() {
         </template>
       </SettingsStep>
 
-      <SettingsStep step="2" title="Voxel downsample" :effect="effects.voxel" :inactive="!has('voxel')">
+      <SettingsStep
+        step="2"
+        title="Voxel downsample"
+        :effect="effects.voxel"
+        :inactive="!has('voxel')"
+        :more="(has('voxel') || has('isolated') || has('sor')) && has('voxel') ? 1 : 0"
+      >
         <label class="checkbox-row"
           ><input type="checkbox" class="checkbox" :checked="has('voxel')" @change="toggle('voxel')" /> Enabled</label
         >
+
+        <template #tuning>
+          <template v-if="(has('voxel') || has('isolated') || has('sor')) && has('voxel')">
+            <SettingsField
+              label-for="filter-voxel"
+              unit="units"
+              :hint="
+                mergeCell > 0 && !(settings.voxelCell > 0)
+                  ? `0 = auto (the dense run's merge cell, ${mergeCell.toPrecision(3)})`
+                  : '0 = auto (about one point spacing)'
+              "
+            >
+              <template #label
+                ><FieldHelp
+                  op="filter-cloud"
+                  param="voxelCell"
+                  :value="settings.voxelCell"
+                  :default-value="FILTER_CLOUD_DEFAULTS.voxelCell"
+                  >Cell size</FieldHelp
+                ></template
+              >
+              <input
+                id="filter-voxel"
+                v-model.number="settings.voxelCell"
+                type="number"
+                min="0"
+                step="any"
+                class="field-input"
+              />
+            </SettingsField>
+          </template>
+        </template>
       </SettingsStep>
 
-      <SettingsStep step="3" title="Isolated clusters" :effect="effects.isolated" :inactive="!has('isolated')">
+      <SettingsStep
+        step="3"
+        title="Isolated clusters"
+        :effect="effects.isolated"
+        :inactive="!has('isolated')"
+        :more="(has('voxel') || has('isolated') || has('sor')) && has('isolated') ? 3 : 0"
+      >
         <label class="checkbox-row"
           ><input type="checkbox" class="checkbox" :checked="has('isolated')" @change="toggle('isolated')" />
           Enabled</label
         >
+
+        <template #tuning>
+          <template v-if="(has('voxel') || has('isolated') || has('sor')) && has('isolated')">
+            <SettingsField
+              label-for="filter-iso-cell"
+              unit="units"
+              hint="Occupancy grid cell. 0 = auto (about 4× the point spacing)."
+            >
+              <template #label
+                ><FieldHelp
+                  op="filter-cloud"
+                  param="isolatedCell"
+                  :value="settings.isolatedCell"
+                  :default-value="FILTER_CLOUD_DEFAULTS.isolatedCell"
+                  >Cell size</FieldHelp
+                ></template
+              >
+              <input
+                id="filter-iso-cell"
+                v-model.number="settings.isolatedCell"
+                type="number"
+                min="0"
+                step="any"
+                class="field-input"
+              />
+            </SettingsField>
+            <SettingsField
+              label-for="filter-iso-nb"
+              hint="A low-support cell needs this many of its 26 neighbours occupied to survive."
+            >
+              <template #label
+                ><FieldHelp
+                  op="filter-cloud"
+                  param="isolatedMinNeighbors"
+                  :value="settings.isolatedMinNeighbors"
+                  :default-value="FILTER_CLOUD_DEFAULTS.isolatedMinNeighbors"
+                  >Min occupied neighbours</FieldHelp
+                ></template
+              >
+              <input
+                id="filter-iso-nb"
+                v-model.number="settings.isolatedMinNeighbors"
+                type="number"
+                min="1"
+                max="26"
+                step="1"
+                class="field-input"
+              />
+            </SettingsField>
+            <SettingsField
+              label-for="filter-iso-sup"
+              unit="points"
+              hint="Cells holding more points than this are never tested — they are real surface."
+            >
+              <template #label
+                ><FieldHelp
+                  op="filter-cloud"
+                  param="isolatedMaxSupport"
+                  :value="settings.isolatedMaxSupport"
+                  :default-value="FILTER_CLOUD_DEFAULTS.isolatedMaxSupport"
+                  >Max tested support</FieldHelp
+                ></template
+              >
+              <input
+                id="filter-iso-sup"
+                v-model.number="settings.isolatedMaxSupport"
+                type="number"
+                min="1"
+                max="64"
+                step="1"
+                class="field-input"
+              />
+            </SettingsField>
+          </template>
+        </template>
       </SettingsStep>
 
-      <SettingsStep step="4" title="Statistical outliers" :effect="effects.sor" :inactive="!has('sor')">
+      <SettingsStep
+        step="4"
+        title="Statistical outliers"
+        :effect="effects.sor"
+        :inactive="!has('sor')"
+        :more="(has('voxel') || has('isolated') || has('sor')) && has('sor') ? 2 : 0"
+      >
         <label class="checkbox-row"
           ><input type="checkbox" class="checkbox" :checked="has('sor')" @change="toggle('sor')" /> Enabled</label
         >
+
+        <template #tuning>
+          <template v-if="(has('voxel') || has('isolated') || has('sor')) && has('sor')">
+            <SettingsField
+              label-for="filter-sor-k"
+              hint="How many nearest neighbours the per-point mean distance averages over."
+            >
+              <template #label
+                ><FieldHelp
+                  op="filter-cloud"
+                  param="sorK"
+                  :value="settings.sorK"
+                  :default-value="FILTER_CLOUD_DEFAULTS.sorK"
+                  >Neighbours</FieldHelp
+                ></template
+              >
+              <input
+                id="filter-sor-k"
+                v-model.number="settings.sorK"
+                type="number"
+                min="3"
+                max="64"
+                step="1"
+                class="field-input"
+              />
+            </SettingsField>
+            <SettingsField
+              label-for="filter-sor-std"
+              unit="σ"
+              hint="Drop points above mean + ratio × σ. Lower is more aggressive."
+            >
+              <template #label
+                ><FieldHelp
+                  op="filter-cloud"
+                  param="sorStdRatio"
+                  :value="settings.sorStdRatio"
+                  :default-value="FILTER_CLOUD_DEFAULTS.sorStdRatio"
+                  >Std-dev ratio</FieldHelp
+                ></template
+              >
+              <input
+                id="filter-sor-std"
+                v-model.number="settings.sorStdRatio"
+                type="number"
+                min="0.1"
+                max="10"
+                step="0.1"
+                class="field-input"
+              />
+            </SettingsField>
+          </template>
+        </template>
       </SettingsStep>
-
-      <AdvancedDisclosure
-        v-if="has('voxel') || has('isolated') || has('sor')"
-        label="Advanced settings"
-        :default-open="!!startMethod"
-      >
-        <SettingsStep v-if="has('voxel')" step="2" title="Voxel downsample — advanced">
-          <SettingsField
-            label-for="filter-voxel"
-            unit="units"
-            :hint="
-              mergeCell > 0 && !(settings.voxelCell > 0)
-                ? `0 = auto (the dense run's merge cell, ${mergeCell.toPrecision(3)})`
-                : '0 = auto (about one point spacing)'
-            "
-          >
-            <template #label
-              ><FieldHelp
-                op="filter-cloud"
-                param="voxelCell"
-                :value="settings.voxelCell"
-                :default-value="FILTER_CLOUD_DEFAULTS.voxelCell"
-                >Cell size</FieldHelp
-              ></template
-            >
-            <input
-              id="filter-voxel"
-              v-model.number="settings.voxelCell"
-              type="number"
-              min="0"
-              step="any"
-              class="field-input"
-            />
-          </SettingsField>
-        </SettingsStep>
-
-        <SettingsStep v-if="has('isolated')" step="3" title="Isolated clusters — advanced">
-          <SettingsField
-            label-for="filter-iso-cell"
-            unit="units"
-            hint="Occupancy grid cell. 0 = auto (about 4× the point spacing)."
-          >
-            <template #label
-              ><FieldHelp
-                op="filter-cloud"
-                param="isolatedCell"
-                :value="settings.isolatedCell"
-                :default-value="FILTER_CLOUD_DEFAULTS.isolatedCell"
-                >Cell size</FieldHelp
-              ></template
-            >
-            <input
-              id="filter-iso-cell"
-              v-model.number="settings.isolatedCell"
-              type="number"
-              min="0"
-              step="any"
-              class="field-input"
-            />
-          </SettingsField>
-          <SettingsField
-            label-for="filter-iso-nb"
-            hint="A low-support cell needs this many of its 26 neighbours occupied to survive."
-          >
-            <template #label
-              ><FieldHelp
-                op="filter-cloud"
-                param="isolatedMinNeighbors"
-                :value="settings.isolatedMinNeighbors"
-                :default-value="FILTER_CLOUD_DEFAULTS.isolatedMinNeighbors"
-                >Min occupied neighbours</FieldHelp
-              ></template
-            >
-            <input
-              id="filter-iso-nb"
-              v-model.number="settings.isolatedMinNeighbors"
-              type="number"
-              min="1"
-              max="26"
-              step="1"
-              class="field-input"
-            />
-          </SettingsField>
-          <SettingsField
-            label-for="filter-iso-sup"
-            unit="points"
-            hint="Cells holding more points than this are never tested — they are real surface."
-          >
-            <template #label
-              ><FieldHelp
-                op="filter-cloud"
-                param="isolatedMaxSupport"
-                :value="settings.isolatedMaxSupport"
-                :default-value="FILTER_CLOUD_DEFAULTS.isolatedMaxSupport"
-                >Max tested support</FieldHelp
-              ></template
-            >
-            <input
-              id="filter-iso-sup"
-              v-model.number="settings.isolatedMaxSupport"
-              type="number"
-              min="1"
-              max="64"
-              step="1"
-              class="field-input"
-            />
-          </SettingsField>
-        </SettingsStep>
-
-        <SettingsStep v-if="has('sor')" step="4" title="Statistical outliers — advanced">
-          <SettingsField
-            label-for="filter-sor-k"
-            hint="How many nearest neighbours the per-point mean distance averages over."
-          >
-            <template #label
-              ><FieldHelp
-                op="filter-cloud"
-                param="sorK"
-                :value="settings.sorK"
-                :default-value="FILTER_CLOUD_DEFAULTS.sorK"
-                >Neighbours</FieldHelp
-              ></template
-            >
-            <input
-              id="filter-sor-k"
-              v-model.number="settings.sorK"
-              type="number"
-              min="3"
-              max="64"
-              step="1"
-              class="field-input"
-            />
-          </SettingsField>
-          <SettingsField
-            label-for="filter-sor-std"
-            unit="σ"
-            hint="Drop points above mean + ratio × σ. Lower is more aggressive."
-          >
-            <template #label
-              ><FieldHelp
-                op="filter-cloud"
-                param="sorStdRatio"
-                :value="settings.sorStdRatio"
-                :default-value="FILTER_CLOUD_DEFAULTS.sorStdRatio"
-                >Std-dev ratio</FieldHelp
-              ></template
-            >
-            <input
-              id="filter-sor-std"
-              v-model.number="settings.sorStdRatio"
-              type="number"
-              min="0.1"
-              max="10"
-              step="0.1"
-              class="field-input"
-            />
-          </SettingsField>
-        </SettingsStep>
-      </AdvancedDisclosure>
     </template>
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!source || !settings.methods.length" @click="run">Filter</button>
     </template>

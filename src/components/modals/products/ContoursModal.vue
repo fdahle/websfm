@@ -6,11 +6,14 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import WarnBox from '../ui/WarnBox.vue'
 import { CONTOUR_DEFAULTS } from '../../../core/defaults.user.js'
 import { contourLevels, MAX_CONTOUR_LEVELS } from '../../../core/products/contours.js'
-import { contoursEffects } from '../../../core/stepEffects/contours.js'
+import { contoursEffects, contoursShorts } from '../../../core/stepEffects/contours.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import FileNameField from '../ui/FileNameField.vue'
 import { defaultExportName } from '../../../core/exportNames.js'
@@ -69,16 +72,28 @@ const projects = useProjectsStore()
 const defaultName = computed(() => defaultExportName('contours', { base: projects.currentProjectName || 'project' }))
 // What each step does with this DEM (core/stepEffects/contours.js).
 const effects = computed(() =>
-  contoursEffects(settings.value, {
-    interval: interval.value,
-    levels: levelCount.value,
-    max: MAX_CONTOUR_LEVELS,
-    zMin: props.dem?.zMin ?? 0,
-    zMax: props.dem?.zMax ?? 0,
-    unit: unit.value,
-    onMap: onMap.value,
-    gsd: props.dem?.gsd ?? 0,
-  }),
+  withShorts(
+    contoursEffects(settings.value, {
+      interval: interval.value,
+      levels: levelCount.value,
+      max: MAX_CONTOUR_LEVELS,
+      zMin: props.dem?.zMin ?? 0,
+      zMax: props.dem?.zMax ?? 0,
+      unit: unit.value,
+      onMap: onMap.value,
+      gsd: props.dem?.gsd ?? 0,
+    }),
+    contoursShorts(settings.value, {
+      interval: interval.value,
+      levels: levelCount.value,
+      max: MAX_CONTOUR_LEVELS,
+      zMin: props.dem?.zMin ?? 0,
+      zMax: props.dem?.zMax ?? 0,
+      unit: unit.value,
+      onMap: onMap.value,
+      gsd: props.dem?.gsd ?? 0,
+    }),
+  ),
 )
 
 function run() {
@@ -94,6 +109,10 @@ function run() {
     fileName: fileName.value,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -104,6 +123,8 @@ function run() {
     </template>
     <WarnBox v-if="!dem">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>).</WarnBox>
     <template v-else>
+      <StepChain />
+
       <SettingsStep step="1" title="Pick the levels" :effect="effects.levels">
         <SettingsField label-for="ct-int" :unit="unit" :hint="`0 = auto (${autoInterval} ${unit}).`">
           <template #label
@@ -150,20 +171,8 @@ function run() {
           />
         </SettingsField>
       </SettingsStep>
-      <SettingsStep step="2" title="Trace and shape" :effect="effects.shape" />
-      <SettingsStep step="3" title="Place and save" :effect="effects.result">
-        <SettingsField label-for="ct-fmt">
-          <template #label><FieldHelp op="contours" param="format">Download</FieldHelp></template>
-          <select id="ct-fmt" v-model="settings.format" class="field-select">
-            <option v-if="onMap" value="none">No download</option>
-            <option value="geojson">GeoJSON (GIS)</option>
-            <option value="dxf">DXF R12 (CAD)</option>
-          </select>
-        </SettingsField>
-        <FileNameField v-if="settings.format !== 'none'" v-model="fileName" :default-name="defaultName" />
-      </SettingsStep>
-      <AdvancedDisclosure label="Advanced settings">
-        <SettingsStep step="2" title="Trace and shape — advanced">
+      <SettingsStep step="2" title="Trace and shape" :effect="effects.shape" :more="3">
+        <template #tuning>
           <SettingsField
             label-for="ct-gen"
             unit="cells"
@@ -226,10 +235,24 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </SettingsStep>
-      </AdvancedDisclosure>
+        </template>
+      </SettingsStep>
+
+      <SettingsStep step="3" title="Place and save" :effect="effects.result">
+        <SettingsField label-for="ct-fmt">
+          <template #label><FieldHelp op="contours" param="format">Download</FieldHelp></template>
+          <select id="ct-fmt" v-model="settings.format" class="field-select">
+            <option v-if="onMap" value="none">No download</option>
+            <option value="geojson">GeoJSON (GIS)</option>
+            <option value="dxf">DXF R12 (CAD)</option>
+          </select>
+        </SettingsField>
+        <FileNameField v-if="settings.format !== 'none'" v-model="fileName" :default-name="defaultName" />
+      </SettingsStep>
     </template>
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button
         class="btn btn-primary"

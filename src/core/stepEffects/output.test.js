@@ -6,6 +6,7 @@ describe('outputEffect', () => {
     expect(outputEffect(false, { main: null, replaceable: false, newName: 'DEM' }, 'DEM')).toEqual({
       effect: 'The first DEM: "DEM"',
       inactive: true,
+      short: 'first',
     })
   })
 

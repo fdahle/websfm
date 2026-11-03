@@ -25,3 +25,16 @@ export function contoursEffects(
     : `This DEM has no coordinate system, so the lines cannot go on the map: they are downloaded as ${fmt ?? 'GeoJSON'}.`
   return { levels: levelsLine, shape, result }
 }
+
+// The steps' short facts for Contour Lines' step chain (≤ SHORT_MAX characters).
+export function contoursShorts(s, { interval = 0, levels = 0, max = Infinity, unit = 'units', onMap = false } = {}) {
+  return {
+    levels: levels > max ? 'too many levels' : `${plural(levels, 'level')} · every ${interval} ${unit}`,
+    shape: `${s.generalize > 0 ? `σ ${s.generalize}` : 'raw'} · ${plural(s.smooth, 'pass', 'passes')}`,
+    result: onMap
+      ? `map layer${s.format !== 'none' ? ` + ${s.format === 'dxf' ? 'DXF' : 'GeoJSON'}` : ''}`
+      : s.format === 'dxf'
+        ? 'DXF'
+        : 'GeoJSON',
+  }
+}

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, useSlots } from 'vue'
+import { computed, onBeforeUnmount, useSlots } from 'vue'
 import { useStepLayout } from '../../../composables/useStepLayout.js'
 
 // One numbered stage of a pipeline modal: "① Resize → ② Tile → ③ Detect → ④ Keep".
@@ -28,6 +28,21 @@ const drawn = computed(() => !layout || !!slots.default || open.value)
 const hasToggle = computed(
   () => !!layout && !layout.showAll.value && (!!slots.tuning || !slots.default) && props.more !== 0,
 )
+// In the step chain: the short fact (the title where the effect has none yet).
+if (layout) {
+  const token = Symbol('step')
+  layout.register(
+    token,
+    computed(() => ({
+      step: props.step,
+      title: props.title,
+      short: typeof props.effect === 'object' && props.effect?.short ? props.effect.short : props.title,
+      long: long.value,
+      inactive: props.inactive,
+    })),
+  )
+  onBeforeUnmount(() => layout.unregister(token))
+}
 const moreLabel = computed(() =>
   open.value ? 'Less' : props.more ? `${props.more} more` : slots.tuning ? 'More' : 'Details',
 )

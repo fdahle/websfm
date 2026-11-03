@@ -22,3 +22,15 @@ export function cleanMeshEffects(s, { textured = false } = {}) {
     : 'Off: unused vertices and flat triangles stay.'
   return { weld, pieces, bridges, holes, compact }
 }
+
+// The steps' short facts for Clean Mesh's step chain (≤ SHORT_MAX characters).
+export function cleanMeshShorts(s) {
+  const on = (id) => s.methods.includes(id)
+  return {
+    weld: on('weld') ? 'weld' : 'off',
+    pieces: on('components') ? `< ${s.minFraction} × largest` : 'off',
+    bridges: on('longEdges') ? `> ${s.maxEdgeFactor} × median edge` : 'off',
+    holes: !on('holes') ? 'off' : s.maxHoleEdges > 0 ? `≤ ${s.maxHoleEdges} edges` : 'watertight',
+    compact: on('compact') ? 'compact' : 'off',
+  }
+}

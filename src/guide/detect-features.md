@@ -16,11 +16,11 @@ keypoints and matches are replaced, and every other image keeps its own. If the 
 model holds one of them, rebuild the model afterwards.
 
 ## How the settings fit together
-Detection runs four steps, in the order of the dialog's Advanced settings: **Resize**
+Detection runs four steps, in the order of the dialog's numbered steps: **Resize**
 each image to the detection resolution (never enlarged), **Tile** the resized image if
 tiling is on, **Detect**, and **Keep** the strongest keypoints up to the limit. The line
-under the quality cards shows them for the largest image, and each step says what it
-does to your images.
+under the quality cards shows them for the largest image; click a step there (or
+**⚙ more** on a step) for its settings and what it does to your images.
 
 ## Detector
 <!-- param: detector  default: SIFT -->

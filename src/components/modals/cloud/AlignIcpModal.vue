@@ -7,12 +7,15 @@ import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import WarnBox from '../ui/WarnBox.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick, referenceOptionLabel } from '../../../composables/useSourcePick.js'
 import { ICP_DEFAULTS } from '../../../core/defaults.user.js'
-import { alignIcpEffects } from '../../../core/stepEffects/alignIcp.js'
+import { alignIcpEffects, alignIcpShorts } from '../../../core/stepEffects/alignIcp.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 import { estimateSpacing } from '../../../core/products/cloudEdit.js'
 import { anyCloudBounds, isStreamed } from '../../../core/lod/streamed.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
@@ -58,13 +61,22 @@ const numbers = computed(() =>
 )
 // What each step does (core/stepEffects/alignIcp.js).
 const effects = computed(() =>
-  alignIcpEffects(settings.value, {
-    sourceName: source.value?.name,
-    autoRadius: autoRadius.value,
-    unit: unitLabel.value,
-    planar: reference.value?.kind === 'mesh' || !!reference.value?.nrm,
-    streamedPoints: isStreamed(source.value) ? source.value.count : 0,
-  }),
+  withShorts(
+    alignIcpEffects(settings.value, {
+      sourceName: source.value?.name,
+      autoRadius: autoRadius.value,
+      unit: unitLabel.value,
+      planar: reference.value?.kind === 'mesh' || !!reference.value?.nrm,
+      streamedPoints: isStreamed(source.value) ? source.value.count : 0,
+    }),
+    alignIcpShorts(settings.value, {
+      sourceName: source.value?.name,
+      autoRadius: autoRadius.value,
+      unit: unitLabel.value,
+      planar: reference.value?.kind === 'mesh' || !!reference.value?.nrm,
+      streamedPoints: isStreamed(source.value) ? source.value.count : 0,
+    }),
+  ),
 )
 
 function run() {
@@ -83,6 +95,10 @@ function run() {
     name: `${source.value?.name ?? 'Cloud'} (aligned)`,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -112,7 +128,9 @@ function run() {
           hint="The reference stays where it is."
         />
       </SettingsGroup>
-      <SettingsStep step="1" title="Pair up points" :effect="effects.pair">
+      <StepChain />
+
+      <SettingsStep step="1" title="Pair up points" :effect="effects.pair" :more="1">
         <SettingsField
           label-for="icp-radius"
           :unit="unitLabel"
@@ -137,25 +155,8 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="2" title="Solve the motion" :effect="effects.solve">
-        <SettingsField
-          hint="For clouds from different sensors or reconstructions with a scale mismatch. Point-to-point constrains scale better on flat scenes."
-        >
-          <label class="checkbox-row"
-            ><input v-model="settings.estimateScale" type="checkbox" class="checkbox" />
-            <FieldHelp
-              op="align-icp"
-              param="estimateScale"
-              :value="settings.estimateScale"
-              :default-value="ICP_DEFAULTS.estimateScale"
-              >Also fit scale</FieldHelp
-            ></label
-          >
-        </SettingsField>
-      </SettingsStep>
-      <AdvancedDisclosure label="Advanced settings">
-        <SettingsStep step="1" title="Pair up points — advanced">
+
+        <template #tuning>
           <SettingsField label-for="icp-n" hint="Points of the moving cloud used per iteration.">
             <template #label
               ><FieldHelp
@@ -176,8 +177,25 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </SettingsStep>
-        <SettingsStep step="2" title="Solve the motion — advanced">
+        </template>
+      </SettingsStep>
+      <SettingsStep step="2" title="Solve the motion" :effect="effects.solve" :more="2">
+        <SettingsField
+          hint="For clouds from different sensors or reconstructions with a scale mismatch. Point-to-point constrains scale better on flat scenes."
+        >
+          <label class="checkbox-row"
+            ><input v-model="settings.estimateScale" type="checkbox" class="checkbox" />
+            <FieldHelp
+              op="align-icp"
+              param="estimateScale"
+              :value="settings.estimateScale"
+              :default-value="ICP_DEFAULTS.estimateScale"
+              >Also fit scale</FieldHelp
+            ></label
+          >
+        </SettingsField>
+
+        <template #tuning>
           <SettingsField label-for="icp-it">
             <template #label
               ><FieldHelp
@@ -211,10 +229,12 @@ function run() {
               ></label
             >
           </SettingsField>
-        </SettingsStep>
-      </AdvancedDisclosure>
+        </template>
+      </SettingsStep>
     </template>
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button
         class="btn btn-primary"

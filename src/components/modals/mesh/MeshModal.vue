@@ -5,7 +5,9 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -16,7 +18,8 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../../core/defaults.user.js'
 import { recommendMeshDepth } from '../../../core/products/mesh.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
-import { meshEffects } from '../../../core/stepEffects/mesh.js'
+import { meshEffects, meshShorts } from '../../../core/stepEffects/mesh.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 import OutputStep from '../ui/OutputStep.vue'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 
@@ -56,7 +59,10 @@ const { baseId, activePreset, selectPreset } = usePresetSettings({
 
 // What each step does to this project (core/stepEffects/mesh.js).
 const effects = computed(() =>
-  meshEffects(settings.value, { source: source.value && { name: source.value.name, count: source.value.count } }),
+  withShorts(
+    meshEffects(settings.value, { source: source.value && { name: source.value.name, count: source.value.count } }),
+    meshShorts(settings.value, { source: source.value && { name: source.value.name, count: source.value.count } }),
+  ),
 )
 
 const TILE_OPTIONS = [
@@ -94,6 +100,10 @@ function run() {
   dialog.remember()
   emit('run', { ...settings.value, sourceId: sourceId.value, ramBudgetBytes: memBudgetRamBytes.value })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -124,57 +134,10 @@ function run() {
 
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="MESH_PRESET_META" @select="selectPreset" />
 
-    <SettingsStep step="1" title="Solve the surface" :effect="effects.solve" />
+    <StepChain />
 
-    <SettingsStep step="2" title="Trim" :effect="effects.trim">
-      <SettingsField hint="How much of the closed Poisson surface is cut back to where the points are.">
-        <template #label><FieldHelp op="mesh" param="trim">Surface trimming</FieldHelp></template>
-        <SegmentedControl v-model="settings.trim" :options="TRIM_OPTIONS" />
-      </SettingsField>
-    </SettingsStep>
-
-    <SettingsStep step="3" title="Fill small holes" :effect="effects.holes" :inactive="settings.trim === 'off'">
-      <SettingsField
-        v-if="settings.trim !== 'off'"
-        hint="Close small holes the trimming opened, where the surrounding surface is solid."
-      >
-        <template #label
-          ><FieldHelp op="mesh" param="fillHoles" :value="settings.fillHoles" :default-value="MESH_DEFAULTS.fillHoles"
-            >Fill small holes</FieldHelp
-          ></template
-        >
-        <label class="checkbox-row"
-          ><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label
-        >
-      </SettingsField>
-    </SettingsStep>
-
-    <SettingsStep
-      step="4"
-      title="Remove floating pieces"
-      :effect="effects.floaters"
-      :inactive="!settings.removeFloaters"
-    >
-      <SettingsField
-        hint="Drop disconnected pieces that explain only a few of the cloud's points — stray specks and leftover clutter."
-      >
-        <template #label
-          ><FieldHelp
-            op="mesh"
-            param="removeFloaters"
-            :value="settings.removeFloaters"
-            :default-value="MESH_DEFAULTS.removeFloaters"
-            >Remove floating pieces</FieldHelp
-          ></template
-        >
-        <label class="checkbox-row"
-          ><input v-model="settings.removeFloaters" type="checkbox" class="checkbox" /> Enabled</label
-        >
-      </SettingsField>
-    </SettingsStep>
-
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="1" title="Solve the surface — advanced">
+    <SettingsStep step="1" title="Solve the surface" :effect="effects.solve" :more="3">
+      <template #tuning>
         <SettingsField
           label-for="mesh-depth"
           unit="levels"
@@ -225,9 +188,16 @@ function run() {
           <template #label><FieldHelp op="mesh" param="tiles">Tiles</FieldHelp></template>
           <SegmentedControl v-model="settings.tiles" :options="TILE_OPTIONS" />
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep step="2" title="Trim — advanced">
+    <SettingsStep step="2" title="Trim" :effect="effects.trim" :more="1">
+      <SettingsField hint="How much of the closed Poisson surface is cut back to where the points are.">
+        <template #label><FieldHelp op="mesh" param="trim">Surface trimming</FieldHelp></template>
+        <SegmentedControl v-model="settings.trim" :options="TRIM_OPTIONS" />
+      </SettingsField>
+
+      <template #tuning>
         <SettingsField
           label-for="mesh-dist"
           unit="× spacing"
@@ -253,37 +223,81 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep v-if="settings.removeFloaters" step="4" title="Remove floating pieces — advanced">
-        <SettingsField
-          label-for="mesh-minpiece"
-          unit="%"
-          hint="Pieces supported by less than this share of the main surface's points are removed."
+    <SettingsStep step="3" title="Fill small holes" :effect="effects.holes" :inactive="settings.trim === 'off'">
+      <SettingsField
+        v-if="settings.trim !== 'off'"
+        hint="Close small holes the trimming opened, where the surrounding surface is solid."
+      >
+        <template #label
+          ><FieldHelp op="mesh" param="fillHoles" :value="settings.fillHoles" :default-value="MESH_DEFAULTS.fillHoles"
+            >Fill small holes</FieldHelp
+          ></template
         >
-          <template #label
-            ><FieldHelp
-              op="mesh"
-              param="minPiecePct"
-              :value="settings.minPiecePct"
-              :default-value="MESH_DEFAULTS.minPiecePct"
-              >Floating piece size</FieldHelp
-            ></template
-          >
-          <input
-            id="mesh-minpiece"
-            v-model.number="settings.minPiecePct"
-            :aria-invalid="numbers.bad.minPiecePct"
-            type="number"
-            min="0"
-            max="50"
-            step="0.5"
-            class="field-input"
-          />
-        </SettingsField>
-      </SettingsStep>
+        <label class="checkbox-row"
+          ><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
+    </SettingsStep>
 
-      <SettingsStep step="5" title="Colour" :effect="effects.colour" :inactive="!settings.colorize">
+    <SettingsStep
+      step="4"
+      title="Remove floating pieces"
+      :effect="effects.floaters"
+      :inactive="!settings.removeFloaters"
+      :more="settings.removeFloaters ? 1 : 0"
+    >
+      <SettingsField
+        hint="Drop disconnected pieces that explain only a few of the cloud's points — stray specks and leftover clutter."
+      >
+        <template #label
+          ><FieldHelp
+            op="mesh"
+            param="removeFloaters"
+            :value="settings.removeFloaters"
+            :default-value="MESH_DEFAULTS.removeFloaters"
+            >Remove floating pieces</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="settings.removeFloaters" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
+
+      <template #tuning>
+        <template v-if="settings.removeFloaters">
+          <SettingsField
+            label-for="mesh-minpiece"
+            unit="%"
+            hint="Pieces supported by less than this share of the main surface's points are removed."
+          >
+            <template #label
+              ><FieldHelp
+                op="mesh"
+                param="minPiecePct"
+                :value="settings.minPiecePct"
+                :default-value="MESH_DEFAULTS.minPiecePct"
+                >Floating piece size</FieldHelp
+              ></template
+            >
+            <input
+              id="mesh-minpiece"
+              v-model.number="settings.minPiecePct"
+              :aria-invalid="numbers.bad.minPiecePct"
+              type="number"
+              min="0"
+              max="50"
+              step="0.5"
+              class="field-input"
+            />
+          </SettingsField>
+        </template>
+      </template>
+    </SettingsStep>
+    <SettingsStep step="5" title="Colour" :effect="effects.colour" :inactive="!settings.colorize" :more="1">
+      <template #tuning>
         <SettingsField hint="Colour each mesh vertex from the nearest dense point.">
           <template #label
             ><FieldHelp op="mesh" param="colorize" :value="settings.colorize" :default-value="MESH_DEFAULTS.colorize"
@@ -294,8 +308,8 @@ function run() {
             ><input v-model="settings.colorize" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
 
     <OutputStep
       v-model="settings.replaceMain"
@@ -307,6 +321,8 @@ function run() {
     />
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!source || !numbers.valid" :title="numbers.reason" @click="run">
         Build Mesh

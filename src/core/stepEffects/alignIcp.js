@@ -30,3 +30,12 @@ export function alignIcpEffects(
     `iterations; a converged run stops early.`
   return { pair, solve }
 }
+
+// The steps' short facts for Align to Reference's step chain (≤ SHORT_MAX characters).
+export function alignIcpShorts(s, { autoRadius = 0, unit = 'units' } = {}) {
+  const r = s.maxDistance > 0 ? s.maxDistance : autoRadius
+  return {
+    pair: `${fmtCount(s.sampleCount)} pts${r > 0 ? ` · ≤ ${fmtLength(r, unit)}` : ''}`,
+    solve: `${s.pointToPlane ? 'point-to-plane' : 'point-to-point'}${s.estimateScale ? ' + scale' : ''} · ≤ ${s.maxIterations} it`,
+  }
+}

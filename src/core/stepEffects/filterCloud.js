@@ -40,3 +40,21 @@ export function filterCloudEffects(s, { mergeCell = 0 } = {}) {
       `${s.sorStdRatio} σ above the cloud’s mean.`
   return { range, voxel, isolated, sor }
 }
+
+// The steps' short facts for Filter Cloud's step chain (≤ SHORT_MAX characters).
+export function filterCloudShorts(s, { mergeCell = 0 } = {}) {
+  const on = (id) => s.methods.includes(id)
+  const z = span(s.zMin, s.zMax),
+    luma = span(s.lumaMin, s.lumaMax)
+  const cell = s.voxelCell > 0 ? s.voxelCell : mergeCell
+  return {
+    range: !on('range')
+      ? 'off'
+      : !z && !luma
+        ? 'no limit yet'
+        : [z && `z ${z}`, luma && 'brightness'].filter(Boolean).join(' · '),
+    voxel: !on('voxel') ? 'off' : cell > 0 ? `${fmtLength(cell, 'units')} cells` : 'one point spacing',
+    isolated: !on('isolated') ? 'off' : `≤ ${s.isolatedMaxSupport} pts, < ${s.isolatedMinNeighbors} neighbours`,
+    sor: !on('sor') ? 'off' : `${s.sorK} neighbours · ${s.sorStdRatio} σ`,
+  }
+}

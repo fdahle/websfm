@@ -6,7 +6,9 @@ import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
@@ -15,7 +17,8 @@ import FieldHelp from '../../guide/FieldHelp.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { TEXTURE_DEFAULTS, TEXTURE_PRESETS, TEXTURE_PRESET_META } from '../../../core/defaults.user.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
-import { textureEffects } from '../../../core/stepEffects/texture.js'
+import { textureEffects, textureShorts } from '../../../core/stepEffects/texture.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 
 // Texture Mesh (Tools ▸ Mesh ▾): a photo texture from the registered cameras
 // (core/products/texture/, dev/planning/plan-texture.md). Non-destructive: adds a NEW
@@ -55,7 +58,10 @@ const valid = computed(() => source.value && props.cameraCount > 0 && settings.v
 const textured = computed(() => !!source.value?.texture)
 // What each step does to this project (core/stepEffects/texture.js).
 const effects = computed(() =>
-  textureEffects(settings.value, { triangles: source.value?.count ?? 0, cameras: props.cameraCount }),
+  withShorts(
+    textureEffects(settings.value, { triangles: source.value?.count ?? 0, cameras: props.cameraCount }),
+    textureShorts(settings.value, { triangles: source.value?.count ?? 0, cameras: props.cameraCount }),
+  ),
 )
 
 function run() {
@@ -78,6 +84,10 @@ function run() {
     name: `${source.value?.name ?? 'Mesh'} (textured)`,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -108,27 +118,11 @@ function run() {
         :presets="TEXTURE_PRESET_META"
         @select="selectPreset"
       />
-      <SettingsStep step="1" title="Which photos see each triangle" :effect="effects.visibility" />
-      <SettingsStep step="2" title="Choose one photo per triangle" :effect="effects.selection" />
-      <SettingsStep step="3" title="Pack the atlas" :effect="effects.atlas" />
-      <SettingsStep step="4" title="Level colours" :effect="effects.colour" :inactive="!settings.levelColours">
-        <SettingsField hint="Matches the exposure and white balance of neighbouring photos.">
-          <template #label
-            ><FieldHelp
-              op="texture-mesh"
-              param="levelColours"
-              :value="settings.levelColours"
-              :default-value="TEXTURE_DEFAULTS.levelColours"
-              >Level colours</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.levelColours" type="checkbox" class="checkbox" /> Balance the photos</label
-          >
-        </SettingsField>
-      </SettingsStep>
-      <AdvancedDisclosure label="Advanced settings">
-        <SettingsStep step="1" title="Which photos see each triangle — advanced">
+
+      <StepChain />
+
+      <SettingsStep step="1" title="Which photos see each triangle" :effect="effects.visibility" :more="2">
+        <template #tuning>
           <SettingsField hint="Masked pixels (people, sky, the drone's legs) are never used.">
             <template #label
               ><FieldHelp
@@ -158,8 +152,11 @@ function run() {
               against each other</label
             >
           </SettingsField>
-        </SettingsStep>
-        <SettingsStep step="2" title="Choose one photo per triangle — advanced">
+        </template>
+      </SettingsStep>
+
+      <SettingsStep step="2" title="Choose one photo per triangle" :effect="effects.selection" :more="2">
+        <template #tuning>
           <SettingsField label-for="tex-unseen">
             <template #label><FieldHelp op="texture-mesh" param="unseen">Faces no photo sees</FieldHelp></template>
             <select id="tex-unseen" v-model="settings.unseen" class="field-input field-select">
@@ -186,8 +183,11 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </SettingsStep>
-        <SettingsStep step="3" title="Pack the atlas — advanced">
+        </template>
+      </SettingsStep>
+
+      <SettingsStep step="3" title="Pack the atlas" :effect="effects.atlas" :more="3">
+        <template #tuning>
           <SettingsField label-for="tex-res">
             <template #label><FieldHelp op="texture-mesh" param="maxScale">Texture resolution</FieldHelp></template>
             <select id="tex-res" v-model.number="settings.maxScale" class="field-input field-select">
@@ -220,10 +220,29 @@ function run() {
               class="field-input"
             />
           </SettingsField>
-        </SettingsStep>
-      </AdvancedDisclosure>
+        </template>
+      </SettingsStep>
+
+      <SettingsStep step="4" title="Level colours" :effect="effects.colour" :inactive="!settings.levelColours">
+        <SettingsField hint="Matches the exposure and white balance of neighbouring photos.">
+          <template #label
+            ><FieldHelp
+              op="texture-mesh"
+              param="levelColours"
+              :value="settings.levelColours"
+              :default-value="TEXTURE_DEFAULTS.levelColours"
+              >Level colours</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.levelColours" type="checkbox" class="checkbox" /> Balance the photos</label
+          >
+        </SettingsField>
+      </SettingsStep>
     </template>
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!valid" @click="run">Texture</button>
     </template>

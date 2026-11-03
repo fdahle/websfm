@@ -12,3 +12,8 @@ export function smoothMeshEffects(s, { triangles = 0 } = {}) {
       `${s.fixBoundary ? '; the boundary stays where it is' : ''}.`
   return { smooth }
 }
+
+// The step's short fact (a one-step dialog draws no chain; kept for the layout).
+export function smoothMeshShorts(s) {
+  return { smooth: `${plural(s.iterations, 'pass', 'passes')} · λ ${s.lambda} · μ ${s.mu}` }
+}

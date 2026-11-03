@@ -5,14 +5,17 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { DENSE_FUSE_DEFAULTS, DENSE_FUSE_PRESETS, DENSE_FUSE_PRESET_META } from '../../../core/defaults.user.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
-import { denseEffects } from '../../../core/stepEffects/dense.js'
+import { denseEffects, denseShorts } from '../../../core/stepEffects/dense.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 import OutputStep from '../ui/OutputStep.vue'
 
 // The depth maps fusion reads, for the steps' effect lines; `output` is the store's
@@ -55,7 +58,9 @@ const numbers = computed(() =>
 )
 
 // What each step does to this project (core/stepEffects/dense.js).
-const effects = computed(() => denseEffects(settings.value, { maps: props.maps }))
+const effects = computed(() =>
+  withShorts(denseEffects(settings.value, { maps: props.maps }), denseShorts(settings.value, { maps: props.maps })),
+)
 
 function run() {
   dialog.remember()
@@ -74,6 +79,10 @@ function run() {
     ramBudgetBytes: memBudgetRamBytes.value,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -89,36 +98,10 @@ function run() {
       @select="selectPreset"
     />
 
-    <SettingsStep step="1" title="Sample the depth maps" :effect="effects.sample" />
+    <StepChain />
 
-    <SettingsStep step="2" title="Agree across depth maps" :effect="effects.agree" />
-
-    <SettingsStep step="3" title="Geometric gates" :effect="effects.gates" />
-
-    <SettingsStep
-      step="4"
-      title="Remove isolated points"
-      :effect="effects.isolated"
-      :inactive="!settings.removeIsolated"
-    >
-      <SettingsField hint="Drop lone low-support cells with too few neighbours (fusion flyers).">
-        <template #label
-          ><FieldHelp
-            op="dense-cloud"
-            param="removeIsolated"
-            :value="settings.removeIsolated"
-            :default-value="DENSE_FUSE_DEFAULTS.removeIsolated"
-            >Remove isolated points</FieldHelp
-          ></template
-        >
-        <label class="checkbox-row"
-          ><input v-model="settings.removeIsolated" type="checkbox" class="checkbox" /> Enabled</label
-        >
-      </SettingsField>
-    </SettingsStep>
-
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="1" title="Sample the depth maps — advanced">
+    <SettingsStep step="1" title="Sample the depth maps" :effect="effects.sample" :more="1">
+      <template #tuning>
         <SettingsField
           label-for="step"
           unit="px"
@@ -140,8 +123,11 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="2" title="Agree across depth maps — advanced">
+      </template>
+    </SettingsStep>
+
+    <SettingsStep step="2" title="Agree across depth maps" :effect="effects.agree" :more="4">
+      <template #tuning>
         <SettingsField hint="Min-views from the image count, the default cost gate. Turn off to set them by hand.">
           <template #label
             ><FieldHelp op="dense-cloud" param="auto" :value="settings.auto" :default-value="DENSE_FUSE_DEFAULTS.auto"
@@ -229,8 +215,11 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="3" title="Geometric gates — advanced">
+      </template>
+    </SettingsStep>
+
+    <SettingsStep step="3" title="Geometric gates" :effect="effects.gates" :more="2">
+      <template #tuning>
         <SettingsField
           label-for="minTriAngle"
           unit="°"
@@ -282,8 +271,30 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
+
+    <SettingsStep
+      step="4"
+      title="Remove isolated points"
+      :effect="effects.isolated"
+      :inactive="!settings.removeIsolated"
+    >
+      <SettingsField hint="Drop lone low-support cells with too few neighbours (fusion flyers).">
+        <template #label
+          ><FieldHelp
+            op="dense-cloud"
+            param="removeIsolated"
+            :value="settings.removeIsolated"
+            :default-value="DENSE_FUSE_DEFAULTS.removeIsolated"
+            >Remove isolated points</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="settings.removeIsolated" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
+    </SettingsStep>
 
     <OutputStep
       v-model="settings.replaceMain"
@@ -295,6 +306,8 @@ function run() {
     />
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="run">
         Build Dense Cloud

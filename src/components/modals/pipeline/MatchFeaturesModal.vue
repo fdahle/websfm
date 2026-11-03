@@ -6,8 +6,10 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import SettingsGroup from '../ui/SettingsGroup.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import PresetCards from '../ui/PresetCards.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -244,6 +246,49 @@ const acceptEffect = computed(() =>
     : `Without verification a pair is kept with at least ${acceptFloor.value} putative matches.`,
 )
 
+// The steps' short facts for the step chain; the long lines above are what an open step says.
+const pairsStep = computed(() => {
+  const n = props.detectedImageCount
+  const { count, exact } = pairs.value
+  const short =
+    n < 2
+      ? 'need 2 images'
+      : limited.value
+        ? 'selection'
+        : count == null
+          ? 'footprint pairs'
+          : `${exact ? '' : '≤ '}${fmt(count)} pairs`
+  return { short, long: pairsEffect.value }
+})
+const descriptorStep = computed(() => ({
+  short:
+    matcher.value === 'bruteforce'
+      ? `ratio ${settings.value.ratioThreshold}${settings.value.crossCheck ? ' · mutual' : ''}`
+      : density.value === 'full'
+        ? 'LightGlue · tiled'
+        : `LightGlue · ${settings.value.lgMaxKeypoints > 0 ? `≤ ${fmt(settings.value.lgMaxKeypoints)}` : 'all'}`,
+  long: descriptorEffect.value,
+}))
+const verifyStep = computed(() => ({
+  short: settings.value.geometricVerification ? `RANSAC ${settings.value.ransacThreshPx} px` : 'off',
+  long: verifyEffect.value,
+}))
+const repairStep = computed(() => ({
+  short:
+    settings.value.repairSplits === false
+      ? 'off'
+      : settings.value.gapRedetect === false
+        ? 'bridge pairs'
+        : 'bridge · redetect',
+  long: repairLine.value,
+}))
+const acceptStep = computed(() => ({
+  short: settings.value.geometricVerification
+    ? `≥ ${settings.value.minMatches} · ${Math.round(settings.value.minInlierRatio * 100)} %`
+    : `≥ ${acceptFloor.value} putatives`,
+  long: acceptEffect.value,
+}))
+
 // Run stays disabled while a field this run uses is blank or out of range (rules =
 // the inputs' own min/max/step). Only the fields shown for the chosen strategy /
 // matcher / density are checked. lgMaxKeypoints is the Fast budget (0 = no cap)
@@ -312,6 +357,10 @@ function run() {
     memBudgetBytes: memBudgetBytes.value,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -328,7 +377,9 @@ function run() {
     </SettingsGroup>
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="MATCH_PRESET_META" @select="selectPreset" />
 
-    <SettingsStep step="1" title="Choose image pairs" :effect="pairsEffect">
+    <StepChain />
+
+    <SettingsStep step="1" title="Choose image pairs" :effect="pairsStep">
       <SettingsField
         hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect prunes pairs by camera position or footprint overlap (EXIF GPS, imported poses, or footprints)."
       >
@@ -458,7 +509,7 @@ function run() {
       </SettingsField>
     </SettingsStep>
 
-    <SettingsStep step="2" title="Match descriptors" :effect="descriptorEffect">
+    <SettingsStep step="2" title="Match descriptors" :effect="descriptorStep" :more="6">
       <SettingsField
         :hint="
           matcher === 'lightglue'
@@ -563,10 +614,8 @@ function run() {
           {{ fmt(settings.lgMaxKeypoints) }} will be matched. Switch to <b>Full</b> density to use all of them.
         </WarnBox>
       </template>
-    </SettingsStep>
 
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="2" title="Match descriptors — advanced">
+      <template #tuning>
         <SettingsField
           v-if="matcher === 'bruteforce'"
           hint="Keeps only mutual nearest neighbours. Slower but more precise."
@@ -694,9 +743,16 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-
-      <SettingsStep step="3" title="Verify geometry" :effect="verifyEffect" :inactive="!settings.geometricVerification">
+      </template>
+    </SettingsStep>
+    <SettingsStep
+      step="3"
+      title="Verify geometry"
+      :effect="verifyStep"
+      :inactive="!settings.geometricVerification"
+      :more="4"
+    >
+      <template #tuning>
         <SettingsField hint="Filter outliers using the fundamental matrix. Strongly recommended.">
           <template #label
             ><FieldHelp
@@ -777,9 +833,10 @@ function run() {
             />
           </SettingsField>
         </template>
-      </SettingsStep>
-
-      <SettingsStep step="4" title="Accept the pair" :effect="acceptEffect">
+      </template>
+    </SettingsStep>
+    <SettingsStep step="4" title="Accept the pair" :effect="acceptStep" :more="2">
+      <template #tuning>
         <SettingsField
           label-for="minMatches"
           :hint="
@@ -841,9 +898,16 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-
-      <SettingsStep step="5" title="Repair a split graph" :effect="repairLine" :inactive="!settings.repairSplits">
+      </template>
+    </SettingsStep>
+    <SettingsStep
+      step="5"
+      title="Repair a split graph"
+      :effect="repairStep"
+      :inactive="!settings.repairSplits"
+      :more="2"
+    >
+      <template #tuning>
         <SettingsField hint="Match the most promising pairs between the pieces again, with looser gates.">
           <template #label
             ><FieldHelp
@@ -875,10 +939,12 @@ function run() {
             ><input v-model="settings.gapRedetect" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="run">
         Run Matching

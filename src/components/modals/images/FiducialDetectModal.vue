@@ -4,7 +4,9 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import ChoiceCards from '../ui/ChoiceCards.vue'
 import DataTable from '../ui/DataTable.vue'
@@ -13,7 +15,8 @@ import WarnBox from '../ui/WarnBox.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import FiducialFamilyGlyph from './FiducialFamilyGlyph.vue'
 import { FIDUCIAL_SPOT_DEFAULTS } from '../../../core/defaults.user.js'
-import { fiducialDetectEffects } from '../../../core/stepEffects/fiducialDetect.js'
+import { fiducialDetectEffects, fiducialDetectShorts } from '../../../core/stepEffects/fiducialDetect.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 
 const props = defineProps({
@@ -62,7 +65,12 @@ const POLARITY_OPTIONS = [
 ]
 
 // What each step does to this sensor's images (core/stepEffects/fiducialDetect.js).
-const effects = computed(() => fiducialDetectEffects(settings.value, { images: props.images.length }))
+const effects = computed(() =>
+  withShorts(
+    fiducialDetectEffects(settings.value, { images: props.images.length }),
+    fiducialDetectShorts(settings.value, { images: props.images.length }),
+  ),
+)
 
 const existingCount = computed(() => props.images.reduce((n, i) => n + (i.fiducialDetections?.length ?? 0), 0))
 
@@ -211,6 +219,10 @@ function acceptDraft(draft) {
 function rejectDraft(draft) {
   drafts.value = drafts.value.filter((d) => d !== draft)
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -225,6 +237,8 @@ function rejectDraft(draft) {
         <template #visual="{ option }"><FiducialFamilyGlyph :family="option.id" /></template>
       </ChoiceCards>
     </SettingsField>
+
+    <StepChain />
 
     <SettingsStep step="1" title="Search the film frame" :effect="effects.search">
       <SettingsField hint="Where marks are expected relative to the detected film frame.">
@@ -244,18 +258,24 @@ function rejectDraft(draft) {
         />
       </SettingsField>
     </SettingsStep>
-
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="2" title="Match the template" :effect="effects.match" :inactive="settings.family === 'frame'">
+    <SettingsStep
+      step="2"
+      title="Match the template"
+      :effect="effects.match"
+      :inactive="settings.family === 'frame'"
+      :more="1"
+    >
+      <template #tuning>
         <SettingsField
           label="Polarity"
           hint="Whether marks are darker or lighter than the surrounding film. Auto tries both."
         >
           <SegmentedControl v-model="settings.polarity" :options="POLARITY_OPTIONS" />
         </SettingsField>
-      </SettingsStep>
-
-      <SettingsStep step="3" title="Store the marks" :effect="effects.store">
+      </template>
+    </SettingsStep>
+    <SettingsStep step="3" title="Store the marks" :effect="effects.store" :more="2">
+      <template #tuning>
         <SettingsField>
           <template #label>Overwrite existing detections</template>
           <label class="checkbox-row">
@@ -270,8 +290,8 @@ function rejectDraft(draft) {
             <input v-model="settings.generateMasks" type="checkbox" class="checkbox" :disabled="running" /> Enabled
           </label>
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
 
     <div v-if="running" class="fid-progress">
       <div class="progress-track">
@@ -325,6 +345,8 @@ function rejectDraft(draft) {
     </template>
 
     <template #footer>
+      <ShowAllSettings />
+
       <button
         class="btn"
         :title="running ? 'Stop detecting and close — nothing from this run is stored' : ''"

@@ -37,8 +37,8 @@ async function openDem(page) {
   await page.locator('.ribbon').getByRole('button', { name: 'DEM', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Build DEM' })
   await expect(dialog).toBeVisible()
-  // Surface aggregation is tuning: under Advanced settings.
-  await dialog.getByRole('button', { name: /Advanced settings/ }).click()
+  // Surface aggregation is tuning: folded in its step; Show all settings draws it.
+  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
   return dialog
 }
 
@@ -101,7 +101,7 @@ test('Detect Features saves a preset with its detector and resolution', async ({
   const dialog = page.getByRole('dialog', { name: 'Detect Features' })
   await expect(dialog).toBeVisible()
   await expect(dialog.locator('#detector-sel')).toHaveValue('sift')
-  await dialog.getByRole('button', { name: /Advanced settings/ }).click()
+  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
   await dialog.locator('#maxDim').fill('3200')
 
   await dialog.getByRole('button', { name: /Presets/ }).click()

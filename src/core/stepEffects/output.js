@@ -9,19 +9,25 @@
  *   a build may replace it (an imported or derived cloud is never replaced), and the
  *   name a new one gets
  * @param {string} noun the product, lower case ("DEM", "dense cloud")
- * @returns {{ effect: string, inactive: boolean }}
+ * @returns {{ effect: string, short: string, inactive: boolean }} — `short` for the step chain
  */
 export function outputEffect(replace, plan, noun) {
-  if (!plan?.main) return { effect: `The first ${noun}: "${plan?.newName ?? noun}"`, inactive: true }
+  if (!plan?.main) return { effect: `The first ${noun}: "${plan?.newName ?? noun}"`, short: 'first', inactive: true }
   if (replace && plan.replaceable)
     return {
       effect: `Replaces "${plan.main}"; products built on it are kept, marked outdated`,
+      short: `replaces "${plan.main}"`,
       inactive: false,
     }
   if (replace)
     return {
       effect: `"${plan.main}" is not one the pipeline built, so it stays: adds "${plan.newName}" as the main ${noun}`,
+      short: `adds "${plan.newName}"`,
       inactive: false,
     }
-  return { effect: `Adds "${plan.newName}" as the main ${noun}; "${plan.main}" stays`, inactive: false }
+  return {
+    effect: `Adds "${plan.newName}" as the main ${noun}; "${plan.main}" stays`,
+    short: `adds "${plan.newName}"`,
+    inactive: false,
+  }
 }

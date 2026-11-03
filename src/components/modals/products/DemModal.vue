@@ -9,13 +9,16 @@ import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import OutputStep from '../ui/OutputStep.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { DEM_DEFAULTS } from '../../../core/defaults.user.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
-import { demEffects, frameText } from '../../../core/stepEffects/raster.js'
+import { demEffects, demShorts, frameText } from '../../../core/stepEffects/raster.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 import { lasClassName } from '../../../core/products/cloudStyle.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 
@@ -151,20 +154,39 @@ const cellUnit = computed(() =>
 )
 const effects = computed(() => {
   const s = activeSource.value
-  return demEffects(settings.value, {
-    // A streamed cloud is read from its octree, as finely as the cell size needs.
-    source: s && {
-      kind: s.kind,
-      name: s.name,
-      count: s.count,
-      streamed: !!(s.cloud && !s.cloud.pos && s.cloud.lod),
-      outdated: !!s.cloud && recon.productStatus(s.cloud).outdated,
-    },
-    estimate: estimate.value,
-    unit: cellUnit.value,
-    frame: frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale }),
-  })
+  return withShorts(
+    demEffects(settings.value, {
+      // A streamed cloud is read from its octree, as finely as the cell size needs.
+      source: s && {
+        kind: s.kind,
+        name: s.name,
+        count: s.count,
+        streamed: !!(s.cloud && !s.cloud.pos && s.cloud.lod),
+        outdated: !!s.cloud && recon.productStatus(s.cloud).outdated,
+      },
+      estimate: estimate.value,
+      unit: cellUnit.value,
+      frame: frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale }),
+    }),
+    demShorts(settings.value, {
+      // A streamed cloud is read from its octree, as finely as the cell size needs.
+      source: s && {
+        kind: s.kind,
+        name: s.name,
+        count: s.count,
+        streamed: !!(s.cloud && !s.cloud.pos && s.cloud.lod),
+        outdated: !!s.cloud && recon.productStatus(s.cloud).outdated,
+      },
+      estimate: estimate.value,
+      unit: cellUnit.value,
+      frame: frameText(settings.value.crs, { projectCrs: props.projectCrs, hasScale: props.hasScale }),
+    }),
+  )
 })
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -173,6 +195,8 @@ const effects = computed(() => {
       <span class="modal-title">Build DEM</span>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
+    <StepChain />
+
     <SettingsStep step="1" title="Points" :effect="effects.points">
       <SettingsField
         label-for="dem-points"
@@ -210,7 +234,7 @@ const effects = computed(() => {
       </WarnBox>
     </SettingsStep>
 
-    <SettingsStep step="2" title="Grid" :effect="effects.grid">
+    <SettingsStep step="2" title="Grid" :effect="effects.grid" :more="1">
       <FrameCrsField
         id="dem-crs"
         v-model="settings.crs"
@@ -237,27 +261,8 @@ const effects = computed(() => {
         :estimate="estimate"
         auto-capped="Auto keeps a DEM to 4,096 px a side, so this one is coarser than one point per cell. Set a cell size or a long side for a finer DEM."
       />
-    </SettingsStep>
 
-    <SettingsStep step="3" title="Height per cell" :effect="effects.cell" />
-
-    <SettingsStep step="4" title="Fill gaps" :effect="effects.fill">
-      <SettingsField
-        hint="Interpolate every gap the survey surrounds, such as the ground under a removed building. Gaps at the edge stay empty."
-      >
-        <template #label>
-          <FieldHelp op="dem" param="fillHoles" :value="settings.fillHoles" :default-value="DEM_DEFAULTS.fillHoles"
-            >Fill enclosed gaps</FieldHelp
-          >
-        </template>
-        <label class="checkbox-row"
-          ><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label
-        >
-      </SettingsField>
-    </SettingsStep>
-
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="2" title="Grid — advanced">
+      <template #tuning>
         <!-- The raw min/max lets far background (an oblique capture sees almost to the
              horizon) set the raster size; the dense core keeps the site. The run logs
              how many points the core leaves out. -->
@@ -271,8 +276,11 @@ const effects = computed(() => {
             <option value="all">All points</option>
           </select>
         </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="3" title="Height per cell — advanced">
+      </template>
+    </SettingsStep>
+
+    <SettingsStep step="3" title="Height per cell" :effect="effects.cell" :more="1">
+      <template #tuning>
         <SettingsField label-for="dem-agg" hint="How multiple points in one cell collapse to a single height.">
           <template #label><FieldHelp op="dem" param="aggregate">Surface aggregation</FieldHelp></template>
           <select id="dem-agg" v-model="settings.aggregate" class="field-input field-select">
@@ -282,8 +290,24 @@ const effects = computed(() => {
             <option value="min">Min (ground-ish)</option>
           </select>
         </SettingsField>
-      </SettingsStep>
-      <SettingsStep step="4" title="Fill gaps — advanced">
+      </template>
+    </SettingsStep>
+
+    <SettingsStep step="4" title="Fill gaps" :effect="effects.fill" :more="2">
+      <SettingsField
+        hint="Interpolate every gap the survey surrounds, such as the ground under a removed building. Gaps at the edge stay empty."
+      >
+        <template #label>
+          <FieldHelp op="dem" param="fillHoles" :value="settings.fillHoles" :default-value="DEM_DEFAULTS.fillHoles"
+            >Fill enclosed gaps</FieldHelp
+          >
+        </template>
+        <label class="checkbox-row"
+          ><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
+
+      <template #tuning>
         <SettingsField
           label-for="dem-fill-method"
           hint="IDW blends nearby heights smoothly; nearest neighbour preserves steps. Disable to keep nodata gaps."
@@ -328,8 +352,8 @@ const effects = computed(() => {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
 
     <OutputStep
       v-model="settings.replaceMain"
@@ -341,6 +365,8 @@ const effects = computed(() => {
     />
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button
         class="btn btn-primary"

@@ -5,12 +5,15 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { useSourcePick, meshOptionLabel } from '../../../composables/useSourcePick.js'
 import { CLEAN_MESH_DEFAULTS } from '../../../core/defaults.user.js'
-import { cleanMeshEffects } from '../../../core/stepEffects/cleanMesh.js'
+import { cleanMeshEffects, cleanMeshShorts } from '../../../core/stepEffects/cleanMesh.js'
+import { withShorts } from '../../../core/stepEffects/format.js'
 
 // Clean Mesh (Tools ▸ Mesh ▾) — the post-Poisson cleanup chain from
 // core/products/meshEdit.js `cleanMesh`. Non-destructive: adds a NEW mesh.
@@ -32,7 +35,12 @@ function toggle(id) {
   settings.value.methods = ORDER.filter((m) => (m === id ? !on : has(m)))
 }
 // What each step does to this mesh (core/stepEffects/cleanMesh.js).
-const effects = computed(() => cleanMeshEffects(settings.value, { textured: !!source.value?.texture }))
+const effects = computed(() =>
+  withShorts(
+    cleanMeshEffects(settings.value, { textured: !!source.value?.texture }),
+    cleanMeshShorts(settings.value, { textured: !!source.value?.texture }),
+  ),
+)
 // 0 = every loop, which closes an open surface's outer rim too.
 const fillAll = computed({
   get: () => !(settings.value.maxHoleEdges > 0),
@@ -55,6 +63,10 @@ function run() {
     name: `${source.value?.name ?? 'Mesh'} (cleaned)`,
   })
 }
+
+// One list of steps (useStepLayout.js): each registers for the step chain, its tuning
+// folded in place.
+provideStepLayout()
 </script>
 
 <template>
@@ -72,27 +84,121 @@ function run() {
         />
       </SettingsGroup>
 
+      <StepChain />
+
       <SettingsStep step="1" title="Weld duplicate vertices" :effect="effects.weld" :inactive="!has('weld')">
         <label class="checkbox-row"
           ><input type="checkbox" class="checkbox" :checked="has('weld')" @change="toggle('weld')" /> Enabled</label
         >
       </SettingsStep>
 
-      <SettingsStep step="2" title="Remove small pieces" :effect="effects.pieces" :inactive="!has('components')">
+      <SettingsStep
+        step="2"
+        title="Remove small pieces"
+        :effect="effects.pieces"
+        :inactive="!has('components')"
+        :more="(has('components') || has('longEdges') || (has('holes') && !fillAll)) && has('components') ? 2 : 0"
+      >
         <label class="checkbox-row"
           ><input type="checkbox" class="checkbox" :checked="has('components')" @change="toggle('components')" />
           Enabled</label
         >
+
+        <template #tuning>
+          <template v-if="(has('components') || has('longEdges') || (has('holes') && !fillAll)) && has('components')">
+            <SettingsField label-for="clean-frac" unit="× largest piece">
+              <template #label
+                ><FieldHelp
+                  op="clean-mesh"
+                  param="minFraction"
+                  :value="settings.minFraction"
+                  :default-value="CLEAN_MESH_DEFAULTS.minFraction"
+                  >Smaller than</FieldHelp
+                ></template
+              >
+              <input
+                id="clean-frac"
+                v-model.number="settings.minFraction"
+                type="number"
+                min="0"
+                max="1"
+                step="0.005"
+                class="field-input"
+              />
+            </SettingsField>
+            <SettingsField label-for="clean-min" unit="triangles">
+              <template #label
+                ><FieldHelp
+                  op="clean-mesh"
+                  param="minTriangles"
+                  :value="settings.minTriangles"
+                  :default-value="CLEAN_MESH_DEFAULTS.minTriangles"
+                  >Or fewer than</FieldHelp
+                ></template
+              >
+              <input
+                id="clean-min"
+                v-model.number="settings.minTriangles"
+                type="number"
+                min="0"
+                step="1"
+                class="field-input"
+              />
+            </SettingsField>
+          </template>
+        </template>
       </SettingsStep>
 
-      <SettingsStep step="3" title="Remove long-edge bridges" :effect="effects.bridges" :inactive="!has('longEdges')">
+      <SettingsStep
+        step="3"
+        title="Remove long-edge bridges"
+        :effect="effects.bridges"
+        :inactive="!has('longEdges')"
+        :more="(has('components') || has('longEdges') || (has('holes') && !fillAll)) && has('longEdges') ? 1 : 0"
+      >
         <label class="checkbox-row"
           ><input type="checkbox" class="checkbox" :checked="has('longEdges')" @change="toggle('longEdges')" />
           Enabled</label
         >
+
+        <template #tuning>
+          <template v-if="(has('components') || has('longEdges') || (has('holes') && !fillAll)) && has('longEdges')">
+            <SettingsField
+              label-for="clean-edge"
+              unit="× median edge"
+              hint="Poisson stretches long thin triangles across gaps in the data. Lower removes more."
+            >
+              <template #label
+                ><FieldHelp
+                  op="clean-mesh"
+                  param="maxEdgeFactor"
+                  :value="settings.maxEdgeFactor"
+                  :default-value="CLEAN_MESH_DEFAULTS.maxEdgeFactor"
+                  >Longer than</FieldHelp
+                ></template
+              >
+              <input
+                id="clean-edge"
+                v-model.number="settings.maxEdgeFactor"
+                type="number"
+                min="1.5"
+                step="0.5"
+                class="field-input"
+              />
+            </SettingsField>
+          </template>
+        </template>
       </SettingsStep>
 
-      <SettingsStep step="4" title="Fill holes" :effect="effects.holes" :inactive="!has('holes')">
+      <SettingsStep
+        step="4"
+        title="Fill holes"
+        :effect="effects.holes"
+        :inactive="!has('holes')"
+        :more="
+          (has('components') || has('longEdges') || (has('holes') && !fillAll)) && has('holes') && !fillAll ? 1 : 0
+        "
+      >
         <label class="checkbox-row"
           ><input type="checkbox" class="checkbox" :checked="has('holes')" @change="toggle('holes')" /> Enabled</label
         >
@@ -105,6 +211,32 @@ function run() {
               <FieldHelp op="clean-mesh" param="fillAll">Close all holes (watertight)</FieldHelp></label
             >
           </SettingsField>
+        </template>
+
+        <template #tuning>
+          <template
+            v-if="(has('components') || has('longEdges') || (has('holes') && !fillAll)) && has('holes') && !fillAll"
+          >
+            <SettingsField label-for="clean-hole" unit="edges around the hole">
+              <template #label
+                ><FieldHelp
+                  op="clean-mesh"
+                  param="maxHoleEdges"
+                  :value="settings.maxHoleEdges"
+                  :default-value="CLEAN_MESH_DEFAULTS.maxHoleEdges"
+                  >Up to</FieldHelp
+                ></template
+              >
+              <input
+                id="clean-hole"
+                v-model.number="settings.maxHoleEdges"
+                type="number"
+                min="3"
+                step="1"
+                class="field-input"
+              />
+            </SettingsField>
+          </template>
         </template>
       </SettingsStep>
 
@@ -119,102 +251,11 @@ function run() {
           Enabled</label
         >
       </SettingsStep>
-
-      <AdvancedDisclosure
-        v-if="has('components') || has('longEdges') || (has('holes') && !fillAll)"
-        label="Advanced settings"
-      >
-        <SettingsStep v-if="has('components')" step="2" title="Remove small pieces — advanced">
-          <SettingsField label-for="clean-frac" unit="× largest piece">
-            <template #label
-              ><FieldHelp
-                op="clean-mesh"
-                param="minFraction"
-                :value="settings.minFraction"
-                :default-value="CLEAN_MESH_DEFAULTS.minFraction"
-                >Smaller than</FieldHelp
-              ></template
-            >
-            <input
-              id="clean-frac"
-              v-model.number="settings.minFraction"
-              type="number"
-              min="0"
-              max="1"
-              step="0.005"
-              class="field-input"
-            />
-          </SettingsField>
-          <SettingsField label-for="clean-min" unit="triangles">
-            <template #label
-              ><FieldHelp
-                op="clean-mesh"
-                param="minTriangles"
-                :value="settings.minTriangles"
-                :default-value="CLEAN_MESH_DEFAULTS.minTriangles"
-                >Or fewer than</FieldHelp
-              ></template
-            >
-            <input
-              id="clean-min"
-              v-model.number="settings.minTriangles"
-              type="number"
-              min="0"
-              step="1"
-              class="field-input"
-            />
-          </SettingsField>
-        </SettingsStep>
-        <SettingsStep v-if="has('longEdges')" step="3" title="Remove long-edge bridges — advanced">
-          <SettingsField
-            label-for="clean-edge"
-            unit="× median edge"
-            hint="Poisson stretches long thin triangles across gaps in the data. Lower removes more."
-          >
-            <template #label
-              ><FieldHelp
-                op="clean-mesh"
-                param="maxEdgeFactor"
-                :value="settings.maxEdgeFactor"
-                :default-value="CLEAN_MESH_DEFAULTS.maxEdgeFactor"
-                >Longer than</FieldHelp
-              ></template
-            >
-            <input
-              id="clean-edge"
-              v-model.number="settings.maxEdgeFactor"
-              type="number"
-              min="1.5"
-              step="0.5"
-              class="field-input"
-            />
-          </SettingsField>
-        </SettingsStep>
-        <SettingsStep v-if="has('holes') && !fillAll" step="4" title="Fill holes — advanced">
-          <SettingsField label-for="clean-hole" unit="edges around the hole">
-            <template #label
-              ><FieldHelp
-                op="clean-mesh"
-                param="maxHoleEdges"
-                :value="settings.maxHoleEdges"
-                :default-value="CLEAN_MESH_DEFAULTS.maxHoleEdges"
-                >Up to</FieldHelp
-              ></template
-            >
-            <input
-              id="clean-hole"
-              v-model.number="settings.maxHoleEdges"
-              type="number"
-              min="3"
-              step="1"
-              class="field-input"
-            />
-          </SettingsField>
-        </SettingsStep>
-      </AdvancedDisclosure>
     </template>
 
     <template #footer>
+      <ShowAllSettings />
+
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!source || !settings.methods.length" @click="run">Clean</button>
     </template>

@@ -1,15 +1,17 @@
 <script setup>
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useStepLayout } from '../../../composables/useStepLayout.js'
 
 // The run at a glance (dev/planning/plan-dialog-layout.md): one chip per step, in run
 // order, with the step's short fact ("1,500 px · 8 views"); an inactive step dims. A
 // chip opens its step in place (useStepLayout) and scrolls to it; its tooltip is the
 // step's long effect.
-//   steps: [{ step, title, short, long, inactive }]
-defineProps({ steps: { type: Array, required: true } })
+// The steps register themselves (SettingsStep → useStepLayout); `steps` may override
+// them: [{ step, title, short, long, inactive }]. Fewer than two steps: no chain.
+const props = defineProps({ steps: { type: Array, default: null } })
 const root = ref(null)
 const layout = useStepLayout()
+const list = computed(() => props.steps ?? layout?.steps.value ?? [])
 
 async function show(step) {
   layout?.open(step)
@@ -22,8 +24,8 @@ async function show(step) {
 </script>
 
 <template>
-  <div ref="root" class="step-chain" role="group" aria-label="What the run does">
-    <template v-for="(s, i) in steps" :key="s.step">
+  <div v-if="list.length > 1" ref="root" class="step-chain" role="group" aria-label="What the run does">
+    <template v-for="(s, i) in list" :key="s.step">
       <span v-if="i" class="chain-arrow" aria-hidden="true">→</span>
       <button
         type="button"

@@ -39,3 +39,22 @@ export function denseEffects(s, { maps = 0 } = {}) {
     : 'Off: lone points stay in the cloud.'
   return { sample, agree, gates, isolated }
 }
+
+// The steps' short facts, for the dialog's step chain (≤ SHORT_MAX characters).
+export function denseShorts(s, { maps = 0 } = {}) {
+  const minViews = s.auto ? Math.max(1, Math.min(2, maps - 1)) : s.minViews
+  return {
+    sample: !maps ? 'no depth maps' : s.step > 1 ? `every ${s.step}th pixel` : 'every pixel',
+    agree: `≥ ${plural(minViews, 'view')} · ${s.depthTolPct} %`,
+    gates:
+      s.minTriAngleDeg > 0 || (s.maxIncidenceDeg > 0 && s.maxIncidenceDeg < 90)
+        ? [
+            s.minTriAngleDeg > 0 ? `≥ ${s.minTriAngleDeg}° apart` : '',
+            s.maxIncidenceDeg > 0 && s.maxIncidenceDeg < 90 ? `≤ ${s.maxIncidenceDeg}° incidence` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        : 'off',
+    isolated: s.removeIsolated ? 'lone points out' : 'off',
+  }
+}
