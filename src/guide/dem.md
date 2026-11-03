@@ -121,9 +121,11 @@ range. Export a GeoTIFF when the DEM has a CRS.
 ## Measure a raster
 With a DEM or orthophoto open, **Tools ▸ Measure ▾** offers **Ruler**, **Area**,
 **Profile** and **Volume** (the last two need heights, so a DEM). Click vertices;
-**Enter** finishes, **Backspace** removes the last point, **Esc** clears. On the 2D
-map, **Map layer to measure** picks the raster, so you can draw over the orthophoto and
-read heights from the DEM.
+**Enter** finishes, **Backspace** removes the last point, **Esc** clears. One window
+holds the tool and its result: the value appears under the buttons as soon as there are
+two points. On the 2D map its **Layer** field picks the raster to measure, so you can
+draw over the orthophoto and read heights from the DEM; Profile and Volume start on the
+map's DEM.
 
 Name a result and **Save measurement** to keep it; **Saved measurements** lists them.
 Rebuilding the raster marks older measurements stale. In a projected CRS, lengths,

@@ -383,7 +383,7 @@ test('a profile across a block-built DEM sees a ridge the overview averages away
   await closeBrowserNote(page)
   await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.5)
   await page.mouse.click(box.x + box.width * 0.8, box.y + box.height * 0.5)
-  const panel = page.locator('.result-panel')
+  const panel = page.getByRole('region', { name: 'Measurement result' })
   await expect(panel).toContainText('Elevation')
   // The overview's ridge is 125 m; the COG's, once its window is read, 150 m.
   await expect(panel).toContainText(/100\.00 – 150\.00 m/)

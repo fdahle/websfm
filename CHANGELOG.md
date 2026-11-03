@@ -145,6 +145,12 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **Measuring in one window.** Ruler, Area, Profile and Volume show their result in the
+  measuring window itself, under the point buttons, instead of in a second panel; on the
+  2D map the window's **Layer** field picks the raster to measure, and Profile and Volume
+  start on the map's DEM. Tools ▸ Measure no longer lists the map's layers: the ribbon
+  stays the same whatever is loaded. The window opens at the top left, out of the way of
+  the drawing.
 - **Every project on the start screen gets the same line.** Under each project's name
   come, in fixed columns, an icon for where it is stored (a folder on disk or this
   browser, the folder's name on hover), its CRS (**Local** without one), its size and

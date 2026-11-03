@@ -55,9 +55,14 @@ const props = defineProps({
   view: Object,
   // How this host pans while a tool is active (the hint line names it).
   panHint: { type: String, default: 'Shift-drag pans' },
+  // The rasters a host stacks (the map), [{ id, name, kind }], and the one measured:
+  // the window's Layer field picks another. Empty on a raster tab.
+  targets: { type: Array, default: () => [] },
+  targetId: { type: String, default: null },
 })
 // 'command' (id, value): the saved list's Export… opens Export ▸ Measurements for it.
-const emit = defineEmits(['command'])
+// 'target' (id, tool): measure another of `targets` with the same tool.
+const emit = defineEmits(['command', 'target'])
 
 const TOOLS = {
   length: { label: 'Ruler', icon: 'ruler', min: 2 },
@@ -65,6 +70,11 @@ const TOOLS = {
   profile: { label: 'Profile', icon: 'profile', min: 2 },
   volume: { label: 'Volume', icon: 'volume', min: 3 },
 }
+
+// The Layer field: profile and volume read heights, so they list the DEMs only.
+const layerOptions = computed(() =>
+  props.targets.filter((t) => t.kind === 'dem' || !['profile', 'volume'].includes(tool.value)),
+)
 
 const root = ref(null)
 const saved = useMeasurementsStore(),
@@ -603,17 +613,34 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
       <circle v-for="(p, i) in screenVertices" :key="i" :cx="p.x" :cy="p.y" r="4" class="vertex" />
     </svg>
 
-    <!-- The measuring tool's toolbox: the ribbon (raster ▸ Measure) picks the tool. -->
+    <!-- The measuring window: the ribbon (Tools ▸ Measure) picks the tool; the points,
+         the raster to measure (on the map) and the result are all here. Top left, out of
+         the way of the drawing, since it grows with the result. -->
     <FloatingToolbox
       v-if="tool !== 'pan'"
       id="measure"
       :title="TOOLS[tool].label"
       :aria-label="`${TOOLS[tool].label} measurement`"
-      anchor="top-center"
       close-title="Stop measuring"
       close-key="measure2d.clear"
+      :width="vertices.length > 1 ? 320 : null"
       @close="choose('pan')"
     >
+      <div v-if="layerOptions.length > 1" class="mb-row mb-layer">
+        <label class="mb-field"
+          >Layer
+          <select
+            class="mb-input"
+            aria-label="Raster to measure"
+            :value="targetId"
+            @change="emit('target', $event.target.value, tool)"
+          >
+            <option v-for="t in layerOptions" :key="t.id" :value="t.id">
+              {{ t.name }} ({{ t.kind === 'dem' ? 'DEM' : 'orthophoto' }})
+            </option>
+          </select>
+        </label>
+      </div>
       <div class="mb-row">
         <template v-if="tool === 'volume' && !selected">
           <label class="mb-field"
@@ -665,6 +692,66 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
           Clear
         </button>
       </div>
+      <div v-if="vertices.length > 1" class="mb-result" role="region" aria-label="Measurement result" @dblclick.stop>
+        <header v-if="selected || stale" class="mp-head">
+          <span class="mp-title">{{ selected?.name || TOOLS[shownKind]?.label }}</span>
+          <span v-if="stale" class="badge">stale</span>
+        </header>
+        <p v-if="stale" class="mp-note" role="status">
+          Source raster or coordinate frame changed. Showing the saved result; redraw to measure the current source.
+        </p>
+        <p v-if="result.error" class="mp-error">{{ result.error }}</p>
+        <template v-else>
+          <div class="mp-label">{{ result.label }}</div>
+          <div class="mp-value">{{ result.value }}</div>
+          <dl v-if="result.rows.length" class="mp-rows">
+            <template v-for="[k, v] in result.rows" :key="k"
+              ><dt>{{ k }}</dt>
+              <dd>{{ v }}</dd></template
+            >
+          </dl>
+          <p v-if="result.warn" class="mp-note" role="status">{{ result.warn }}</p>
+        </template>
+        <svg
+          v-if="shownKind === 'profile'"
+          class="mp-plot"
+          :viewBox="`0 0 ${PLOT.w} ${PLOT.h}`"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="Elevation profile; gaps indicate no data"
+        >
+          <path v-for="(path, i) in paths" :key="i" :d="path" />
+        </svg>
+        <footer class="mp-actions">
+          <template v-if="!selected">
+            <input
+              v-model="name"
+              class="mb-input mp-name"
+              aria-label="Measurement name"
+              :placeholder="`${TOOLS[shownKind]?.label} ${records.length + 1}`"
+              @keydown.enter.stop="canSave && saveMeasurement()"
+            />
+            <button class="btn btn-primary btn-sm" :disabled="!canSave" @click="saveMeasurement">
+              Save measurement
+            </button>
+          </template>
+          <template v-else>
+            <input v-model="name" class="mb-input mp-name" aria-label="Measurement name" />
+            <button
+              class="btn btn-sm"
+              :disabled="!name.trim() || name.trim() === selected.name"
+              title="Rename this measurement"
+              @click="saved.rename(selectedId, name)"
+            >
+              Rename
+            </button>
+            <button class="btn btn-sm btn-danger" title="Delete this measurement" @click="deleteMeasurement">
+              Delete
+            </button>
+          </template>
+          <button v-if="shownKind === 'profile'" class="btn btn-sm" @click="exportProfile">Export profile CSV</button>
+        </footer>
+      </div>
     </FloatingToolbox>
 
     <div v-if="saved.error" class="measure-alert" role="alert">{{ saved.error }}</div>
@@ -702,71 +789,6 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
         </li>
       </ul>
     </aside>
-
-    <section
-      v-if="vertices.length > 1"
-      class="measure-panel result-panel"
-      aria-label="Measurement result"
-      @mousedown.stop
-      @dblclick.stop
-    >
-      <header class="mp-head">
-        <span class="mp-title">{{ selected?.name || TOOLS[shownKind]?.label }}</span>
-        <span v-if="stale" class="badge">stale</span>
-      </header>
-      <p v-if="stale" class="mp-note" role="status">
-        Source raster or coordinate frame changed. Showing the saved result; redraw to measure the current source.
-      </p>
-      <p v-if="result.error" class="mp-error">{{ result.error }}</p>
-      <template v-else>
-        <div class="mp-label">{{ result.label }}</div>
-        <div class="mp-value">{{ result.value }}</div>
-        <dl v-if="result.rows.length" class="mp-rows">
-          <template v-for="[k, v] in result.rows" :key="k"
-            ><dt>{{ k }}</dt>
-            <dd>{{ v }}</dd></template
-          >
-        </dl>
-        <p v-if="result.warn" class="mp-note" role="status">{{ result.warn }}</p>
-      </template>
-      <svg
-        v-if="shownKind === 'profile'"
-        class="mp-plot"
-        :viewBox="`0 0 ${PLOT.w} ${PLOT.h}`"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="Elevation profile; gaps indicate no data"
-      >
-        <path v-for="(path, i) in paths" :key="i" :d="path" />
-      </svg>
-      <footer class="mp-actions">
-        <template v-if="!selected">
-          <input
-            v-model="name"
-            class="mb-input mp-name"
-            aria-label="Measurement name"
-            :placeholder="`${TOOLS[shownKind]?.label} ${records.length + 1}`"
-            @keydown.enter.stop="canSave && saveMeasurement()"
-          />
-          <button class="btn btn-primary btn-sm" :disabled="!canSave" @click="saveMeasurement">Save measurement</button>
-        </template>
-        <template v-else>
-          <input v-model="name" class="mb-input mp-name" aria-label="Measurement name" />
-          <button
-            class="btn btn-sm"
-            :disabled="!name.trim() || name.trim() === selected.name"
-            title="Rename this measurement"
-            @click="saved.rename(selectedId, name)"
-          >
-            Rename
-          </button>
-          <button class="btn btn-sm btn-danger" title="Delete this measurement" @click="deleteMeasurement">
-            Delete
-          </button>
-        </template>
-        <button v-if="shownKind === 'profile'" class="btn btn-sm" @click="exportProfile">Export profile CSV</button>
-      </footer>
-    </section>
   </div>
 </template>
 
@@ -907,11 +929,16 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
-.result-panel {
-  left: 10px;
-  bottom: 12px;
-  width: 340px;
-  max-width: calc(100% - 20px);
+.mb-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-border);
+}
+.mb-layer {
+  margin-bottom: 6px;
 }
 .saved-panel {
   right: 10px;

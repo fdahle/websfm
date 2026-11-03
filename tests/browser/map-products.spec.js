@@ -131,7 +131,8 @@ test('a computed DEM in the project CRS goes on the map, fits, and probes cell v
   await measureTool(page, /^Ruler/)
   await page.mouse.click(x1, y)
   await page.mouse.click(x2, y)
-  const result = page.getByRole('region', { name: 'Measurement result' })
+  // One window: the result sits in the ruler's own toolbox, under its buttons.
+  const result = page.getByLabel('Ruler measurement').getByRole('region', { name: 'Measurement result' })
   const metres = Number((await result.locator('.mp-value').textContent()).replace(/[^\d.]/g, ''))
   expect(Math.abs(metres - dE / 0.9996)).toBeLessThan(0.05)
   await result.getByRole('textbox', { name: 'Measurement name' }).fill('Map ruler')

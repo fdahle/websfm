@@ -131,8 +131,7 @@ describe('command dispatch', () => {
     ...rasterTab({ kind: 'dem', imported: true }).groups,
     ...rasterTab({ kind: 'ortho', imported: false }).groups,
   ]).filter((c) => !c.disabled)
-  for (const row of measureMenu({ targets: [{ id: 'a', name: 'DEM', kind: 'dem' }] }))
-    if (row.id && !row.disabled) ribbon.push(row)
+  for (const row of measureMenu()) if (row.id && !row.disabled) ribbon.push(row)
 
   it('handles every enabled ribbon command', () => {
     expect(ribbon.map((c) => c.id).filter((id) => !handled(id))).toEqual([])
@@ -166,9 +165,7 @@ describe('console parity', () => {
 
   it('makes every enabled ribbon command typeable, by its id at least', async () => {
     const { getCommand } = await import('./commands.js')
-    const missing = leaves.filter(
-      (c) => !c.disabled && !c.id.startsWith('measure-target:') && getCommand(c.id)?.dispatch !== c.id,
-    )
+    const missing = leaves.filter((c) => !c.disabled && getCommand(c.id)?.dispatch !== c.id)
     expect(missing.map((c) => c.id)).toEqual([])
   })
 })
@@ -213,20 +210,11 @@ describe('one home per tool', () => {
       expect(toolIds.has(id), id).toBe(true)
   })
 
-  it('greys DEM-only measuring instead of hiding it, and lists the map targets', () => {
-    const rows = measureMenu({
-      targets: [
-        { id: 'a', name: 'DEM', kind: 'dem' },
-        { id: 'b', name: 'Ortho', kind: 'ortho' },
-      ],
-      targetId: 'b',
-    })
+  it('greys DEM-only measuring instead of hiding it, and keeps the menu the same on the map', () => {
+    const rows = measureMenu()
     expect(rows.filter((r) => r.demOnly).map((r) => r.id)).toEqual(['measure-profile', 'measure-volume'])
-    expect(rows.filter((r) => r.id?.startsWith('measure-target:')).map((r) => [r.id, r.selected])).toEqual([
-      ['measure-target:a', false],
-      ['measure-target:b', true],
-    ])
-    expect(measureMenu().some((r) => r.id?.startsWith('measure-target:'))).toBe(false)
+    // The raster to measure is picked in the measuring window, not in the ribbon.
+    expect(rows.some((r) => r.id?.startsWith('measure-target:'))).toBe(false)
   })
 
   it('offers the same object actions on a computed and an imported raster tab', () => {

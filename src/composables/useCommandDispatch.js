@@ -19,7 +19,7 @@ import { useTheme } from './useTheme.js'
 //   tabs     — useTabs: activateTab, activeView, activeTab, activeImageTab
 //   viewers  — the 3D / map / image viewer refs, and the raster tab in front
 //   view     — useViewState's toggles and setters
-//   map      — useMapProducts: toggleModelFrame, setMapMeasureTarget
+//   map      — useMapProducts: toggleModelFrame
 //   tools    — feature openers (model tools, fiducials, GCP report, quality hub)
 //   exports  — useExports
 //   removals — the confirm-first removals (useConfirmations, useRasterTabs)
@@ -44,7 +44,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     setCameraScale,
     setMapBasemap,
   } = view
-  const { toggleModelFrame, setMapMeasureTarget } = map
+  const { toggleModelFrame } = map
   const {
     openRegionTool,
     openOrientTool,
@@ -272,11 +272,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       return
     }
     // Measure groups: 'measure-length' → the ruler of the viewer in front (a raster
-    // tab, or the 2D map), etc. The map also picks which raster it measures.
-    if (id.startsWith('measure-target:')) {
-      setMapMeasureTarget(id.slice('measure-target:'.length))
-      return
-    }
+    // tab, or the 2D map), etc. The map's measuring window picks which raster it measures.
     if (id.startsWith('map-basemap:')) {
       setMapBasemap(id.slice('map-basemap:'.length))
       return

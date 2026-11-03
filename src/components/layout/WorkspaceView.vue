@@ -80,6 +80,8 @@ const {
   modelCameras,
   modelMarkers,
   mapMeasureTarget,
+  mapMeasureTargets,
+  setMapMeasureTarget,
   mapNotes,
   alignedUuids,
   hasSparse,
@@ -383,6 +385,8 @@ watch(activeTabId, (id) => {
         :model-cameras="modelCameras"
         :model-markers="modelMarkers"
         :measure-target="mapMeasureTarget"
+        :measure-targets="mapMeasureTargets"
+        @measure-target="setMapMeasureTarget"
         :notes="mapNotes"
         :load-raster="ensureRasterLoaded"
         @select="selectImage"

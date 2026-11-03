@@ -1,6 +1,6 @@
 <script setup>
 import 'ol/ol.css'
-import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch, nextTick } from 'vue'
 // Aliased: a bare `Map` import shadows the global Map constructor.
 import OlMap from 'ol/Map'
 import View from 'ol/View'
@@ -110,6 +110,8 @@ const props = defineProps({
   // { layer, product, source, kind, frameStatus } | null. The tools measure in that
   // raster's OWN frame; this viewer only maps their geometry onto the screen.
   measureTarget: { type: Object, default: null },
+  // Every raster the map can measure, [{ id, name, kind }]: the measuring window's Layer.
+  measureTargets: { type: Array, default: () => [] },
   // Markers (role 'marker') triangulated into the model frame: [{ id, name, x, y }].
   modelMarkers: { type: Array, default: () => [] },
 })
@@ -128,6 +130,8 @@ const emit = defineEmits([
   'add-gcp-at',
   'delete-gcp',
   'open-image',
+  // (layer id) measure this raster instead.
+  'measure-target',
 ])
 
 // GCP edit mode: shows the target-selector toolbox, makes markers draggable, and
@@ -287,8 +291,24 @@ const measureView = computed(() => {
 })
 const measuring = computed(() => !!measurements.value?.active)
 const measureState = computed(() => measurements.value?.state ?? null)
+// Profile and volume read heights: started over an orthophoto, they move to the map's
+// first DEM.
+const DEM_TOOLS = new Set(['profile', 'volume'])
 function setMeasureTool(tool, opts) {
+  const dem = props.measureTargets.find((t) => t.kind === 'dem')
+  if (DEM_TOOLS.has(tool) && props.measureTarget?.kind !== 'dem' && dem) {
+    measureLayer(dem.id, tool, opts)
+    return
+  }
   measurements.value?.setTool(tool, opts)
+}
+// Measure another raster with the same tool. The measuring layer is keyed by raster,
+// so it starts afresh: the tool is set on the new one once it is there.
+async function measureLayer(id, tool, opts) {
+  emit('measure-target', id)
+  await nextTick()
+  await nextTick()
+  if (tool && tool !== 'pan') measurements.value?.setTool(tool, opts)
 }
 function toggleSavedMeasurements() {
   measurements.value?.toggleSaved()
@@ -771,7 +791,10 @@ defineExpose({
         :frame-status="measureTarget.frameStatus"
         :kind="measureTarget.kind"
         :view="measureView"
+        :targets="measureTargets"
+        :target-id="measureTarget.layer.id"
         pan-hint="drag pans"
+        @target="measureLayer"
         @command="(...a) => emit('command', ...a)"
       />
 

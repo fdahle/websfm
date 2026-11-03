@@ -12,7 +12,6 @@ import {
   MAP_GROUP,
   PICTURE_TAB,
   rasterTab as buildRasterTab,
-  measureMenu,
   menuReason,
   stepValue,
 } from '../../core/help/ribbonTabs.js'
@@ -97,17 +96,6 @@ const currentTab = computed(() => {
     if (props.activeView === 'viewer') return { ...tab, groups: [...tab.groups, CAMERA_GROUP, SCENE_GROUP] }
     return tab
   }
-  if (tab.id === 'tools' && props.activeView === 'map' && !props.activeRaster && props.mapMeasure?.targets?.length) {
-    // The map stacks rasters, so its Measure menu also picks which one is measured.
-    const menu = measureMenu(props.mapMeasure)
-    return {
-      ...tab,
-      groups: tab.groups.map((g) => ({
-        ...g,
-        commands: g.commands.map((c) => (c.id === 'menu-measure' ? { ...c, menu } : c)),
-      })),
-    }
-  }
   return tab
 })
 
@@ -154,7 +142,6 @@ function isActive(cmd) {
   if (cmd.activeKey === 'consoleOpen') return props.consoleOpen
   if (VIEW_KEYS.has(cmd.activeKey)) return !!props.viewState[cmd.activeKey]
   if (cmd.activeKey === 'rasterVisible') return !!props.activeRaster?.visible
-  if (cmd.selected !== undefined) return cmd.selected // a map measure-target row
   if (cmd.basemap) return props.viewState.mapBasemap === cmd.basemap
   // Edit GCPs is one mode per view: the map's own flag, else the image view's.
   if (cmd.activeKey === 'gcpEdit' && props.activeView === 'map') return !!props.viewState.mapGcpEdit
@@ -177,13 +164,14 @@ function disabledReason(cmd) {
   const base = commandReason(cmd, { ...props.state, sceneType: props.sceneType })
   if (base) return base
   const m = measureCtx.value?.measure
-  if (cmd.demOnly && measureCtx.value?.kind !== 'dem')
-    return props.activeRaster
-      ? 'Needs a DEM — this is an orthophoto'
-      : 'Needs a DEM — pick a DEM layer to measure below'
+  // On the map, profile and volume move to its DEM (ViewerMap setMeasureTool).
+  const onDem = measureCtx.value?.kind === 'dem'
+  if (cmd.demOnly && !onDem && (props.activeRaster || !props.mapMeasure?.targets?.some((t) => t.kind === 'dem')))
+    return props.activeRaster ? 'Needs a DEM — this is an orthophoto' : 'Needs a DEM on the map'
   if (cmd.measureTool && !m?.available)
     return 'Measuring needs a current frame with linear coordinates (not geographic, not an outdated frame)'
-  if (cmd.measureTool && cmd.demOnly && !m?.heights) return 'Needs the DEM elevation values, which are not loaded yet'
+  if (cmd.measureTool && cmd.demOnly && onDem && !m?.heights)
+    return 'Needs the DEM elevation values, which are not loaded yet'
   if (cmd.needsSavedMeasurements && !m?.savedCount) return 'No saved measurements on this raster yet'
   // A computed product in the local frame has no map position (productLayers.js).
   if (cmd.activeKey === 'rasterVisible' && props.activeRaster?.mapBlocked) return props.activeRaster.mapBlocked
@@ -199,9 +187,8 @@ function disabledReason(cmd) {
   return ''
 }
 
-// A row that is a mode (it has an on state) or an option (a map measure target,
-// a base layer).
-const isToggleRow = (row) => !!(row.activeKey || row.measureTool || row.selected !== undefined || row.basemap)
+// A row that is a mode (it has an on state) or an option (a base layer).
+const isToggleRow = (row) => !!(row.activeKey || row.measureTool || row.basemap)
 
 // A menu's rows, resolved: each real row carries its own disabled reason (printed
 // inline in the menu) and, for a mode, whether it is on; sections pass through;

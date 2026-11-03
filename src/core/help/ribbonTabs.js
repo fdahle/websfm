@@ -50,13 +50,10 @@ const EXPORT_DEM = { id: 'export-dem', label: 'DEM', icon: 'dem', needs: ['dem']
 const EXPORT_ORTHO = { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needs: ['ortho'], aerialOnly: true }
 
 // Tools ▸ Measure ▾. Raster tools run on the raster in front: a DEM/Orthophoto
-// tab, or the 2D map's measure target. On the map the menu also lists the
-// target choices (the map stacks several rasters; profile/volume need a DEM even
-// while an orthophoto is drawn above it).
-//   m: { targets: [{ id, name, kind }], targetId } — the map's raster layers, or null.
-// `measure-target:<id>` rows pick the target; App dispatches the prefix.
-export function measureMenu(m = null) {
-  const targets = m?.targets ?? []
+// tab, or one of the 2D map's rasters, which the measuring window's Layer field picks
+// (RasterMeasurements.vue); profile and volume take the map's DEM. The menu itself
+// stays the same whatever is loaded.
+export function measureMenu() {
   return [
     { section: 'DEM / orthophoto in front' },
     {
@@ -102,18 +99,6 @@ export function measureMenu(m = null) {
       needs: ['measureHost'],
       blurb: 'Show, reopen and export saved results',
     },
-    ...(targets.length
-      ? [
-          { section: 'Map layer to measure' },
-          ...targets.map((t) => ({
-            id: `measure-target:${t.id}`,
-            label: t.name,
-            icon: t.kind === 'dem' ? 'dem' : 'ortho',
-            selected: t.id === m.targetId,
-            blurb: t.kind === 'dem' ? 'DEM — all tools, including profile and volume' : 'Orthophoto — ruler and area',
-          })),
-        ]
-      : []),
     { section: 'Clouds & meshes' },
     {
       id: 'measure-3d',
@@ -1079,7 +1064,7 @@ export function labelText(cmd) {
  * commands.js derives its verbs from this, so a new ribbon command is typeable without
  * a second table). → [{ cmd, tab, path }] in ribbon order, first occurrence of each id;
  * `path` is 'Tab ▸ Group' (▸ Menu for a menu row), the contextual groups under the
- * tab they appear in. Dynamic rows (`measure-target:` — the map's layers) are left out.
+ * tab they appear in.
  */
 export function ribbonEntries() {
   const sources = [
@@ -1094,7 +1079,7 @@ export function ribbonEntries() {
   const out = [],
     seen = new Set()
   const add = (cmd, tab, path) => {
-    if (!cmd.id || seen.has(cmd.id) || cmd.id.startsWith('measure-target:')) return
+    if (!cmd.id || seen.has(cmd.id)) return
     seen.add(cmd.id)
     out.push({ cmd, tab, path })
   }

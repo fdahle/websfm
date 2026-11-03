@@ -889,7 +889,7 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useComma
     setCameraScale,
     setMapBasemap,
   },
-  map: { toggleModelFrame, setMapMeasureTarget },
+  map: { toggleModelFrame },
   tools: {
     openRegionTool,
     openOrientTool,
@@ -1013,6 +1013,8 @@ provideAppContext({
   mapGcpEdit,
   mapLayers,
   mapMeasureTarget,
+  mapMeasureTargets,
+  setMapMeasureTarget,
   mapNotes,
   mapViewerRef,
   markDisplayedFiducial,
