@@ -243,7 +243,7 @@ function doImport() {
 .source-head span,
 .hint,
 .muted {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: 12px;
 }
 .stats {
@@ -256,15 +256,15 @@ function doImport() {
   display: flex;
   flex-direction: column;
   padding: 8px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
 }
 .stats span {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: 12px;
 }
 fieldset {
-  border: 1px solid var(--border);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
   display: flex;
   flex-direction: column;
@@ -277,7 +277,7 @@ label.disabled {
   margin: 8px 0 0;
   padding-left: 18px;
   font-size: 12px;
-  color: var(--warning, var(--text-muted));
+  color: var(--warn, #d9a441);
 }
 .field {
   display: flex;

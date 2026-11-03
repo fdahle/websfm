@@ -107,10 +107,10 @@ function save() {
 .presets-button {
   font-size: 12px;
   padding: 3px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
-  background: var(--surface);
-  color: var(--text-muted);
+  background: var(--panel);
+  color: var(--text-dim);
   cursor: pointer;
   white-space: nowrap;
   max-width: 220px;
@@ -128,8 +128,8 @@ function save() {
   z-index: 20;
   width: 240px;
   padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
   display: flex;
@@ -159,12 +159,12 @@ function save() {
   border-radius: 4px;
 }
 .presets-item:hover {
-  background: var(--hover, rgb(127 127 127 / 0.12));
+  background: var(--hover-bg);
 }
 .presets-delete {
   border: none;
   background: none;
-  color: var(--text-muted);
+  color: var(--text-dim);
   cursor: pointer;
   font-size: 14px;
   padding: 0 6px;
@@ -172,7 +172,7 @@ function save() {
 .presets-empty {
   margin: 2px 6px;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-dim);
 }
 .presets-save {
   display: flex;
@@ -183,9 +183,9 @@ function save() {
   min-width: 0;
   font-size: 12px;
   padding: 3px 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
-  background: var(--bg, var(--surface));
+  background: var(--bg);
   color: var(--text);
 }
 </style>

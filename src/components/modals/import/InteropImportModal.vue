@@ -145,7 +145,7 @@ const canImport = computed(
 }
 .source-head span,
 .hint {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: 12px;
 }
 .stats {
@@ -156,7 +156,7 @@ const canImport = computed(
 }
 .stats div {
   padding: 9px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--panel-border);
   border-radius: 5px;
   display: flex;
   flex-direction: column;
@@ -165,11 +165,11 @@ const canImport = computed(
   font-size: 17px;
 }
 .stats span {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: 11px;
 }
 fieldset {
-  border: 1px solid var(--border);
+  border: 1px solid var(--panel-border);
   border-radius: 5px;
   margin: 12px 0 0;
   padding: 10px 12px;
@@ -178,7 +178,7 @@ fieldset {
   gap: 8px;
 }
 legend {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: 12px;
   padding: 0 5px;
 }

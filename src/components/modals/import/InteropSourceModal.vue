@@ -21,7 +21,7 @@ defineEmits(['close', 'files', 'folder'])
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
 .hint {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: 13px;
   margin-top: 0;
 }
@@ -33,9 +33,9 @@ defineEmits(['close', 'files', 'folder'])
 .choice {
   text-align: left;
   padding: 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--panel);
   color: var(--text);
   cursor: pointer;
   display: flex;
@@ -46,7 +46,7 @@ defineEmits(['close', 'files', 'folder'])
   border-color: var(--accent);
 }
 .choice span {
-  color: var(--text-muted);
+  color: var(--text-dim);
   font-size: 12px;
 }
 </style>
