@@ -1,6 +1,8 @@
 Metashape 2.2.2 exports of the Aukerman example (`npm run fetch:examples`, CC0, OpenDroneMap
 odm_data_aukerman): 42 photos at 2400 px aligned with their EXIF GPS, three markers placed on
-tie points (GCP3 a check point), optimised (f, cx, cy, k1–k3, p1, p2).
+tie points (GCP3 a check point), optimised (f, cx, cy, k1–k3, p1, p2), then three scale bars
+added (GCP1–GCP2 12.345 m ± 2 mm; GCP2–GCP3 20.5 m, disabled as a check; between the first two
+cameras 3.25 m).
 
 - `aukerman-markers.xml`: File ▸ Export ▸ Export Markers (WGS 84), which holds the sensors and
   cameras as well.

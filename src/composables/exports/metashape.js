@@ -17,7 +17,7 @@ import { defaultExportName, exportFileName } from '../../core/exportNames.js'
 import { pluralize } from '../../core/textFormat.js'
 
 // Export ▸ SfM Project ▸ Metashape XML: the registered cameras, their calibration and
-// the GCPs with their marks, as the document Metashape's Export Markers writes
+// the GCPs with their marks and the scale bars between them, as the document Metashape's Export Markers writes
 // (core/io/metashapeXml.js buildMetashapeXml), so File ▸ Import ▸ Import Cameras and
 // Import Markers read it. Georeferenced, the chunk is WGS 84 with ellipsoidal heights;
 // otherwise a local frame in the export frame's units.
@@ -32,6 +32,7 @@ export function createMetashapeExport({
   sparseCloud,
   summary,
   gcps,
+  scaleBars = null,
   effectiveFrameSpec,
   log,
   projectBase,
@@ -178,7 +179,21 @@ export function createMetashapeExport({
         }
       }
       if (!reference && !locations.length) continue
-      markers.push({ id: markers.length, label: g.name, reference, locations })
+      markers.push({ id: markers.length, label: g.name, reference, locations, gcpId: g.id })
+    }
+
+    // Scale bars between exported markers or cameras; a bar left out of the fit is a check.
+    const markerIndex = new Map(markers.map((m) => [m.gcpId, m.id]))
+    const end = (e) =>
+      e?.kind === 'marker'
+        ? markerIndex.has(e.id) && { markerId: markerIndex.get(e.id) }
+        : e?.kind === 'camera' && camIndex.has(e.id) && { cameraId: camIndex.get(e.id) }
+    const scalebars = []
+    for (const b of scaleBars?.value ?? []) {
+      const a = end(b.a),
+        c = end(b.b)
+      if (!a || !c || !(b.knownDistanceM > 0)) continue
+      scalebars.push({ label: b.name, a, b: c, distance: b.knownDistanceM, accuracy: b.accuracyM, enabled: b.enabled })
     }
 
     const xml = buildMetashapeXml({
@@ -191,6 +206,7 @@ export function createMetashapeExport({
         transform: frames.transforms[i],
       })),
       markers,
+      scalebars,
       chunk: frames.chunk,
       wkt: geo ? WGS84_WKT : LOCAL_WKT,
       label: projectBase(),
@@ -199,7 +215,7 @@ export function createMetashapeExport({
     downloadBlob(`${name}.xml`, xml, 'application/xml')
     log(
       `Exported ${pluralize(out.length, 'camera')}, ${pluralize(msSensors.length, 'calibration')} and ` +
-        `${pluralize(markers.length, 'marker')} for Metashape ${geo ? 'in WGS 84' : 'in a local frame'}` +
+        `${pluralize(markers.length, 'marker')}${scalebars.length ? `, ${pluralize(scalebars.length, 'scale bar')}` : ''} for Metashape ${geo ? 'in WGS 84' : 'in a local frame'}` +
         (film ? `; ${pluralize(film, 'film scan')} left out` : '') +
         (notes.length ? `; ${notes.join('; ')}` : ''),
       'success',

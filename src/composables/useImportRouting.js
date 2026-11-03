@@ -2,6 +2,8 @@ import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useModalsStore } from '../stores/useModalsStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
+import { useGcpsStore } from '../stores/useGcpsStore.js'
+import { useScaleBarsStore } from '../stores/useScaleBarsStore.js'
 import { findDuplicateFiles } from '../core/io/imageDuplicates.js'
 import { confirmDialog } from './useConfirmations.js'
 import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../core/io/geojson.js'
@@ -667,16 +669,49 @@ export function useImportRouting({
   }
 
   // The dialog's Import: each part through the importer it would take on its own.
-  async function onMetashapeImport({ sensorItems, poses, gcps, crs, verticalDatum }) {
+  async function onMetashapeImport({ sensorItems, poses, gcps, scaleBars = [], crs, verticalDatum }) {
     metashapeImportData.value = null
     if (sensorItems.length) await importSensors(sensorItems)
     if (poses.length) await addPoses(poses, crs)
     if (gcps.length)
       await addGcps(gcps, crs, {}, { convention: '1sigma', unit: 'metres', verticalDatum, rememberDefaults: false }, {})
+    if (scaleBars.length) addMetashapeScaleBars(scaleBars)
     if (poses.length || gcps.length) activateTab('map')
     if (gcps.length) showGcps?.()
     else if (poses.length) showPoses?.()
     else if (sensorItems.length) showSensors?.()
+  }
+
+  // Scale bars from Metashape (core/io/metashapeXml.js): endpoints by GCP or photo name,
+  // found among the project's GCPs (the import's included) and photos.
+  function addMetashapeScaleBars(list) {
+    const gcpsStore = useGcpsStore(),
+      bars = useScaleBarsStore()
+    const imagesStore = useImagesStore()
+    const find = (e) => {
+      const id =
+        e.kind === 'marker'
+          ? gcpsStore.gcps.findLast((g) => g.name === e.name)?.id
+          : imagesStore.images.find((im) => im.name === e.name)?.id
+      return id ? { kind: e.kind, id } : null
+    }
+    const missed = []
+    for (const sb of list) {
+      const a = find(sb.a),
+        b = find(sb.b)
+      if (!a || !b) {
+        missed.push(sb.name)
+        continue
+      }
+      const id = bars.addBar({ a, b, knownDistance: sb.distanceM, unit: 'm', accuracy: sb.accuracyM, name: sb.name })
+      if (!sb.enabled) bars.setBarEnabled(id, false)
+    }
+    if (missed.length)
+      log(
+        `Metashape import: scale bars ${missed.join(', ')} left out (an endpoint is not in the project)`,
+        'warn',
+        'Scale',
+      )
   }
 
   function onMetashapePick(event) {

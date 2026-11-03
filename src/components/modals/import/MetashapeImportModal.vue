@@ -32,7 +32,7 @@ const chunkIndex = ref(
 const chunk = computed(() => chunks.value[chunkIndex.value])
 const plan = ref(null)
 const failed = ref(null)
-const options = reactive({ calibration: true, poses: true, gcps: true })
+const options = reactive({ calibration: true, poses: true, gcps: true, scaleBars: true })
 
 watch(
   [chunk, () => props.projectCrs],
@@ -94,6 +94,16 @@ const gcps = computed(() =>
     observations: g.observations.map((o) => ({ ...o, imageName: projectName.value(o.imageName) ?? o.imageName })),
   })),
 )
+// Scale bars whose endpoints are markers (imported with the GCPs, or already here) or
+// photos of this project.
+const scaleBars = computed(() =>
+  (plan.value?.scaleBars ?? []).flatMap((sb) => {
+    const end = (e) => (e.kind === 'camera' ? { ...e, name: projectName.value(e.name) } : e)
+    const a = end(sb.a),
+      b = end(sb.b)
+    return a.name && b.name ? [{ ...sb, a, b }] : []
+  }),
+)
 const joining = computed(() => {
   const names = new Set(props.existingGcps.map((g) => g.name))
   return (plan.value?.gcps ?? []).filter((g) => names.has(g.name)).length
@@ -110,13 +120,15 @@ const has = computed(() => ({
   calibration: sized.value.sensors.length > 0,
   poses: poses.value.length > 0,
   gcps: !!plan.value?.gcps.length,
+  scaleBars: scaleBars.value.length > 0,
 }))
 const canImport = computed(
   () =>
     !!plan.value &&
     ((options.calibration && has.value.calibration) ||
       (options.poses && has.value.poses) ||
-      (options.gcps && has.value.gcps)),
+      (options.gcps && has.value.gcps) ||
+      (options.scaleBars && has.value.scaleBars)),
 )
 
 function doImport() {
@@ -128,6 +140,7 @@ function doImport() {
         : [],
     poses: options.poses ? poses.value : [],
     gcps: options.gcps ? gcps.value : [],
+    scaleBars: options.scaleBars ? scaleBars.value : [],
     crs: props.projectCrs,
     verticalDatum: chunk.value.crs.verticalDatum,
   })
@@ -189,6 +202,13 @@ function doImport() {
             }}<template v-if="joining">, {{ joining }} joining a GCP of the same name</template
             ><template v-if="!chunk.crs.local">, heights {{ datumLabel(chunk.crs.verticalDatum) }}</template></span
           ></label
+        >
+        <label v-if="plan.scaleBars.length" :class="{ disabled: !has.scaleBars }"
+          ><input v-model="options.scaleBars" type="checkbox" :disabled="!has.scaleBars" /> Scale bars
+          <span v-if="has.scaleBars" class="muted"
+            >— {{ pluralize(scaleBars.length, 'bar') }}, {{ scaleBars.filter((b) => !b.enabled).length }} as
+            checks</span
+          ><span v-else class="muted">— their photos are not in this project</span></label
         >
       </fieldset>
       <p class="hint">

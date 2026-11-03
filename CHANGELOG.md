@@ -52,11 +52,13 @@ Notable changes to websfm. The format follows
 - **Metashape interchange, both ways.** Import ▸ **Metashape Cameras**
   reads the XML of Metashape's Export Cameras or Export Markers and takes, as you choose,
   the calibration of each camera, the positions and orientations of the aligned cameras
-  as priors in the project's coordinate system, and the markers with the marks placed in
-  Metashape (a disabled marker as a check point). A calibration made at another photo
+  as priors in the project's coordinate system, the markers with the marks placed in
+  Metashape (a disabled marker as a check point), and the scale bars between markers or
+  cameras (a disabled one as a check). A calibration made at another photo
   size is scaled to the project's photos; terms WebSfM has no place for (k4, b1, b2) are
   named with how far they move a corner. Export ▸ SfM Project ▸ **Metashape XML** writes
-  the registered cameras, their calibration and the GCPs with their marks back, for
+  the registered cameras, their calibration, the GCPs with their marks and the scale bars
+  back, for
   Metashape's Import Cameras and Import Markers. On the Aukerman example the imported
   cameras land where Metashape 2.2's own Omega Phi Kappa export puts them (1e-6 m, 1e-8
   in rotation), and Metashape 2.2 projects points through the exported cameras to within

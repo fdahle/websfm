@@ -17,6 +17,7 @@ import { useExternalStore } from '../stores/useExternalStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
+import { useScaleBarsStore } from '../stores/useScaleBarsStore.js'
 import { storeToRefs } from 'pinia'
 import { polygonSetToGeoJson } from '../core/io/geojson.js'
 import { vectorSetToKml } from '../core/io/kml.js'
@@ -279,6 +280,7 @@ export function useExports({
     sparseCloud,
     summary,
     gcps: storeToRefs(useGcpsStore()).gcps,
+    scaleBars: storeToRefs(useScaleBarsStore()).bars,
     effectiveFrameSpec,
     log,
     projectBase,

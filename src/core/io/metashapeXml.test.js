@@ -174,8 +174,37 @@ describe('metashapeChunkToImport', () => {
     expect(out.gcps[0].observations[0]).toMatchObject({ imageName: 'DSC00272', px: 104.079048, py: 1020.72284 })
     expect(out.sensors).toHaveLength(1)
     expect(out.sensors[0].images).toHaveLength(42)
-    expect(out.counts).toEqual({ cameras: 42, aligned: 42, sensors: 1, markers: 3, marks: 35 })
+    expect(out.counts).toEqual({ cameras: 42, aligned: 42, sensors: 1, markers: 3, marks: 35, scaleBars: 3 })
     expect(out.warnings).toEqual([])
+  })
+
+  it('gives the scale bars between markers or cameras by name, a disabled one as a check', () => {
+    expect(out.scaleBars).toEqual([
+      {
+        name: 'tape A',
+        a: { kind: 'marker', name: 'GCP1' },
+        b: { kind: 'marker', name: 'GCP2' },
+        distanceM: 12.345,
+        accuracyM: 0.002,
+        enabled: true,
+      },
+      {
+        name: 'check B',
+        a: { kind: 'marker', name: 'GCP2' },
+        b: { kind: 'marker', name: 'GCP3' },
+        distanceM: 20.5,
+        accuracyM: 0.005,
+        enabled: false,
+      },
+      {
+        name: 'cams C',
+        a: { kind: 'camera', name: chunk.cameras[0].label },
+        b: { kind: 'camera', name: chunk.cameras[1].label },
+        distanceM: 3.25,
+        accuracyM: null,
+        enabled: true,
+      },
+    ])
   })
 
   it('keeps the calibration and the marks of a local chunk, and says the poses stay behind', () => {
@@ -267,10 +296,32 @@ describe('writing Metashape XML', () => {
           y: l.y,
         })),
       })),
+      scalebars: [
+        { label: 'tape A', a: { markerId: 0 }, b: { markerId: 1 }, distance: 12.345, accuracy: 0.002 },
+        { label: 'cams C', a: { cameraId: 0 }, b: { cameraId: 1 }, distance: 3.25, enabled: false },
+      ],
       chunk: frames.chunk,
       wkt: WGS84_WKT,
     })
     const again = readMetashapeXml(xml).chunks[0]
+    expect(metashapeChunkToImport(again, opts).scaleBars).toEqual([
+      {
+        name: 'tape A',
+        a: { kind: 'marker', name: 'GCP1' },
+        b: { kind: 'marker', name: 'GCP2' },
+        distanceM: 12.345,
+        accuracyM: 0.002,
+        enabled: true,
+      },
+      {
+        name: 'cams C',
+        a: { kind: 'camera', name: before.poses[0].imageName },
+        b: { kind: 'camera', name: before.poses[1].imageName },
+        distanceM: 3.25,
+        accuracyM: null,
+        enabled: false,
+      },
+    ])
     expect(again.crs.epsg).toBe('EPSG:4326')
     expect(again.sensors[0].calibration).toMatchObject({ f: msCal.f, p1: msCal.p1, p2: msCal.p2 })
     const after = metashapeChunkToImport(again, opts)

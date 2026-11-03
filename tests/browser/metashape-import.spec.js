@@ -57,6 +57,8 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
   await expect(dialog).toContainText('3 points')
   // Metashape ran on the full 2400 px photos, the project holds 1200 px copies.
   await expect(dialog).toContainText('made for 2400 × 1800 photos, scaled to these 1200 × 900')
+  // The bar between two cameras names photos this project does not hold.
+  await expect(dialog).toContainText('Scale bars — 2 bars, 1 as checks')
   await dialog.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(dialog).toHaveCount(0)
 
@@ -76,6 +78,10 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
       sensor: sensors.find((x) => x.id === images[0].sensorId),
       groups: new Set(images.map((im) => im.sensorId)).size,
       gcps: gcps.map((g) => [g.name, g.role, g.observations.filter((o) => o.imageId != null).length]),
+      bars: (await import('/src/stores/useScaleBarsStore.js')).useScaleBarsStore().bars.map((b) => {
+        const name = (e) => useGcpsStore().gcps.find((g) => g.id === e.id)?.name
+        return [b.name, name(b.a), name(b.b), b.knownDistanceM, b.accuracyM, b.enabled]
+      }),
     }
   })
   // Each photo keeps one pose: Metashape's replaces the one from EXIF.
@@ -88,6 +94,10 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
     ['GCP1', 'control'],
     ['GCP2', 'control'],
     ['GCP3', 'check'],
+  ])
+  expect(got.bars.slice(-2)).toEqual([
+    ['tape A', 'GCP1', 'GCP2', 12.345, 0.002, true],
+    ['check B', 'GCP2', 'GCP3', 20.5, 0.005, false],
   ])
   expect(errors).toEqual([])
 })
@@ -150,6 +160,15 @@ test('exports the cameras, calibration and markers for Metashape', async ({ page
     toTarget: (lon, lat) => toUtm.forward([lon, lat]),
     fromChunk: (x, y) => toUtm.forward([x, y]),
   })
+  // The project's scale bar between its two markers goes along.
+  const bars = await page.evaluate(async () => {
+    const { useScaleBarsStore } = await import('/src/stores/useScaleBarsStore.js')
+    return useScaleBarsStore().bars.map((b) => [b.name, b.knownDistanceM])
+  })
+  expect(bars.length).toBeGreaterThan(0)
+  expect(back.scaleBars.map((b) => [b.name, b.distanceM, b.a.name, b.b.name])).toEqual(
+    bars.map(([n, d]) => [n, d, 'Bar end A', 'Bar end B']),
+  )
   expect(back.poses).toHaveLength(5)
   for (const p of back.poses) {
     const q = expected.poses.find((e) => e.name.startsWith(p.imageName))

@@ -1,7 +1,7 @@
 ---
 id: import-metashape
 title: Import Metashape Cameras
-summary: Brings the calibration, camera positions and orientations, and the markers with their marks from an Agisoft Metashape project into this one.
+summary: Brings the calibration, camera positions and orientations, the markers with their marks and the scale bars from an Agisoft Metashape project into this one.
 category: Reconstruction pipeline
 order: 12
 ---
@@ -26,12 +26,14 @@ You choose what comes:
   GCPs here of the same name. Metashape's own projections (the unpinned flags) are not
   marks anyone placed, so they stay behind.
 
-Scale bars are not read: add them again in **Scale bars**.
+- **Scale bars** between markers or between cameras, with their distance and
+  accuracy; one whose reference is turned off comes left out of the fit, as a check.
+  A bar between markers needs them here, imported with it or already of the same name.
 
 ## Back to Metashape
 
 **Export ▸ SfM Project ▸ Metashape XML** writes the registered cameras, their
-calibration and the GCPs with their marks, for **File ▸ Import ▸ Import Cameras** and
+calibration, the GCPs with their marks and the scale bars between them, for **File ▸ Import ▸ Import Cameras** and
 then **Import Markers** in Metashape (the same file for both). A georeferenced project
 goes out in WGS 84 with ellipsoidal heights, converted from EGM96 or EGM2008 where
 the georeference uses one; otherwise the cameras stay in a local frame. Each camera

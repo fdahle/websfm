@@ -182,7 +182,29 @@ function readChunk(el) {
     sensors,
     cameras,
     markers,
-    scalebars: childrenOf(child(el, 'scalebars'), 'scalebar').length,
+    scalebars: childrenOf(child(el, 'scalebars'), 'scalebar').map(readScalebar),
+  }
+}
+
+// A scale bar: two endpoints, each a marker or a camera, and its reference distance
+// (chunk units, metres), accuracy, and whether it takes part (enabled) or checks.
+function readScalebar(el) {
+  const ends = childrenOf(el, 'endpoint').map((e) =>
+    e.attrs.marker_id != null
+      ? { kind: 'marker', id: e.attrs.marker_id }
+      : e.attrs.camera_id != null
+        ? { kind: 'camera', id: e.attrs.camera_id }
+        : null,
+  )
+  const ref = child(el, 'reference')
+  return {
+    id: el.attrs.id,
+    label: el.attrs.label ?? `scalebar ${el.attrs.id}`,
+    a: ends[0] ?? null,
+    b: ends[1] ?? null,
+    distance: num(ref?.attrs.d),
+    accuracy: num(ref?.attrs.accuracy),
+    enabled: ref ? bool(ref.attrs.enabled) : false,
   }
 }
 
@@ -339,7 +361,8 @@ function cameraInGeocentric(cam, frameOf) {
   return { C, axes: mul(F.R, Rl) }
 }
 
-// One chunk → { sensors, poses, gcps, warnings, counts }.
+// One chunk → { sensors, poses, gcps, scaleBars, warnings, counts }. A scale bar is
+// { name, a, b: { kind: 'marker' | 'camera', name }, distanceM, accuracyM, enabled }.
 //   ellipsoid   { a, f } of the chunk CRS's datum (ellipsoidOf), for a georeferenced chunk
 //   toTarget    (lon, lat) on that datum → [x, y] in the target CRS (positions and the
 //               grid north the angles are taken against)
@@ -460,12 +483,35 @@ export function metashapeChunkToImport(
       correlationYZ: null,
     })
   }
-  if (chunk.scalebars) warnings.push(`${chunk.scalebars} scale bar(s) left out: add them in Scale bars.`)
+  // Scale bars between markers or cameras, by name: the importer finds them among the
+  // GCPs it added and the project's photos.
+  const markerLabel = new Map(chunk.markers.map((m) => [m.id, m.label]))
+  const endName = (e) => (e?.kind === 'marker' ? markerLabel.get(e.id) : e ? byId.get(e.id)?.label : null)
+  const scaleBars = []
+  let unusable = 0
+  for (const sb of chunk.scalebars) {
+    const a = endName(sb.a),
+      b = endName(sb.b)
+    if (!a || !b || !(sb.distance > 0)) {
+      unusable++
+      continue
+    }
+    scaleBars.push({
+      name: sb.label,
+      a: { kind: sb.a.kind, name: a },
+      b: { kind: sb.b.kind, name: b },
+      distanceM: sb.distance,
+      accuracyM: sb.accuracy > 0 ? sb.accuracy : null,
+      enabled: sb.enabled,
+    })
+  }
+  if (unusable) warnings.push(`${unusable} scale bar(s) without two endpoints or a distance left out.`)
 
   return {
     sensors,
     poses,
     gcps,
+    scaleBars,
     warnings,
     counts: {
       cameras: chunk.cameras.length,
@@ -473,6 +519,7 @@ export function metashapeChunkToImport(
       sensors: sensors.length,
       markers: gcps.length,
       marks: gcps.reduce((n, g) => n + g.observations.length, 0),
+      scaleBars: scaleBars.length,
     },
   }
 }
@@ -683,6 +730,7 @@ export function buildMetashapeXml({
   sensors = [],
   cameras = [],
   markers = [],
+  scalebars = [],
   chunk = null,
   wkt = LOCAL_WKT,
   label = 'WebSfM',
@@ -730,6 +778,23 @@ export function buildMetashapeXml({
     L.push('      </marker>')
   }
   L.push('    </markers>')
+  // Scale bars: endpoints { markerId } or { cameraId }, distance and accuracy in metres.
+  if (scalebars.length) {
+    L.push(`    <scalebars next_id="${scalebars.length}" next_group_id="0">`)
+    for (const [i, sb] of scalebars.entries()) {
+      L.push(`      <scalebar id="${i}" label="${esc(sb.label)}">`)
+      for (const e of [sb.a, sb.b])
+        L.push(
+          e.markerId != null
+            ? `        <endpoint marker_id="${e.markerId}"/>`
+            : `        <endpoint camera_id="${e.cameraId}"/>`,
+        )
+      const acc = sb.accuracy > 0 ? ` accuracy="${n17(sb.accuracy)}"` : ''
+      L.push(`        <reference d="${n17(sb.distance)}"${acc} enabled="${sb.enabled === false ? 'false' : 'true'}"/>`)
+      L.push('      </scalebar>')
+    }
+    L.push('    </scalebars>')
+  }
   if (chunk) {
     L.push('    <transform>')
     L.push(`      <rotation locked="true">${chunk.R.flat().map(n17).join(' ')}</rotation>`)
