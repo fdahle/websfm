@@ -3,7 +3,6 @@ import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -511,15 +510,14 @@ provideStepLayout()
     <div class="field-label"><FieldHelp op="detect-features" param="preset">Quality preset</FieldHelp></div>
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="presetCards" @select="selectPreset" />
 
-    <!-- The run at a glance, in execution order, on the largest image it will touch. -->
+    <!-- Which image the steps' facts describe: the largest the run will touch. -->
     <div class="plan-strip">
       <template v-if="plan">
         <div class="plan-caption">
-          What happens to the largest of {{ fmt(plan.count) }} image{{ plan.count !== 1 ? 's' : '' }},
+          The steps show what happens to the largest of {{ fmt(plan.count) }} image{{ plan.count !== 1 ? 's' : '' }},
           {{ dims(plan.largest.natW, plan.largest.natH)
-          }}<span v-if="plan.unknown"> ({{ fmt(plan.unknown) }} without a known size yet)</span>:
+          }}<span v-if="plan.unknown"> ({{ fmt(plan.unknown) }} without a known size yet)</span>.
         </div>
-        <StepChain />
       </template>
       <div v-else-if="!runImages.length" class="plan-caption">
         Every image already has keypoints — Append mode has nothing to do. Switch to Overwrite to re-detect.

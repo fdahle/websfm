@@ -5,7 +5,6 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
@@ -112,8 +111,6 @@ provideStepLayout()
         :presets="FILTER_CLOUD_PRESET_META"
         @select="selectPreset"
       />
-
-      <StepChain />
 
       <SettingsGroup title="Source">
         <SourcePicker

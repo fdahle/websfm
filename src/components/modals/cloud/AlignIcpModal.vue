@@ -7,7 +7,6 @@ import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import WarnBox from '../ui/WarnBox.vue'
@@ -128,7 +127,6 @@ provideStepLayout()
           hint="The reference stays where it is."
         />
       </SettingsGroup>
-      <StepChain />
 
       <SettingsStep step="1" title="Pair up points" :effect="effects.pair" :more="1">
         <SettingsField

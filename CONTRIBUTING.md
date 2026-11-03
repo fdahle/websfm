@@ -179,22 +179,22 @@ volume) is a workbench: it uses the same fields but no numbered steps.
    switch) are its content; the fields whose defaults suit almost every project go in
    its `#tuning` slot, which folds out in place behind **⚙ n more** (`:more` counts
    them). Presets, the source and mode choices may sit above the steps.
-2. The dialog calls `provideStepLayout()` (`composables/useStepLayout.js`), puts a
-   `<StepChain />` under its cards and `<ShowAllSettings />` first in its footer. The
-   steps register with the chain themselves; a step with no everyday field is not
-   drawn until opened from the chain or by Show all settings.
+2. The dialog calls `provideStepLayout()` (`composables/useStepLayout.js`) and puts
+   `<ShowAllSettings />` first in its footer. Every step is drawn as one header with its
+   short fact; a step with no everyday field is just that line, and its tuning (or,
+   without tuning, its long effect: *Details*) opens below a divider.
 3. Each step's **effect** comes in two lengths, from the same rules the run applies:
    the long line an open step shows ("42 depth maps at up to 1,500 px …", "Off: lone
-   points stay in the cloud") and the short fact its chip shows ("1,500 px · 10
+   points stay in the cloud") and the short fact its header shows ("1,500 px · 10
    views", "off"; at most `SHORT_MAX`, 40 characters, no sentence). Write them as pure
    functions in `src/core/stepEffects/<dialog>.js` (`…Effects` and `…Shorts`, paired
    by `withShorts`), with unit tests, and pass the project data into the dialog as
    props.
-4. A step that cannot matter in the current configuration is `inactive` (dimmed, also
-   in the chain), and its long effect says why.
+4. A step that cannot matter in the current configuration is `inactive` (dimmed, its
+   fact too), and its long effect says why.
 5. The guide article lists its setting sections in the same order as the steps. A
-   dialog with only a few settings (about five) and no tuning has neither chain nor
-   folding: its steps simply hold their fields.
+   dialog with only a few settings (about five) and no tuning needs no layout: its
+   steps simply hold their fields and effects.
 6. **Quality cards:** where a dialog has a real quality-against-time ladder (resolution,
    density, the mosaic method), cards at the top set it (Fast · Balanced · Detailed, or
    the dialog's own words); the card names say what they change, and the CHANGELOG

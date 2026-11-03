@@ -1,9 +1,9 @@
 import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 
-// A processing dialog's steps laid out once (dev/planning/plan-dialog-layout.md, pilot:
-// Build Depth Maps): a chain of short facts, only the steps with an everyday field drawn,
-// each step's tuning folded in place, and Show all settings.
+// A processing dialog's steps laid out once (dev/planning/plan-dialog-layout.md; here
+// Build Depth Maps): every step a header with its short fact, its everyday fields below,
+// its tuning folded in place, and Show all settings.
 const PROJECT = new URL('../fixtures/projects/v2/aukerman-5.websfm', import.meta.url)
 
 async function openFixture(page) {
@@ -45,16 +45,14 @@ test('Depth Maps lists each step once, its tuning in place', async ({ page, brow
   })
   const dialog = page.getByRole('dialog', { name: 'Build Depth Maps' })
   await expect(dialog).toBeVisible()
-  const chain = dialog.getByRole('group', { name: 'What the run does' })
-  await expect(chain.getByRole('button')).toHaveCount(4)
-  await expect(chain.getByRole('button', { name: /Step 4, Check across views: ≥ 2 views agree/ })).toBeVisible()
-
-  // Steps 1 and 2 have no everyday field: not drawn until opened from the chain.
-  await expect(dialog.getByText('Working resolution and source views', { exact: true })).toHaveCount(0)
-  await expect(dialog.getByText('Check across views', { exact: true })).toBeVisible()
-  await chain.getByRole('button', { name: /Step 1/ }).click()
+  // Every step is drawn, one header with its short fact; tuning stays folded.
+  const step = (n) => dialog.locator(`[data-step-id="${n}"]`)
+  await expect(step(1)).toContainText('Working resolution and source views')
+  await expect(step(4)).toContainText('≥ 2 views agree')
+  await expect(dialog.locator('#maxSources')).toHaveCount(0)
+  await dialog.getByRole('button', { name: /Working resolution and source views: show more/ }).click()
   await expect(dialog.locator('#maxSources')).toBeVisible()
-  await expect(dialog.getByText(/one per registered image/)).toBeVisible()
+  await expect(step(1)).toContainText(/one per registered image/)
   await dialog.getByRole('button', { name: /Working resolution and source views: fold/ }).click()
   await expect(dialog.locator('#maxSources')).toHaveCount(0)
 
@@ -63,10 +61,10 @@ test('Depth Maps lists each step once, its tuning in place', async ({ page, brow
   await dialog.getByRole('button', { name: /Check across views: show more/ }).click()
   await expect(dialog.locator('#minNcc')).toBeVisible()
   await dialog.getByLabel('Enabled').nth(1).uncheck()
-  await expect(chain.getByRole('button', { name: /Step 4, Check across views: off/ })).toBeVisible()
+  await expect(step(4)).toContainText('off')
 
   // Show all settings: every step, every field.
-  await dialog.getByText('Show all settings').click()
+  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
   for (const id of ['#maxDim', '#window', '#filterRelTol']) await expect(dialog.locator(id)).toBeVisible()
   await expect(dialog.getByRole('button', { name: /show more/ })).toHaveCount(0)
   expect(errors).toEqual([])

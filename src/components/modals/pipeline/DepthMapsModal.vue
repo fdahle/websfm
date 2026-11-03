@@ -5,7 +5,6 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
@@ -188,8 +187,6 @@ function run() {
       :note="qualityNote"
       @select="selectQuality"
     />
-
-    <StepChain />
 
     <SettingsStep
       step="1"

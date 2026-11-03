@@ -9,7 +9,6 @@ import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import OutputStep from '../ui/OutputStep.vue'
@@ -195,7 +194,6 @@ provideStepLayout()
       <span class="modal-title">Build DEM</span>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
-    <StepChain />
 
     <SettingsStep step="1" title="Points" :effect="effects.points">
       <SettingsField

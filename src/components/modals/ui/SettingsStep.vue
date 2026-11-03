@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, useSlots } from 'vue'
+import { computed, useSlots } from 'vue'
 import { useStepLayout } from '../../../composables/useStepLayout.js'
 
 // One numbered stage of a pipeline modal: "① Resize → ② Tile → ③ Detect → ④ Keep".
@@ -9,10 +9,11 @@ import { useStepLayout } from '../../../composables/useStepLayout.js'
 // editable, but the user sees why they're inert instead of tuning a dead knob.
 //
 // In a dialog with a step layout (useStepLayout.js; dev/planning/plan-dialog-layout.md)
-// the step appears once: drawn only when it has everyday fields (the default slot) or is
-// open; its `tuning` slot unfolds in place behind "⚙ n more" (`more`: how many fields
-// it holds; 0 hides the toggle), with the long effect at the top. `effect` may then be
-// { short, long }: the StepChain shows `short`. Without a layout it is drawn as before.
+// every step is one header with its short fact (`effect` = { short, long }), then its
+// everyday fields (the default slot); its `tuning` slot unfolds below a divider behind
+// "⚙ n more" (`more`: how many fields it holds; 0 hides the toggle), after the long
+// effect. A step with no tuning opens to its long effect ("Details"). Without a layout
+// it is drawn as before.
 const props = defineProps({
   step: { type: [Number, String], required: true },
   title: { type: String, required: true },
@@ -23,36 +24,22 @@ const props = defineProps({
 const slots = useSlots()
 const layout = useStepLayout()
 const long = computed(() => (typeof props.effect === 'string' ? props.effect : (props.effect?.long ?? '')))
+const short = computed(() => (typeof props.effect === 'object' ? (props.effect?.short ?? '') : ''))
 const open = computed(() => !!layout && layout.isOpen(props.step))
-const drawn = computed(() => !layout || !!slots.default || open.value)
 const hasToggle = computed(
-  () => !!layout && !layout.showAll.value && (!!slots.tuning || !slots.default) && props.more !== 0,
+  () => !!layout && !layout.showAll.value && props.more !== 0 && (!!slots.tuning || !!long.value),
 )
-// In the step chain: the short fact (the title where the effect has none yet).
-if (layout) {
-  const token = Symbol('step')
-  layout.register(
-    token,
-    computed(() => ({
-      step: props.step,
-      title: props.title,
-      short: typeof props.effect === 'object' && props.effect?.short ? props.effect.short : props.title,
-      long: long.value,
-      inactive: props.inactive,
-    })),
-  )
-  onBeforeUnmount(() => layout.unregister(token))
-}
 const moreLabel = computed(() =>
   open.value ? 'Less' : props.more ? `${props.more} more` : slots.tuning ? 'More' : 'Details',
 )
 </script>
 
 <template>
-  <div v-if="drawn" class="settings-step" :class="{ inactive }" :data-step-id="step">
+  <div class="settings-step" :class="{ inactive, open }" :data-step-id="step">
     <div class="step-head">
       <span class="step-num">{{ step }}</span>
       <span class="step-title">{{ title }}</span>
+      <span v-if="layout && short" class="step-fact">{{ short }}</span>
       <button
         v-if="hasToggle"
         type="button"
@@ -61,19 +48,21 @@ const moreLabel = computed(() =>
         :aria-label="`${title}: ${open ? 'fold the settings' : 'show more settings'}`"
         @click="layout.toggle(step)"
       >
-        ⚙ {{ moreLabel }} {{ open ? '▾' : '▸' }}
+        {{ $slots.tuning ? '⚙ ' : '' }}{{ moreLabel }} {{ open ? '▾' : '▸' }}
       </button>
     </div>
     <div v-if="!layout && (long || $slots.effect)" class="step-effect">
       <slot name="effect">{{ long }}</slot>
     </div>
     <div v-if="$slots.default" class="step-fields"><slot /></div>
-    <!-- In a step layout the long effect leads into the step's tuning, after its
-         everyday fields. -->
-    <div v-if="layout && open && (long || $slots.effect)" class="step-effect step-detail">
-      <slot name="effect">{{ long }}</slot>
+    <!-- In a step layout the open part sits below a divider: the long effect, then the
+         step's tuning. -->
+    <div v-if="layout && open && (long || $slots.tuning)" class="step-open">
+      <div v-if="long || $slots.effect" class="step-effect step-detail">
+        <slot name="effect">{{ long }}</slot>
+      </div>
+      <div v-if="$slots.tuning" class="step-fields"><slot name="tuning" /></div>
     </div>
-    <div v-if="layout && open && $slots.tuning" class="step-fields step-tuning"><slot name="tuning" /></div>
   </div>
 </template>
 
@@ -132,12 +121,27 @@ const moreLabel = computed(() =>
 .step-more:hover {
   color: var(--accent);
 }
+.step-fact {
+  font-size: 11px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.settings-step.inactive .step-fact {
+  color: var(--text-dim);
+}
 .step-detail {
   color: var(--text-dim);
 }
-.step-tuning {
-  padding-left: 10px;
-  border-left: 2px dashed var(--panel-border);
+.step-open {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-border);
 }
 .step-fields {
   display: flex;

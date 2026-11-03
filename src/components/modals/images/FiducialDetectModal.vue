@@ -4,7 +4,6 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -237,8 +236,6 @@ provideStepLayout()
         <template #visual="{ option }"><FiducialFamilyGlyph :family="option.id" /></template>
       </ChoiceCards>
     </SettingsField>
-
-    <StepChain />
 
     <SettingsStep step="1" title="Search the film frame" :effect="effects.search">
       <SettingsField hint="Where marks are expected relative to the detected film frame.">

@@ -6,7 +6,6 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import WarnBox from '../ui/WarnBox.vue'
@@ -207,8 +206,6 @@ provideStepLayout()
       :presets="RECONSTRUCT_PRESET_META"
       @select="selectPreset"
     />
-
-    <StepChain />
 
     <SettingsStep step="1" title="Register images" :effect="effects.register" :more="2">
       <template #tuning>

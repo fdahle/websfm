@@ -145,16 +145,15 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
-- **Each step listed once, in every processing dialog.** Under the quality cards, one
-  line shows the run in short facts (Depth Maps: 1,500 px · 10 views → 7×7 · 5 sweeps ·
-  Fast → median 10 % → ≥ 2 views agree); only the steps with something to choose are
-  drawn, and each step's finer settings fold out in place behind **⚙ n more**, with
-  what the step does. A click on a fact opens its step; **Show all settings** in the
-  footer opens every step. The Advanced section that repeated the steps is gone from
-  the Reconstruct dialogs (Detect and Match Features, Sparse Model, Depth Maps, Dense
-  Cloud, DEM, Orthophoto, Mesh) and the Tools dialogs with tuning (Texture, Filter
-  Cloud, Classify Points, Clean and Smooth Mesh, Align to Reference, Detect Fiducials,
-  Contour Lines).
+- **Each step listed once, in every processing dialog.** Every step is one line with what
+  it will do in a few words (Depth Maps: ① 1,500 px · 10 views, ② 7×7 · 5 sweeps · Fast,
+  ③ median 10 %, ④ ≥ 2 views agree), followed only by the choices you make per project;
+  each step's finer settings open in place below a divider behind **⚙ n more**, with
+  what the step does, and **Show all settings** in the footer opens every step. The
+  Advanced section that repeated the steps is gone from the Reconstruct dialogs (Detect
+  and Match Features, Sparse Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh) and
+  the Tools dialogs with tuning (Texture, Filter Cloud, Classify Points, Clean and Smooth
+  Mesh, Align to Reference, Detect Fiducials, Contour Lines).
 - **Dialogs laid out alike.** Every processing dialog now shows its steps with what each
   will do, keeps the settings whose defaults suit almost every project under one
   **Advanced settings** section, and leaves only the choices you make per project in

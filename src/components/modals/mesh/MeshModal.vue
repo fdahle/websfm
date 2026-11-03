@@ -5,7 +5,6 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
@@ -133,8 +132,6 @@ provideStepLayout()
     />
 
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="MESH_PRESET_META" @select="selectPreset" />
-
-    <StepChain />
 
     <SettingsStep step="1" title="Solve the surface" :effect="effects.solve" :more="3">
       <template #tuning>

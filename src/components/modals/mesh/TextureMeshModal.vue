@@ -6,7 +6,6 @@ import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
@@ -118,8 +117,6 @@ provideStepLayout()
         :presets="TEXTURE_PRESET_META"
         @select="selectPreset"
       />
-
-      <StepChain />
 
       <SettingsStep step="1" title="Which photos see each triangle" :effect="effects.visibility" :more="2">
         <template #tuning>

@@ -5,7 +5,6 @@ import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import StepChain from '../ui/StepChain.vue'
 import ShowAllSettings from '../ui/ShowAllSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import NoSourceWarn from '../ui/NoSourceWarn.vue'
@@ -66,7 +65,6 @@ provideStepLayout()
           hint="The result is a new mesh; this one is left untouched."
         />
       </SettingsGroup>
-      <StepChain />
 
       <SettingsStep step="1" title="Smooth" :effect="effects.smooth" :more="2">
         <SettingsField label-for="smooth-it" hint="Each pass removes finer noise; more passes also soften real edges.">
