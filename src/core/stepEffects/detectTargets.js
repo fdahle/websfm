@@ -5,9 +5,10 @@ import { plural } from './format.js'
 // project: { halfPx (median half-size of the target in the photos, null without a
 // scale), predictions, photos, gcps (how many places, in how many photos, for how many
 // GCPs the search will look), unplaced (GCPs with nothing to place them by) }; for
-// AprilTags { photos (enabled), gcps, tagged (GCPs with a number in their name) }.
+// AprilTags and ArUco markers { photos (enabled), gcps, tagged (GCPs with a number in their
+// name) }.
 export function detectTargetsEffects(s, project = {}) {
-  if (s.kind === 'apriltag') return tagEffects(s, project)
+  if (s.kind === 'apriltag' || s.kind === 'aruco') return tagEffects(s, project)
   const { halfPx = null, predictions = 0, photos = 0, gcps = 0, unplaced = 0 } = project
   const targets =
     halfPx > 0
@@ -25,10 +26,11 @@ export function detectTargetsEffects(s, project = {}) {
 }
 
 function tagEffects(s, { photos = 0, gcps = 0, tagged = 0 }) {
+  const what = s.kind === 'aruco' ? `ArUco ${String(s.arucoDict).toUpperCase()} markers` : 'AprilTag 36h11 tags'
   const targets = !gcps
-    ? 'AprilTag 36h11 tags; no GCPs yet, ' +
+    ? `${what}; no GCPs yet, ` +
       (s.addMarkers ? 'so each tag found becomes a marker.' : 'and new markers are off: nothing will be placed.')
-    : `AprilTag 36h11 tags: a GCP stands for the tag with the number in its name ` +
+    : `${what}: a GCP stands for the tag with the number in its name ` +
       `(${tagged} of ${plural(gcps, 'GCP')} ${tagged === 1 ? 'has' : 'have'} one).`
   const search = photos
     ? `Every tag in each of ${plural(photos, 'photo')}, the whole frame at full resolution; no model needed.`

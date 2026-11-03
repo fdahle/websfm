@@ -151,6 +151,18 @@ export const REFERENCES = {
     venue: 'IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), 4193–4198',
     doi: '10.1109/IROS.2016.7759617',
   },
+  garridojurado2014: {
+    authors: [
+      'Sergio Garrido-Jurado',
+      'Rafael Muñoz-Salinas',
+      'Francisco José Madrid-Cuevas',
+      'Manuel Jesús Marín-Jiménez',
+    ],
+    year: 2014,
+    title: 'Automatic generation and detection of highly reliable fiducial markers under occlusion',
+    venue: 'Pattern Recognition 47(6), 2280–2292',
+    doi: '10.1016/j.patcog.2014.01.005',
+  },
   agarwal2010: {
     authors: ['Sameer Agarwal', 'Noah Snavely', 'Steven M. Seitz', 'Richard Szeliski'],
     year: 2010,

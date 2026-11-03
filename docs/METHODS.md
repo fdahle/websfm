@@ -1306,6 +1306,16 @@ in every step:
    up to 5 could be corrected; 2 keeps random patterns out). The score is the share of
    that margin left, (11 − 2·errors)/11.
 
+**ArUco markers** (OpenCV's DICT_4X4/5X5/6X6 dictionaries; Garrido-Jurado et al. 2014)
+are read by the same detector with another family (`core/sfm/tags/aruco.js`): the black
+box is n + 2 cells, the n × n data cells are read row-major (white = 1), and a
+dictionary of 50, 100 or 250 markers is the first words of the 1,000. The bits a reading
+may correct are the smaller of 2 and ⌊(d − 1)/2⌋, d the dictionary's smallest distance
+over all pairs and rotations, worked out on load (`familyDistance.js`): 4 for 4X4_50,
+7 for 5X5_100, 11 for 6X6_250, 2 for 4X4_1000 (none corrected), as OpenCV's
+maxCorrectionBits says. Its dark blob may fill up to 96 % of the box (a 4 × 4 marker
+with few white cells), against 85 % for an AprilTag's ring.
+
 The centre is the homography's image of the box centre, where the diagonals cross,
 which under perspective is not the corners' mean. A photo is read in 2048-px native
 tiles overlapping by 400 px, so a worker holds a tile's buffers instead of the
@@ -2445,6 +2455,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Fischler, M. A. & Bolles, R. C. (1981). Random sample consensus: a paradigm for model fitting with applications to image analysis and automated cartography. Communications of the ACM 24(6), 381–395. https://doi.org/10.1145/358669.358692
 - Galliani, S., Lasinger, K. & Schindler, K. (2015). Massively parallel multiview stereopsis by surface normal diffusion. IEEE International Conference on Computer Vision (ICCV). https://doi.org/10.1109/ICCV.2015.106
 - Garland, M. & Heckbert, P. S. (1997). Surface simplification using quadric error metrics. SIGGRAPH 97, 209–216. https://doi.org/10.1145/258734.258849
+- Garrido-Jurado, S., Muñoz-Salinas, R., Madrid-Cuevas, F. J. & Marín-Jiménez, M. J. (2014). Automatic generation and detection of highly reliable fiducial markers under occlusion. Pattern Recognition 47(6), 2280–2292. https://doi.org/10.1016/j.patcog.2014.01.005
 - Hartley, R. & Zisserman, A. (2004). Multiple View Geometry in Computer Vision (2nd edition). Cambridge University Press. https://doi.org/10.1017/CBO9780511811685
 - Hartley, R. I. (1997). In defense of the eight-point algorithm. IEEE Transactions on Pattern Analysis and Machine Intelligence 19(6), 580–593. https://doi.org/10.1109/34.601246
 - Horn, B. K. P. (1981). Hill shading and the reflectance map. Proceedings of the IEEE 69(1), 14–47. https://doi.org/10.1109/PROC.1981.11918

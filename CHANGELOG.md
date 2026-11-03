@@ -31,8 +31,8 @@ Notable changes to websfm. The format follows
   within 0.1 % of MicaSense's own test values, and the sun-sensor irradiance of the Altum
   and the 10-band RedEdge-MX Dual exactly. Not yet checked on a full flight.
 - **GCP targets marked for you.** Tools ▸ Images ▸ **Detect targets…** finds the centre of
-  each GCP's checker mat where the model expects it, or of every AprilTag 36h11 tag in
-  every photo, and places the mark, flagged as detected with a score, for you to check in
+  each GCP's checker mat where the model expects it, or of every AprilTag 36h11 tag or
+  ArUco marker in every photo, and places the mark, flagged as detected with a score, for you to check in
   Edit GCPs. A checker mat is looked for from its coordinates through the georeference,
   or from its marks in two other photos. An AprilTag needs no model, even before Align:
   tag 7 marks the GCP with 7 as the only number in its name, or a new marker "Tag 7".
@@ -42,7 +42,10 @@ Notable changes to websfm. The format follows
   place it searches for a removed mark lies within 3 px of where the mark was. On
   rendered tags (turned, in perspective, blurred, noisy, two bits wrong) the tag's centre
   is found to within 0.1–0.3 px; a 20 MP photo takes about 2.5 s per worker, photos run
-  on all workers. ArUco and Metashape coded targets are not read.
+  on all workers. ArUco reads OpenCV's 4X4, 5X5 and 6X6 dictionaries (choose yours under
+  Dictionary), correcting as many wrong cells as OpenCV does for each (none for 4X4_1000,
+  5 for 6X6_250); on rendered markers the centre is within a third of a pixel. Metashape
+  coded targets are not read.
 - **Dialogs remember their settings.** The Reconstruct dialogs (Detect Features, Match
   Features, Sparse Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh, Reflectance) and Texture Mesh, Contour Lines,
   Co-register DEM, Align to Reference and Detect Targets open on the settings of their

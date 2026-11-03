@@ -246,10 +246,11 @@ export function detectTargets(url, predictions) {
   return call('detectTargets', [url, predictions.map((p) => ({ ...p }))])
 }
 
-// AprilTag tag36h11 targets anywhere in one photo (workers/ops/detect.js
-// detectTagsInPhoto) → { tags: [{ id, hamming, score, x, y, contrast }] }.
-export function detectTagsInPhoto(url) {
-  return call('detectTagsInPhoto', [url])
+// AprilTag tag36h11 targets, or the markers of an ArUco dictionary (`dict`, '4x4_50' …),
+// anywhere in one photo (workers/ops/detect.js detectTagsInPhoto)
+// → { tags: [{ id, hamming, score, x, y, contrast }] }.
+export function detectTagsInPhoto(url, dict = null) {
+  return call('detectTagsInPhoto', [url, dict])
 }
 
 export function detectFiducialSpots(url, options = {}, { onLog } = {}) {

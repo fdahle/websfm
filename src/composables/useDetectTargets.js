@@ -21,12 +21,17 @@ import { pluralize } from '../core/textFormat.js'
 // Tools ▸ Images ▸ Detect targets (core/sfm/targetPredict.js, targetDetect.js): plan where
 // every GCP's checker mat should appear in every registered photo, then find its centre
 // there in the workers and place the GCP's mark, flagged { source: 'detected', score }.
-// AprilTags (core/sfm/tagDetect.js) need no plan: every enabled photo is searched whole,
-// and tag N is the GCP with N in its name, or a new marker "Tag N".
+// AprilTags and ArUco markers (core/sfm/tagDetect.js) need no plan: every enabled photo is
+// searched whole, and tag N is the GCP with N in its name, or a new marker "Tag N".
 //
 // plan(settings) → { photos: [{ img, predictions }], counts } — what the dialog's effect
 //   lines count; run(settings, plan, onProgress) places the marks it finds. A photo per
 //   worker, over the whole pool.
+// A coded kind (AprilTag, ArUco): found anywhere, by its number.
+export const isTagKind = (kind) => kind === 'apriltag' || kind === 'aruco'
+// What a run says it looks for.
+const tagLabel = (settings) => (settings.kind === 'aruco' ? `ArUco ${settings.arucoDict.toUpperCase()}` : 'AprilTag')
+
 export function useDetectTargets() {
   const gcpsStore = useGcpsStore()
   const imagesStore = useImagesStore()
@@ -35,7 +40,7 @@ export function useDetectTargets() {
   const { log } = useLog()
 
   async function plan(settings) {
-    if (settings.kind === 'apriltag') return planTags()
+    if (isTagKind(settings.kind)) return planTags()
     const cams = recon.mainSparseCloud?.cameras
     if (!cams?.size) return { photos: [], counts: { predictions: 0, photos: 0, gcps: 0, unplaced: 0, halfPx: null } }
     const frameModel = makeFrameModelResolver({ summary: toRaw(recon.summary), sensors: sensors.sensors })
@@ -126,10 +131,12 @@ export function useDetectTargets() {
     const added = [],
       unknown = new Set()
     const t0 = performance.now()
-    onProgress?.(0, n, `Looking for AprilTags in ${pluralize(n, 'photo')}…`)
+    const label = tagLabel(settings)
+    const dict = settings.kind === 'aruco' ? settings.arucoDict : null
+    onProgress?.(0, n, `Looking for ${label} markers in ${pluralize(n, 'photo')}…`)
     await mapConcurrent(planned.photos, workers, async ({ img }) => {
       await imagesStore.whenComputeReady(img)
-      const { tags } = await detectTagsInPhoto(computeSourceOf(img))
+      const { tags } = await detectTagsInPhoto(computeSourceOf(img), dict)
       for (const t of tags) {
         let g = gcpForTag(t.id)
         if (!g && !settings.addMarkers) {
@@ -149,10 +156,10 @@ export function useDetectTargets() {
         })
         found++
       }
-      onProgress?.(++done, n, `Looking for AprilTags… ${done} of ${n}`)
+      onProgress?.(++done, n, `Looking for ${label} markers… ${done} of ${n}`)
     })
     log(
-      `Detect targets: ${pluralize(found, 'AprilTag mark')} placed in ${pluralize(n, 'photo')} on ` +
+      `Detect targets: ${pluralize(found, `${label} mark`)} placed in ${pluralize(n, 'photo')} on ` +
         `${pluralize(workers, 'worker')} in ${((performance.now() - t0) / 1000).toFixed(1)} s` +
         (added.length ? `; new markers ${added.join(', ')}` : '') +
         (unknown.size ? `; tags no GCP is named after: ${[...unknown].sort((a, b) => a - b).join(', ')}` : '') +
@@ -164,7 +171,7 @@ export function useDetectTargets() {
   }
 
   async function run(settings, planned, onProgress) {
-    if (settings.kind === 'apriltag') return runTags(settings, planned, onProgress)
+    if (isTagKind(settings.kind)) return runTags(settings, planned, onProgress)
     let found = 0,
       tried = 0,
       done = 0

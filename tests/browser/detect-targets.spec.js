@@ -165,6 +165,59 @@ test('reads AprilTags anywhere in a photo, and runs from the dialog', async ({ p
   expect(errors).toEqual([])
 })
 
+// ArUco markers in the worker: two 5X5_100 markers (6 + 2 cells across with the white
+// border) on a drawn photo, one turned, read with the dictionary chosen in the dialog.
+test('reads ArUco markers of the chosen dictionary', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough')
+  test.setTimeout(120_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await openFixture(page)
+  const found = await page.evaluate(async () => {
+    const { arucoFamily } = await import('/src/core/sfm/tags/aruco.js')
+    const { detectTagsInPhoto } = await import('/src/workers/computeClient.js')
+    const fam = arucoFamily('5x5_100')
+    const T = fam.WIDTH_AT_BORDER + 2
+    const c = new OffscreenCanvas(3000, 2000)
+    const ctx = c.getContext('2d')
+    ctx.fillStyle = 'rgb(120,120,120)'
+    ctx.fillRect(0, 0, 3000, 2000)
+    const draw = (id, cx, cy, cell, a) => {
+      ctx.setTransform(Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), cx, cy)
+      for (let y = 0; y < T; y++)
+        for (let x = 0; x < T; x++) {
+          let white = x === 0 || y === 0 || x === T - 1 || y === T - 1
+          const i = [...Array(fam.NBITS).keys()].find((k) => fam.BIT_X[k] + 1 === x && fam.BIT_Y[k] + 1 === y)
+          if (i !== undefined) white = Math.floor(fam.CODES[id] / 2 ** (fam.NBITS - 1 - i)) % 2 === 1
+          ctx.fillStyle = white ? 'rgb(235,235,235)' : 'rgb(15,15,15)'
+          ctx.fillRect((x - T / 2) * cell, (y - T / 2) * cell, cell + 0.5, cell + 0.5)
+        }
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+    }
+    draw(42, 900, 700, 8, 0.4)
+    draw(99, 2100.25, 1300.75, 6, -0.9)
+    const url = URL.createObjectURL(await c.convertToBlob({ type: 'image/png' }))
+    const aruco = (await detectTagsInPhoto(url, '5x5_100')).tags
+    const april = (await detectTagsInPhoto(url)).tags
+    URL.revokeObjectURL(url)
+    return { aruco, april }
+  })
+  const at = Object.fromEntries(found.aruco.map((t) => [t.id, t]))
+  expect(found.aruco.map((t) => t.id)).toEqual([42, 99])
+  expect(Math.hypot(at[42].x - 899.5, at[42].y - 699.5)).toBeLessThan(0.3)
+  expect(Math.hypot(at[99].x - 2099.75, at[99].y - 1300.25)).toBeLessThan(0.3)
+  expect(found.april).toEqual([])
+
+  await page.getByRole('button', { name: 'Tools', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Images', exact: true }).click()
+  await page.getByRole('menuitem', { name: /Detect targets/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'Detect Targets' })
+  await dialog.getByLabel('Target type').selectOption('aruco')
+  await dialog.getByLabel('Dictionary').selectOption('6x6_250')
+  await expect(dialog).toContainText('ArUco 6X6_250 markers')
+  expect(errors).toEqual([])
+})
+
 // Reviewing detected marks in the GCP's marks view: ✓ accepts one (it loses its flag),
 // Accept in the header takes the rest.
 test('accepts detected marks in the GCP view', async ({ page, browserName }) => {

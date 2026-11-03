@@ -33,4 +33,14 @@ describe('detectTargetsEffects', () => {
     expect(off.targets).toMatch(/no GCPs yet/)
     expect(off.marks).toMatch(/is left out\.$/)
   })
+  it('names the ArUco dictionary', () => {
+    const e = detectTargetsEffects(
+      { ...s, kind: 'aruco', arucoDict: '5x5_100', addMarkers: true },
+      { photos: 4, gcps: 2, tagged: 2 },
+    )
+    expect(e.targets).toBe(
+      'ArUco 5X5_100 markers: a GCP stands for the tag with the number in its name (2 of 2 GCPs have one).',
+    )
+    expect(e.search).toMatch(/^Every tag in each of 4 photos/)
+  })
 })

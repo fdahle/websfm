@@ -8,10 +8,11 @@ import SettingsStep from '../ui/SettingsStep.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { TARGET_DEFAULTS } from '../../../core/defaults.user.js'
 import { detectTargetsEffects } from '../../../core/stepEffects/detectTargets.js'
-import { useDetectTargets } from '../../../composables/useDetectTargets.js'
+import { useDetectTargets, isTagKind } from '../../../composables/useDetectTargets.js'
+import { ARUCO_DICTIONARIES } from '../../../core/sfm/tags/aruco.js'
 
 // Detect Targets (Tools ▸ Images ▾): place the marks of GCPs with checkerboard mats where
-// the model expects them, or of AprilTags anywhere (composables/useDetectTargets.js). The
+// the model expects them, or of AprilTags or ArUco markers anywhere (composables/useDetectTargets.js). The
 // plan (which GCP is looked for in which photo) is made here, live, so the effect lines
 // count the run.
 const emit = defineEmits(['close', 'run'])
@@ -32,7 +33,7 @@ watch(
   { immediate: true },
 )
 const effects = computed(() => detectTargetsEffects(settings.value, planned.value?.counts ?? {}))
-const tags = computed(() => settings.value.kind === 'apriltag')
+const tags = computed(() => isTagKind(settings.value.kind))
 const valid = computed(
   () =>
     tags.value ||
@@ -65,6 +66,13 @@ function run() {
         <select id="dt-kind" v-model="settings.kind" class="field-select">
           <option value="checker">Checker mat</option>
           <option value="apriltag">AprilTag 36h11</option>
+          <option value="aruco">ArUco</option>
+        </select>
+      </SettingsField>
+      <SettingsField v-if="settings.kind === 'aruco'" label-for="dt-dict">
+        <template #label><FieldHelp op="detect-targets" param="arucoDict">Dictionary</FieldHelp></template>
+        <select id="dt-dict" v-model="settings.arucoDict" class="field-select">
+          <option v-for="d in ARUCO_DICTIONARIES" :key="d" :value="d">{{ d.toUpperCase() }}</option>
         </select>
       </SettingsField>
       <SettingsField v-if="!tags" label-for="dt-size" unit="m">

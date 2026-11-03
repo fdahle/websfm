@@ -1,4 +1,4 @@
-// AprilTag tag36h11 targets in a grey image (Tools ▸ Images ▸ Detect targets, plan-after-
+// AprilTag tag36h11 or ArUco targets in a grey image (Tools ▸ Images ▸ Detect targets, plan-after-
 // 0.7 ▸ TGT): each tag's id and centre, without knowing where to look. Pure: grey in,
 // detections out (the worker reads the photo, core/sfm/tags/tag36h11.js holds the codes).
 //
@@ -15,7 +15,13 @@
 // detectTags → [{ id, hamming, score, center: { x, y }, corners: [{ x, y } ×4, the tag's
 //   top-left, top-right, bottom-right, bottom-left], contrast }]
 
-import * as TAG from './tags/tag36h11.js'
+import * as TAG36H11 from './tags/tag36h11.js'
+import { hamming } from './tags/familyDistance.js'
+
+// The family a search reads unless told otherwise. A family is { NAME, WIDTH_AT_BORDER
+// (the black box, in cells), NBITS, MIN_HAMMING, BIT_X, BIT_Y, CODES, DARK_MAX? }:
+// tags/tag36h11.js, or an ArUco dictionary (tags/aruco.js arucoFamily).
+export const DEFAULT_FAMILY = TAG36H11
 
 // Integral image (sums over [0, x) × [0, y)), (w + 1) × (h + 1).
 function integral({ data, width, height }) {
@@ -260,20 +266,8 @@ function squareToQuad(q) {
   }
 }
 
-const popcount = (v) => {
-  let n = 0
-  while (v) {
-    n += v & 1
-    v >>>= 1
-  }
-  return n
-}
-// Hamming distance of two 36-bit codes held as Numbers.
-const hamming = (a, b) =>
-  popcount((a % 2 ** 18) ^ (b % 2 ** 18)) + popcount(Math.floor(a / 2 ** 18) ^ Math.floor(b / 2 ** 18))
-
 // The closest code to `code` in the family: { id, hamming }.
-function closest(code) {
+function closest(code, TAG) {
   let id = -1,
     best = 99
   for (let i = 0; i < TAG.CODES.length; i++) {
@@ -285,7 +279,7 @@ function closest(code) {
 }
 
 // Read and decode the tag in `corners` (clockwise from any corner).
-function decode(gray, corners, maxHamming) {
+function decode(gray, corners, maxHamming, TAG) {
   const W = TAG.WIDTH_AT_BORDER
   const H = squareToQuad(corners)
   const at = (cx, cy) => {
@@ -344,17 +338,25 @@ function decode(gray, corners, maxHamming) {
     }
     let code = 0
     for (let i = 0; i < TAG.NBITS; i++) code = code * 2 + cell(TAG.BIT_X[i], TAG.BIT_Y[i])
-    const m = closest(code)
+    const m = closest(code, TAG)
     if (!best || m.hamming < best.hamming) best = { ...m, r }
   }
   if (best.hamming > maxHamming) return null
   // Corners in the tag's own order: rotating the reading by r moves its top-left.
   const order = [0, 1, 2, 3].map((k) => corners[(k + 4 - best.r) % 4])
   const center = H(0.5, 0.5)
-  return { id: best.id, hamming: best.hamming, score: tagScore(best.hamming), center, corners: order, contrast }
+  return { id: best.id, hamming: best.hamming, score: tagScore(best.hamming, TAG), center, corners: order, contrast }
 }
 
-export function detectTags(gray, { minSide = 16, maxSide = Infinity, maxHamming = 2, window = null } = {}) {
+// `family`: the tags to read (DEFAULT_FAMILY, tag36h11). `maxHamming` is capped below half
+// the family's distance, so a misread can never become another code.
+export function detectTags(
+  gray,
+  { minSide = 16, maxSide = Infinity, maxHamming = 2, window = null, family = DEFAULT_FAMILY } = {},
+) {
+  const TAG = family
+  maxHamming = Math.min(maxHamming, Math.floor((TAG.MIN_HAMMING - 1) / 2))
+  const darkMax = TAG.DARK_MAX ?? 0.85
   const { width, height } = gray
   const r = window ?? Math.max(7, Math.round(minSide / 2))
   const mask = adaptiveThreshold(gray, r)
@@ -365,7 +367,7 @@ export function detectTags(gray, { minSide = 16, maxSide = Infinity, maxHamming 
     if (w < minSide || h < minSide || w > maxSide || h > maxSide) continue
     if (c.x0 <= 1 || c.y0 <= 1 || c.x1 >= width - 2 || c.y1 >= height - 2) continue
     // A ring: much less than the whole box is dark.
-    if (c.n > 0.85 * w * h || c.n < 0.2 * w * h) continue
+    if (c.n > darkMax * w * h || c.n < 0.2 * w * h) continue
     const edge = []
     for (const [y, [x0, x1]] of c.rows) edge.push({ x: x0, y }, { x: x1, y })
     const quad = hullQuad(hull(edge))
@@ -381,7 +383,7 @@ export function detectTags(gray, { minSide = 16, maxSide = Infinity, maxHamming 
     if (corners.some((p) => !p || !Number.isFinite(p.x))) continue
     // Each refined corner close to its rough one: a wrong line would throw it off.
     if (corners.some((p, i) => Math.hypot(p.x - quad[i].x, p.y - quad[i].y) > Math.max(3, reach * 2))) continue
-    const tag = decode(gray, corners, maxHamming)
+    const tag = decode(gray, corners, maxHamming, TAG)
     if (!tag) continue
     const prev = out.get(tag.id)
     if (!prev || tag.hamming < prev.hamming) out.set(tag.id, tag)
@@ -391,7 +393,10 @@ export function detectTags(gray, { minSide = 16, maxSide = Infinity, maxHamming 
 
 // A tag's score, 0–1: the share of the margin to the nearest other code still left after
 // its wrong bits (1 read cleanly, 0.64 with 2 of tag36h11's 11 used up).
-export const tagScore = (hamming) => Math.round((100 * (TAG.MIN_HAMMING - 2 * hamming)) / TAG.MIN_HAMMING) / 100
+export function tagScore(hamming, family = DEFAULT_FAMILY) {
+  const d = family?.MIN_HAMMING ?? DEFAULT_FAMILY.MIN_HAMMING
+  return Math.round((100 * (d - 2 * hamming)) / d) / 100
+}
 
 // The native tiles a photo is searched in: [{ x0, y0, w, h, core: { x0, y0, x1, y1 } }].
 // A tag counts in the tile whose core (the tile less half the overlap on each inner side)

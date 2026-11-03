@@ -124,6 +124,17 @@ export const THIRD_PARTY = [
           'OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.',
       },
       {
+        name: 'OpenCV ArUco dictionaries (core/sfm/tags/aruco.js)',
+        version: '4.x',
+        license: 'Apache-2.0',
+        url: 'https://github.com/opencv/opencv',
+        notice:
+          'The DICT_4X4, DICT_5X5 and DICT_6X6 codes, from modules/objdetect/src/aruco/' +
+          'predefined_dictionaries.hpp. Copyright (C) 2000-2022, Intel Corporation, all rights reserved; ' +
+          'and others. Licensed under the Apache License, Version 2.0; a copy is at ' +
+          'https://www.apache.org/licenses/LICENSE-2.0',
+      },
+      {
         name: 'MicaSense imageprocessing radiometric model (core/radiometry/micasense.js)',
         version: 'master, 2024',
         license: 'MIT',
