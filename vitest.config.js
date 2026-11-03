@@ -29,6 +29,8 @@ export default defineConfig({
       'src/stores/**/*.test.{js,ts}',
       'src/composables/**/*.test.{js,ts}',
       'src/components/**/*.test.{js,ts}',
+      // Worker ops whose browser globals are Node's too (fetch, Blob, CompressionStream).
+      'src/workers/**/*.test.{js,ts}',
     ],
   },
 })

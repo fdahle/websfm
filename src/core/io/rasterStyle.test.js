@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { reflectanceStyle } from '../products/reflectanceStyle.js'
 import {
+  bandForRole,
+  indexBands,
   needsStyling,
   defaultRasterStyle,
   resolveRasterStyle,
@@ -262,5 +265,23 @@ describe('styleStamp', () => {
 
   it('is stable for an unstyled raster (DEM / 8-bit fast path)', () => {
     expect(styleStamp(null)).toBe(styleStamp(null))
+  })
+})
+
+describe('band roles', () => {
+  const names = ['Blue', 'Green', 'Red', 'NIR', 'Red edge', 'Panchro', 'LWIR (°C)']
+  it("finds an index's bands by name, red apart from red edge", () => {
+    expect(bandForRole(names, 'Red')).toBe(2)
+    expect(bandForRole(names, 'Red edge')).toBe(4)
+    expect(indexBands(names, 'ndvi')).toEqual({ bandA: 3, bandB2: 2 })
+    expect(indexBands(names, 'ndre')).toEqual({ bandA: 3, bandB2: 4 })
+    expect(indexBands(names, 'gndvi')).toEqual({ bandA: 3, bandB2: 1 })
+    expect(indexBands(names, 'ndsi')).toBeNull()
+    expect(indexBands(null, 'ndvi')).toBeNull()
+  })
+  it('opens a reflectance map on NDVI, true colour, or grey', () => {
+    expect(reflectanceStyle(names)).toEqual({ mode: 'index', index: 'ndvi', bandA: 3, bandB2: 2, ramp: 'rdylgn' })
+    expect(reflectanceStyle(['Blue', 'Green', 'Red'])).toMatchObject({ mode: 'rgb', bandR: 2, bandG: 1, bandB: 0 })
+    expect(reflectanceStyle(['LWIR (°C)'])).toMatchObject({ mode: 'gray', band: 0 })
   })
 })

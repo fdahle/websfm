@@ -216,6 +216,8 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     'mesh-measure',
     // Products ▾
     'dem-contours',
+    // Reconstruct ▸ Products ▸ Reflectance map (a dialog, opened like the tools)
+    'gen-reflectance',
     'dem-derivatives',
     'coregister-dem',
     'clip-raster',

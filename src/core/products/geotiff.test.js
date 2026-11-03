@@ -9,6 +9,7 @@ import {
   geoKeysForEpsg,
   createCogBuilder,
   cogRawBytes,
+  gdalBandNames,
   assembleStripTiff,
 } from './geotiff.js'
 
@@ -781,5 +782,33 @@ describe('BigTIFF and short ASCII values', () => {
         else expect(image.getGDALNoData()).toBe(want)
       }
     }
+  })
+})
+
+describe('band names', () => {
+  it('names each band of a float COG in GDAL_METADATA, as GDAL and QGIS read it', async () => {
+    const builder = createCogBuilder({
+      width: 8,
+      height: 4,
+      tileSize: 16,
+      ArrayType: Float32Array,
+      samples: [0, 1, 2].map(() => ({ bits: 32, format: 3 })),
+      photometric: 1,
+      gdalNoData: 'nan',
+      gdalMetadata: gdalBandNames(['Blue', 'Red edge', 'LWIR <°C>']),
+      pixelScale: [1, 1, 0],
+      tiepoint: [0, 0, 0, 0, 4, 0],
+      geoKeys: geoKeysForEpsg(32632, false),
+    })
+    await builder.addBlock({ col0: 0, row0: 0, width: 8, height: 4, data: new Float32Array(96).map((_, i) => i / 10) })
+    const { parts } = await builder.finish()
+    const bytes = new Uint8Array(await new Blob(parts).arrayBuffer())
+    const image = await (await fromArrayBuffer(bytes.buffer)).getImage()
+    expect(image.getSamplesPerPixel()).toBe(3)
+    const md = image.fileDirectory.GDAL_METADATA ?? image.fileDirectory.getValue?.('GDAL_METADATA')
+    expect(md).toContain('<Item name="DESCRIPTION" sample="1" role="description">Red edge</Item>')
+    expect(md).toContain('LWIR &lt;°C&gt;')
+    const [, b1] = await image.readRasters()
+    expect(b1[9]).toBeCloseTo(2.8, 5) // pixel 9, band 1: index 9·3 + 1 = 28
   })
 })

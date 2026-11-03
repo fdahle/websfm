@@ -78,6 +78,8 @@ export function useRibbonState({
     footprintCount: footprintCount.value,
     sensorCount: sensors.value.length,
     filmSensorCount: filmSensors.value.length,
+    // Band photos of a multispectral camera (Products ▸ Reflectance map).
+    bandImageCount: images.value.filter((i) => i.meta?.band).length,
     fiducialImageCount: images.value.filter((i) => i.fiducialDetections?.length).length,
     fiducialMarkSensorCount: sensors.value.filter((s) => s.fiducialCalibration?.marks?.length).length,
     sparseReady: sparseReady.value,

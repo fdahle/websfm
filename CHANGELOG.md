@@ -19,6 +19,17 @@ Notable changes to websfm. The format follows
   0.15–0.2° wrong were solved to the truth within 0.01° (plus the 0.048° a 5 cm lever
   arm at 60 m turns into), and the thermal band placed within 5 cm. Not yet run on a
   real multispectral flight.
+- **Reflectance maps for NDVI.** Reconstruct ▸ Products ▸ **Reflectance** puts every band
+  of a MicaSense camera onto the DEM in reflectance, calibrated with the panel photos, the
+  sun sensor or both, and adds it to Reference Data, shown as NDVI; Style bands… picks
+  any band, a composite or NDVI, NDRE and GNDVI by the bands' names. Each cell takes the
+  capture that sees it most from above, every band read from that capture's raw values
+  through the camera's own radiometric model (black level, gain, exposure, vignetting),
+  ported from MicaSense's MIT-licensed processing code; a thermal band is in °C. The
+  GeoTIFF has one 32-bit band per lens, named as QGIS and GDAL read them. On MicaSense's
+  sample captures the panel radiance and irradiance of all five RedEdge-MX bands come
+  within 0.1 % of MicaSense's own test values, and the sun-sensor irradiance of the Altum
+  and the 10-band RedEdge-MX Dual exactly. Not yet checked on a full flight.
 - **GCP targets marked for you.** Tools ▸ Images ▸ **Detect targets…** finds the centre of
   each GCP's checker mat where the model expects it, or of every AprilTag 36h11 tag in
   every photo, and places the mark, flagged as detected with a score, for you to check in

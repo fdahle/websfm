@@ -19,12 +19,38 @@ export const STRETCH_MODES = ['percentile', 'minmax', 'manual']
 // — nothing in the file says which plane is NIR.
 export const INDEX_PRESETS = {
   ndvi: { label: 'NDVI — vegetation', roleA: 'NIR', roleB: 'Red' },
+  ndre: { label: 'NDRE — canopy chlorophyll', roleA: 'NIR', roleB: 'Red edge' },
+  gndvi: { label: 'GNDVI — green NDVI', roleA: 'NIR', roleB: 'Green' },
   ndwi: { label: 'NDWI — water', roleA: 'Green', roleB: 'NIR' },
   ndsi: { label: 'NDSI — snow / ice', roleA: 'Green', roleB: 'SWIR' },
   custom: { label: 'Custom — (A−B) / (A+B)', roleA: 'A', roleB: 'B' },
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+
+// The band a role names, among band names such as a reflectance map's ("Blue", "Red
+// edge", "NIR", "LWIR (°C)"), or −1. Red must not match "Red edge".
+const ROLE_PATTERNS = {
+  'NIR': /^(nir|near[ -]?infra-?red)\b/i,
+  'Red': /^red(?![ -]?edge)\b/i,
+  'Red edge': /^red[ -]?edge\b/i,
+  'Green': /^green\b/i,
+  'Blue': /^blue\b/i,
+  'SWIR': /^swir\b/i,
+}
+export function bandForRole(names, role) {
+  const re = ROLE_PATTERNS[role]
+  return re && names ? names.findIndex((n) => re.test(String(n).trim())) : -1
+}
+
+// An index preset's two bands from the raster's band names, or null when a role has no band.
+export function indexBands(names, index) {
+  const p = INDEX_PRESETS[index]
+  if (!p) return null
+  const a = bandForRole(names, p.roleA),
+    b = bandForRole(names, p.roleB)
+  return a >= 0 && b >= 0 ? { bandA: a, bandB2: b } : null
+}
 
 // Does this raster need styling at all, or can the legacy `readRGB()` fast path
 // handle it? An 8-bit 1–3 band image is already display-ready and must keep

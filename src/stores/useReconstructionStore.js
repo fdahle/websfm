@@ -2,6 +2,7 @@ import { isStreamed } from '../core/lod/streamed.js'
 import { createFrameResolver } from './reconstruction/frames.js'
 import { createSparseRun } from './reconstruction/sparseRun.js'
 import { createProductRuns } from './reconstruction/productRuns.js'
+import { createReflectanceRun } from './reconstruction/reflectanceRun.js'
 import { createCloudEdits } from './reconstruction/cloudEdits.js'
 import { createMeshTexture } from './reconstruction/meshTexture.js'
 import { createCloudLod } from './reconstruction/cloudLod.js'
@@ -1165,6 +1166,16 @@ export const useReconstructionStore = registerProjectStore(
       validGeoref,
       clouds,
     })
+    // Products ▸ Reflectance map (reconstruction/reflectanceRun.js).
+    const { generateReflectanceMap } = createReflectanceRun({
+      dem,
+      frameModelFor,
+      images,
+      log,
+      mainSparseCloud,
+      projects,
+      reconStatus,
+    })
 
     // Anything built from the main model's cameras: what Add to the model ▸ Existing
     // cameras ▸ Auto keeps fixed (core/sfm/extendModel.js resolveExistingCameras).
@@ -1517,6 +1528,7 @@ export const useReconstructionStore = registerProjectStore(
       gcpEstimate,
       generateDem,
       generateOrtho,
+      generateReflectanceMap,
       estimateRasterSize,
       generateMesh,
       reconstruct,

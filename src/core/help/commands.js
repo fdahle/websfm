@@ -66,6 +66,10 @@ export const NEED_CHECKS = {
   selection: { ok: (s) => !!s.hasSelection, reason: 'Select an image first' },
   sensors: { ok: (s) => s.sensorCount > 0, reason: 'No sensors available' },
   filmSensor: { ok: (s) => s.filmSensorCount > 0, reason: 'Set at least one sensor to Film first' },
+  bands: {
+    ok: (s) => s.bandImageCount > 0,
+    reason: 'Import the photos of a multispectral camera (MicaSense RedEdge or Altum) first',
+  },
   fiducials: { ok: (s) => s.fiducialImageCount > 0, reason: 'Detect or mark fiducials first' },
   fiducialMarks: {
     ok: (s) => s.fiducialMarkSensorCount > 0,
@@ -130,6 +134,7 @@ export const CONSOLE_NAMES = {
   'gen-dem': ['dem'],
   'gen-ortho': ['ortho'],
   'gen-mesh': ['mesh'],
+  'gen-reflectance': ['reflectance', 'reflectance map', 'multispectral'],
   'find-gcps': ['find gcps', 'auto-gcps'],
   'georeference': ['georeference', 'georef'],
   'scale-bars': ['scale bars', 'scalebars'],

@@ -38,6 +38,14 @@ const GEN_ORTHO = {
   needs: ['imagesReady', 'depthMaps', 'surface'],
   aerialOnly: true,
 }
+// A multispectral camera's bands on the DEM (stores/reconstruction/reflectanceRun.js).
+const GEN_REFLECTANCE = {
+  id: 'gen-reflectance',
+  label: 'Reflect-\nance',
+  icon: 'layers',
+  needs: ['imagesReady', 'sparse', 'dem', 'bands'],
+  aerialOnly: true,
+}
 const EXPORT_DEM = { id: 'export-dem', label: 'DEM', icon: 'dem', needs: ['dem'], aerialOnly: true }
 const EXPORT_ORTHO = { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needs: ['ortho'], aerialOnly: true }
 
@@ -288,7 +296,12 @@ export const TABS = [
       },
       {
         label: 'Products',
-        commands: [GEN_DEM, GEN_ORTHO, { id: 'gen-mesh', label: 'Mesh', icon: 'cube', needs: ['dense'] }],
+        commands: [
+          GEN_DEM,
+          GEN_ORTHO,
+          GEN_REFLECTANCE,
+          { id: 'gen-mesh', label: 'Mesh', icon: 'cube', needs: ['dense'] },
+        ],
       },
     ],
   },

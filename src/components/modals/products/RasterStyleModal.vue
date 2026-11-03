@@ -1,6 +1,12 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { STRETCH_MODES, INDEX_PRESETS, resolveRasterStyle, describeStyle } from '../../../core/io/rasterStyle.js'
+import {
+  STRETCH_MODES,
+  INDEX_PRESETS,
+  resolveRasterStyle,
+  describeStyle,
+  indexBands,
+} from '../../../core/io/rasterStyle.js'
 import { RAMPS } from '../../../core/products/colormap.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import ModalShell from '../ui/ModalShell.vue'
@@ -19,7 +25,11 @@ const emit = defineEmits(['close', 'apply'])
 
 const bandCount = computed(() => Math.max(1, props.raster.bands || 1))
 const bandOptions = computed(() =>
-  Array.from({ length: bandCount.value }, (_, i) => ({ value: i, label: `Band ${i + 1}` })),
+  Array.from({ length: bandCount.value }, (_, i) => ({
+    value: i,
+    // A raster that names its bands (a reflectance map) shows the names.
+    label: props.raster.bandNames?.[i] ? `Band ${i + 1} · ${props.raster.bandNames[i]}` : `Band ${i + 1}`,
+  })),
 )
 
 // Seed from the raster's current style, normalised against its band count.
@@ -33,6 +43,14 @@ watch(
 
 const isIndex = computed(() => s.value.mode === 'index')
 const preset = computed(() => INDEX_PRESETS[s.value.index] || INDEX_PRESETS.ndvi)
+// With named bands, picking an index picks its bands too.
+watch(
+  () => s.value.index,
+  (index) => {
+    const bands = indexBands(props.raster.bandNames, index)
+    if (bands) Object.assign(s.value, bands)
+  },
+)
 const rampNames = Object.keys(RAMPS)
 
 // Manual limits are per channel, and only meaningful once the user picks

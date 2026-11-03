@@ -587,6 +587,7 @@ function layoutCog(plan, byteCounts, tileBuffers, compression, big) {
     tiepoint,
     geoKeys,
     gdalNoData,
+    gdalMetadata = null,
     tileSize,
   } = plan
   const even = (n) => (n % 2 ? n + 1 : n)
@@ -639,6 +640,8 @@ function layoutCog(plan, byteCounts, tileBuffers, compression, big) {
       for (const k of geoKeys) dir.push(k[0], k[1], k[2], k[3])
       shorts(34735, dir)
     }
+    // GDAL_METADATA (band names and the like) on the full-resolution IFD.
+    if (li === 0 && gdalMetadata) field(42112, TYPE.ASCII, new TextEncoder().encode(gdalMetadata + '\0'))
     if (gdalNoData != null) field(42113, TYPE.ASCII, new TextEncoder().encode(String(gdalNoData) + '\0'))
     return { entries, offsetsEntry }
   })
@@ -714,7 +717,8 @@ export function planCogFromTiles({ width, height, tileSize = 256, maxOverviews =
 }
 
 // spec: planCog's, minus `data`, plus `ArrayType` (the samples' TypedArray constructor,
-// default Uint8Array). options:
+// default Uint8Array) and `gdalMetadata` (a GDAL_METADATA XML string, gdalBandNames).
+// options:
 //   blockSize    the block grid, a multiple of tileSize (default 2048)
 //   compress     async (Uint8Array) → Uint8Array | { length, part } — one tile's DEFLATE
 //                (zlib) stream; null = uncompressed
@@ -733,6 +737,7 @@ export function createCogBuilder(spec, { blockSize = 2048, compress = null, prev
     tiepoint,
     geoKeys,
     gdalNoData,
+    gdalMetadata = null,
     tileSize = 256,
     maxOverviews = Infinity,
     ArrayType = Uint8Array,
@@ -835,6 +840,7 @@ export function createCogBuilder(spec, { blockSize = 2048, compress = null, prev
       tiepoint,
       geoKeys,
       gdalNoData,
+      gdalMetadata,
       tileSize,
     }
     const parts = assembleCog(plan, buffers, { compression: compress ? 8 : 1, parts: true })
@@ -846,6 +852,16 @@ export function createCogBuilder(spec, { blockSize = 2048, compress = null, prev
 
 // Upper bound on a COG's bytes before compression: every level's padded tiles plus
 // headers — what decides whether the classic-TIFF 4 GiB offsets can hold it.
+// GDAL_METADATA naming each band (GDAL, QGIS: the band's description).
+export function gdalBandNames(names) {
+  const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return (
+    '<GDALMetadata>' +
+    names.map((n, i) => `<Item name="DESCRIPTION" sample="${i}" role="description">${esc(n)}</Item>`).join('') +
+    '</GDALMetadata>'
+  )
+}
+
 export function cogRawBytes({ width, height, tileSize = 256, bytesPerPixel }) {
   const { tileCounts } = planCogFromTiles({ width, height, tileSize })
   return tileCounts.reduce((n, c) => n + c, 0) * tileSize * tileSize * bytesPerPixel + 65536

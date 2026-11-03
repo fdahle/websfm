@@ -130,6 +130,13 @@ export const REFERENCES = {
     venue: 'ISPRS Annals of the Photogrammetry, Remote Sensing and Spatial Information Sciences III-3, 139–146',
     doi: '10.5194/isprs-annals-III-3-139-2016',
   },
+  micasense2017: {
+    authors: ['MicaSense'],
+    year: 2017,
+    title: 'MicaSense RedEdge and Altum image processing tutorials (imageprocessing)',
+    venue: 'GitHub, MIT licence',
+    url: 'https://github.com/micasense/imageprocessing',
+  },
   olson2011: {
     authors: ['Edwin Olson'],
     year: 2011,

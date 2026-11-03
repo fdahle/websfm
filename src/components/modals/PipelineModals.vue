@@ -15,11 +15,13 @@ import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
 import { useAppContext } from '../../appContext.js'
 import { tilesSubject } from '../../core/products/tiles3d.js'
 import { findRigs } from '../../core/sensors/rig.js'
+import { dlsIrradiance } from '../../core/radiometry/micasense.js'
 import AlignIcpModal from './cloud/AlignIcpModal.vue'
 import CleanMeshModal from './mesh/CleanMeshModal.vue'
 import ClipRasterModal from './products/ClipRasterModal.vue'
 import CloudDistanceModal from './cloud/CloudDistanceModal.vue'
 import ContoursModal from './products/ContoursModal.vue'
+import ReflectanceMapModal from './products/ReflectanceMapModal.vue'
 import CoregisterDemModal from './products/CoregisterDemModal.vue'
 import CropCloudModal from './cloud/CropCloudModal.vue'
 import DecimateMeshModal from './mesh/DecimateMeshModal.vue'
@@ -99,6 +101,21 @@ const { sensors } = storeToRefs(useSensorsStore())
 const { matchStore } = storeToRefs(useMatchesStore())
 // Images with a capture time: Sparse Model ▸ Rolling shutter takes the motion from them.
 const timedImages = computed(() => images.value.filter((im) => im.meta?.dateTime).length)
+// Products ▸ Reflectance map: the project's largest rig, with what calibrates it.
+const rigSummary = computed(() => {
+  const rig = findRigs(images.value).sort((a, b) => b.captures.length - a.captures.length)[0]
+  if (!rig) return null
+  const ids = new Set(rig.captures.map((c) => c.id))
+  const inRig = images.value.filter((im) => ids.has(im.meta?.band?.captureId))
+  return {
+    label: rig.label,
+    bands: rig.bands.length,
+    captures: rig.captures.length,
+    panelCaptures: rig.captures.filter((c) => c.panel).length,
+    dls: inRig.some((im) => dlsIrradiance(im.meta.band, im.meta.model) != null),
+    thermal: rig.bands.some((b) => b.thermal),
+  }
+})
 // Sparse Model ▸ Camera rig: the multispectral rigs among the enabled photos.
 const cameraRigs = computed(() =>
   findRigs(images.value.filter(isImageEnabled)).map((r) => ({
@@ -254,6 +271,7 @@ const {
   onOptimizeCamerasRun,
   onOrthoRun,
   onProductToolRun,
+  onReflectanceRun,
   onCoregisterRun,
   onReconstructRun,
   onSectionRun,
@@ -639,6 +657,13 @@ const exportingFootprints = computed(
       :initial-id="toolInitialId"
       :frame-signature="reconstructionStore.currentFrameSignature"
       @close="toolModal = null"
+    />
+    <ReflectanceMapModal
+      v-else-if="toolModal === 'gen-reflectance'"
+      :rig="rigSummary"
+      :dem="dem"
+      @close="toolModal = null"
+      @run="onReflectanceRun"
     />
     <ContoursModal
       v-else-if="toolModal === 'dem-contours'"

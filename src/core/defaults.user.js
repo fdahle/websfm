@@ -235,6 +235,17 @@ export const RECONSTRUCT_DEFAULTS = {
   cameraRig: 'on',
 }
 
+// Products ▸ Reflectance map (core/products/reflectanceMap.js): a multispectral camera's
+// bands on the DEM, in reflectance.
+export const REFLECTANCE_DEFAULTS = {
+  // 'auto' | 'panel+dls' | 'panel' | 'dls' | 'radiance': how radiance becomes
+  // reflectance. Auto takes the panel and the sun sensor together where both exist
+  // (the panel sets the scale, the sun sensor follows the light through the flight).
+  calibration: 'auto',
+  // Cell size in the DEM's units; 0 = the reference band's own ground pixel.
+  gsd: 0,
+}
+
 // Quality presets (WS5): per-modal deltas OVER the defaults above, so `medium` ≡ the
 // defaults (empty delta) and the single-source-of-truth contract is preserved. A modal's
 // PresetCards applies `{ ...DEFAULTS, ...PRESET[id] }`; editing any field afterwards

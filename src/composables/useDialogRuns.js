@@ -296,6 +296,27 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     }
   }
 
+  // Products ▸ Reflectance map: behind the progress bar; the map lands in Reference Data.
+  async function onReflectanceRun(settings) {
+    toolModal.value = null
+    exportProgress.open('Building Reflectance Map', 1, () => terminateAll('reflectance map cancelled'), {
+      unit: 'blocks',
+    })
+    let record = null
+    try {
+      record = await reconstructionStore.generateReflectanceMap(settings, (d, t, label) =>
+        exportProgress.report(d, t, label),
+      )
+    } finally {
+      await exportProgress.close()
+    }
+    if (record)
+      showToast(`Added "${record.name}"`, {
+        detail: 'Reference Data ▸ Style bands… shows any band, a composite or an index such as NDVI.',
+        ms: 8000,
+      })
+  }
+
   // Co-register DEM: close the dialog, co-register, and say how far the DEM moved.
   async function onCoregisterRun(settings) {
     toolModal.value = null
@@ -341,5 +362,6 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     onToolEditRun,
     onSectionRun,
     onProductToolRun,
+    onReflectanceRun,
   }
 }

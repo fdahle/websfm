@@ -510,6 +510,25 @@ export const orthoFinish = (parts, { onLog, onProgress, worker } = {}) =>
     },
   })
 
+// Reflectance map (workers/ops/reflectance.js): the panels' radiance, then the map split
+// over the pool like the orthophoto: the writer on one worker (begin / add / finish),
+// the shares' blocks arriving as `onBlock(block)` with their data transferred.
+export const reflectancePanels = streamingOp('reflectancePanels')
+export const reflectanceBegin = (input, { onLog, worker } = {}) =>
+  call('reflectanceBegin', [input], { worker, onEvent: (ev, args) => ev === 'log' && onLog?.(...args) })
+export const reflectanceAdd = (block, { worker }) =>
+  call('reflectanceAdd', [block], { worker, transfer: [block.data.buffer] })
+export const reflectanceFinish = ({ worker } = {}) => call('reflectanceFinish', [], { worker })
+export const reflectanceShare = (input, ids, { onLog, onProgress, onBlock, worker } = {}) =>
+  call('reflectanceShare', [input, ids], {
+    worker,
+    onEvent: (ev, args) => {
+      if (ev === 'log') onLog?.(...args)
+      else if (ev === 'progress') onProgress?.(...args)
+      else if (ev === 'block') onBlock?.(args[0])
+    },
+  })
+
 // Tools ▸ Products ▾ — contours / terrain derivatives / polygon clip of a DEM or
 // ortho (see workers/ops/products.js `demTool`). A DEM plane is a copy, transferred
 // in; an ortho is clipped from a window of its COG file, read in the worker.

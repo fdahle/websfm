@@ -2207,6 +2207,40 @@ cloud or mesh; nothing here feeds back into the solve.
   product frame. Like the scale factor (§6.6), it lives in the frame, never in the
   coordinates, and a georeference outranks it.
 
+### 8.7 Reflectance map (`core/products/reflectanceMap.js`, `core/radiometry/micasense.js`, 2026-11-03)
+
+The bands of a multispectral rig (§4.6c) on the DEM, one Float32 plane per lens, written
+in 1,024-cell blocks over the pool into a COG with each band named in GDAL_METADATA, and
+added as a reference raster (styled as NDVI when it has NIR and red bands).
+
+**Which photo.** Each cell goes to the capture whose reference-band photo sees it nearest
+its principal point (smallest normalised radius: the most nadir view); every band then
+reads that capture's own photo, so a cell's bands come from one moment. No occlusion
+test: meant for open ground and canopy, where the nadir view sees what the DEM
+describes. The candidates per block are the captures whose scoring photo sees a 13 × 13
+lattice of its cells (with a margin of a lattice step).
+
+**Which value.** The pinhole projection goes through the camera's lens model to the raw
+pixel (`makeSampleMap`, as dense and the undistorted export), the raw DN is read
+bilinearly from the original file, and MicaSense's radiometric model, ported from their
+MIT-licensed `imageprocessing` (MicaSense 2017), gives radiance:
+L = V(x, y) · (DN − black) / (gain · t_exp) · a1 / 2^bits / (1 + a2·y/t_exp − a3·y), with V
+the radial or 2-D vignetting polynomial and the legacy RedEdge exposure quirk. Thermal
+DN is centikelvin: °C = DN/100 − 273.15. Checked on MicaSense's sample captures: the
+panel radiance and irradiance of all five RedEdge-MX bands within 0.1 % of their
+`test_capture.py` values (on the raw rather than undistorted image, which an even panel
+does not notice), the DLS irradiance of the Altum and the 10-band RedEdge-MX Dual exact.
+
+**Calibration.** Panel: factor = albedo / L_panel (mean over the camera-detected panel
+area, `ReflectArea`, of every panel capture). Sun sensor: π / E with E the DLS 2
+horizontal irradiance, rebuilt as direct·sin(elevation) + scattered on firmware that
+computed it wrong (MicaSense's own rule; DLS 1, which needs the sun's position, is not
+modelled). Both: the panel's factor × E_panel / E. A band without a panel photo falls
+back to the sun sensor, else radiance.
+
+Not yet: a real multispectral flight (the ZM Altum-PT set) to check registration between
+bands (< 0.3 px) and reflectance on panels left out of the calibration (2 %).
+
 ## 9. CRS handling (why this app is different)
 
 Everything is built to **not assume WGS84 / lat-lon**. There is a per-project
@@ -2402,6 +2436,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Lindenberger, P., Sarlin, P.-E. & Pollefeys, M. (2023). LightGlue: local feature matching at light speed. IEEE/CVF International Conference on Computer Vision (ICCV). https://arxiv.org/abs/2306.13643
 - Lowe, D. G. (2004). Distinctive image features from scale-invariant keypoints. International Journal of Computer Vision 60(2), 91–110. https://doi.org/10.1023/B:VISI.0000029664.99615.94
 - Mark, R. K. (1992). Multidirectional, oblique-weighted, shaded-relief image of the Island of Hawaii. U.S. Geological Survey Open-File Report 92-422. https://pubs.usgs.gov/of/1992/of92-422/
+- MicaSense (2017). MicaSense RedEdge and Altum image processing tutorials (imageprocessing). GitHub, MIT licence. https://github.com/micasense/imageprocessing
 - Nistér, D. (2004). An efficient solution to the five-point relative pose problem. IEEE Transactions on Pattern Analysis and Machine Intelligence 26(6), 756–770. https://doi.org/10.1109/TPAMI.2004.17
 - Olson, E. (2011). AprilTag: A robust and flexible visual fiducial system. IEEE International Conference on Robotics and Automation (ICRA), 3400–3407. https://doi.org/10.1109/ICRA.2011.5979561
 - Persson, M. & Nordberg, K. (2018). Lambda Twist: an accurate fast robust perspective three point (P3P) solver. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-030-01225-0_20
