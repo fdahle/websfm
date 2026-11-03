@@ -180,6 +180,11 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **TIFF photos keep their camera details.** A TIFF that stores its tags after the
+  pixels, as MicaSense cameras write them, came in without make, model or focal length,
+  so its camera group read "Sensor 1 · NaN mm" and the band went unread; its metadata is
+  now read from the whole file. Found importing MicaSense's Altum-PT sample captures:
+  exifr's chunked reader found 53 of their 99 tags.
 - **Exported camera angles taken where each camera is.** Export ▸ Camera Poses
   (estimated, georeferenced) now gives each camera's omega/phi/kappa against grid north
   and the vertical at that camera, as Metashape and Pix4D do, not at the georeference's

@@ -266,6 +266,8 @@ function loadDimensions(url) {
   })
 }
 
+const isTiffFile = (file) => /tiff/i.test(file?.type ?? '') || /\.tiff?$/i.test(file?.name ?? '')
+
 /**
  * Parse EXIF + basic dimensions for an image file.
  * Returns a flat, normalized metadata object (null fields when absent).
@@ -278,7 +280,11 @@ export async function extractMetadata(file, url, presetDims = null) {
     presetDims ? Promise.resolve(presetDims) : loadDimensions(url),
     // XMP carries drone gimbal attitude and vendor GNSS/RTK uncertainties; TIFF,
     // EXIF and GPS remain enabled by default and merge into the same output.
-    exifr.parse(file, { xmp: true }).catch(() => null),
+    // A TIFF is read whole: exifr's chunked reader of a File stops at the first chunks,
+    // and a TIFF may keep its tags after the pixels (MicaSense writes its IFD at the end,
+    // so the band, make, model and focal length all came back empty). Only plain values
+    // are kept from the result (see normalizeExifMetadata).
+    exifr.parse(file, { xmp: true, ...(isTiffFile(file) ? { chunked: false } : {}) }).catch(() => null),
   ])
   const e = exif || {}
   return normalizeExifMetadata(e, dims, file.size)
