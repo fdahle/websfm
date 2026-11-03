@@ -9,7 +9,7 @@ import WarnBox from '../ui/WarnBox.vue'
 import FrameCrsField from '../ui/FrameCrsField.vue'
 import RasterSizeField from '../ui/RasterSizeField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import ShowAdvancedSettings from '../ui/ShowAdvancedSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
@@ -502,7 +502,7 @@ provideStepLayout()
     />
 
     <template #footer>
-      <ShowAllSettings />
+      <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!canRun || !numbers.valid" :title="numbers.reason" @click="run">

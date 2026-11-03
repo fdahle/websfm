@@ -6,7 +6,7 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import ShowAdvancedSettings from '../ui/ShowAdvancedSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import WarnBox from '../ui/WarnBox.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
@@ -336,24 +336,21 @@ provideStepLayout()
       title="Rolling shutter"
       :effect="effects.rollingShutter"
       :inactive="adding || !(settings.baIterations > 0) || settings.rollingShutter !== 'on'"
-      :more="1"
     >
-      <template #tuning>
-        <SettingsField label-for="rollingShutter">
-          <template #label>
-            <FieldHelp op="sparse-reconstruction" param="rollingShutter">Rolling shutter</FieldHelp>
-          </template>
-          <select
-            id="rollingShutter"
-            v-model="settings.rollingShutter"
-            class="field-input field-select"
-            :disabled="adding || !(settings.baIterations > 0)"
-          >
-            <option value="off">Off</option>
-            <option value="on">Estimate the readout time</option>
-          </select>
-        </SettingsField>
-      </template>
+      <SettingsField label-for="rollingShutter">
+        <template #label>
+          <FieldHelp op="sparse-reconstruction" param="rollingShutter">Rolling shutter</FieldHelp>
+        </template>
+        <select
+          id="rollingShutter"
+          v-model="settings.rollingShutter"
+          class="field-input field-select"
+          :disabled="adding || !(settings.baIterations > 0)"
+        >
+          <option value="off">Off</option>
+          <option value="on">Estimate the readout time</option>
+        </select>
+      </SettingsField>
     </SettingsStep>
 
     <SettingsStep
@@ -361,28 +358,25 @@ provideStepLayout()
       title="Camera rig"
       :effect="effects.cameraRig"
       :inactive="adding || !cameraRigs.length || settings.cameraRig === 'off'"
-      :more="1"
     >
-      <template #tuning>
-        <SettingsField label-for="cameraRig">
-          <template #label>
-            <FieldHelp op="sparse-reconstruction" param="cameraRig">Multispectral rig</FieldHelp>
-          </template>
-          <select
-            id="cameraRig"
-            v-model="settings.cameraRig"
-            class="field-input field-select"
-            :disabled="adding || !cameraRigs.length"
-          >
-            <option value="on">One pose per capture</option>
-            <option value="off">One pose per photo</option>
-          </select>
-        </SettingsField>
-      </template>
+      <SettingsField label-for="cameraRig">
+        <template #label>
+          <FieldHelp op="sparse-reconstruction" param="cameraRig">Multispectral rig</FieldHelp>
+        </template>
+        <select
+          id="cameraRig"
+          v-model="settings.cameraRig"
+          class="field-input field-select"
+          :disabled="adding || !cameraRigs.length"
+        >
+          <option value="on">One pose per capture</option>
+          <option value="off">One pose per photo</option>
+        </select>
+      </SettingsField>
     </SettingsStep>
 
     <template #footer>
-      <ShowAllSettings />
+      <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
       <button

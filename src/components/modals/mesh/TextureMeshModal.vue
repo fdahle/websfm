@@ -6,7 +6,7 @@ import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import ShowAdvancedSettings from '../ui/ShowAdvancedSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
@@ -238,7 +238,7 @@ provideStepLayout()
       </SettingsStep>
     </template>
     <template #footer>
-      <ShowAllSettings />
+      <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!valid" @click="run">Texture</button>

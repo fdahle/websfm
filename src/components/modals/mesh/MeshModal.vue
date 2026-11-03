@@ -5,7 +5,7 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import ShowAdvancedSettings from '../ui/ShowAdvancedSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -293,19 +293,17 @@ provideStepLayout()
         </template>
       </template>
     </SettingsStep>
-    <SettingsStep step="5" title="Colour" :effect="effects.colour" :inactive="!settings.colorize" :more="1">
-      <template #tuning>
-        <SettingsField hint="Colour each mesh vertex from the nearest dense point.">
-          <template #label
-            ><FieldHelp op="mesh" param="colorize" :value="settings.colorize" :default-value="MESH_DEFAULTS.colorize"
-              >Transfer colour from the dense cloud</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.colorize" type="checkbox" class="checkbox" /> Enabled</label
-          >
-        </SettingsField>
-      </template>
+    <SettingsStep step="5" title="Colour" :effect="effects.colour" :inactive="!settings.colorize">
+      <SettingsField hint="Colour each mesh vertex from the nearest dense point.">
+        <template #label
+          ><FieldHelp op="mesh" param="colorize" :value="settings.colorize" :default-value="MESH_DEFAULTS.colorize"
+            >Transfer colour from the dense cloud</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="settings.colorize" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
     </SettingsStep>
 
     <OutputStep
@@ -318,7 +316,7 @@ provideStepLayout()
     />
 
     <template #footer>
-      <ShowAllSettings />
+      <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!source || !numbers.valid" :title="numbers.reason" @click="run">

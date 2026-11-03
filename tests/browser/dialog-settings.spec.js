@@ -1,6 +1,13 @@
 import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 
+// Every step of a processing dialog open, its advanced settings shown.
+async function showEverything(dialog) {
+  await dialog.getByRole('checkbox', { name: 'Show advanced settings' }).check()
+  const closed = dialog.locator('.step-toggle[aria-expanded="false"]')
+  while (await closed.count()) await closed.first().click()
+}
+
 // A processing dialog keeps its settings (composables/useDialogSettings.js): it opens on
 // the last run's in this project, and a named preset brings a set back after Reset.
 const PROJECT = new URL('../fixtures/projects/v2/aukerman-5.websfm', import.meta.url)
@@ -37,8 +44,8 @@ async function openDem(page) {
   await page.locator('.ribbon').getByRole('button', { name: 'DEM', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Build DEM' })
   await expect(dialog).toBeVisible()
-  // Surface aggregation is tuning: folded in its step; Show all settings draws it.
-  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
+  // Surface aggregation is advanced, in a step that starts closed.
+  await showEverything(dialog)
   return dialog
 }
 
@@ -101,7 +108,7 @@ test('Detect Features saves a preset with its detector and resolution', async ({
   const dialog = page.getByRole('dialog', { name: 'Detect Features' })
   await expect(dialog).toBeVisible()
   await expect(dialog.locator('#detector-sel')).toHaveValue('sift')
-  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
+  await showEverything(dialog)
   await dialog.locator('#maxDim').fill('3200')
 
   await dialog.getByRole('button', { name: /Presets/ }).click()

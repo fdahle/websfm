@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import ShowAdvancedSettings from '../ui/ShowAdvancedSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import PresetCards from '../ui/PresetCards.vue'
@@ -573,23 +573,24 @@ provideStepLayout()
         </SettingsField>
       </template>
     </SettingsStep>
-    <SettingsStep step="2" title="Split into tiles" :effect="tileStep" :inactive="!tilingOn || tilingIdle" :more="3">
+    <SettingsStep step="2" title="Split into tiles" :effect="tileStep" :inactive="!tilingOn || tilingIdle" :more="2">
+      <SettingsField
+        label-for="tiling"
+        :hint="
+          isLearned
+            ? 'Processes the resized image in overlapping pieces that fit GPU memory, then merges them.'
+            : 'Processes the resized image in overlapping pieces, then merges them. Same keypoints, less memory.'
+        "
+      >
+        <template #label><FieldHelp op="detect-features" param="tiling">Tiling</FieldHelp></template>
+        <select id="tiling" v-model="activeSettings.tiling" class="field-input field-select">
+          <option value="off">Off</option>
+          <option value="auto">{{ isLearned ? 'Auto (fit GPU memory)' : 'Auto (fit tile size)' }}</option>
+          <option value="manual">Manual</option>
+        </select>
+      </SettingsField>
+
       <template #tuning>
-        <SettingsField
-          label-for="tiling"
-          :hint="
-            isLearned
-              ? 'Processes the resized image in overlapping pieces that fit GPU memory, then merges them.'
-              : 'Processes the resized image in overlapping pieces, then merges them. Same keypoints, less memory.'
-          "
-        >
-          <template #label><FieldHelp op="detect-features" param="tiling">Tiling</FieldHelp></template>
-          <select id="tiling" v-model="activeSettings.tiling" class="field-input field-select">
-            <option value="off">Off</option>
-            <option value="auto">{{ isLearned ? 'Auto (fit GPU memory)' : 'Auto (fit tile size)' }}</option>
-            <option value="manual">Manual</option>
-          </select>
-        </SettingsField>
         <SettingsField
           v-if="activeSettings.tiling === 'manual'"
           label-for="tileSize"
@@ -734,7 +735,7 @@ provideStepLayout()
     </SettingsStep>
 
     <template #footer>
-      <ShowAllSettings />
+      <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
       <button

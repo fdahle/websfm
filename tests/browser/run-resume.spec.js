@@ -1,6 +1,13 @@
 import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 
+// Every step of a processing dialog open, its advanced settings shown.
+async function showEverything(dialog) {
+  await dialog.getByRole('checkbox', { name: 'Show advanced settings' }).check()
+  const closed = dialog.locator('.step-toggle[aria-expanded="false"]')
+  while (await closed.count()) await closed.first().click()
+}
+
 // A depth-map run whose tab dies continues where it stopped (core/runJournal.js): the
 // page is closed while the run is under way, the project is opened again, Continue is
 // clicked, and the maps match an uninterrupted run. The project is the format fixture
@@ -354,7 +361,7 @@ test('a depth run keeps the maps whose camera and settings did not change', asyn
     useModalsStore().depthMapsOpen = true
   })
   const dialog = page.getByRole('dialog', { name: 'Build Depth Maps' })
-  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
+  await showEverything(dialog)
   await dialog.getByText('Low', { exact: true }).first().click()
   await dialog.getByLabel('Method').selectOption('fast')
   await expect(dialog.getByText(/All 5 saved depth maps are kept/)).toBeVisible()
@@ -441,7 +448,7 @@ test('Sparse Reconstruction opens with the settings it is handed', async ({ page
     useModalsStore().reconstructOpen = true
   })
   const dialog = page.getByRole('dialog', { name: 'Sparse Reconstruction' })
-  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
+  await showEverything(dialog)
   await expect(dialog.locator('#minMatches')).toHaveValue('12')
   await expect(dialog.locator('#reprj')).toHaveValue('6')
   await dialog.getByRole('button', { name: 'Cancel' }).click()
@@ -450,6 +457,6 @@ test('Sparse Reconstruction opens with the settings it is handed', async ({ page
     const { useModalsStore } = await import('/src/stores/useModalsStore.js')
     useModalsStore().reconstructOpen = true
   })
-  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
+  await showEverything(dialog)
   await expect(dialog.locator('#minMatches')).toHaveValue('20')
 })

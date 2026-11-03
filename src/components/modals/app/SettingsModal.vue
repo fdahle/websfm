@@ -227,8 +227,11 @@ onMounted(refreshStorage)
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Expand advanced settings</span>
-            <span class="setting-desc">Open processing dialogs with their advanced controls visible.</span>
+            <span class="setting-label">Show advanced settings</span>
+            <span class="setting-desc"
+              >Show the advanced settings of each open step in processing dialogs (the same switch as in their
+              footer).</span
+            >
           </div>
           <label class="switch">
             <input

@@ -175,14 +175,15 @@ live preview, a result table or a readout (Auto mask, Reseau, Section, Mesh area
 volume) is a workbench: it uses the same fields but no numbered steps.
 
 1. Each stage is a `<SettingsStep step="n" title="…" :effect="…">`, listed **once**, in
-   run order. Its everyday fields (a mode, a resolution, a cleanup stage's on/off
-   switch) are its content; the fields whose defaults suit almost every project go in
-   its `#tuning` slot, which folds out in place behind **⚙ n more** (`:more` counts
-   them). Presets, the source and mode choices may sit above the steps.
+   run order, as a group: its header (number, title, short fact) opens and closes it.
+   Its everyday fields (a mode, a resolution, a stage's on/off switch) are its content;
+   the fields whose defaults suit almost every project go in its `#tuning` slot.
+   Presets, the source and mode choices may sit above the steps.
 2. The dialog calls `provideStepLayout()` (`composables/useStepLayout.js`) and puts
-   `<ShowAllSettings />` first in its footer. Every step is drawn as one header with its
-   short fact; a step with no everyday field is just that line, and its tuning (or,
-   without tuning, its long effect: *Details*) opens below a divider.
+   `<ShowAdvancedSettings />` first in its footer. An open step shows its long effect,
+   its everyday fields and, while **Show advanced settings** is on, its `#tuning`
+   fields under an *Advanced* divider (with it off, a link offers them, counted as they
+   render). A closed step shows none of them. Steps with everyday fields start open.
 3. Each step's **effect** comes in two lengths, from the same rules the run applies:
    the long line an open step shows ("42 depth maps at up to 1,500 px …", "Off: lone
    points stay in the cloud") and the short fact its header shows ("1,500 px · 10
@@ -190,8 +191,8 @@ volume) is a workbench: it uses the same fields but no numbered steps.
    functions in `src/core/stepEffects/<dialog>.js` (`…Effects` and `…Shorts`, paired
    by `withShorts`), with unit tests, and pass the project data into the dialog as
    props.
-4. A step that cannot matter in the current configuration is `inactive` (dimmed, its
-   fact too), and its long effect says why.
+4. A step that cannot matter in the current configuration is `inactive`: its fact is
+   dimmed (its fields stay as usable as any other), and its long effect says why.
 5. The guide article lists its setting sections in the same order as the steps. A
    dialog with only a few settings (about five) and no tuning needs no layout: its
    steps simply hold their fields and effects.

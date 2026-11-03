@@ -1,9 +1,9 @@
 import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 
-// A processing dialog's steps laid out once (dev/planning/plan-dialog-layout.md; here
-// Build Depth Maps): every step a header with its short fact, its everyday fields below,
-// its tuning folded in place, and Show all settings.
+// A processing dialog's steps as groups (dev/planning/plan-dialog-layout.md; here Build
+// Depth Maps): each header opens its step, and the advanced fields of an open step show
+// with the footer's Show advanced settings.
 const PROJECT = new URL('../fixtures/projects/v2/aukerman-5.websfm', import.meta.url)
 
 async function openFixture(page) {
@@ -33,7 +33,7 @@ async function openFixture(page) {
   })
 }
 
-test('Depth Maps lists each step once, its tuning in place', async ({ page, browserName }) => {
+test('Depth Maps: each step a group, its advanced settings behind one switch', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'layout logic: one browser is enough')
   test.setTimeout(120_000)
   const errors = []
@@ -45,27 +45,36 @@ test('Depth Maps lists each step once, its tuning in place', async ({ page, brow
   })
   const dialog = page.getByRole('dialog', { name: 'Build Depth Maps' })
   await expect(dialog).toBeVisible()
-  // Every step is drawn, one header with its short fact; tuning stays folded.
-  const step = (n) => dialog.locator(`[data-step-id="${n}"]`)
-  await expect(step(1)).toContainText('Working resolution and source views')
-  await expect(step(4)).toContainText('≥ 2 views agree')
+  const head = (n) => dialog.locator(`[data-step-id="${n}"] .step-toggle`)
+  const advanced = dialog.getByRole('checkbox', { name: 'Show advanced settings' })
+
+  // Every step is a header with its fact; the steps with an everyday switch start open.
+  await expect(head(1)).toContainText('300 px · 10 views')
+  await expect(head(1)).toHaveAttribute('aria-expanded', 'false')
+  await expect(head(4)).toHaveAttribute('aria-expanded', 'true')
   await expect(dialog.locator('#maxSources')).toHaveCount(0)
-  await dialog.getByRole('button', { name: /Working resolution and source views: show more/ }).click()
+
+  // Opening a group shows what it does; its advanced fields wait for the switch.
+  await head(1).click()
+  await expect(dialog.locator('[data-step-id="1"]')).toContainText(/one per registered image/)
+  await expect(dialog.locator('#maxSources')).toBeHidden()
+  await dialog
+    .locator('[data-step-id="1"]')
+    .getByRole('button', { name: /Show \d+ advanced settings?/ })
+    .click()
+  await expect(advanced).toBeChecked()
   await expect(dialog.locator('#maxSources')).toBeVisible()
-  await expect(step(1)).toContainText(/one per registered image/)
-  await dialog.getByRole('button', { name: /Working resolution and source views: fold/ }).click()
+  await expect(dialog.locator('#minNcc')).toBeVisible()
+  // A closed group stays closed with the switch on.
+  await expect(dialog.locator('#window')).toHaveCount(0)
+  await head(1).click()
   await expect(dialog.locator('#maxSources')).toHaveCount(0)
 
-  // A drawn step's tuning unfolds in place, and folds away with its switch off.
-  await expect(dialog.locator('#minNcc')).toHaveCount(0)
-  await dialog.getByRole('button', { name: /Check across views: show more/ }).click()
-  await expect(dialog.locator('#minNcc')).toBeVisible()
+  // A step switched off reads "off", and its switch stays usable.
   await dialog.getByLabel('Enabled').nth(1).uncheck()
-  await expect(step(4)).toContainText('off')
-
-  // Show all settings: every step, every field.
-  await dialog.getByRole('checkbox', { name: 'Show all settings' }).check()
-  for (const id of ['#maxDim', '#window', '#filterRelTol']) await expect(dialog.locator(id)).toBeVisible()
-  await expect(dialog.getByRole('button', { name: /show more/ })).toHaveCount(0)
+  await expect(head(4)).toContainText('off')
+  await dialog.getByLabel('Enabled').nth(1).check()
+  await advanced.uncheck()
+  await expect(dialog.locator('#minNcc')).toBeHidden()
   expect(errors).toEqual([])
 })

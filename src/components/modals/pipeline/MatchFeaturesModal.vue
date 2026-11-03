@@ -6,7 +6,7 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import ShowAdvancedSettings from '../ui/ShowAdvancedSettings.vue'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
@@ -747,24 +747,24 @@ provideStepLayout()
       title="Verify geometry"
       :effect="verifyStep"
       :inactive="!settings.geometricVerification"
-      :more="4"
+      :more="3"
     >
-      <template #tuning>
-        <SettingsField hint="Filter outliers using the fundamental matrix. Strongly recommended.">
-          <template #label
-            ><FieldHelp
-              op="match-features"
-              param="geometricVerification"
-              :value="settings.geometricVerification"
-              :default-value="MATCH_DEFAULTS.geometricVerification"
-              >RANSAC verification</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.geometricVerification" type="checkbox" class="checkbox" /> Enabled</label
-          >
-        </SettingsField>
+      <SettingsField hint="Filter outliers using the fundamental matrix. Strongly recommended.">
+        <template #label
+          ><FieldHelp
+            op="match-features"
+            param="geometricVerification"
+            :value="settings.geometricVerification"
+            :default-value="MATCH_DEFAULTS.geometricVerification"
+            >RANSAC verification</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="settings.geometricVerification" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
 
+      <template #tuning>
         <template v-if="settings.geometricVerification">
           <SettingsField
             label-for="verifier"
@@ -902,23 +902,24 @@ provideStepLayout()
       title="Repair a split graph"
       :effect="repairStep"
       :inactive="!settings.repairSplits"
-      :more="2"
+      :more="1"
     >
+      <SettingsField hint="Match the most promising pairs between the pieces again, with looser gates.">
+        <template #label
+          ><FieldHelp
+            op="match-features"
+            param="repairSplits"
+            :value="settings.repairSplits"
+            :default-value="MATCH_DEFAULTS.repairSplits"
+            >Repair a split graph</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="settings.repairSplits" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
+
       <template #tuning>
-        <SettingsField hint="Match the most promising pairs between the pieces again, with looser gates.">
-          <template #label
-            ><FieldHelp
-              op="match-features"
-              param="repairSplits"
-              :value="settings.repairSplits"
-              :default-value="MATCH_DEFAULTS.repairSplits"
-              >Repair a split graph</FieldHelp
-            ></template
-          >
-          <label class="checkbox-row"
-            ><input v-model="settings.repairSplits" type="checkbox" class="checkbox" /> Enabled</label
-          >
-        </SettingsField>
         <SettingsField
           v-if="settings.repairSplits"
           hint="Detect the images of pieces still apart again at full size, with their partners, and match their pairs again."
@@ -940,7 +941,7 @@ provideStepLayout()
     </SettingsStep>
 
     <template #footer>
-      <ShowAllSettings />
+      <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="run">
