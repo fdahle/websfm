@@ -58,11 +58,9 @@ test('Depth Maps: each step a group, its advanced settings behind one switch', a
   await head(1).click()
   await expect(dialog.locator('[data-step-id="1"]')).toContainText(/one per registered image/)
   await expect(dialog.locator('#maxSources')).toBeHidden()
-  await dialog
-    .locator('[data-step-id="1"]')
-    .getByRole('button', { name: /Show \d+ advanced settings?/ })
-    .click()
-  await expect(advanced).toBeChecked()
+  await expect(dialog.locator('[data-step-id="1"]')).toContainText(/\d+ advanced settings? hidden/)
+  await advanced.check()
+  await expect(dialog.locator('[data-step-id="1"]')).not.toContainText(/advanced settings? hidden/)
   await expect(dialog.locator('#maxSources')).toBeVisible()
   await expect(dialog.locator('#minNcc')).toBeVisible()
   // A closed group stays closed with the switch on.

@@ -12,7 +12,8 @@ import { useStepLayout } from '../../../composables/useStepLayout.js'
 // long }) opens and closes it. Open, it shows the long effect, its everyday fields (the
 // default slot) and, while the footer's Show advanced settings is on, its advanced
 // fields (the `tuning` slot, counted as they render: a field its own v-if leaves out
-// is not offered; `more` 0 drops the slot). A step that is
+// is not counted; `more` 0 drops the slot). With the switch off, a gray note says how
+// many are hidden (a note, not a link: the footer switch shows them). A step that is
 // inactive dims only its fact: its fields stay as usable as any other. A step with
 // everyday fields starts open. Without a layout it is drawn as before: always open, the
 // effect line under the title, an inactive step dimmed.
@@ -76,14 +77,9 @@ onUpdated(countAdvanced)
         <div class="step-advanced-label">Advanced</div>
         <div ref="advancedEl" class="step-fields"><slot name="tuning" /></div>
       </div>
-      <button
-        v-if="hasAdvanced && advancedCount && !layout.showAdvanced.value"
-        type="button"
-        class="step-show-advanced"
-        @click="layout.setShowAdvanced(true)"
-      >
-        Show {{ advancedCount }} advanced setting{{ advancedCount === 1 ? '' : 's' }}
-      </button>
+      <div v-if="hasAdvanced && advancedCount && !layout.showAdvanced.value" class="step-advanced-hidden">
+        {{ advancedCount }} advanced setting{{ advancedCount === 1 ? '' : 's' }} hidden
+      </div>
     </template>
   </div>
 </template>
@@ -205,17 +201,8 @@ onUpdated(countAdvanced)
   text-transform: uppercase;
   color: var(--text-dim);
 }
-.step-show-advanced {
-  align-self: flex-start;
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-size: 11px;
-  color: var(--accent);
-  cursor: pointer;
-}
-.step-show-advanced:hover {
-  text-decoration: underline;
+.step-advanced-hidden {
+  font-size: 10px;
+  color: var(--text-dim);
 }
 </style>

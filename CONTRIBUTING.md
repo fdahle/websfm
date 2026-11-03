@@ -182,8 +182,8 @@ volume) is a workbench: it uses the same fields but no numbered steps.
 2. The dialog calls `provideStepLayout()` (`composables/useStepLayout.js`) and puts
    `<ShowAdvancedSettings />` first in its footer. An open step shows its long effect,
    its everyday fields and, while **Show advanced settings** is on, its `#tuning`
-   fields under an *Advanced* divider (with it off, a link offers them, counted as they
-   render). A closed step shows none of them. Steps with everyday fields start open.
+   fields under an *Advanced* divider (with it off, a gray note says how many are
+   hidden, counted as they render; a note, not a link). A closed step shows none of them. Steps with everyday fields start open.
 3. Each step's **effect** comes in two lengths, from the same rules the run applies:
    the long line an open step shows ("42 depth maps at up to 1,500 px …", "Off: lone
    points stay in the cloud") and the short fact its header shows ("1,500 px · 10
