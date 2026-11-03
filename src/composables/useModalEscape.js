@@ -25,6 +25,7 @@ export function useModalEscape({
   sfmImportSession,
   onCloseSfmImport,
   folderPrompt,
+  cancelFolderPrompt,
 }) {
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
@@ -113,7 +114,8 @@ export function useModalEscape({
       [
         folderPrompt?.value,
         () => {
-          folderPrompt.value = null
+          if (cancelFolderPrompt) cancelFolderPrompt()
+          else folderPrompt.value = null
         },
       ],
       // Help browsers can be opened on top of any action dialog.

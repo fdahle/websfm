@@ -461,6 +461,18 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     await openProject(prompt.id)
   }
 
+  // "Cancel": back to the open project, or to the project list when none is open, so
+  // the user is never left in an empty, project-less app.
+  function cancelFolderPrompt() {
+    folderPrompt.value = null
+    if (currentProjectId.value) return
+    if (projects.value.length) projectPickerOpen.value = true
+    else {
+      newProjectCanCancel.value = false
+      newProjectOpen.value = true
+    }
+  }
+
   // Adopt a directory that already holds a project.json — the Dropbox/git sharing
   // path. Its internal ids are kept, so the same folder is the same project
   // wherever it is opened.
@@ -863,6 +875,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     folderPromptProject,
     onFolderConnect,
     onFolderRepick,
+    cancelFolderPrompt,
     openProjectFolder,
     moveCurrentProjectToFolder,
     duplicateProjectById,

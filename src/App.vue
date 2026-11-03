@@ -524,6 +524,7 @@ const {
   folderPromptProject,
   onFolderConnect,
   onFolderRepick,
+  cancelFolderPrompt,
   openProjectFolder,
   moveCurrentProjectToFolder,
   moveCurrentProjectToBrowser,
@@ -821,6 +822,7 @@ const { closeTopModal } = useModalEscape({
   sfmImportSession,
   onCloseSfmImport: closeSfmImport,
   folderPrompt,
+  cancelFolderPrompt,
 })
 
 // Autosaved idle sessions can close quietly. Prompt only while closing would
@@ -995,6 +997,7 @@ provideAppContext({
   fitRegionDraft,
   folderPrompt,
   folderPromptProject,
+  cancelFolderPrompt,
   footprintImageCount,
   gcpReport,
   georeferenceAfterReconstruct,

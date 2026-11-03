@@ -63,6 +63,7 @@ const { setTheme, theme, themePreference } = useTheme()
 const {
   addNewWorkflow,
   applyCrsSuggestion,
+  cancelFolderPrompt,
   cancelPendingConfirm,
   cancelRun,
   clearCurrentProjectDerived,
@@ -339,7 +340,7 @@ const progressSpotlight = computed(() =>
       :error="folderPrompt.error"
       @connect="onFolderConnect"
       @repick="onFolderRepick"
-      @cancel="folderPrompt = null"
+      @cancel="cancelFolderPrompt"
     />
   </Teleport>
 

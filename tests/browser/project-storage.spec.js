@@ -127,6 +127,32 @@ test('cancelling Project folder… on the start screen leaves the project list o
   await expect(page.locator('.project-backdrop')).toBeVisible()
 })
 
+test('cancelling Reconnect project folder with no project open goes back to the project list', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('.project-picker')).toBeVisible()
+  // As opening a folder project whose permission lapsed does: the picker closes and
+  // the reconnect prompt asks for the grant.
+  await page.evaluate(async () => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+    useModalsStore().projectPickerOpen = false
+    const id = useProjectsStore().projects[0].id
+    document.querySelector('#app').__vue_app__._instance.setupState.folderPrompt = {
+      id,
+      action: 'reconnect',
+      error: '',
+    }
+  })
+  const prompt = page.getByRole('dialog', { name: 'Reconnect project folder' })
+  await expect(prompt).toBeVisible()
+  await prompt.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(prompt).toHaveCount(0)
+  await expect(page.locator('.project-picker')).toBeVisible()
+})
+
 test('without folder access, the folder choices are shown disabled with the browsers they need', async ({ page }) => {
   // As in Firefox and Safari, in every engine: runs after the stub above.
   await page.addInitScript(() => {
