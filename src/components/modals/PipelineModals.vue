@@ -14,6 +14,7 @@ import { useSensorsStore } from '../../stores/useSensorsStore.js'
 import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
 import { useAppContext } from '../../appContext.js'
 import { tilesSubject } from '../../core/products/tiles3d.js'
+import { findRigs } from '../../core/sensors/rig.js'
 import AlignIcpModal from './cloud/AlignIcpModal.vue'
 import CleanMeshModal from './mesh/CleanMeshModal.vue'
 import ClipRasterModal from './products/ClipRasterModal.vue'
@@ -98,6 +99,15 @@ const { sensors } = storeToRefs(useSensorsStore())
 const { matchStore } = storeToRefs(useMatchesStore())
 // Images with a capture time: Sparse Model ▸ Rolling shutter takes the motion from them.
 const timedImages = computed(() => images.value.filter((im) => im.meta?.dateTime).length)
+// Sparse Model ▸ Camera rig: the multispectral rigs among the enabled photos.
+const cameraRigs = computed(() =>
+  findRigs(images.value.filter(isImageEnabled)).map((r) => ({
+    label: r.label,
+    bands: r.bands.length,
+    captures: r.captures.length,
+    reference: r.bands.find((b) => b.reference)?.name ?? '',
+  })),
+)
 const matchedLinks = computed(() => {
   const ids = new Set()
   const off = disabledUuids(images.value)
@@ -343,6 +353,7 @@ const exportingFootprints = computed(
       :ground-control-adjustment="georeferenceAfterReconstruct"
       :linked-images="matchedLinks.images"
       :timed-images="timedImages"
+      :camera-rigs="cameraRigs"
       :pairs="matchedLinks.pairs"
       :sensors="sensors.length"
       :sensor-splits="[...sensorSplits.values()].map((x) => ({ label: x.label, groups: x.groups.length }))"

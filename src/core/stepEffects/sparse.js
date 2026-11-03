@@ -12,7 +12,8 @@ const TERMS = {
 }
 
 // project: { linkedImages (images in a usable matched pair), pairs (usable pairs),
-// timedImages (images with a capture time), sensors, autoReason (why `auto` self-calibrates as it does here, or null),
+// timedImages (images with a capture time), rigs (multispectral rigs: [{ label, bands,
+// captures, reference }]), sensors, autoReason (why `auto` self-calibrates as it does here, or null),
 // splits (the camera groups that may hold photos of more than one camera:
 // [{ label, groups }], from core/sensors/splitSuggestions.js) }
 // `splits` is the warning above the steps, '' when there is none.
@@ -24,6 +25,7 @@ export function sparseEffects(
     linkedImages = 0,
     pairs = 0,
     timedImages = 0,
+    rigs = [],
     sensors = 0,
     autoReason = null,
     modelCameras = 0,
@@ -44,6 +46,7 @@ export function sparseEffects(
           : 'Off: the new cameras keep the poses registration found.',
       calibration: "Off while adding images: every camera keeps the model's calibration.",
       rollingShutter: 'Off while adding images: the new cameras are solved as a global shutter.',
+      cameraRig: 'Off while adding images: every new photo gets a pose of its own.',
     }
   }
   const register = !pairs
@@ -78,7 +81,16 @@ export function sparseEffects(
           ? `Nothing to estimate: ${timedImages ? `only ${plural(timedImages, 'image')} has` : 'no image has'} a capture time, which the cameras' motion is taken from.`
           : `${plural(timedImages, 'image')} with a capture time: each camera's motion is taken from the photos ` +
             'taken just before and after it, and each camera group gets a readout time.'
-  return { register, ba, calibration, rollingShutter, splits: splitWarning(splits) }
+  const rig = rigs[0]
+  const cameraRig = !rig
+    ? 'No multispectral camera among the photos: every photo gets a pose of its own.'
+    : s.cameraRig === 'off'
+      ? `Off: each of the ${rig.bands} band photos of a ${rig.label} capture gets a pose of its own.`
+      : `${plural(rig.captures, `${rig.label} capture`)}: the ${rig.bands} band photos of a capture share one ` +
+        `pose, each band at its lens offset to ${rig.reference || 'the reference band'}, refined from the photos; ` +
+        "a band that matches nothing (thermal) takes its capture's pose." +
+        (rigs.length > 1 ? ` (and ${plural(rigs.length - 1, 'other camera')})` : '')
+  return { register, ba, calibration, rollingShutter, cameraRig, splits: splitWarning(splits) }
 }
 
 // A camera group with photos of more than one camera gets one calibration for all of

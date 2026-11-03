@@ -439,6 +439,19 @@ export function createSparseRun({
                   // Sparse Model ▸ Rolling shutter takes the cameras' motion from these.
                   dateTime: img.meta.dateTime,
                   subSecTime: img.meta.subSecTime,
+                  // Sparse Model ▸ Camera rig: the band, its capture and its lens offset.
+                  band: img.meta.band
+                    ? {
+                        name: img.meta.band.name,
+                        index: img.meta.band.index,
+                        captureId: img.meta.band.captureId,
+                        wavelength: img.meta.band.wavelength,
+                        thermal: img.meta.band.thermal,
+                        rigRef: img.meta.band.rigRef,
+                        rigRelatives: img.meta.band.rigRelatives,
+                        rigTranslations: img.meta.band.rigTranslations,
+                      }
+                    : null,
                 }
               : null,
             sensor: s

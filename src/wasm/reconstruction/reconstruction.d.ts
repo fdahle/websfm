@@ -110,6 +110,28 @@ export class GuidedSearch {
 export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_index: Uint32Array, obs_px: Float32Array, observation_weight: Float32Array, anchor_flat: Float64Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array, fixed_cam: Uint8Array, fisheye_flat: Float32Array): Float32Array;
 
 /**
+ * `bundle_adjust_rs` for the cameras of a rig (plan-after-0.7 ▸ MSP-1): a multispectral
+ * camera's lenses, triggered together. The photos of one capture share one pose, the
+ * capture's (its reference lens's), and each lens sees from a fixed offset to it:
+ * x_cam = R_o·(R_c·X + t_c) + t_o, the offset the same for every capture. The solver
+ * keeps one pose block per capture; with refine bit 128 each sensor group's offset
+ * rotation is refined (three slots after τ, ω: R_o = Exp(ω)·R_o⁰), its lever arm t_o
+ * kept (a few centimetres, too short to resolve from the photos). A group none of
+ * whose cameras has an offset (the reference lens, or photos outside the rig) has no ω.
+ *
+ * - `capture_of_cam`: n_cam ints; cameras with the same non-negative value share a pose
+ *   block, a negative value (or a short list) is a pose of its own.
+ * - `offset_flat`: n_cam × 13 floats `[has, R_o(9), t_o(3), …]`; `has` 0 (or a short
+ *   list) ⇒ no offset: the camera's pose is its capture's.
+ *
+ * A capture's pose starts from a camera without an offset where it has one, else from
+ * its first camera with the offset taken off; it is held fixed only when every camera
+ * in it is. A camera-centre prior acts on the capture's pose: give one per capture.
+ * Output: `bundle_adjust_rs`'s, each camera's pose being its composed pose.
+ */
+export function bundle_adjust_rig(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_index: Uint32Array, obs_px: Float32Array, observation_weight: Float32Array, anchor_flat: Float64Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array, fixed_cam: Uint8Array, fisheye_flat: Float32Array, rs_flat: Float32Array, capture_of_cam: Int32Array, offset_flat: Float32Array): Float32Array;
+
+/**
  * `bundle_adjust` with a rolling-shutter model (rsh, plan-after-0.7 ▸ RSH). A camera
  * whose rows are read one after another over the readout time τ sees each row from
  * a slightly different place: from C + τ·s·v, where v is the camera centre's velocity
@@ -199,6 +221,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_guidedsearch_free: (a: number, b: number) => void;
     readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number) => [number, number];
+    readonly bundle_adjust_rig: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number, c1: number, d1: number, e1: number, f1: number, g1: number, h1: number) => [number, number];
     readonly bundle_adjust_rs: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number, c1: number, d1: number) => [number, number];
     readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number, c1: number, d1: number, e1: number, f1: number, g1: number, h1: number, i1: number, j1: number, k1: number, l1: number, m1: number, n1: number, o1: number) => [number, number];
     readonly guidedsearch_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => number;

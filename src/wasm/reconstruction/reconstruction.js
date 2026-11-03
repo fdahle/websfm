@@ -227,6 +227,84 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index
 }
 
 /**
+ * `bundle_adjust_rs` for the cameras of a rig (plan-after-0.7 ▸ MSP-1): a multispectral
+ * camera's lenses, triggered together. The photos of one capture share one pose, the
+ * capture's (its reference lens's), and each lens sees from a fixed offset to it:
+ * x_cam = R_o·(R_c·X + t_c) + t_o, the offset the same for every capture. The solver
+ * keeps one pose block per capture; with refine bit 128 each sensor group's offset
+ * rotation is refined (three slots after τ, ω: R_o = Exp(ω)·R_o⁰), its lever arm t_o
+ * kept (a few centimetres, too short to resolve from the photos). A group none of
+ * whose cameras has an offset (the reference lens, or photos outside the rig) has no ω.
+ *
+ * - `capture_of_cam`: n_cam ints; cameras with the same non-negative value share a pose
+ *   block, a negative value (or a short list) is a pose of its own.
+ * - `offset_flat`: n_cam × 13 floats `[has, R_o(9), t_o(3), …]`; `has` 0 (or a short
+ *   list) ⇒ no offset: the camera's pose is its capture's.
+ *
+ * A capture's pose starts from a camera without an offset where it has one, else from
+ * its first camera with the offset taken off; it is held fixed only when every camera
+ * in it is. A camera-centre prior acts on the capture's pose: give one per capture.
+ * Output: `bundle_adjust_rs`'s, each camera's pose being its composed pose.
+ * @param {Float32Array} cameras_flat
+ * @param {Float32Array} intrinsics_flat
+ * @param {Float32Array} pts_flat
+ * @param {Uint32Array} obs_index
+ * @param {Float32Array} obs_px
+ * @param {Float32Array} observation_weight
+ * @param {Float64Array} anchor_flat
+ * @param {Float32Array} anchor_weight
+ * @param {Float32Array} camera_prior_flat
+ * @param {number} max_iters
+ * @param {Int32Array} sensor_of_cam
+ * @param {number} refine_mask
+ * @param {Float32Array} solver_flat
+ * @param {Uint8Array} fixed_cam
+ * @param {Float32Array} fisheye_flat
+ * @param {Float32Array} rs_flat
+ * @param {Int32Array} capture_of_cam
+ * @param {Float32Array} offset_flat
+ * @returns {Float32Array}
+ */
+export function bundle_adjust_rig(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat, capture_of_cam, offset_flat) {
+    const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF32ToWasm0(pts_flat, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray32ToWasm0(obs_index, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArrayF32ToWasm0(obs_px, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ptr5 = passArrayF32ToWasm0(observation_weight, wasm.__wbindgen_malloc);
+    const len5 = WASM_VECTOR_LEN;
+    const ptr6 = passArrayF64ToWasm0(anchor_flat, wasm.__wbindgen_malloc);
+    const len6 = WASM_VECTOR_LEN;
+    const ptr7 = passArrayF32ToWasm0(anchor_weight, wasm.__wbindgen_malloc);
+    const len7 = WASM_VECTOR_LEN;
+    const ptr8 = passArrayF32ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
+    const len8 = WASM_VECTOR_LEN;
+    const ptr9 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
+    const len9 = WASM_VECTOR_LEN;
+    const ptr10 = passArrayF32ToWasm0(solver_flat, wasm.__wbindgen_malloc);
+    const len10 = WASM_VECTOR_LEN;
+    const ptr11 = passArray8ToWasm0(fixed_cam, wasm.__wbindgen_malloc);
+    const len11 = WASM_VECTOR_LEN;
+    const ptr12 = passArrayF32ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
+    const len12 = WASM_VECTOR_LEN;
+    const ptr13 = passArrayF32ToWasm0(rs_flat, wasm.__wbindgen_malloc);
+    const len13 = WASM_VECTOR_LEN;
+    const ptr14 = passArray32ToWasm0(capture_of_cam, wasm.__wbindgen_malloc);
+    const len14 = WASM_VECTOR_LEN;
+    const ptr15 = passArrayF32ToWasm0(offset_flat, wasm.__wbindgen_malloc);
+    const len15 = WASM_VECTOR_LEN;
+    const ret = wasm.bundle_adjust_rig(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, max_iters, ptr9, len9, refine_mask, ptr10, len10, ptr11, len11, ptr12, len12, ptr13, len13, ptr14, len14, ptr15, len15);
+    var v17 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v17;
+}
+
+/**
  * `bundle_adjust` with a rolling-shutter model (rsh, plan-after-0.7 ▸ RSH). A camera
  * whose rows are read one after another over the readout time τ sees each row from
  * a slightly different place: from C + τ·s·v, where v is the camera centre's velocity

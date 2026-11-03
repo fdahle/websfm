@@ -37,6 +37,8 @@ import { numStats, fmtStats, modelResiduals as residualsOf, trackHist } from './
 import { createSelfCalFold } from './selfCalFold.js'
 import { createBundleSession } from './bundleSession.js'
 import { readoutSummary } from './rollingShutter.js'
+import { createRigModel } from './rigModel.js'
+import { resolveK } from './reconstruction.js'
 import { refineModel, pruneFinalTracks } from './refinePipeline.js'
 import {
   captureRunConfig,
@@ -596,6 +598,9 @@ export async function reconstructSingleModel(input, hooks = {}) {
       refoldMovePx: cfg.selfCalRefoldMovePx,
       composedWarnPx: cfg.selfCalComposedWarnPx,
     })
+    // A multispectral rig (Sparse Model ▸ Camera rig, rigModel.js): one pose per capture
+    // in the global solves. Not for an extension, whose fixed cameras keep their solve.
+    const rig = cfg.cameraRig !== 'off' && !base ? createRigModel(images, { log }) : null
     const bundles = createBundleSession({
       cfg,
       cameras,
@@ -612,6 +617,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       modelReprojStats,
       log,
       fixedCameras: extension?.fixed ?? null,
+      rig,
     })
 
     // ── Incremental registration ───────────────────────────────────────────
@@ -684,8 +690,11 @@ export async function reconstructSingleModel(input, hooks = {}) {
     // its strongest verified pairs; take outliers out, let a final registration sweep
     // re-resect them against the now complete model, re-solve, and leave out any that
     // still disagree — an unregistered camera is better than a misplaced one.
+    // A rig's band photos are left out of it: their strongest pairs are with their own
+    // capture's reference photo, a few centimetres away, whose epipolar geometry says
+    // nothing, and their pose follows the capture's.
     const registrationCheck = await recheckRegistrations({
-      protect: extension?.fixed ?? null,
+      protect: rig ? new Set([...(extension?.fixed ?? []), ...rig.bandUuids()]) : (extension?.fixed ?? null),
       cfg,
       cameras,
       tracks,
@@ -716,6 +725,40 @@ export async function reconstructSingleModel(input, hooks = {}) {
     markStage('bundleAdjust')
 
     const finalTrackPrune = pruneFinalTracks({ cfg, tracks, refreshTracks, keypointsAt, log })
+
+    // Rig band photos that did not register (a thermal band matches nothing) take their
+    // capture's pose through their band's offset, with the K of their sensor's solved
+    // cameras where it has some.
+    let rigCompleted = []
+    if (rig) {
+      const kOfSensor = new Map()
+      for (const [u, cam] of cameras) {
+        const sid = imageByUuid(u)?.sensorId
+        if (sid != null && !kOfSensor.has(sid)) kOfSensor.set(sid, cam.K)
+      }
+      rigCompleted = rig.complete(cameras, (u) => {
+        const img = imageByUuid(u)
+        if (!img || img.enabled === false) return null
+        return (img.sensorId != null && kOfSensor.get(img.sensorId)) || Kmap.get(u) || resolveK(img.meta, img.sensor)
+      })
+      for (const b of rig.summary())
+        log(
+          `Camera rig: ${b.band} lens offset ${b.offsetDeg.toFixed(3)}°, ${b.movedDeg.toFixed(3)}° from what the camera ` +
+            `records${b.captures ? ` (solved over ${pluralize(b.captures, 'capture')})` : ' (not solved: kept as recorded)'}`,
+          'info',
+          'Reconstruction',
+        )
+      if (rigCompleted.length)
+        log(
+          `Camera rig: ${pluralize(rigCompleted.length, 'band photo')} placed from ${rigCompleted.length === 1 ? 'its' : 'their'} capture's pose ` +
+            `(${rigCompleted
+              .slice(0, 3)
+              .map((u) => imageByUuid(u)?.name ?? u)
+              .join(', ')}${rigCompleted.length > 3 ? ', …' : ''})`,
+          'info',
+          'Reconstruction',
+        )
+    }
 
     // ── Run record + summary (runRecord.js) ──────────────────────────────────
     logPerCameraResiduals({ tracks, ids, cameras, keypointsAt, imageByUuid, modelResiduals, log })
@@ -770,6 +813,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       }
     }
     summary.registrationCheck = registrationCheck
+    if (rig) summary.rig = { bands: rig.summary(), placed: rigCompleted.length }
     // Rolling shutter (cfg.rollingShutter): each camera group's estimated readout time.
     if (cfg.rollingShutter === 'on') {
       const groups = readoutSummary(cameras, (u) => imageByUuid(u)?.sensorId ?? `image:${u}`)

@@ -95,3 +95,18 @@ describe('rolling shutter effect', () => {
     expect(sparseEffects({ ...on, addToModel: true }, project).rollingShutter).toMatch(/^Off while adding images/)
   })
 })
+
+describe('camera rig effect', () => {
+  const rigs = [{ label: 'MicaSense Altum-PT', bands: 7, captures: 556, reference: 'Green' }]
+  it('says how a multispectral capture is solved, or that there is none', () => {
+    expect(sparseEffects(RECONSTRUCT_DEFAULTS, project).cameraRig).toMatch(/^No multispectral camera/)
+    expect(sparseEffects(RECONSTRUCT_DEFAULTS, { ...project, rigs }).cameraRig).toBe(
+      '556 MicaSense Altum-PT captures: the 7 band photos of a capture share one pose, each band at its lens ' +
+        "offset to Green, refined from the photos; a band that matches nothing (thermal) takes its capture's pose.",
+    )
+    expect(sparseEffects({ ...RECONSTRUCT_DEFAULTS, cameraRig: 'off' }, { ...project, rigs }).cameraRig).toBe(
+      'Off: each of the 7 band photos of a MicaSense Altum-PT capture gets a pose of its own.',
+    )
+    expect(sparseEffects({ ...RECONSTRUCT_DEFAULTS, addToModel: true }, project).cameraRig).toMatch(/^Off while adding/)
+  })
+})

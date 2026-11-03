@@ -706,6 +706,44 @@ by a short fixed point on the row, so the filters and statistics after a solve s
 residuals the solver minimised. Not yet: the saved model does not keep `rs`, and dense,
 orthophoto and texture project with the principal-row pose (plan-after-0.7 ▸ RSH-4).
 
+### 4.6c Multispectral rigs (`bundle.rs` `bundle_adjust_rig`, `core/sfm/rigModel.js`, 2026-11-03)
+
+A multispectral camera (MicaSense RedEdge, Altum) has one lens per band, triggered
+together. Import reads each band image's capture, band and lens offset from the XMP
+(`core/io/metadata.js bandMetadata`); each band is its own sensor. MicaSense records
+the offset as `RigRelatives` (degrees, R = Rx·Ry·Rz, taking the band lens's rays into
+the reference lens's frame) and `RigTranslations` (mm). In the solver's convention a
+reference-frame point x is R_o·x + t_o in the band frame, R_o = Rᵀ·R_ref
+(`core/sensors/rig.js bandOffset`). Checked on MicaSense's sample captures: the
+predicted band → green homography K_ref·R_oᵀ·K_band⁻¹ agrees with a SIFT + RANSAC
+homography to 0.7–1.5 px (RedEdge-MX, Altum), against 6–31 px with R_o inverted.
+
+**Matching** pairs only the reference band across captures (by the chosen strategy) and
+every other band with its own capture's reference image (`rigPairs`): tracks run
+through the reference band, and blue-to-NIR matching across viewpoints is unreliable.
+In-capture pairs are near-pure rotations; the F fit still keeps their inliers.
+
+**Bundle adjustment** keeps one pose block per capture. A band camera's pose is
+x_cam = R_o·(R_c·X + t_c) + t_o, the capture pose (R_c, t_c) shared by the capture's
+photos and the offset by every capture. With refine bit 128 each band's offset
+rotation is refined, as three slots of its sensor group after τ (R_o = Exp(ω)·R_o⁰,
+left perturbation: ∂x_cam/∂ω = −[R_o·q]×, q the capture-frame point; the capture's and
+the point's Jacobians gain the factor R_o). The reference band's group has no ω (its
+slots are pinned), which fixes the gauge. The lever arm t_o is kept at 0: its few
+centimetres are not resolved from the photos, and over a nadir block a lever arm b at
+height H acts as a rotation of b/H, which ω absorbs (synthetic block, 5 cm at 60 m:
+the solved rotation sits 0.048° from the true one, as predicted). The residual is the
+relief's share, b·Δh/H² in angle. Only the global solves refine ω; the camera-prior and
+GCP solves keep the rig with fixed offsets; the local window solves give every camera
+its own pose and the next global solve brings the capture back together. A capture's
+camera-centre prior acts on its block (one per capture).
+
+Poses stay per image in the saved model (every solve writes the composed pose), so
+dense matching, the orthophoto and every projection are unchanged. At the end of a run
+a band photo that never registered (the thermal band matches nothing) takes its
+capture's pose through its band's offset. Registration plausibility leaves the band
+cameras out: their strongest pairs are their own capture's, a few centimetres away.
+
 ### 4.7 Retriangulation, split-track merge, track filtering
 
 After BA settles: **retriangulate** pairs (`retriangulatePairs`) with the improved

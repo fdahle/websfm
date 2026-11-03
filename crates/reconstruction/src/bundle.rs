@@ -591,8 +591,8 @@ pub(crate) fn so3_log(r: &M3) -> V3 {
 // ── Reduced-variable coupling blocks (Schur assembly) ─────────────────────────
 
 // Largest reduced block: a camera's 6 rows, or an intrinsic group's
-// [s, dcx, dcy, k1, k2, k3, k4, τ] (≤ 8).
-const BLK_MAX: usize = 8;
+// [s, dcx, dcy, k1, k2, k3, k4, τ, ωx, ωy, ωz] (≤ 11; ω: bundle_adjust_rig).
+const BLK_MAX: usize = 11;
 
 // One point's merged Jvarᵀ·Jp coupling block, keyed by its reduced-variable offset
 // (a camera's 6 rows, or an intrinsic group's 1–8 rows). Fixed BLK_MAX-row storage
@@ -800,7 +800,8 @@ pub fn bundle_adjust(
     fisheye_flat: &[f32],
 ) -> Vec<f32> {
     bundle_adjust_impl(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat,
-        anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, &[])
+        anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, &[],
+        &[], &[])
 }
 
 /// `bundle_adjust` with a rolling-shutter model (rsh, plan-after-0.7 ▸ RSH). A camera
@@ -827,7 +828,39 @@ pub fn bundle_adjust_rs(
     fisheye_flat: &[f32], rs_flat: &[f32],
 ) -> Vec<f32> {
     bundle_adjust_impl(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat,
-        anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat)
+        anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat,
+        &[], &[])
+}
+
+/// `bundle_adjust_rs` for the cameras of a rig (plan-after-0.7 ▸ MSP-1): a multispectral
+/// camera's lenses, triggered together. The photos of one capture share one pose, the
+/// capture's (its reference lens's), and each lens sees from a fixed offset to it:
+/// x_cam = R_o·(R_c·X + t_c) + t_o, the offset the same for every capture. The solver
+/// keeps one pose block per capture; with refine bit 128 each sensor group's offset
+/// rotation is refined (three slots after τ, ω: R_o = Exp(ω)·R_o⁰), its lever arm t_o
+/// kept (a few centimetres, too short to resolve from the photos). A group none of
+/// whose cameras has an offset (the reference lens, or photos outside the rig) has no ω.
+///
+/// - `capture_of_cam`: n_cam ints; cameras with the same non-negative value share a pose
+///   block, a negative value (or a short list) is a pose of its own.
+/// - `offset_flat`: n_cam × 13 floats `[has, R_o(9), t_o(3), …]`; `has` 0 (or a short
+///   list) ⇒ no offset: the camera's pose is its capture's.
+///
+/// A capture's pose starts from a camera without an offset where it has one, else from
+/// its first camera with the offset taken off; it is held fixed only when every camera
+/// in it is. A camera-centre prior acts on the capture's pose: give one per capture.
+/// Output: `bundle_adjust_rs`'s, each camera's pose being its composed pose.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn bundle_adjust_rig(
+    cameras_flat: &[f32], intrinsics_flat: &[f32], pts_flat: &[f32], obs_index: &[u32], obs_px: &[f32],
+    observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f32],
+    max_iters: u32, sensor_of_cam: &[i32], refine_mask: u32, solver_flat: &[f32], fixed_cam: &[u8],
+    fisheye_flat: &[f32], rs_flat: &[f32], capture_of_cam: &[i32], offset_flat: &[f32],
+) -> Vec<f32> {
+    bundle_adjust_impl(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat,
+        anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat,
+        capture_of_cam, offset_flat)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -848,11 +881,35 @@ fn bundle_adjust_impl(
     fixed_cam: &[u8],
     fisheye_flat: &[f32],
     rs_flat: &[f32],
+    capture_of_cam: &[i32],
+    offset_flat: &[f32],
 ) -> Vec<f32> {
     let n_cam = cameras_flat.len() / 12;
     let n_pts = pts_flat.len() / 3;
     let n_obs = (obs_index.len() / 2).min(obs_px.len() / 2);
     if n_cam == 0 || n_pts == 0 || n_obs == 0 { return vec![]; }
+
+    // Rig (bundle_adjust_rig): each camera's pose block and lens offset. Without one,
+    // block c is camera c and no offset is composed: the plain solve, bit for bit.
+    let off: Vec<Option<(M3, V3)>> = (0..n_cam).map(|c| {
+        let b = c * 13;
+        if offset_flat.len() < b + 13 || !(offset_flat[b] > 0.5) { return None; }
+        let v = |i: usize| offset_flat[b + i] as f64;
+        let r: M3 = [[v(1), v(2), v(3)], [v(4), v(5), v(6)], [v(7), v(8), v(9)]];
+        let t: V3 = [v(10), v(11), v(12)];
+        if r.iter().flatten().chain(t.iter()).any(|x| !x.is_finite()) { return None; }
+        Some((r, t))
+    }).collect();
+    let (pb, n_pb) = {
+        let mut map: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
+        let mut pb = vec![0usize; n_cam];
+        let mut next = 0usize;
+        for c in 0..n_cam {
+            let id = capture_of_cam.get(c).copied().unwrap_or(-1);
+            pb[c] = if id < 0 { next += 1; next - 1 } else { *map.entry(id).or_insert_with(|| { next += 1; next - 1 }) };
+        }
+        (pb, next)
+    };
 
     // Anchors: (point_idx, target position, per-axis weights). Points outside range are
     // dropped rather than panicking on a malformed caller payload.
@@ -915,11 +972,12 @@ fn bundle_adjust_impl(
             && precision[0][0] > 0.0 && det2 > 0.0 && det3(&precision) > 0.0 {
             Some((target_r, precision))
         } else { None };
-        Some((ci, target, weight, orientation))
+        // On the camera's pose block: a capture's prior moves the capture.
+        Some((pb[ci], target, weight, orientation))
     }).collect();
 
     // Unpack cameras / base intrinsics / points / observations.
-    let mut cams: Vec<(M3, V3)> = (0..n_cam).map(|c| {
+    let cams_in: Vec<(M3, V3)> = (0..n_cam).map(|c| {
         let b = c * 12;
         let r: M3 = [[cameras_flat[b]   as f64, cameras_flat[b+1] as f64, cameras_flat[b+2]  as f64],
                      [cameras_flat[b+3] as f64, cameras_flat[b+4] as f64, cameras_flat[b+5]  as f64],
@@ -927,6 +985,24 @@ fn bundle_adjust_impl(
         let t: V3 = [cameras_flat[b+9] as f64, cameras_flat[b+10] as f64, cameras_flat[b+11] as f64];
         (r, t)
     }).collect();
+    // One pose per block: a capture starts from a camera without an offset where it has
+    // one, else from its first camera with the offset taken off (R_c = R_oᵀ·R,
+    // t_c = R_oᵀ·(t − t_o)).
+    let mut cams: Vec<(M3, V3)> = vec![([[0.0; 3]; 3], [0.0; 3]); n_pb];
+    { let mut seeded = vec![0u8; n_pb];
+      for c in 0..n_cam {
+          let rank = if off[c].is_none() { 2 } else { 1 };
+          if seeded[pb[c]] >= rank { continue; }
+          seeded[pb[c]] = rank;
+          let (r, t) = cams_in[c];
+          cams[pb[c]] = match off[c] {
+              None => (r, t),
+              Some((ro, to)) => {
+                  let rot = mat3_transpose(&ro);
+                  (mat3_mul(&rot, &r), mat3_vec(&rot, &[t[0] - to[0], t[1] - to[1], t[2] - to[2]]))
+              }
+          };
+      } }
     // Base (seed) intrinsics — held fixed; refinement is expressed relative to these.
     let ks: Vec<(f64, f64, f64, f64)> = (0..n_cam).map(|c| {
         let b = c * 4;
@@ -1012,6 +1088,7 @@ fn bundle_adjust_impl(
     let has_k3 = refine_mask & 16 != 0;
     let has_k4 = refine_mask & 32 != 0;
     let has_rs = refine_mask & 64 != 0 && rs_any;
+    let has_rig = refine_mask & 128 != 0 && off.iter().any(|o| o.is_some());
     let mut kdim = 0usize;
     let mut alloc = |on: bool| -> isize { if on { let i = kdim as isize; kdim += 1; i } else { -1 } };
     let idx_s   = alloc(has_f);
@@ -1022,6 +1099,8 @@ fn bundle_adjust_impl(
     let idx_k3  = alloc(has_k3);
     let idx_k4  = alloc(has_k4);
     let idx_rs  = alloc(has_rs);
+    // The offset rotation ω: three consecutive slots.
+    let idx_rig = alloc(has_rig); alloc(has_rig); alloc(has_rig);
     let idx_k = [idx_k1, idx_k2, idx_k3, idx_k4];
     let (grp, g_count) = if kdim > 0 { build_groups(sensor_of_cam, n_cam) } else { (vec![0usize; n_cam], 0) };
     let refine = kdim > 0 && g_count > 0;
@@ -1034,6 +1113,9 @@ fn bundle_adjust_impl(
     let mut group_tau0 = vec![0.0f64; g_count];
     { let mut seen = vec![false; g_count];
       for c in 0..n_cam { if refine && !seen[grp[c]] { if let Some((_, _, t0)) = rs[c] { seen[grp[c]] = true; group_tau0[grp[c]] = t0; } } } }
+    // Which groups have a lens offset to refine (the others' ω slots are pinned).
+    let mut group_has_off = vec![false; g_count];
+    for c in 0..n_cam { if refine && off[c].is_some() { group_has_off[grp[c]] = true; } }
     let k_live = |g: usize, j: usize| -> bool {
         let terms = group_lens[g].0;
         if terms == 0 { j < 3 } else { j < terms }
@@ -1041,10 +1123,13 @@ fn bundle_adjust_impl(
     // Reduced slot of each free camera (fixed ones have none); with no fixed camera the
     // slot is the camera index, so the system is exactly the all-free one.
     const FIXED: usize = usize::MAX;
-    let mut slot = vec![FIXED; n_cam];
-    let mut free_cams: Vec<usize> = Vec::with_capacity(n_cam);
-    for c in 0..n_cam {
-        if fixed_cam.get(c).copied().unwrap_or(0) == 0 { slot[c] = free_cams.len(); free_cams.push(c); }
+    // (Slots and `free_cams` are per pose block; a block is fixed when all its cameras are.)
+    let mut slot = vec![FIXED; n_pb];
+    let mut free_cams: Vec<usize> = Vec::with_capacity(n_pb);
+    let mut block_free = vec![false; n_pb];
+    for c in 0..n_cam { if fixed_cam.get(c).copied().unwrap_or(0) == 0 { block_free[pb[c]] = true; } }
+    for b in 0..n_pb {
+        if block_free[b] { slot[b] = free_cams.len(); free_cams.push(b); }
     }
     let n_free = free_cams.len();
     let group_off = 6 * n_free;           // intrinsic params follow the camera poses
@@ -1056,6 +1141,7 @@ fn bundle_adjust_impl(
     let pattern = {
         let (cam_start, cam_obs) = csr(n_cam, obs.iter().map(|o| o.0));
         let (grp_start, grp_cams) = csr(n_groups, (0..if refine { n_cam } else { 0 }).map(|c| grp[c]));
+        let (blk_start, blk_cams) = csr(n_pb, (0..n_cam).map(|c| pb[c]));
         let mut dims = vec![6usize; n_free];
         dims.extend(std::iter::repeat(kdim).take(n_groups));
         BlockPattern::new(dims, |r, touch| {
@@ -1065,12 +1151,15 @@ fn bundle_adjust_impl(
                     let p = obs[cam_obs[k as usize] as usize].1;
                     for q in pt_start[p]..pt_start[p + 1] {
                         let c2 = obs[pt_obs[q as usize] as usize].0;
-                        if slot[c2] != FIXED { touch(slot[c2]); }
+                        if slot[pb[c2]] != FIXED { touch(slot[pb[c2]]); }
                         if n_groups > 0 { touch(n_free + grp[c2]); }
                     }
                 }
             };
-            if r < n_free { visit(free_cams[r], touch); }
+            if r < n_free {
+                let b = free_cams[r];
+                for k in blk_start[b]..blk_start[b + 1] { visit(blk_cams[k as usize] as usize, &mut *touch); }
+            }
             else { for k in grp_start[r - n_free]..grp_start[r - n_free + 1] { visit(grp_cams[k as usize] as usize, &mut *touch); } }
         })
     };
@@ -1100,7 +1189,7 @@ fn bundle_adjust_impl(
     // writes were the cost). The full-matrix paths keep the index order (and their bits).
     let schur_order: Vec<usize> = if lower_only {
         let mut key: Vec<(usize, usize)> = (0..n_pts).map(|p| {
-            ((pt_start[p] as usize..pt_start[p + 1] as usize).map(|q| obs[pt_obs[q] as usize].0).min().unwrap_or(usize::MAX), p)
+            ((pt_start[p] as usize..pt_start[p + 1] as usize).map(|q| pb[obs[pt_obs[q] as usize].0]).min().unwrap_or(usize::MAX), p)
         }).collect();
         key.sort_unstable();
         key.into_iter().map(|(_, p)| p).collect()
@@ -1109,7 +1198,7 @@ fn bundle_adjust_impl(
     // the full-matrix paths keep their single loop.
     let range_plan = if lower_only { Some(RangePlan::new(&pattern, n_free, &schur_order, |p, visit: &mut dyn FnMut(usize)| {
         for q in pt_start[p] as usize..pt_start[p + 1] as usize {
-            let sl = slot[obs[pt_obs[q] as usize].0];
+            let sl = slot[pb[obs[pt_obs[q] as usize].0]];
             if sl != FIXED { visit(sl); }
         }
     })) } else { None };
@@ -1140,6 +1229,25 @@ fn bundle_adjust_impl(
             Some((_, _, t0)) => if idx_rs >= 0 && refine { group_tau0[grp[ci]] + gpar[grp[ci]][idx_rs as usize] } else { t0 },
         }
     };
+    // A camera's lens offset under the current group params, (Exp(ω)·R_o, t_o), or None.
+    let offset_rot = |ci: usize, gpar: &Vec<[f64; BLK_MAX]>| -> Option<(M3, V3)> {
+        let (ro, to) = off[ci]?;
+        if idx_rig >= 0 && refine {
+            let (p, i) = (gpar[grp[ci]], idx_rig as usize);
+            Some((mat3_mul(&so3_exp(&[p[i], p[i + 1], p[i + 2]]), &ro), to))
+        } else { Some((ro, to)) }
+    };
+    // A camera's pose: its capture's, composed with its offset when it has one.
+    let pose_of = |ci: usize, cams: &Vec<(M3, V3)>, gpar: &Vec<[f64; BLK_MAX]>| -> (M3, V3) {
+        let (r, t) = cams[pb[ci]];
+        match offset_rot(ci, gpar) {
+            None => (r, t),
+            Some((ro, to)) => {
+                let rt = mat3_vec(&ro, &t);
+                (mat3_mul(&ro, &r), [rt[0] + to[0], rt[1] + to[1], rt[2] + to[2]])
+            }
+        }
+    };
     // The point an observation sees: X − τ·s·v (rolling shutter), or X itself, and the
     // shift direction −s·v (for τ's Jacobian).
     let seen_point = |o: usize, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> (V3, V3) {
@@ -1161,7 +1269,8 @@ fn bundle_adjust_impl(
     // One observation's squared reprojection error, NaN when it projects nowhere.
     let sq_err = |o: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
         let (ci, pi, ox, oy, _, _) = obs[o];
-        let (r, t) = &cams[ci];
+        let pose = pose_of(ci, cams, gpar);
+        let (r, t) = &pose;
         let e = eff(ci, gpar);
         let x = if rs_any { seen_point(o, pts, gpar).0 } else { pts[pi] };
         let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &x);
@@ -1181,7 +1290,8 @@ fn bundle_adjust_impl(
     let robust_cost = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| -> f64 {
         let terms = map_indexed(obs.len(), |o| {
             let (ci, pi, ox, oy, wx, wy) = obs[o];
-            let (r, t) = &cams[ci];
+            let pose = pose_of(ci, cams, gpar);
+            let (r, t) = &pose;
             let e = eff(ci, gpar);
             let x = if rs_any { seen_point(o, pts, gpar).0 } else { pts[pi] };
             let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &x);
@@ -1219,11 +1329,20 @@ fn bundle_adjust_impl(
     struct Jac { ci: usize, ru: f64, rv: f64, wu: f64, wv: f64, ju: [f64; 6], jv: [f64; 6], jpu: [f64; 3], jpv: [f64; 3], jku: [f64; BLK_MAX], jkv: [f64; BLK_MAX] }
     let jac = |o: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| -> Option<Jac> {
         let (ci, pi, ox, oy, obs_wx, obs_wy) = obs[o];
-        let (r, t) = &cams[ci];
+        let (r, t) = &cams[pb[ci]];
         let Eff { fx, fy, cx, cy, k, fisheye } = eff(ci, gpar);
         let (xs, sdir) = if rs_any { seen_point(o, pts, gpar) } else { (pts[pi], [0.0; 3]) };
         let pc = mat3_vec(r, &xs); // R·X (the rolling-shutter-shifted X)
-        let xc = pc[0] + t[0]; let yc = pc[1] + t[1]; let zc = pc[2] + t[2];
+        // A lens with an offset sees R_o·q + t_o of the capture-frame point q = R·X + t
+        // (`rq` = R_o·q, for ω's Jacobian).
+        let ro_o = offset_rot(ci, gpar);
+        let (xc, yc, zc, rq) = match ro_o {
+            None => (pc[0] + t[0], pc[1] + t[1], pc[2] + t[2], [0.0; 3]),
+            Some((ro, to)) => {
+                let rq = mat3_vec(&ro, &[pc[0] + t[0], pc[1] + t[1], pc[2] + t[2]]);
+                (rq[0] + to[0], rq[1] + to[1], rq[2] + to[2], rq)
+            }
+        };
         if zc.abs() < 1e-9 { return None; }
         let inv = 1.0 / zc;
         // Normalised coords and the lens's radial factor m (lens_factor): m ≡ 1, and
@@ -1239,20 +1358,24 @@ fn bundle_adjust_impl(
         // For Brown q = 2g, g = k1 + 2k2·r² + 3k3·r⁴ (the earlier closed form).
         let dudc = [fx * inv * (d + q*a*a), fx * inv * (q*a*b), -fx * a * inv * (d + q*r2)];
         let dvdc = [fy * inv * (q*a*b), fy * inv * (d + q*b*b), -fy * b * inv * (d + q*r2)];
+        // Through a lens offset ∂x_cam/∂q = R_o: the capture's and the point's Jacobians
+        // see ∂proj/∂x_cam · R_o (the same rows when there is none).
+        let vm = |v: &[f64; 3], m: &M3| -> [f64; 3] { [0, 1, 2].map(|k| v[0]*m[0][k] + v[1]*m[1][k] + v[2]*m[2][k]) };
+        let (dqu, dqv) = match ro_o { None => (dudc, dvdc), Some((ro, _)) => (vm(&dudc, &ro), vm(&dvdc, &ro)) };
         // Camera Jacobian Jc (2×6): [I | −[pc]_×] through ∂proj/∂x_cam.
         let sp = skew(&pc);
         let mut ju = [0f64; 6]; let mut jv = [0f64; 6];
-        for k in 0..3 { ju[k] = dudc[k]; jv[k] = dvdc[k]; }
+        for k in 0..3 { ju[k] = dqu[k]; jv[k] = dqv[k]; }
         for k in 0..3 {
             let colk = [-sp[0][k], -sp[1][k], -sp[2][k]];
-            ju[3 + k] = dudc[0]*colk[0] + dudc[1]*colk[1] + dudc[2]*colk[2];
-            jv[3 + k] = dvdc[0]*colk[0] + dvdc[1]*colk[1] + dvdc[2]*colk[2];
+            ju[3 + k] = dqu[0]*colk[0] + dqu[1]*colk[1] + dqu[2]*colk[2];
+            jv[3 + k] = dqv[0]*colk[0] + dqv[1]*colk[1] + dqv[2]*colk[2];
         }
         // Point Jacobian Jp (2×3) = ∂proj/∂x_cam · R.
         let mut jpu = [0f64; 3]; let mut jpv = [0f64; 3];
         for k in 0..3 {
-            jpu[k] = dudc[0]*r[0][k] + dudc[1]*r[1][k] + dudc[2]*r[2][k];
-            jpv[k] = dvdc[0]*r[0][k] + dvdc[1]*r[1][k] + dvdc[2]*r[2][k];
+            jpu[k] = dqu[0]*r[0][k] + dqu[1]*r[1][k] + dqu[2]*r[2][k];
+            jpv[k] = dqv[0]*r[0][k] + dqv[1]*r[1][k] + dqv[2]*r[2][k];
         }
         // Intrinsic Jacobian Jk (2×kdim), filled by slot (idx_* is the param's
         // position in [s?,dcx?,dcy?,k1?,k2?,k3?,k4?]). ∂/∂s = (fx0·a·m, fy0·b·m);
@@ -1272,8 +1395,17 @@ fn bundle_adjust_impl(
             // ∂/∂τ: the camera-frame point moves by R·(−s·v) per unit τ.
             if idx_rs >= 0 && rs[ci].is_some() {
                 let rd = mat3_vec(r, &sdir);
-                jku[idx_rs as usize] = dudc[0]*rd[0] + dudc[1]*rd[1] + dudc[2]*rd[2];
-                jkv[idx_rs as usize] = dvdc[0]*rd[0] + dvdc[1]*rd[1] + dvdc[2]*rd[2];
+                jku[idx_rs as usize] = dqu[0]*rd[0] + dqu[1]*rd[1] + dqu[2]*rd[2];
+                jkv[idx_rs as usize] = dqv[0]*rd[0] + dqv[1]*rd[1] + dqv[2]*rd[2];
+            }
+            // ∂/∂ω (left perturbation of the offset rotation): −[R_o·q]_× through ∂proj/∂x_cam.
+            if idx_rig >= 0 && ro_o.is_some() {
+                let sq = skew(&rq);
+                for k in 0..3 {
+                    let colk = [-sq[0][k], -sq[1][k], -sq[2][k]];
+                    jku[idx_rig as usize + k] = dudc[0]*colk[0] + dudc[1]*colk[1] + dudc[2]*colk[2];
+                    jkv[idx_rig as usize + k] = dvdc[0]*colk[0] + dvdc[1]*colk[1] + dvdc[2]*colk[2];
+                }
             }
         }
         // Huber IRLS weight.
@@ -1288,7 +1420,8 @@ fn bundle_adjust_impl(
             let Some(j) = jac(pt_obs[q as usize] as usize, cams, pts, gpar, dh) else { continue };
             let mut cblk = [[0f64; 3]; BLK_MAX];
             for a in 0..6 { for b in 0..3 { cblk[a][b] = j.wu*j.ju[a]*j.jpu[b] + j.wv*j.jv[a]*j.jpv[b]; } }
-            if slot[j.ci] != FIXED { add_eblock(list, slot[j.ci], 6 * slot[j.ci], 6, &cblk); }
+            let sj = slot[pb[j.ci]];
+            if sj != FIXED { add_eblock(list, sj, 6 * sj, 6, &cblk); }
             if refine {
                 let g = grp[j.ci];
                 let mut kblk = [[0f64; 3]; BLK_MAX];
@@ -1417,7 +1550,7 @@ fn bundle_adjust_impl(
                     let owner = rp.owner[pi] as usize == r;
                     for q in pt_start[pi]..pt_start[pi + 1] {
                         let o = pt_obs[q as usize] as usize;
-                        let sc = slot[obs[o].0];
+                        let sc = slot[pb[obs[o].0]];
                         let free = sc != FIXED;
                         let mine = free && rp.range(sc) == r;
                         if !mine && !owner { continue; }
@@ -1487,7 +1620,7 @@ fn bundle_adjust_impl(
                     for q in pt_start[pi]..pt_start[pi + 1] {
                         let Some(Jac { ci, ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv }) = jac(pt_obs[q as usize] as usize, &cams, &pts, &gpar, dh)
                             else { continue };
-                        let sc = slot[ci];
+                        let sc = slot[pb[ci]];
                         let free = sc != FIXED;
                         let coff = if free { 6 * sc } else { 0 };
                         if free {
@@ -1533,6 +1666,10 @@ fn bundle_adjust_impl(
                 let dg = pattern.diag_at[n_free + g];
                 for j in 0..4 {
                     if idx_k[j] >= 0 && !k_live(g, j) { let a = idx_k[j] as usize; smat[dg + a*kdim + a] += 1.0; }
+                }
+                // Likewise ω for a group with no lens offset (the rig's reference lens).
+                if idx_rig >= 0 && !group_has_off[g] {
+                    for k in 0..3 { let a = idx_rig as usize + k; smat[dg + a*kdim + a] += 1.0; }
                 }
             }
         }
@@ -1802,9 +1939,10 @@ fn bundle_adjust_impl(
     // bits not in refine_mask; a fisheye's full Kannala–Brandt coefficients),
     // [cost_before, cost_after, anchor_rms_after, camera_prior_rms_after], then trace.
     let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 8 + 4 + BA_STATS_LEN + trace.len());
-    for (r, t) in &cams {
-        for row in r { for &v in row { out.push(v as f32); } }
-        for &v in t { out.push(v as f32); }
+    for c in 0..n_cam {
+        let (r, t) = pose_of(c, &cams, &gpar);
+        for row in &r { for &v in row { out.push(v as f32); } }
+        for &v in &t { out.push(v as f32); }
     }
     for pt in &pts {
         for &v in pt { out.push(v as f32); }
@@ -2454,5 +2592,175 @@ mod rolling_shutter_tests {
         assert_eq!(&plain[..head], &off[..head]);
         assert_eq!(&plain[head..], &off[head + n_cam..]);
         assert!(taus(&off, n_cam, n_pts).iter().all(|&t| t == 0.0));
+    }
+}
+
+#[cfg(test)]
+mod rig_tests {
+    use super::*;
+
+    // A three-lens rig (reference + two bands, each turned a fraction of a degree and a
+    // few centimetres off) flown in two nadir strips 50 m above a rolling field.
+    const F: f64 = 1000.0;
+    const W: f64 = 1000.0;
+    const H: f64 = 750.0;
+
+    fn nadir() -> M3 { [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]] }
+    fn offsets() -> Vec<Option<(M3, V3)>> {
+        vec![None, Some((so3_exp(&[0.004, -0.006, 0.003]), [0.05, 0.0, 0.0])), Some((so3_exp(&[-0.005, 0.002, -0.004]), [0.0, 0.05, 0.002]))]
+    }
+    fn compose(r: &M3, t: &V3, o: &Option<(M3, V3)>) -> (M3, V3) {
+        match o {
+            None => (*r, *t),
+            Some((ro, to)) => { let rt = mat3_vec(ro, t); (mat3_mul(ro, r), [rt[0] + to[0], rt[1] + to[1], rt[2] + to[2]]) }
+        }
+    }
+
+    struct Rig { caps: Vec<(M3, V3)>, pts: Vec<V3>, obs_idx: Vec<u32>, obs_px: Vec<f32> }
+
+    // Camera 3·k + b is band b of capture k.
+    fn rig() -> Rig { rig_of(2, 7) }
+    fn rig_of(strips: usize, per_strip: usize) -> Rig {
+        let r = nadir();
+        let mut caps = Vec::new();
+        for strip in 0..strips { for k in 0..per_strip {
+            let c = [8.0 * k as f64, 18.0 * strip as f64, 50.0 + 0.5 * k as f64];
+            let t = mat3_vec(&r, &c);
+            caps.push((r, [-t[0], -t[1], -t[2]]));
+        }}
+        let mut pts = Vec::new();
+        for ix in 0..(16 + 2 * per_strip) { for iy in 0..(5 * strips) {
+            let (x, y) = (-10.0 + 4.5 * ix as f64, -12.0 + 4.2 * iy as f64);
+            pts.push([x, y, 1.5 * (0.2 * x).sin() * (0.3 * y).cos()]);
+        }}
+        let (mut obs_idx, mut obs_px) = (Vec::new(), Vec::new());
+        for (k, (r, t)) in caps.iter().enumerate() {
+            for (b, o) in offsets().iter().enumerate() {
+                let (ri, ti) = compose(r, t, o);
+                for (pi, x) in pts.iter().enumerate() {
+                    let pc = mat3_vec(&ri, x);
+                    let c = [pc[0] + ti[0], pc[1] + ti[1], pc[2] + ti[2]];
+                    let (u, v) = (F * c[0] / c[2] + W / 2.0, F * c[1] / c[2] + H / 2.0);
+                    if c[2] > 0.0 && u >= 0.0 && u <= W && v >= 0.0 && v <= H {
+                        obs_idx.extend_from_slice(&[(3 * k + b) as u32, pi as u32]);
+                        obs_px.extend_from_slice(&[u as f32, v as f32]);
+                    }
+                }
+            }
+        }
+        Rig { caps, pts, obs_idx, obs_px }
+    }
+
+    // Inputs: every camera's own (perturbed) pose, intrinsics, points, capture ids,
+    // band sensors, and offsets seeded with `seed_err` added to each band's rotation.
+    fn inputs(g: &Rig, seed_err: f64) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<i32>, Vec<i32>, Vec<f32>) {
+        let (mut cf, mut capture, mut sensor, mut of) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for (k, (r, t)) in g.caps.iter().enumerate() {
+            let w = [0.002 * (k as f64).sin(), -0.002 * (k as f64).cos(), 0.001];
+            let (rp, tp) = (mat3_mul(&so3_exp(&w), r), [t[0] + 0.05, t[1] - 0.04, t[2] + 0.06]);
+            for (b, o) in offsets().iter().enumerate() {
+                let (ri, ti) = compose(&rp, &tp, o);
+                for row in &ri { for &v in row { cf.push(v as f32); } }
+                for &v in &ti { cf.push(v as f32); }
+                capture.push(k as i32);
+                sensor.push(b as i32);
+                match o {
+                    None => of.extend(std::iter::repeat(0.0f32).take(13)),
+                    Some((ro, to)) => {
+                        let rs = mat3_mul(&so3_exp(&[seed_err, -seed_err, 0.5 * seed_err]), ro);
+                        of.push(1.0);
+                        for row in &rs { for &v in row { of.push(v as f32); } }
+                        for &v in to { of.push(v as f32); }
+                    }
+                }
+            }
+        }
+        let n = cf.len() / 12;
+        let kf: Vec<f32> = (0..n).flat_map(|_| [F as f32, F as f32, (W / 2.0) as f32, (H / 2.0) as f32]).collect();
+        let pf: Vec<f32> = g.pts.iter().enumerate().flat_map(|(i, x)| {
+            let d = 0.05 * (i as f64).sin();
+            [(x[0] + d) as f32, (x[1] - d) as f32, (x[2] + d) as f32]
+        }).collect();
+        (cf, kf, pf, capture, sensor, of)
+    }
+
+    fn pose(out: &[f32], c: usize) -> (M3, V3) {
+        let v = |i: usize| out[c * 12 + i] as f64;
+        ([[v(0), v(1), v(2)], [v(3), v(4), v(5)], [v(6), v(7), v(8)]], [v(9), v(10), v(11)])
+    }
+    fn cost_after(out: &[f32], n_cam: usize, n_pts: usize) -> f32 { out[n_cam * 12 + n_pts * 3 + n_cam * 8 + 1] }
+    // The offset rotation a solve ended with: band pose · reference poseᵀ, per capture.
+    fn offset_of(out: &[f32], k: usize, b: usize) -> M3 {
+        mat3_mul(&pose(out, 3 * k + b).0, &mat3_transpose(&pose(out, 3 * k).0))
+    }
+    fn angle(a: &M3, b: &M3) -> f64 { let w = so3_log(&mat3_mul(a, &mat3_transpose(b))); dot3(&w, &w).sqrt() }
+
+    #[test]
+    fn a_capture_moves_as_one_and_its_bands_keep_their_offsets() {
+        let g = rig();
+        let (cf, kf, pf, capture, sensor, of) = inputs(&g, 0.0);
+        let (n_cam, n_pts) = (cf.len() / 12, g.pts.len());
+        let ones = vec![1.0f32; g.obs_px.len()];
+        let out = bundle_adjust_rig(&cf, &kf, &pf, &g.obs_idx, &g.obs_px, &ones, &[], &[], &[], 40, &sensor, 0, &[], &[], &[], &[],
+                                    &capture, &of);
+        assert!(cost_after(&out, n_cam, n_pts) < 0.01, "residual {} px", cost_after(&out, n_cam, n_pts));
+        for k in 0..g.caps.len() { for (b, o) in offsets().iter().enumerate().skip(1) {
+            let ro = o.unwrap().0;
+            assert!(angle(&offset_of(&out, k, b), &ro) < 1e-5, "capture {k} band {b} kept its offset");
+            // The lever arm too: t_band = R_o·t_ref + t_o.
+            let (_, tr) = pose(&out, 3 * k);
+            let (_, tb) = pose(&out, 3 * k + b);
+            let want = { let rt = mat3_vec(&ro, &tr); [rt[0] + o.unwrap().1[0], rt[1] + o.unwrap().1[1], rt[2] + o.unwrap().1[2]] };
+            for i in 0..3 { assert!((tb[i] - want[i]).abs() < 1e-4); }
+        }}
+    }
+
+    #[test]
+    fn a_wrong_offset_is_refined_from_the_photos() {
+        let g = rig();
+        // Each band's rotation seeded 0.3° off.
+        let (cf, kf, pf, capture, sensor, of) = inputs(&g, 0.0052);
+        let (n_cam, n_pts) = (cf.len() / 12, g.pts.len());
+        let ones = vec![1.0f32; g.obs_px.len()];
+        let fixed = bundle_adjust_rig(&cf, &kf, &pf, &g.obs_idx, &g.obs_px, &ones, &[], &[], &[], 40, &sensor, 0, &[], &[], &[], &[],
+                                      &capture, &of);
+        let refined = bundle_adjust_rig(&cf, &kf, &pf, &g.obs_idx, &g.obs_px, &ones, &[], &[], &[], 40, &sensor, 128, &[], &[], &[], &[],
+                                        &capture, &of);
+        assert!(cost_after(&fixed, n_cam, n_pts) > 1.0, "a wrong offset cannot fit: {} px", cost_after(&fixed, n_cam, n_pts));
+        assert!(cost_after(&refined, n_cam, n_pts) < 0.01, "refined: {} px", cost_after(&refined, n_cam, n_pts));
+        for (b, o) in offsets().iter().enumerate().skip(1) {
+            let e = angle(&offset_of(&refined, 5, b), &o.unwrap().0);
+            assert!(e < 2e-5, "band {b}: offset {e} rad from the truth");
+        }
+    }
+
+    #[test]
+    fn a_large_rig_takes_the_threaded_schur_path_alike() {
+        // 150 captures, 450 cameras: over 128 free blocks, the range-split Schur step.
+        let g = rig_of(5, 30);
+        let (cf, kf, pf, capture, sensor, of) = inputs(&g, 0.0052);
+        let (n_cam, n_pts) = (cf.len() / 12, g.pts.len());
+        let ones = vec![1.0f32; g.obs_px.len()];
+        let solver = [64.0f32, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1.0, f32::NAN];
+        let out = bundle_adjust_rig(&cf, &kf, &pf, &g.obs_idx, &g.obs_px, &ones, &[], &[], &[], 40, &sensor, 128, &solver, &[], &[],
+                                    &[], &capture, &of);
+        assert!(cost_after(&out, n_cam, n_pts) < 0.01, "residual {} px", cost_after(&out, n_cam, n_pts));
+        for (b, o) in offsets().iter().enumerate().skip(1) {
+            assert!(angle(&offset_of(&out, 70, b), &o.unwrap().0) < 2e-5);
+        }
+    }
+
+    #[test]
+    fn without_captures_or_offsets_it_is_bundle_adjust_exactly() {
+        let g = rig();
+        let (cf, kf, pf, _, sensor, _) = inputs(&g, 0.0);
+        let ones = vec![1.0f32; g.obs_px.len()];
+        let n_cam = cf.len() / 12;
+        let own: Vec<i32> = (0..n_cam as i32).collect();
+        let none = vec![0.0f32; n_cam * 13];
+        let plain = bundle_adjust(&cf, &kf, &pf, &g.obs_idx, &g.obs_px, &ones, &[], &[], &[], 15, &sensor, 1, &[], &[], &[]);
+        let rig = bundle_adjust_rig(&cf, &kf, &pf, &g.obs_idx, &g.obs_px, &ones, &[], &[], &[], 15, &sensor, 1 | 128, &[], &[], &[], &[],
+                                    &own, &none);
+        assert_eq!(plain, rig);
     }
 }

@@ -4,6 +4,7 @@ import init, {
   solve_pnp,
   bundle_adjust,
   bundle_adjust_rs,
+  bundle_adjust_rig,
   compute_depth_map,
   undistort_brown_pixels,
   GuidedSearch,
@@ -444,6 +445,11 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 // read over `tau` seconds while its centre moves at `v` (model units per second), `h`
 // the frame height. With any such camera the call runs bundle_adjust_rs and returns
 // `readout`, each camera's readout time after the solve (null for the others).
+// `opts.rig` (rigModel.js attach): { captureOf: per-camera capture (−1 none), offsets:
+// per-camera lens offset { R, t } to its capture's reference lens, or null } runs
+// bundle_adjust_rig: a capture's cameras share one pose, and with `refineRig` the offsets'
+// rotations are refined. A camera-centre prior then acts on its capture, so one per
+// capture is kept (the reference camera's where it has one).
 const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16, k4: 32 }
 // Parse a refine-terms string into the crate's bitmask. Unknown / 'none' tokens
 // contribute nothing (so 'none', '', undefined → 0).
@@ -486,29 +492,59 @@ export function baSolverFlat(solver = {}) {
   )
 }
 
+// bundle.rs `offset_flat`: [has, R(9), t(3)] per camera.
+function rigOffsetFlat(offsets, nCam) {
+  const out = new Float32Array(nCam * 13)
+  for (let c = 0; c < nCam; c++) {
+    const o = offsets[c]
+    if (o) out.set([1, ...o.R[0], ...o.R[1], ...o.R[2], ...o.t], c * 13)
+  }
+  return out
+}
+
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
   const threaded = await threadedWasm((opts.solver ?? SFM_TUNING.baSolver)?.threads ?? 0)
   const rsCams = cameras.some((c) => c?.rs?.h > 0)
-  const adjust = rsCams
+  const rig = opts.rig?.captureOf?.some((c) => c >= 0) ? opts.rig : null
+  const adjust = rig
     ? threaded
-      ? threaded.bundle_adjust_rs
-      : bundle_adjust_rs
-    : threaded
-      ? threaded.bundle_adjust
-      : bundle_adjust
+      ? threaded.bundle_adjust_rig
+      : bundle_adjust_rig
+    : rsCams
+      ? threaded
+        ? threaded.bundle_adjust_rs
+        : bundle_adjust_rs
+      : threaded
+        ? threaded.bundle_adjust
+        : bundle_adjust
   const {
     maxIters = 30,
     refineIntrinsics = 'none',
     sensorOfCam = null,
     gcpAnchors = [],
-    cameraPriors = [],
     solver = SFM_TUNING.baSolver,
     flatPoints = false,
     fixedCams = null,
     refineReadout = false,
+    refineRig = false,
   } = opts
-  const refineMode = refineModeMask(refineIntrinsics) | (rsCams && refineReadout ? 64 : 0)
+  let { cameraPriors = [] } = opts
+  const refineMode =
+    refineModeMask(refineIntrinsics) | (rsCams && refineReadout ? 64 : 0) | (rig && refineRig ? 128 : 0)
+  if (rig) {
+    // One prior per capture, the one without an offset first.
+    const byCapture = new Map()
+    for (const p of cameraPriors) {
+      const cap = rig.captureOf[p.camIdx] ?? -1
+      if (cap < 0) continue
+      const have = byCapture.get(cap)
+      if (!have || (rig.offsets[have.camIdx] && !rig.offsets[p.camIdx])) byCapture.set(cap, p)
+    }
+    cameraPriors = cameraPriors.filter(
+      (p) => (rig.captureOf[p.camIdx] ?? -1) < 0 || byCapture.get(rig.captureOf[p.camIdx]) === p,
+    )
+  }
   const nCam = cameras.length
   // `points3d`: [{x, y, z}] or a flat Float64Array [x0,y0,z0, x1,…]. With
   // `flatPoints`, the refined points come back as `pos` (Float64Array) instead of
@@ -638,7 +674,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     baSolverFlat(solver),
     fixedMask,
     fisheyeFlat,
-    ...(rsCams ? [rsFlat] : []),
+    ...(rig ? [rsFlat, rig.captureOf, rigOffsetFlat(rig.offsets, nCam)] : rsCams ? [rsFlat] : []),
   )
   const ms = performance.now() - tCall
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×8 = fx,fy,cx,cy,k1,k2,k3,k4),

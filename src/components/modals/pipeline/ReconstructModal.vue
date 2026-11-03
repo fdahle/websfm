@@ -30,6 +30,8 @@ const props = defineProps({
   linkedImages: { type: Number, default: 0 },
   // Images with a capture time (EXIF), which rolling shutter takes the motion from.
   timedImages: { type: Number, default: 0 },
+  // Multispectral rigs among the photos: [{ label, bands, captures, reference }].
+  cameraRigs: { type: Array, default: () => [] },
   pairs: { type: Number, default: 0 },
   sensors: { type: Number, default: 0 },
   // Camera groups that may hold photos of more than one camera: [{ label, groups }].
@@ -125,6 +127,7 @@ const effects = computed(() =>
   sparseEffects(modeSettings.value, {
     linkedImages: props.linkedImages,
     timedImages: props.timedImages,
+    rigs: props.cameraRigs,
     pairs: props.pairs,
     sensors: props.sensors,
     splits: props.sensorSplits,
@@ -315,6 +318,28 @@ function run() {
           >
             <option value="off">Off</option>
             <option value="on">Estimate the readout time</option>
+          </select>
+        </SettingsField>
+      </SettingsStep>
+
+      <SettingsStep
+        step="5"
+        title="Camera rig"
+        :effect="effects.cameraRig"
+        :inactive="adding || !cameraRigs.length || settings.cameraRig === 'off'"
+      >
+        <SettingsField label-for="cameraRig">
+          <template #label>
+            <FieldHelp op="sparse-reconstruction" param="cameraRig">Multispectral rig</FieldHelp>
+          </template>
+          <select
+            id="cameraRig"
+            v-model="settings.cameraRig"
+            class="field-input field-select"
+            :disabled="adding || !cameraRigs.length"
+          >
+            <option value="on">One pose per capture</option>
+            <option value="off">One pose per photo</option>
           </select>
         </SettingsField>
       </SettingsStep>

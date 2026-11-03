@@ -13,6 +13,9 @@
 //   fixedCameras?,  Set of uuids no solve may move (extending a saved model,
 //                   extendModel.js); a solve then holds K too, and takes only the points
 //                   a free camera sees, with the fixed cameras that see them
+//   rig?,           rigModel.js: a capture's photos share one pose in the global and
+//                   survey solves, whose plain global solves refine the lens offsets
+//                   (the local window solves keep every camera its own pose)
 // }
 // Created before registration: register.js runs the interleaved (R3) and local
 // solves through it. `cfg` must already carry the resolved gates and refineIntrinsics.
@@ -48,6 +51,7 @@ export function createBundleSession(ctx) {
     modelReprojStats,
     log,
     fixedCameras = null,
+    rig = null,
   } = ctx
   const isFixed = (uuid) => !!fixedCameras?.has(uuid)
   // Defaults + rationale for these live in defaults.user.js (baIterations,
@@ -383,6 +387,7 @@ export function createBundleSession(ctx) {
       maxIters: iters,
       refineIntrinsics: refineMode,
       refineReadout: rollingShutter,
+      ...(rig ? { rig: rig.attach(uuidList), refineRig: !fixedCameras?.size } : {}),
       sensorOfCam,
       solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver,
       flatPoints: true,
@@ -537,6 +542,7 @@ export function createBundleSession(ctx) {
       if (!isFixed(uuid)) cameras.set(uuid, { ...old, ...result.cameras[ci], K })
     })
     setTrackPositions(ptIds, result.pos)
+    rig?.update(cameras)
 
     // Each self-cal group this solve refined → the index of its first camera here.
     const solvedGroups = new Map()
@@ -695,6 +701,7 @@ export function createBundleSession(ctx) {
         flatPoints: true,
         sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
         cameraPriors: constrained.priors,
+        ...(rig ? { rig: rig.attach(uuidList) } : {}),
         solver: cfg.baSolver,
       })
       noteBaSolver(`camera-prior bundle adjustment (round ${round + 1})`, result)
@@ -813,6 +820,7 @@ export function createBundleSession(ctx) {
         gcpAnchors: anchors,
         flatPoints: true,
         cameraPriors: constrainedCameras?.priors ?? [],
+        ...(rig ? { rig: rig.attach(uuidList) } : {}),
         solver: cfg.baSolver,
       })
       noteBaSolver(`GCP-anchored bundle adjustment (round ${round + 1})`, result)

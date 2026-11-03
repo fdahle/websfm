@@ -11,6 +11,7 @@ import { resolveK } from './reconstruction.js'
 import { distortPixel } from './distortion.js'
 import { packMatchPairs, Uint32PairList } from './matchCodec.js'
 import { canonicalFrame } from './fiducials.js'
+import { rigRotation } from '../sensors/rig.js'
 
 export function mulberry32(seed) {
   return () => {
@@ -86,6 +87,14 @@ const NADIR = [
  * @param {number[]} [o.ppOffset]        true principal point offset from the centre [dx, dy] px
  * @param {boolean} [o.film]              film scans: keypoints in per-image scan space,
  *                                        fiducial detections + a calibrated layout
+ * @param {object[]} [o.rig]              a multispectral rig: each grid camera is a capture's
+ *                                        reference lens (band "Green", index 1), and every
+ *                                        entry { name, index, trueDeg, recordedDeg, leverM,
+ *                                        pairs = true } adds a band photo per capture, turned
+ *                                        by the MicaSense RigRelatives `trueDeg` and `leverM`
+ *                                        metres off, its metadata recording `recordedDeg`. It
+ *                                        is matched with its own capture's reference photo
+ *                                        only, or with nothing (`pairs: false`, a thermal band)
  */
 export function aerialBlock({
   seed,
@@ -105,6 +114,7 @@ export function aerialBlock({
   outlierFrac = 0.03,
   film = false,
   ppOffset = [3.5, -2.5],
+  rig = null,
 }) {
   const rng = mulberry32(seed)
   const gauss = () => {
@@ -159,6 +169,23 @@ export function aerialBlock({
       }
     }
   })
+  // Rig bands: x_band = R_o·x_ref + t_o, R_o = R(trueDeg)ᵀ (rig.js bandOffset), the lens
+  // `leverM` along x from the reference one.
+  const captures = cams.length
+  if (rig) {
+    for (let k = 0; k < captures; k++) {
+      const ref = cams[k]
+      ref.capture = k
+      for (const [bi, band] of rig.entries()) {
+        const Ro = T(rigRotation(band.trueDeg))
+        const to = mv(Ro, [band.leverM ?? 0, 0, 0]).map((v) => -v)
+        const R = mul(Ro, ref.R)
+        const t = mv(Ro, ref.t).map((v, i) => v + to[i])
+        const C = mv(T(R), t).map((v) => -v)
+        cams.push({ uuid: `${ref.uuid}b${bi}`, block: ref.block, R, t, C, capture: k, band: bi })
+      }
+    }
+  }
 
   const minX = Math.min(...cams.map((c) => c.C[0])) - 40,
     maxX = Math.max(...cams.map((c) => c.C[0])) + 40
@@ -233,15 +260,30 @@ export function aerialBlock({
       return { x: p.x, y: p.y, color }
     })
     kpOfWorld.push(map)
+    const bandSpec = cam.band != null ? rig[cam.band] : null
+    const bandMeta = rig
+      ? {
+          band: {
+            name: bandSpec?.name ?? 'Green',
+            index: bandSpec?.index ?? 1,
+            captureId: `cap${cam.capture}`,
+            rigRef: 1,
+            rigRelatives: bandSpec?.recordedDeg ?? [0, 0, 0],
+            thermal: !!bandSpec?.thermal,
+          },
+          make: 'MicaSense',
+          model: 'Synthetic',
+        }
+      : {}
     images.push({
       uuid: cam.uuid,
       name: `${cam.uuid}.jpg`,
       kpStatus: 'done',
       detectScale: null,
-      sensorId: 'sensor-1',
+      sensorId: bandSpec ? `sensor-band-${cam.band}` : 'sensor-1',
       keypoints,
       descU8,
-      meta: film ? { width: 1800, height: 1400 } : { ...meta },
+      meta: film ? { width: 1800, height: 1400 } : { ...meta, ...bandMeta },
       ...(film
         ? {
             fiducialDetections: fid.marks.map((m, i) => {
@@ -288,6 +330,12 @@ export function aerialBlock({
   for (let a = 0; a < cams.length; a++) {
     for (let b = a + 1; b < cams.length; b++) {
       if (cams[a].block !== cams[b].block) continue
+      // A rig is paired as matching pairs it (rig.js rigPairs).
+      if (rig && (cams[a].band != null || cams[b].band != null)) {
+        const band = cams[a].band ?? cams[b].band
+        if (cams[a].capture !== cams[b].capture || (cams[a].band != null && cams[b].band != null)) continue
+        if (rig[band].pairs === false) continue
+      }
       const list = []
       for (const [wi, ka] of kpOfWorld[a]) {
         const kb = kpOfWorld[b].get(wi)

@@ -10,9 +10,15 @@ Notable changes to websfm. The format follows
   band: each band becomes its own sensor, the photos of one trigger form a capture, and
   captures of the calibration panel are disabled when imported, so alignment leaves them
   out. Matching pairs only the reference band (green) between captures and every other
-  band with its own capture's reference image. On the MicaSense sample captures, the
-  band offsets the camera records predict how each band lines up with green to within
-  0.7–1.5 px (RedEdge-MX, Altum), against 6–31 px when read the other way round.
+  band with its own capture's reference image, and Sparse Model ▸ 5 · Camera rig solves
+  one pose per capture, each band at its lens offset refined from the photos; a band
+  that matches nothing, such as thermal, takes its capture's pose. On the MicaSense
+  sample captures, the band offsets the camera records predict how each band lines up
+  with green to within 0.7–1.5 px (RedEdge-MX, Altum), against 6–31 px when read the
+  other way round. On a synthetic 15-capture block with four bands, offsets recorded
+  0.15–0.2° wrong were solved to the truth within 0.01° (plus the 0.048° a 5 cm lever
+  arm at 60 m turns into), and the thermal band placed within 5 cm. Not yet run on a
+  real multispectral flight.
 - **GCP targets marked for you.** Tools ▸ Images ▸ **Detect targets…** finds the centre of
   each GCP's checker mat where the model expects it, or of every AprilTag 36h11 tag in
   every photo, and places the mark, flagged as detected with a score, for you to check in

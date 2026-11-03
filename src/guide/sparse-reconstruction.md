@@ -71,6 +71,15 @@ readout time** solves it per camera group, the motion taken from the photos' cap
 times. Leave it off for a mechanical or global shutter, and for photos without a
 capture time.
 
+## Multispectral rig
+<!-- param: cameraRig default: One pose per capture -->
+For a [multispectral camera](help:multispectral-rig) such as a MicaSense RedEdge or
+Altum. **One pose per capture** solves the photos of one trigger together: each band
+is seen from its lens's fixed offset to the reference band, starting from the offsets
+the camera records and refined from the matches. A band that matches nothing, such as
+thermal, still gets its pose from its capture. **One pose per photo** solves each band
+image on its own; use it only for cameras that are not rigidly mounted together.
+
 ## Check the result
 Cameras should follow the capture path, most images should register, and the points
 should have a coherent shape. The log reports the run's own checks: a focal length

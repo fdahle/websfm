@@ -229,6 +229,10 @@ export const RECONSTRUCT_DEFAULTS = {
   // rollingShutter.js). Off until a real drone block with check points measures the gain
   // (plan-after-0.7 ▸ RSH); a global-shutter camera gains nothing from it.
   rollingShutter: 'off',
+  // 'on' | 'off': a multispectral camera's photos of one trigger share one pose, each
+  // band at its lens offset (core/sfm/rigModel.js). Acts only on band photos (MicaSense);
+  // the lenses are rigidly mounted, so a pose per band photo only adds unknowns.
+  cameraRig: 'on',
 }
 
 // Quality presets (WS5): per-modal deltas OVER the defaults above, so `medium` ≡ the

@@ -14,3 +14,8 @@ WebSfM reads the bands and captures from the photos' metadata. Each band becomes
 own [sensor](help:sensor), because each lens has its own calibration. Captures the
 camera took of its calibration panel are disabled when imported, so alignment leaves
 them out.
+
+In [bundle adjustment](help:bundle-adjustment) the photos of one capture share one
+pose, and each band is seen from its lens offset to the reference band, refined from
+the matches. Bands that match nothing, such as thermal, take their pose from their
+capture.
