@@ -19,6 +19,9 @@ The map is added to **Reference Data**: **Style bands…** shows a single band, 
 false-colour composite, or an index such as NDVI or NDRE, which the bands' names fill in.
 It is a GeoTIFF with one 32-bit band per lens, NaN where no photo sees the ground.
 
+A thermal band stored as a 16-bit TIFF in centikelvin (MicaSense Altum, Altum-PT) maps
+in °C. DJI's radiometric JPEG (R-JPEG) is not read: its temperatures need DJI's own SDK.
+
 ## Calibration
 <!-- param: calibration default: Auto -->
 How the camera's radiance becomes [reflectance](help:reflectance-calibration). **Panel**
