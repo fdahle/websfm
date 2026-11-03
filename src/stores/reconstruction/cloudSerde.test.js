@@ -134,6 +134,15 @@ describe('sparse cloud round trip', () => {
     expect(back.pixelCount(0)).toBe(0)
   })
 
+  it("keeps a rolling-shutter camera's readout", () => {
+    const c = sparseCloud()
+    const rs = { v: [0.5, -1.25, 0], h: 80, tau: 0.031 }
+    c.cameras.set('ua', { ...c.cameras.get('ua'), rs })
+    const out = roundTrip(c)
+    expect(out.cameras.get('ua').rs).toEqual(rs)
+    expect('rs' in out.cameras.get('ub')).toBe(false)
+  })
+
   it('dictionary-encodes a view uuid that is not among the cameras', () => {
     const records = sparseRecords()
     records[0].views.set('stray', 5)

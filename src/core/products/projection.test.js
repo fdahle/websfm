@@ -9,6 +9,7 @@ import {
   frameFromScaledLocal,
 } from './projection.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
+import { projectPoint } from '../sfm/geometry.js'
 
 // A nadir camera at height `h` looking straight down: for a world-down viewing
 // direction of [0,0,-1] (camera looks toward −Z, i.e. ground below), the world
@@ -208,6 +209,32 @@ describe('aerial Z-up orientation', () => {
     expect(out.points.kpOf(0, 'a')).toBe(5)
     // p'=R·p: (1,2,3) → (-2,1,3)
     expect(out.points.xyz(0)).toEqual([-2, 1, 3])
+  })
+
+  it("turns a rolling-shutter camera's velocity with the model", () => {
+    const cam = {
+      R: [
+        [1, 0, 0],
+        [0, -1, 0],
+        [0, 0, -1],
+      ],
+      t: [0, 0, 10],
+      K: { fx: 900, fy: 900, cx: 500, cy: 400 },
+      rs: { v: [3, -2, 0.5], h: 800, tau: 0.03 },
+    }
+    const pts = SparsePoints.fromRecords([{ x: 1.5, y: 2, z: 0.3 }])
+    const R = [
+      [0, -1, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+    ]
+    const out = rotateReconstruction(new Map([['a', cam]]), pts, R)
+    const before = projectPoint(cam, 1.5, 2, 0.3)
+    const [x, y, z] = out.points.xyz(0)
+    const after = projectPoint(out.cameras.get('a'), x, y, z)
+    expect(after.u).toBeCloseTo(before.u, 9)
+    expect(after.v).toBeCloseTo(before.v, 9)
+    expect(out.cameras.get('a').rs.v).toEqual([2, 3, 0.5])
   })
 
   it('can rotate an owned result without allocating a second point array', () => {

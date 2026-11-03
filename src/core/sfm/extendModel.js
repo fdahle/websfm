@@ -131,7 +131,12 @@ export function seedFromModel({ imgs, rawKp, base, Kmap, fiducialTransforms, cam
     }
 
   for (const [uuid, cam] of baseCams)
-    cameras.set(uuid, { R: cam.R.map((row) => [...row]), t: [...cam.t], K: { ...cam.K } })
+    cameras.set(uuid, {
+      R: cam.R.map((row) => [...row]),
+      t: [...cam.t],
+      K: { ...cam.K },
+      ...(cam.rs ? { rs: structuredClone(cam.rs) } : {}),
+    })
   for (let i = 0, n = points.length; i < n; i++) {
     const p = tracks.addPoint(points.pos[3 * i], points.pos[3 * i + 1], points.pos[3 * i + 2])
     for (let s = points.vstart[i]; s < points.vstart[i + 1]; s++) {

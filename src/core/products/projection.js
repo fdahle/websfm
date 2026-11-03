@@ -299,7 +299,13 @@ export function rotateReconstruction(cameras, points, R, { inPlace = false } = {
   }
   const newCams = new Map()
   for (const [uuid, cam] of cameras) {
-    newCams.set(uuid, { R: mul(cam.R, Rt), t: [...cam.t], K: cam.K })
+    const next = { R: mul(cam.R, Rt), t: [...cam.t], K: cam.K }
+    // A rolling-shutter camera's velocity turns with the model (core/sfm/rollingShutter.js).
+    if (cam.rs) {
+      const v = cam.rs.v
+      next.rs = { ...cam.rs, v: [0, 1, 2].map((i) => R[i][0] * v[0] + R[i][1] * v[1] + R[i][2] * v[2]) }
+    }
+    newCams.set(uuid, next)
   }
   // A SparsePoints cloud rotates its pos column; tracks and colour are shared.
   const src = points.pos

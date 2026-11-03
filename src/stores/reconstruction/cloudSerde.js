@@ -283,8 +283,10 @@ function deserializeCloudData(c, makeCloudId) {
 
   const cameras = new Map()
   for (const cam of c.cameras || []) {
-    const { uuid, R, t, K } = cam
-    cameras.set(uuid, { R, t, K })
+    // `rs`: a rolling-shutter camera's readout (core/sfm/rollingShutter.js), absent for a
+    // global shutter.
+    const { uuid, R, t, K, rs } = cam
+    cameras.set(uuid, rs ? { R, t, K, rs } : { R, t, K })
   }
 
   // A cloud saved without tracks (none in practice) restores with no views.

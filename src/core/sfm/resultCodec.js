@@ -220,6 +220,7 @@ export function packSparseCloud(cloud) {
       R: c.R.map((row) => [...row]),
       t: [...c.t],
       K: { ...c.K },
+      ...(c.rs ? { rs: structuredClone(c.rs) } : {}),
     })),
   })
 }
@@ -238,7 +239,10 @@ function unpackModel(model) {
   const vy = b.vy ? new Float32Array(b.vy) : null
   const uuids = model.viewUuids || []
 
-  const cameras = new Map((model.cameras || []).map(({ uuid, R, t, K }) => [uuid, { R, t, K }]))
+  // `rs`: a rolling-shutter camera's readout (rollingShutter.js), absent for a global shutter.
+  const cameras = new Map(
+    (model.cameras || []).map(({ uuid, R, t, K, rs }) => [uuid, rs ? { R, t, K, rs } : { R, t, K }]),
+  )
   const points = makePackedPoints({
     pos,
     col,

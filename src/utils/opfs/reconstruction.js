@@ -7,7 +7,7 @@ import { getProjectDir, getRoot, getSubDir, readBin, removeFileIn, writeBin, wri
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Metadata → reconstruction.json (version 3):
 //   { version: 3, binaryFiles: { key: { name, bytes } }, clouds: [{ id, name, kind, createdAt, pointCount, hasColor,
-//       cameras: [{ uuid, R, t, K }], viewUuids: [uuid, …] }],
+//       cameras: [{ uuid, R, t, K, rs? }], viewUuids: [uuid, …] }],
 //     georef, summary, denseSummary }
 // The heavy per-point data lives in binary sidecars, one set per cloud, named
 // `reconstruction.json.{generation}.{cloudId}.{key}.bin`:

@@ -72,6 +72,15 @@ describe('sparse reconstruction worker transport', () => {
     expect(out.points.vcam).toBeInstanceOf(Uint32Array)
   })
 
+  it("keeps a rolling-shutter camera's readout", () => {
+    const rs = { v: [1, 0, -0.5], h: 80, tau: 0.03 }
+    const out = unpackReconstructionResult(
+      packReconstructionResult(model({ cameras: [{ ...camera('a'), rs }, camera('b')] })).result,
+    )
+    expect(out.cameras.get('a').rs).toEqual(rs)
+    expect('rs' in out.cameras.get('b')).toBe(false)
+  })
+
   it('packs and restores separate secondary models and their metadata', () => {
     const secondary = model({ name: 'Secondary sparse 1', componentImageUuids: ['b'] })
     const { result, transfer } = packReconstructionResult(model({ secondaryModels: [secondary] }))
