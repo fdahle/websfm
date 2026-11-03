@@ -79,8 +79,8 @@ reason. Interactive tools open a small toolbox over the view (close with × or E
 Hover a button for its shortcut; **?** lists them all. **What's New** lists the changes
 of each version.
 
-The Reconstruct dialogs (Match Features, Sparse Model, Depth Maps, Dense Cloud, DEM,
-Orthophoto, Mesh) and the Tools that take the longest to set up (Texture Mesh, Contour
+The Reconstruct dialogs (Detect Features, Match Features, Sparse Model, Depth Maps,
+Dense Cloud, DEM, Orthophoto, Mesh, Reflectance) and the Tools that take the longest to set up (Texture Mesh, Contour
 Lines, Co-register DEM, Align to Reference, Detect Targets) open on the settings of
 their last run in this project. **Presets ▾**
 in a dialog's title bar saves the current settings under a name, for the next project of

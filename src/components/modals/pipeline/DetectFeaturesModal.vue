@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
@@ -9,6 +9,8 @@ import PresetCards from '../ui/PresetCards.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import { useDatasetRecommendations } from '../../../composables/useDatasetRecommendations.js'
 import { useRecommendedPreset } from '../../../composables/useRecommendedPreset.js'
 import { usePresetSettings, presetOwnedKeys } from '../../../composables/usePresetSettings.js'
@@ -100,6 +102,60 @@ const siftSettings = ref({ ...DETECT_SIFT_DEFAULTS })
 // one's edits (and never carries SIFT's keypoint budget into LightGlue's O(N²)).
 const learnedSettings = ref(
   Object.fromEntries(Object.keys(LEARNED_DETECTORS).map((id) => [id, { ...DETECT_DEFAULTS_BY_DETECTOR[id] }])),
+)
+
+// The last run's settings and saved presets (useDialogSettings), kept flat: the detector
+// and every detector's own settings under its id ('sift.maxDim', 'aliked.maxKeypoints'),
+// so a preset brings back each detector as it was. Append / Overwrite follows the
+// project each time and is not kept.
+const flatDefaults = {
+  detector: 'sift',
+  ...Object.fromEntries(
+    Object.entries({ sift: DETECT_SIFT_DEFAULTS, ...DETECT_DEFAULTS_BY_DETECTOR }).flatMap(([id, d]) =>
+      Object.entries(d).map(([k, v]) => [`${id}.${k}`, v]),
+    ),
+  ),
+}
+const dialog = useDialogSettings('detect-features', flatDefaults)
+const pick = (flat, id) =>
+  Object.fromEntries(
+    Object.entries(flat)
+      .filter(([k]) => k.startsWith(`${id}.`))
+      .map(([k, v]) => [k.slice(id.length + 1), v]),
+  )
+const toFlat = () => ({
+  detector: detector.value,
+  ...Object.fromEntries(Object.entries(siftSettings.value).map(([k, v]) => [`sift.${k}`, v])),
+  ...Object.fromEntries(
+    Object.entries(learnedSettings.value).flatMap(([id, d]) => Object.entries(d).map(([k, v]) => [`${id}.${k}`, v])),
+  ),
+})
+function fromFlat(flat) {
+  siftSettings.value = { ...DETECT_SIFT_DEFAULTS, ...pick(flat, 'sift') }
+  learnedSettings.value = Object.fromEntries(
+    Object.keys(LEARNED_DETECTORS).map((id) => [id, { ...DETECT_DEFAULTS_BY_DETECTOR[id], ...pick(flat, id) }]),
+  )
+  // A selection detected again keeps the detector the other images use.
+  detector.value = mostUsed(otherDetectors.value) ?? flat.detector ?? 'sift'
+}
+fromFlat(dialog.settings.value)
+// Both ways, and only on a real change: the saved settings arriving (or a preset)
+// land in the detectors' objects; an edit there lands in the kept set.
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+watch(
+  () => dialog.settings.value,
+  (flat) => {
+    if (!same(flat, toFlat())) fromFlat(flat)
+  },
+  { deep: true },
+)
+watch(
+  [detector, siftSettings, learnedSettings],
+  () => {
+    const flat = toFlat()
+    if (!same(flat, dialog.settings.value)) dialog.settings.value = flat
+  },
+  { deep: true },
 )
 
 const detectors = [
@@ -332,6 +388,7 @@ const awaitingOversizeChoice = ref(false)
 
 function doRun() {
   awaitingOversizeChoice.value = false
+  dialog.remember()
   emit('run', {
     detector: detector.value,
     overwrite: overwrite.value,
@@ -359,6 +416,10 @@ function onShellClose() {
 
 <template>
   <ModalShell title="Detect Features" @close="onShellClose">
+    <template #header>
+      <span class="modal-title">Detect Features</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <SettingsField
       label-for="detector-sel"
       hint="SIFT works on any image; the learned detectors (ALIKED, DISK, SuperPoint) pair with LightGlue matching."
