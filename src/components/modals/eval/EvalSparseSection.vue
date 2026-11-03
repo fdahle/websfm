@@ -133,9 +133,10 @@ const columns = [
   { key: 'kp', label: 'Keypts', align: 'right' },
   { key: 'deg', label: 'Edges', align: 'right' },
   { key: 'nObs', label: 'Obs', align: 'right' },
-  { key: 'rmsPx', label: 'RMS', align: 'right', format: fmt },
-  { key: 'medianPx', label: 'Median', align: 'right', format: fmt },
-  { key: 'maxPx', label: 'Max', align: 'right', format: fmt },
+  // DataTable calls format(value, row): fmt's second argument is its digits, so wrap it.
+  { key: 'rmsPx', label: 'RMS', align: 'right', format: (v) => fmt(v) },
+  { key: 'medianPx', label: 'Median', align: 'right', format: (v) => fmt(v) },
+  { key: 'maxPx', label: 'Max', align: 'right', format: (v) => fmt(v) },
 ]
 
 function onRow(row) {

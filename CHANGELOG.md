@@ -237,6 +237,8 @@ Notable changes to websfm. The format follows
 - **Cancel in Reconnect project folder no longer leaves an empty app.** With no project
   open, Cancel (or Esc) goes back to the project list, or to New Project when there is
   none.
+- **Quality Report ▸ Sparse shows the residuals to two decimals.** The image table's
+  RMS, Median and Max columns were rounded to whole pixels (0.71 px read "1").
 - **The Quality Report's image tables fit short windows.** On a short screen (a laptop),
   Sparse squeezed its image table into a sliver that scrolled but never showed a whole
   row; each part of a section now keeps its height and the section scrolls. The stat
