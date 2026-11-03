@@ -2,6 +2,8 @@
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
@@ -23,7 +25,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({ ...CONTOUR_DEFAULTS })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('contours', CONTOUR_DEFAULTS, { exclude: ['format'] })
+const settings = dialog.settings
 const onMap = computed(() => !!props.dem?.crs && props.dem.crs !== 'local')
 if (!onMap.value && settings.value.format === 'none') settings.value.format = 'geojson'
 const unit = computed(() => (props.dem?.unit === 'model' ? 'model units' : props.dem?.unit || 'units'))
@@ -78,6 +82,7 @@ const effects = computed(() =>
 
 function run() {
   const s = settings.value
+  dialog.remember()
   emit('run', {
     interval: interval.value,
     indexEvery: s.indexEvery,
@@ -92,6 +97,10 @@ function run() {
 
 <template>
   <ModalShell title="Contour Lines" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Contour Lines</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <WarnBox v-if="!dem">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>).</WarnBox>
     <template v-else>
       <SettingsStep step="1" title="Pick the levels" :effect="effects.levels">

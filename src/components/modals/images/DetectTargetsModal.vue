@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
@@ -14,7 +16,9 @@ import { useDetectTargets } from '../../../composables/useDetectTargets.js'
 // count the run.
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({ ...TARGET_DEFAULTS })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('detect-targets', TARGET_DEFAULTS)
+const settings = dialog.settings
 const { plan } = useDetectTargets()
 const planned = ref(null)
 let seq = 0
@@ -40,12 +44,17 @@ const valid = computed(
 const runnable = computed(() => (tags.value ? planned.value?.counts.photos : planned.value?.counts.predictions) > 0)
 
 function run() {
+  dialog.remember()
   emit('run', { settings: { ...settings.value }, plan: planned.value })
 }
 </script>
 
 <template>
   <ModalShell title="Detect Targets" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Detect Targets</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <p class="field-hint">
       Finds the centre of each GCP's target in the photos and places the GCP's mark there, marked as detected. Check
       them in <b>Edit GCPs</b>, then georeference again.

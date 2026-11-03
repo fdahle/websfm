@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
@@ -33,7 +35,9 @@ const emit = defineEmits(['close', 'run', 'remove'])
 const demId = ref(props.initial?.demId ?? props.dems[0]?.id ?? null)
 const referenceId = ref(props.initial?.referenceId ?? props.references[0]?.id ?? null)
 const stableSetId = ref(props.initial?.stableSetId ?? '')
-const settings = ref({ ...COREG_DEFAULTS })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('coregister-dem', COREG_DEFAULTS, { exclude: ['applyTo'] })
+const settings = dialog.settings
 watch(
   () => props.references,
   (list) => {
@@ -85,6 +89,7 @@ async function fetchCopDem() {
 }
 
 function run() {
+  dialog.remember()
   emit('run', {
     demId: demId.value,
     referenceId: referenceId.value,
@@ -96,6 +101,10 @@ function run() {
 
 <template>
   <ModalShell title="Co-register DEM" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Co-register DEM</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <WarnBox v-if="!dems.length">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>).</WarnBox>
     <template v-else>
       <div v-if="effects.current" class="current-row">

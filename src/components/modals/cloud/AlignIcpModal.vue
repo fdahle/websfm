@@ -2,6 +2,8 @@
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
@@ -28,7 +30,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({ ...ICP_DEFAULTS })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('align-icp', ICP_DEFAULTS)
+const settings = dialog.settings
 const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 // The reference is never the source: picking the current reference to move re-picks
 // another one rather than leaving "Onto" blank.
@@ -65,6 +69,7 @@ const effects = computed(() =>
 
 function run() {
   const s = settings.value
+  dialog.remember()
   emit('run', {
     sourceIds: [sourceId.value, referenceId.value],
     settings: {
@@ -82,6 +87,10 @@ function run() {
 
 <template>
   <ModalShell title="Align to Reference (ICP)" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Align to Reference (ICP)</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <WarnBox v-if="!clouds.length || !refChoices.length"
       >ICP needs a dense cloud to move and another cloud or a mesh to align it to.</WarnBox
     >

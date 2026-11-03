@@ -19,11 +19,13 @@ Notable changes to websfm. The format follows
   is found to within 0.1–0.3 px; a 20 MP photo takes about 2.5 s per worker, photos run
   on all workers. ArUco and Metashape coded targets are not read.
 - **Dialogs remember their settings.** The Reconstruct dialogs (Match Features, Sparse
-  Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh) open on the settings of their
+  Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh) and Texture Mesh, Contour Lines,
+  Co-register DEM, Align to Reference and Detect Targets open on the settings of their
   last run in the project, and **Presets ▾** in the title bar saves a set under a name
   for the next project of the same kind, brings it back, or resets to the defaults. Only
   what differs from the defaults is kept, so a setting renamed in a later version falls
-  back to its default. Match Features' "only new pairs" follows the project each time.
+  back to its default. Match Features' "only new pairs", Co-register DEM's "apply to" and
+  the contours' output follow the project each time.
 - **The orthophoto as a web map.** Export ▸ Orthophoto ▸ **MBTiles** or **XYZ tiles**
   cuts it into Web Mercator map tiles, from the zoom that shows the whole area to the
   first one as fine as its pixels, in PNG, JPEG or WebP: one file for QGIS, QField or

@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
+import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
@@ -23,7 +25,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({ ...TEXTURE_DEFAULTS })
+// The last run's settings in this project, and saved presets (useDialogSettings).
+const dialog = useDialogSettings('texture-mesh', TEXTURE_DEFAULTS)
+const settings = dialog.settings
 // Settings ▸ Compute: the WebGPU depth pass and the memory gate the page count obeys.
 const { useGpu, memBudgetBytes } = useComputeSettings()
 const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
@@ -46,6 +50,7 @@ const effects = computed(() =>
 
 function run() {
   const s = settings.value
+  dialog.remember()
   emit('run', {
     sourceId: sourceId.value,
     settings: {
@@ -67,6 +72,10 @@ function run() {
 
 <template>
   <ModalShell title="Texture Mesh" @close="emit('close')">
+    <template #header>
+      <span class="modal-title">Texture Mesh</span>
+      <SettingsPresetsMenu :dialog="dialog" />
+    </template>
     <NoSourceWarn v-if="!meshes.length" kind="mesh" />
     <template v-else>
       <SettingsGroup title="Source">
