@@ -354,7 +354,7 @@ test('a depth run keeps the maps whose camera and settings did not change', asyn
     useModalsStore().depthMapsOpen = true
   })
   const dialog = page.getByRole('dialog', { name: 'Build Depth Maps' })
-  await dialog.getByText('Advanced settings').click()
+  await dialog.getByText('Show all settings').click()
   await dialog.getByText('Low', { exact: true }).first().click()
   await dialog.getByLabel('Method').selectOption('fast')
   await expect(dialog.getByText(/All 5 saved depth maps are kept/)).toBeVisible()

@@ -1,46 +1,65 @@
 import { describe, it, expect } from 'vitest'
 import { depthMapEffects, keepMapsEffect } from './depthMaps.js'
 import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
+import { SHORT_MAX } from './format.js'
 
 const project = { registered: 42, nativeLong: 6000 }
 
 describe('depthMapEffects', () => {
   it('states the working resolution Quality gives, as the run resolves it', () => {
     const e = depthMapEffects(DEPTHMAP_DEFAULTS, project)
-    expect(e.resolution).toMatch(/^42 depth maps, one per registered image, at up to 1,500 px/)
-    expect(e.resolution).toMatch(/Medium: ¼ of the largest original, 6,000 px/)
-    expect(e.resolution).toMatch(/up to 10 neighbours/)
-    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, maxDim: 2400 }, project).resolution).toMatch(
+    expect(e.resolution.long).toMatch(/^42 depth maps, one per registered image, at up to 1,500 px/)
+    expect(e.resolution.long).toMatch(/Medium: ¼ of the largest original, 6,000 px/)
+    expect(e.resolution.long).toMatch(/up to 10 neighbours/)
+    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, maxDim: 2400 }, project).resolution.long).toMatch(
       /up to 2,400 px on the long side \(fixed here\)/,
     )
-    expect(depthMapEffects(DEPTHMAP_DEFAULTS, { registered: 0 }).resolution).toMatch(/Build the sparse model first/)
+    expect(depthMapEffects(DEPTHMAP_DEFAULTS, { registered: 0 }).resolution.long).toMatch(
+      /Build the sparse model first/,
+    )
   })
 
   it('describes the window, the filters, and what turning a filter off means', () => {
     const e = depthMapEffects(DEPTHMAP_DEFAULTS, project)
-    expect(e.patchMatch).toMatch(/^A 7×7 px correlation window; 5 propagation sweeps/)
-    expect(e.speckle).toMatch(/more than 10 %/)
-    expect(e.crossView).toMatch(/at least 2 other views \(auto for an aerial \/ mapping project\) agree on/)
+    expect(e.patchMatch.long).toMatch(/^A 7×7 px correlation window; 5 propagation sweeps/)
+    expect(e.speckle.long).toMatch(/more than 10 %/)
+    expect(e.crossView.long).toMatch(/at least 2 other views \(auto for an aerial \/ mapping project\) agree on/)
     const obj = depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, sceneType: 'object' })
-    expect(obj.crossView).toMatch(/at least 1 other view \(auto for an object capture project\) agrees on/)
-    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, minConsistent: 3 }, project).crossView).toMatch(
+    expect(obj.crossView.long).toMatch(/at least 1 other view \(auto for an object capture project\) agrees on/)
+    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, minConsistent: 3 }, project).crossView.long).toMatch(
       /at least 3 other views agree on/,
     )
     const off = depthMapEffects({ ...DEPTHMAP_DEFAULTS, speckleFilter: false, geomConsistency: false }, project)
-    expect(off.speckle).toMatch(/^Off/)
-    expect(off.crossView).toMatch(/^Off/)
+    expect(off.speckle.long).toMatch(/^Off/)
+    expect(off.crossView.long).toMatch(/^Off/)
   })
 
   it('names the view selection, auto resolved by the backend', () => {
-    expect(depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, gpu: true }).patchMatch).toMatch(
+    expect(depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, gpu: true }).patchMatch.long).toMatch(
       /Full method \(auto, on the GPU\)/,
     )
-    expect(depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, gpu: false }).patchMatch).toMatch(
+    expect(depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, gpu: false }).patchMatch.long).toMatch(
       /Fast method \(auto, without a GPU\)/,
     )
-    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, method: 'full' }, project).patchMatch).toMatch(
+    expect(depthMapEffects({ ...DEPTHMAP_DEFAULTS, method: 'full' }, project).patchMatch.long).toMatch(
       /Full method: ACMH view selection/,
     )
+  })
+})
+
+describe('the step chain', () => {
+  it('gives each step a short fact for the chain', () => {
+    const e = depthMapEffects(DEPTHMAP_DEFAULTS, { ...project, gpu: false })
+    expect(Object.values(e).map((x) => x.short)).toEqual([
+      '1,500 px · 10 views',
+      '7×7 · 5 sweeps · Fast',
+      'median 10 %',
+      '≥ 2 views agree',
+    ])
+    const off = depthMapEffects({ ...DEPTHMAP_DEFAULTS, speckleFilter: false, geomConsistency: false }, project)
+    expect([off.speckle.short, off.crossView.short]).toEqual(['off', 'off'])
+    expect(depthMapEffects(DEPTHMAP_DEFAULTS, { registered: 0 }).resolution.short).toBe('no sparse model')
+    for (const x of Object.values(e)) expect(x.short.length).toBeLessThanOrEqual(SHORT_MAX)
   })
 })
 

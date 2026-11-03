@@ -9,6 +9,9 @@ import { fmtCount, plural } from './format.js'
 
 const FRACTION = { low: '⅛', medium: '¼', high: '½', ultra: 'all' }
 
+// Each step's effect comes in two lengths (dev/planning/plan-dialog-layout.md): `short`,
+// the fact the dialog's step chain shows ("1,500 px · 8 views"), and `long`, the
+// sentence an open step shows.
 // project: { registered (images with a pose), nativeLong (largest original long side, px),
 //            sceneType (what a blank "Consistent views" resolves to), gpu (Settings ▸ Compute
 //            asks for the GPU: what "auto" view selection resolves to) }
@@ -70,5 +73,13 @@ export function depthMapEffects(s, { registered = 0, nativeLong = 0, sceneType =
       `${s.maxGeomCost} px${angle} and its match scores an NCC of ${s.minNcc} or more. Runs once all maps exist.`
     : 'Off: no pixel is checked against other views, so sky and vegetation freckles reach the dense cloud.'
 
-  return { resolution, patchMatch, speckle, crossView }
+  return {
+    resolution: {
+      short: registered ? `${fmtCount(maxDim)} px · ${plural(s.maxSources, 'view')}` : 'no sparse model',
+      long: resolution,
+    },
+    patchMatch: { short: `${d}×${d} · ${plural(s.iterations, 'sweep')} · ${full ? 'Full' : 'Fast'}`, long: patchMatch },
+    speckle: { short: s.speckleFilter ? `median ${s.filterRelTol} %` : 'off', long: speckle },
+    crossView: { short: s.geomConsistency ? `≥ ${plural(views, 'view')} agree` : 'off', long: crossView },
+  }
 }

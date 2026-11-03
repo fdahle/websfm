@@ -8,3 +8,7 @@ export const plural = (n, word, many = `${word}s`) => `${fmtCount(n)} ${n === 1 
 
 // A length with its unit, rounded to what matters at that size.
 export const fmtLength = (v, unit) => `${Number(v.toPrecision(3)).toLocaleString('en-US')} ${unit}`
+
+// The longest a step's short fact may be: one chip of a dialog's step chain
+// (dev/planning/plan-dialog-layout.md). The effects' tests hold each `short` to it.
+export const SHORT_MAX = 40

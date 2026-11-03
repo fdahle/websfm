@@ -5,7 +5,9 @@ import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import AdvancedDisclosure from '../ui/AdvancedDisclosure.vue'
+import StepChain from '../ui/StepChain.vue'
+import ShowAllSettings from '../ui/ShowAllSettings.vue'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import PresetCards from '../ui/PresetCards.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
@@ -118,6 +120,17 @@ const effects = computed(() =>
     gpu: gpuOn.value,
   }),
 )
+// One list of steps (useStepLayout.js): the chain's facts, each step's tuning in place.
+provideStepLayout()
+const chain = computed(() => {
+  const e = effects.value
+  return [
+    { step: 1, title: 'Working resolution and source views', ...e.resolution },
+    { step: 2, title: 'PatchMatch', ...e.patchMatch },
+    { step: 3, title: 'Clean each depth map', ...e.speckle, inactive: !settings.value.speckleFilter },
+    { step: 4, title: 'Check across views', ...e.crossView, inactive: !settings.value.geomConsistency },
+  ]
+})
 
 // What the run receives: the store keys kept maps on exactly this (depthReuse.js).
 const runSettings = computed(() => {
@@ -184,50 +197,15 @@ function run() {
       @select="selectQuality"
     />
 
-    <SettingsStep step="1" title="Working resolution and source views" :effect="effects.resolution" />
+    <StepChain :steps="chain" />
 
-    <SettingsStep step="2" title="PatchMatch" :effect="effects.patchMatch" />
-
-    <SettingsStep step="3" title="Clean each depth map" :effect="effects.speckle" :inactive="!settings.speckleFilter">
-      <SettingsField
-        hint="Cleans per-image depth noise (drops flying pixels, smooths to the local median) before fusion."
-      >
-        <template #label
-          ><FieldHelp
-            op="depth-maps"
-            param="speckleFilter"
-            :value="settings.speckleFilter"
-            :default-value="DEPTHMAP_DEFAULTS.speckleFilter"
-            >Speckle / median filter</FieldHelp
-          ></template
-        >
-        <label class="checkbox-row"
-          ><input v-model="settings.speckleFilter" type="checkbox" class="checkbox" /> Enabled</label
-        >
-      </SettingsField>
-    </SettingsStep>
-
-    <SettingsStep step="4" title="Check across views" :effect="effects.crossView" :inactive="!settings.geomConsistency">
-      <SettingsField
-        hint="Keeps only pixels whose depth other views independently agree with. Removes sky and vegetation, which no photometric gate can catch."
-      >
-        <template #label
-          ><FieldHelp
-            op="depth-maps"
-            param="geomConsistency"
-            :value="settings.geomConsistency"
-            :default-value="DEPTHMAP_DEFAULTS.geomConsistency"
-            >Cross-view consistency</FieldHelp
-          ></template
-        >
-        <label class="checkbox-row"
-          ><input v-model="settings.geomConsistency" type="checkbox" class="checkbox" /> Enabled</label
-        >
-      </SettingsField>
-    </SettingsStep>
-
-    <AdvancedDisclosure label="Advanced settings">
-      <SettingsStep step="1" title="Working resolution and source views — advanced">
+    <SettingsStep
+      step="1"
+      title="Working resolution and source views"
+      :effect="effects.resolution"
+      :more="props.savedMaps.length ? 4 : 3"
+    >
+      <template #tuning>
         <SettingsField
           label-for="maxDim"
           unit="px"
@@ -319,9 +297,11 @@ function run() {
           >
           <template #hint>{{ keepEffect }}</template>
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep step="2" title="PatchMatch — advanced">
+    <SettingsStep step="2" title="PatchMatch" :effect="effects.patchMatch" :more="3">
+      <template #tuning>
         <SettingsField
           label-for="method"
           hint="Full is more accurate and complete; it takes about 2–3× as long on a GPU and several times longer without one."
@@ -382,9 +362,33 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep step="3" title="Clean each depth map — advanced">
+    <SettingsStep
+      step="3"
+      title="Clean each depth map"
+      :effect="effects.speckle"
+      :inactive="!settings.speckleFilter"
+      :more="settings.speckleFilter ? 1 : 0"
+    >
+      <SettingsField
+        hint="Cleans per-image depth noise (drops flying pixels, smooths to the local median) before fusion."
+      >
+        <template #label
+          ><FieldHelp
+            op="depth-maps"
+            param="speckleFilter"
+            :value="settings.speckleFilter"
+            :default-value="DEPTHMAP_DEFAULTS.speckleFilter"
+            >Speckle / median filter</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="settings.speckleFilter" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
+      <template #tuning>
         <SettingsField
           v-if="settings.speckleFilter"
           label-for="filterRelTol"
@@ -411,9 +415,33 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
+      </template>
+    </SettingsStep>
 
-      <SettingsStep step="4" title="Check across views — advanced">
+    <SettingsStep
+      step="4"
+      title="Check across views"
+      :effect="effects.crossView"
+      :inactive="!settings.geomConsistency"
+      :more="settings.geomConsistency ? 4 : 0"
+    >
+      <SettingsField
+        hint="Keeps only pixels whose depth other views independently agree with. Removes sky and vegetation, which no photometric gate can catch."
+      >
+        <template #label
+          ><FieldHelp
+            op="depth-maps"
+            param="geomConsistency"
+            :value="settings.geomConsistency"
+            :default-value="DEPTHMAP_DEFAULTS.geomConsistency"
+            >Cross-view consistency</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row"
+          ><input v-model="settings.geomConsistency" type="checkbox" class="checkbox" /> Enabled</label
+        >
+      </SettingsField>
+      <template #tuning>
         <SettingsField
           v-if="settings.geomConsistency"
           label-for="maxGeomCost"
@@ -520,10 +548,11 @@ function run() {
             class="field-input"
           />
         </SettingsField>
-      </SettingsStep>
-    </AdvancedDisclosure>
+      </template>
+    </SettingsStep>
 
     <template #footer>
+      <ShowAllSettings />
       <button class="btn" @click="emit('close')">Cancel</button>
       <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="run">
         Build Depth Maps
