@@ -24,7 +24,7 @@
 // would hide exactly the disagreement the report exists to surface.
 
 import { triangulateDlt, makeP34flat } from './reconstruction.js'
-import { cameraCenter, projectPoint } from './geometry.js'
+import { cameraCenter, projectPoint, rowCamera } from './geometry.js'
 
 // Gauss-Newton refinement (defaults co-located with the algorithm, per CLAUDE.md).
 const GN_MAX_ITERS = 10
@@ -261,7 +261,7 @@ function median(nums) {
 
 // Triangulate one GCP's observations.
 //   observations: [{ imageId, px, py }]
-//   camerasByImageId: Map<imageId, { R, t, K }> — only *registered* images
+//   camerasByImageId: Map<imageId, { R, t, K, rs? }> — only *registered* images
 //   opts.robust: drop views that disagree with the consensus and re-fit without
 //     them (opt-in — see the header note on why the fit/report path must not).
 // Returns { x, y, z, viewCount, perViewReprojPx: [{ imageId, reprojPx }],
@@ -271,8 +271,12 @@ function median(nums) {
 // residual reported, it just didn't steer the point.
 export async function triangulateGcp(observations, camerasByImageId, opts = {}) {
   const { robust = false } = opts
+  // A rolling-shutter photo's mark is seen from where the camera was at the mark's row.
   const views = (observations || [])
-    .map((o) => ({ ...o, cam: camerasByImageId.get(o.imageId) }))
+    .map((o) => {
+      const cam = camerasByImageId.get(o.imageId)
+      return { ...o, cam: cam && o.py != null ? rowCamera(cam, o.py) : cam }
+    })
     .filter((v) => v.cam && v.px != null && v.py != null)
   if (views.length < 2) return null
 

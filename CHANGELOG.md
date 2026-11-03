@@ -43,9 +43,11 @@ Notable changes to websfm. The format follows
   ms recovered from 0) the shape error was 0.003 mm. On 54 photos of a DJI Mavic Air 2
   (whole-second capture times) it found a 25.7 ms readout, the camera positions fitted
   the drone's GPS 20 % closer (0.75 against 0.94 RMS) and self-calibration moved the
-  principal point less (5.3 against 11.7 px), at the same 0.87 px reprojection; no check
-  points there, so the default stays off. Dense clouds and orthophotos still project
-  with each photo's middle-row pose.
+  principal point less (5.3 against 11.7 px), at about the same reprojection (0.86 against
+  0.88 px RMS); no check points there, so the default stays off. The model keeps each camera's readout, so GCP
+  and check-point marks are triangulated from the pose at their own row, and the GCP
+  guides and Detect targets look where that row sees them; dense clouds, orthophotos and
+  textures still read each photo with its middle-row pose.
 - **Metashape interchange, both ways.** Import ▸ **Metashape Cameras**
   reads the XML of Metashape's Export Cameras or Export Markers and takes, as you choose,
   the calibration of each camera, the positions and orientations of the aligned cameras

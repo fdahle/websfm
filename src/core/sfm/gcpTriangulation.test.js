@@ -4,6 +4,7 @@ import { beforeAll, describe, it, expect } from 'vitest'
 
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { triangulateGcp, triangulateAllGcps, refineGcpPoint } from './gcpTriangulation.js'
+import { projectPoint } from './geometry.js'
 
 beforeAll(async () => {
   const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
@@ -344,5 +345,29 @@ describe('triangulateAllGcps', () => {
     expect(results[0].tri).not.toBeNull()
     expect(results[0].tri.x).toBeCloseTo(X.x, 3)
     expect(results[1].tri).toBeNull()
+  })
+})
+
+describe('triangulateGcp with rolling-shutter cameras', () => {
+  // Three cameras flying along X at 10 units/s, 30 ms readout over 800 rows; marks made
+  // by the rolling-shutter projection. Each mark is seen from its row's camera.
+  const rs = { v: [10, 0, 0], h: 800, tau: 0.03 }
+  const cams = new Map([
+    ['a', { R: I3, t: [0, 0, 0], K, rs }],
+    ['b', { R: I3, t: [-1, 0, 0], K, rs }],
+    ['c', { R: I3, t: [-0.5, -0.6, 0], K, rs }],
+  ])
+  const X = { x: 0.4, y: 0.55, z: 5 }
+  const marks = [...cams].map(([imageId, cam]) => {
+    const p = projectPoint(cam, X.x, X.y, X.z)
+    return { imageId, px: p.u, py: p.v }
+  })
+  it('recovers the point exactly, where the mid-row poses miss it', async () => {
+    const tri = await triangulateGcp(marks, cams)
+    expect(Math.hypot(tri.x - X.x, tri.y - X.y, tri.z - X.z)).toBeLessThan(1e-6)
+    for (const r of tri.perViewReprojPx) expect(r.reprojPx).toBeLessThan(1e-6)
+    const global = new Map([...cams].map(([k, c]) => [k, { R: c.R, t: c.t, K: c.K }]))
+    const off = await triangulateGcp(marks, global)
+    expect(Math.hypot(off.x - X.x, off.y - X.y, off.z - X.z)).toBeGreaterThan(0.01)
   })
 })

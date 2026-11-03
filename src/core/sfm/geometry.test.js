@@ -5,6 +5,7 @@ import {
   fromScaledPx,
   projectPoint,
   projectWithDepth,
+  rowCamera,
   triangulationAngle,
   medianTriangulationAngle,
   scaleK,
@@ -73,6 +74,18 @@ describe('projectWithDepth', () => {
   it('returns null for a point behind the camera', () => {
     const cam = { R: I3, t: [0, 0, -5], K }
     expect(projectWithDepth(cam, 0, 0, 0)).toBeNull()
+  })
+
+  it("projects through a rolling-shutter camera's row, as projectPoint and rowCamera do", () => {
+    const cam = { R: I3, t: [0, 0, 5], K, rs: { v: [8, -3, 0], h: 480, tau: 0.04 } }
+    const p = projectWithDepth(cam, 0.7, 1.1, 0)
+    expect(p).toMatchObject(projectPoint(cam, 0.7, 1.1, 0))
+    expect(p.depth).toBe(5)
+    const q = projectPoint(rowCamera(cam, p.v), 0.7, 1.1, 0)
+    expect(q.u).toBeCloseTo(p.u, 6)
+    expect(q.v).toBeCloseTo(p.v, 6)
+    // Off the principal row the shift is pixels.
+    expect(p.v - projectPoint({ R: I3, t: [0, 0, 5], K }, 0.7, 1.1, 0).v).not.toBeCloseTo(0, 1)
   })
 })
 

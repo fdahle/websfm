@@ -32,6 +32,8 @@ export function fmtStats(s) {
 // (813 k on quarry), so each image's camera is unpacked once (a uuid Map lookup per
 // observation, and projectPoint's result object, were seconds a run and most of its
 // garbage). The arithmetic is projectPoint's, in the same order: the same residuals.
+// A rolling-shutter camera (`rs`) is taken at the observation's own row, as bundle
+// adjustment takes it (geometry.js rowCamera): t − τ·(row − cy)/h · R·v.
 export function modelResiduals({ tracks, cameras, ids, images }) {
   const residuals = []
   const camAt = new Array(images.length).fill(null)
@@ -47,7 +49,9 @@ export function modelResiduals({ tracks, cameras, ids, images }) {
       kpXy[img] = set.xy
       kpN[img] = set.n
     }
-    const { R, t, K } = cam
+    const { R, t, K, rs } = cam
+    const rate = rs?.h > 0 ? rs.tau / rs.h : 0
+    const w = rate ? [0, 1, 2].map((i) => R[i][0] * rs.v[0] + R[i][1] * rs.v[1] + R[i][2] * rs.v[2]) : [0, 0, 0]
     camAt[img] = [
       R[0][0],
       R[0][1],
@@ -65,6 +69,10 @@ export function modelResiduals({ tracks, cameras, ids, images }) {
       K.fy,
       K.cx,
       K.cy,
+      w[0],
+      w[1],
+      w[2],
+      rate,
     ]
   }
   tracks.forEachPoint((p) => {
@@ -80,9 +88,15 @@ export function modelResiduals({ tracks, cameras, ids, images }) {
         v = xy[2 * kpIdx + 1]
       // eslint-disable-next-line no-self-compare
       if (u !== u) return
-      const xc = c[0] * x + c[1] * y + c[2] * z + c[9]
-      const yc = c[3] * x + c[4] * y + c[5] * z + c[10]
-      const zc = c[6] * x + c[7] * y + c[8] * z + c[11]
+      let xc = c[0] * x + c[1] * y + c[2] * z + c[9]
+      let yc = c[3] * x + c[4] * y + c[5] * z + c[10]
+      let zc = c[6] * x + c[7] * y + c[8] * z + c[11]
+      if (c[19]) {
+        const k = c[19] * (v - c[15])
+        xc -= k * c[16]
+        yc -= k * c[17]
+        zc -= k * c[18]
+      }
       if (!isFinite(zc) || Math.abs(zc) < 1e-9) return
       residuals.push(Math.hypot(c[12] * (xc / zc) + c[14] - u, c[13] * (yc / zc) + c[15] - v))
     })

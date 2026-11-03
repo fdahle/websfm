@@ -28,6 +28,22 @@ export function projectRollingShutter(rs, cy, x, y, z, first, proj) {
   return p
 }
 
+// The global-shutter camera a rolling-shutter one (`cam.rs`) was when it read `row`:
+// moved by τ·s·v, s = (row − cy)/h, so t − τ·s·R·v. An observation at that row projects
+// through it exactly, as bundle adjustment models it (the row is the observation's own,
+// not solved for). A global-shutter camera is returned as it is.
+export function rowCamera(cam, row) {
+  const rs = cam.rs
+  if (!(rs?.h > 0)) return cam
+  const k = (rs.tau * (row - cam.K.cy)) / rs.h
+  const { R, t, K } = cam
+  return {
+    R,
+    t: [0, 1, 2].map((i) => t[i] - k * (R[i][0] * rs.v[0] + R[i][1] * rs.v[1] + R[i][2] * rs.v[2])),
+    K,
+  }
+}
+
 // Project a world point through { R, t, K } to pixel coords. Returns { u, v } or
 // null when the point lies on the camera plane (|z_cam| ≈ 0). Points *behind* the
 // camera still project (negative depth) — callers gate cheirality separately.
@@ -48,14 +64,18 @@ function projectGlobal(cam, x, y, z) {
 }
 
 // Like projectPoint but requires the point in front of the camera (z_cam > 0) and
-// also returns that depth. Returns { u, v, depth } or null. (Dense MVS reprojection.)
+// also returns that depth (the principal row's). Returns { u, v, depth } or null.
+// A rolling-shutter camera (`cam.rs`) projects through projectRollingShutter.
 export function projectWithDepth(cam, x, y, z) {
   const { R, t, K } = cam
   const zc = R[2][0] * x + R[2][1] * y + R[2][2] * z + t[2]
   if (!(zc > 1e-9)) return null
   const xc = R[0][0] * x + R[0][1] * y + R[0][2] * z + t[0]
   const yc = R[1][0] * x + R[1][1] * y + R[1][2] * z + t[1]
-  return { u: K.fx * (xc / zc) + K.cx, v: K.fy * (yc / zc) + K.cy, depth: zc }
+  const first = { u: K.fx * (xc / zc) + K.cx, v: K.fy * (yc / zc) + K.cy }
+  if (!(cam.rs?.h > 0)) return { ...first, depth: zc }
+  const p = projectRollingShutter(cam.rs, K.cy, x, y, z, first, (a, b, c) => projectGlobal(cam, a, b, c))
+  return p ? { u: p.u, v: p.v, depth: zc } : null
 }
 
 // Triangulation (parallax) angle in degrees at world point `p`, between the two
