@@ -111,7 +111,7 @@ test('exports the cameras, calibration and markers for Metashape', async ({ page
   await page.getByRole('button', { name: 'Export', exact: true }).click()
   await page.locator('.ribbon').getByRole('button', { name: 'SfM Project' }).click()
   const dialog = page.getByRole('dialog', { name: 'Export SfM Project' })
-  await dialog.locator('#fmt').selectOption('metashape')
+  await dialog.getByRole('radiogroup', { name: 'Format' }).locator('[data-id="metashape"]').click()
   const download = page.waitForEvent('download')
   await dialog.getByRole('button', { name: 'Export', exact: true }).click()
   const file = await (await download).path()

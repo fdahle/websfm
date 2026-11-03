@@ -145,6 +145,15 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **Export dialogs laid out like the Tools dialogs.** The formats are cards, each saying
+  what its file holds, followed by numbered steps: ① Format, ② the export's own
+  settings, ③ the coordinate system of a DEM or orthophoto GeoTIFF, then the file name.
+  What the dialog exports, and the source of camera poses or calibration, sit above the
+  steps as Source.
+- **Image lists in the Quality Report are links.** The images of each match component
+  (Matching), the images not registered and those an extension added (Sparse) are listed
+  in columns, and a click on a name opens the image; a click on a row of the Matching
+  table does too. A long list shows its first 48 names and a *Show all* button.
 - **Each step listed once, in every processing dialog.** Every step is a group headed by
   what it will do in a few words (Depth Maps: ① 1,500 px · 10 views, ② 7×7 · 5 sweeps ·
   Fast, ③ median 10 %, ④ ≥ 2 views agree); a click on the header opens or closes it.
@@ -219,6 +228,13 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **Cancel in Reconnect project folder no longer leaves an empty app.** With no project
+  open, Cancel (or Esc) goes back to the project list, or to New Project when there is
+  none.
+- **The Quality Report's image tables fit short windows.** On a short screen (a laptop),
+  Sparse squeezed its image table into a sliver that scrolled but never showed a whole
+  row; each part of a section now keeps its height and the section scrolls. The stat
+  tiles also leave a space between a number and its unit.
 - **TIFF photos keep their camera details.** A TIFF that stores its tags after the
   pixels, as MicaSense cameras write them, came in without make, model or focal length,
   so its camera group read "Sensor 1 · NaN mm" and the band went unread; its metadata is

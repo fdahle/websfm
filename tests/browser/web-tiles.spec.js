@@ -46,7 +46,7 @@ async function exportTiles(page, format) {
   await page.getByRole('button', { name: 'Export', exact: true }).click()
   await page.locator('.ribbon').getByRole('button', { name: 'Ortho', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Export Orthophoto' })
-  await dialog.locator('#fmt').selectOption(format)
+  await dialog.getByRole('radiogroup', { name: 'Format' }).locator(`[data-id="${format}"]`).click()
   const download = page.waitForEvent('download', { timeout: 60_000 })
   await dialog.getByRole('button', { name: 'Export', exact: true }).click()
   const d = await download

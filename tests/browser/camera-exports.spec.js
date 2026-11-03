@@ -99,7 +99,7 @@ test('camera poses and calibration export through their dialogs', async ({ page 
   // The imported pose, as tab-separated text without its angles.
   dialog = await open(/Camera\s*Poses/, 'Export Camera Poses')
   await dialog.getByLabel('Source').selectOption('imported')
-  await dialog.getByLabel('Format').selectOption('txt')
+  await dialog.getByRole('radiogroup', { name: 'Format' }).locator('[data-id="txt"]').click()
   await dialog.getByLabel('Orientation (omega, phi, kappa)').uncheck()
   file = await exportFrom(dialog)
   expect(file.name).toMatch(/-poses\.txt$/)

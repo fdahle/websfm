@@ -2,6 +2,9 @@
 import { ref, computed, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsField from '../ui/SettingsField.vue'
+import SettingsGroup from '../ui/SettingsGroup.vue'
+import SettingsStep from '../ui/SettingsStep.vue'
+import ChoiceCards from '../ui/ChoiceCards.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import CrsPicker from '../../controls/CrsPicker.vue'
 import { EXPORT_DEFAULTS } from '../../../core/defaults.user.js'
@@ -412,383 +415,457 @@ const orthoNodataApplies = computed(
     (orthoAlphaApplies.value && !settings.value.orthoAlpha) ||
     (props.kind === 'ortho' && settings.value.format === 'jpeg'),
 )
+
+// The formats as cards: a label "Name — what it holds" (or "Name (what)") gives the
+// card's name and its line.
+function formatCard(f) {
+  const dash = f.label.indexOf(' — ')
+  if (dash > 0)
+    return { id: f.value, label: f.label.slice(0, dash), blurb: f.label.slice(dash + 3), disabled: f.disabled }
+  const paren = f.label.match(/^(.+?) \(([^()]+)\)$/)
+  if (paren) return { id: f.value, label: paren[1], blurb: paren[2], disabled: f.disabled }
+  return { id: f.value, label: f.label, disabled: f.disabled }
+}
+const formatCards = computed(() => cfg.value.formats.map(formatCard))
+
+// The steps, as the export applies them: ① the format, ② the kind's own settings (when
+// this format has any), ③ a DEM's or orthophoto's coordinate system (GeoTIFF), then the
+// file name.
+const optionsShown = computed(() => {
+  const f = settings.value.format
+  switch (props.kind) {
+    case 'model':
+      return f === 'json'
+    case 'colmap':
+      return f === 'workspace'
+    case 'dem':
+      return !reprojecting.value && f !== 'png'
+    case 'ortho':
+      return (
+        (isTiff.value && !isCog.value && !reprojecting.value) ||
+        orthoAlphaApplies.value ||
+        orthoNodataApplies.value ||
+        isWebTiles.value ||
+        f === 'jpeg'
+      )
+    case 'sensors':
+      return settings.value.sensorSource !== 'entered'
+    case 'vectors':
+      return wgs84Offered.value || !props.projectCrs
+    case 'cameraFiducials':
+    case 'imageFiducials':
+    case 'keypoints':
+      return false
+    default:
+      return true
+  }
+})
+const OPTION_TITLES = {
+  tiles3d: 'Tiles',
+  undistorted: 'Images',
+  dem: 'Cells',
+  ortho: 'Pixels',
+  measurements: 'Coordinates',
+  vectors: 'Coordinates',
+}
+const optionsTitle = computed(() => OPTION_TITLES[props.kind] ?? 'Content')
+const crsShown = computed(() => isRaster.value && isTiff.value)
+const stepNo = computed(() => {
+  let n = 1
+  const options = optionsShown.value ? ++n : 0
+  const crs = crsShown.value ? ++n : 0
+  return { options, crs, file: n + 1 }
+})
+const hasSource = computed(() => !!props.subject || props.kind === 'poses' || props.kind === 'sensors')
 </script>
 
 <template>
-  <!-- Every export reads the same way: what is exported, where it comes from (Source),
-       the Format with what its file holds, the File name, the kind's own settings, notes. -->
+  <!-- Every export reads the same way, as numbered steps like a Tools dialog: where it
+       comes from (Source), ① the Format as cards with what its file holds, ② the kind's
+       own settings, ③ a raster's coordinate system, then the File name. -->
   <ModalShell :title="cfg.title" @close="emit('close')">
-    <p v-if="subject" class="subject">
-      Exporting <strong>{{ subject }}</strong>
-    </p>
-    <SettingsField v-if="kind === 'poses'" label-for="psrc">
-      <template #label><FieldHelp op="export-camera-poses" param="source">Source</FieldHelp></template>
-      <select id="psrc" v-model="settings.poseSource" class="field-input field-select">
-        <option value="estimated" :disabled="!sources.estimated">
-          Estimated by the reconstruction ({{ pluralize(sources.estimated ?? 0, 'camera') }})
-        </option>
-        <option value="imported" :disabled="!sources.imported">
-          Imported poses ({{ pluralize(sources.imported ?? 0, 'pose') }})
-        </option>
-      </select>
-    </SettingsField>
-    <SettingsField v-else-if="kind === 'sensors'" label-for="ssrc">
-      <template #label><FieldHelp op="export-calibration" param="source">Source</FieldHelp></template>
-      <select id="ssrc" v-model="settings.sensorSource" class="field-input field-select">
-        <option value="estimated" :disabled="!sources.estimated">
-          Estimated by the reconstruction, one row per camera group
-        </option>
-        <option value="estimatedPerImage" :disabled="!sources.estimated">
-          Estimated by the reconstruction, one row per image ({{ pluralize(sources.estimated ?? 0, 'camera') }})
-        </option>
-        <option value="entered" :disabled="!sources.entered">
-          As entered ({{ pluralize(sources.entered ?? 0, 'camera group') }})
-        </option>
-      </select>
-    </SettingsField>
-    <SettingsField label="Format" label-for="fmt">
-      <select id="fmt" v-model="settings.format" class="field-input field-select">
-        <option v-for="f in cfg.formats" :key="f.value" :value="f.value" :disabled="f.disabled">
-          {{ f.label }}
-        </option>
-      </select>
-      <template v-if="kind === 'dem' && settings.format === 'support'" #hint>
+    <SettingsGroup v-if="hasSource" title="Source">
+      <p v-if="subject" class="subject">
+        Exporting <strong>{{ subject }}</strong>
+      </p>
+      <SettingsField v-if="kind === 'poses'" label-for="psrc">
+        <template #label><FieldHelp op="export-camera-poses" param="source">Source</FieldHelp></template>
+        <select id="psrc" v-model="settings.poseSource" class="field-input field-select">
+          <option value="estimated" :disabled="!sources.estimated">
+            Estimated by the reconstruction ({{ pluralize(sources.estimated ?? 0, 'camera') }})
+          </option>
+          <option value="imported" :disabled="!sources.imported">
+            Imported poses ({{ pluralize(sources.imported ?? 0, 'pose') }})
+          </option>
+        </select>
+      </SettingsField>
+      <SettingsField v-else-if="kind === 'sensors'" label-for="ssrc">
+        <template #label><FieldHelp op="export-calibration" param="source">Source</FieldHelp></template>
+        <select id="ssrc" v-model="settings.sensorSource" class="field-input field-select">
+          <option value="estimated" :disabled="!sources.estimated">
+            Estimated by the reconstruction, one row per camera group
+          </option>
+          <option value="estimatedPerImage" :disabled="!sources.estimated">
+            Estimated by the reconstruction, one row per image ({{ pluralize(sources.estimated ?? 0, 'camera') }})
+          </option>
+          <option value="entered" :disabled="!sources.entered">
+            As entered ({{ pluralize(sources.entered ?? 0, 'camera group') }})
+          </option>
+        </select>
+      </SettingsField>
+    </SettingsGroup>
+
+    <SettingsStep step="1" title="Format" :effect="formatHint">
+      <template v-if="kind === 'dem' && settings.format === 'support'" #effect>
         <FieldHelp op="dem" param="supportExport">Support layer</FieldHelp>: for each DEM cell, the percentage that
         points landed in (0 = filled by interpolation), 255 where the DEM is empty. On the DEM's grid, or its overview
         for a DEM too large for one plane.
       </template>
-      <template v-else-if="formatHint" #hint>{{ formatHint }}</template>
-    </SettingsField>
-    <FileNameField v-model="settings.fileName" :default-name="defaultName" />
+      <ChoiceCards v-model="settings.format" :options="formatCards" class="format-cards" aria-label="Format" />
+    </SettingsStep>
 
-    <!-- Point cloud -->
-    <template v-if="kind === 'cloud'">
-      <label class="checkbox-row">
-        <input type="checkbox" v-model="settings.includeColor" :disabled="isLasFormat" class="checkbox" />
-        Include vertex colours{{ isLasFormat ? ' (LAS always stores RGB when the cloud has colour)' : '' }}
-      </label>
-      <label v-if="hasFrame" class="checkbox-row"
-        ><input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}</label
-      >
-      <SettingsField
-        label="Voxel downsample cell"
-        label-for="dscell"
-        :hint="`World units${hasGeoref ? ' (project CRS when georeferenced)' : hasScale ? ' (metres when scaled)' : ''}; 0 = keep every point.`"
-      >
-        <input
-          id="dscell"
-          v-model.number="settings.downsampleCell"
-          type="number"
-          min="0"
-          step="any"
-          class="field-input"
-        />
-      </SettingsField>
-      <p class="field-hint">
-        Point attributes (a computed distance, imported intensity or classification) are written to PLY and LAS. LAZ
-        keeps only the standard LAS fields; XYZ keeps none.
-      </p>
-    </template>
-
-    <!-- Mesh -->
-    <template v-else-if="kind === 'mesh'">
-      <template v-if="textured">
+    <SettingsStep v-if="optionsShown" :step="stepNo.options" :title="optionsTitle">
+      <!-- Point cloud -->
+      <template v-if="kind === 'cloud'">
         <label class="checkbox-row">
-          <input type="checkbox" v-model="settings.includeTexture" :disabled="!textureFormat" class="checkbox" />
-          Include the photo texture{{ textureFormat ? '' : ' (GLB or OBJ only)' }}
+          <input type="checkbox" v-model="settings.includeColor" :disabled="isLasFormat" class="checkbox" />
+          Include vertex colours{{ isLasFormat ? ' (LAS always stores RGB when the cloud has colour)' : '' }}
         </label>
-        <p v-if="textureFormat && settings.includeTexture" class="field-hint">
+        <label v-if="hasFrame" class="checkbox-row"
+          ><input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}</label
+        >
+        <SettingsField
+          label="Voxel downsample cell"
+          label-for="dscell"
+          :hint="`World units${hasGeoref ? ' (project CRS when georeferenced)' : hasScale ? ' (metres when scaled)' : ''}; 0 = keep every point.`"
+        >
+          <input
+            id="dscell"
+            v-model.number="settings.downsampleCell"
+            type="number"
+            min="0"
+            step="any"
+            class="field-input"
+          />
+        </SettingsField>
+        <p class="field-hint">
+          Point attributes (a computed distance, imported intensity or classification) are written to PLY and LAS. LAZ
+          keeps only the standard LAS fields; XYZ keeps none.
+        </p>
+      </template>
+
+      <!-- Mesh -->
+      <template v-else-if="kind === 'mesh'">
+        <template v-if="textured">
+          <label class="checkbox-row">
+            <input type="checkbox" v-model="settings.includeTexture" :disabled="!textureFormat" class="checkbox" />
+            Include the photo texture{{ textureFormat ? '' : ' (GLB or OBJ only)' }}
+          </label>
+          <p v-if="textureFormat && settings.includeTexture" class="field-hint">
+            {{
+              settings.format === 'glb'
+                ? 'The atlas pages are embedded in the .glb.'
+                : 'Downloads a .zip with the .obj, its .mtl and one JPEG per atlas page.'
+            }}
+          </p>
+        </template>
+        <label v-if="!(textured && textureFormat && settings.includeTexture)" class="checkbox-row">
+          <input
+            type="checkbox"
+            v-model="settings.includeColor"
+            :disabled="settings.format === 'stl'"
+            class="checkbox"
+          />
+          Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}
+        </label>
+        <label v-if="hasFrame" class="checkbox-row">
+          <input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}
+        </label>
+      </template>
+
+      <!-- Model JSON -->
+      <template v-else-if="kind === 'model'">
+        <label v-if="settings.format === 'json'" class="checkbox-row">
+          <input type="checkbox" v-model="settings.includeTracks" class="checkbox" /> Include point tracks (image
+          observations)
+        </label>
+      </template>
+
+      <!-- COLMAP model -->
+      <template v-else-if="kind === 'colmap'">
+        <label v-if="settings.format === 'workspace'" class="checkbox-row">
+          <input type="checkbox" v-model="settings.includeImages" class="checkbox" /> Include original source images
+          (larger ZIP)
+        </label>
+      </template>
+
+      <!-- 3D Tiles -->
+      <template v-else-if="kind === 'tiles3d'">
+        <SettingsField
+          label-for="tiling"
+          :hint="
+            settings.tiling === 'lod'
+              ? tilesMesh
+                ? 'The mesh split into tiles and decimated per level; viewers load detail where the camera is.'
+                : 'One tile per node of the cloud\'s level-of-detail octree; viewers load detail where the camera is.'
+              : 'The whole model in one tile, loaded at once.'
+          "
+        >
+          <template #label><FieldHelp op="export-3d-tiles" param="tiling">Tiling</FieldHelp></template>
+          <select id="tiling" v-model="settings.tiling" class="field-input field-select">
+            <option value="lod">Level of detail (hierarchy of tiles)</option>
+            <option value="single" :disabled="!singleTileOk">
+              Single tile{{ singleTileOk ? '' : ' — too large for one tile' }}
+            </option>
+          </select>
+        </SettingsField>
+        <SettingsField v-if="tilesMesh && settings.tiling === 'lod'" label-for="tiletris">
+          <template #label>
+            <FieldHelp
+              op="export-3d-tiles"
+              param="tileTriangles"
+              :value="settings.tileTriangles"
+              :default-value="EXPORT_DEFAULTS.tileTriangles"
+              >Triangles per tile</FieldHelp
+            >
+          </template>
+          <input
+            id="tiletris"
+            v-model.number="settings.tileTriangles"
+            type="number"
+            min="1000"
+            step="1024"
+            class="field-input"
+          />
+        </SettingsField>
+        <p v-if="textured" class="field-hint">
           {{
-            settings.format === 'glb'
-              ? 'The atlas pages are embedded in the .glb.'
-              : 'Downloads a .zip with the .obj, its .mtl and one JPEG per atlas page.'
+            settings.tiling === 'lod'
+              ? 'The finest tiles keep the photo texture; the coarser, decimated ones have vertex colours.'
+              : 'The tile is the selected textured mesh, with its photo texture.'
+          }}
+        </p>
+        <label v-if="!textured || settings.tiling === 'lod'" class="checkbox-row"
+          ><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label
+        >
+        <p v-if="tilesSubject?.streamed" class="field-hint">
+          A streamed cloud is written in its own coordinates and placed in the CRS its file names, else the project CRS.
+        </p>
+        <p v-else-if="!hasGeoref" class="field-hint warn-hint">
+          This project has no georeference, so the tileset will have no position on the globe. Georeference the model
+          first.
+        </p>
+      </template>
+
+      <!-- Undistorted images -->
+      <template v-else-if="kind === 'undistorted'">
+        <SettingsField
+          label="Border"
+          label-for="umode"
+          hint="Cropping keeps only the region that samples inside the source image."
+        >
+          <select id="umode" v-model="settings.undistortMode" class="field-input field-select">
+            <option value="crop">Crop to the valid region</option>
+            <option value="full">Keep the full frame (blank borders)</option>
+          </select>
+        </SettingsField>
+        <SettingsField
+          v-if="settings.format === 'jpeg'"
+          :label="`JPEG quality: ${settings.undistortQuality.toFixed(2)}`"
+          label-for="uq"
+        >
+          <input
+            id="uq"
+            v-model.number="settings.undistortQuality"
+            type="range"
+            min="0.5"
+            max="1"
+            step="0.01"
+            class="field-input range"
+          />
+        </SettingsField>
+        <SettingsField
+          label="Maximum dimension"
+          label-for="umax"
+          hint="Longest output side in pixels; 0 = native resolution. Lower it for a smaller ZIP."
+        >
+          <input
+            id="umax"
+            v-model.number="settings.undistortMaxDim"
+            type="number"
+            min="0"
+            step="1"
+            class="field-input"
+          />
+        </SettingsField>
+      </template>
+
+      <!-- DEM -->
+      <template v-else-if="kind === 'dem'">
+        <!-- The hillshade PNG is a rendered preview, the support layer a percentage: no elevation cells to flag. -->
+        <SettingsField
+          v-if="settings.format !== 'png' && settings.format !== 'support' && !reprojecting"
+          label="NODATA value"
+          label-for="nodata"
+          hint="Written for empty cells (holes with no measurement)."
+        >
+          <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input" />
+        </SettingsField>
+        <SettingsField
+          v-if="(isTiff || settings.format === 'support') && !reprojecting"
+          label="Compression"
+          label-for="comp"
+        >
+          <select id="comp" v-model="settings.compression" class="field-input field-select">
+            <option value="none">None (uncompressed)</option>
+            <option value="deflate">DEFLATE (lossless)</option>
+          </select>
+        </SettingsField>
+      </template>
+
+      <!-- Saved measurements -->
+      <template v-else-if="kind === 'measurements'">
+        <SettingsField v-if="settings.format === 'geojson' && measurementCrs" label-for="mcoords">
+          <template #label><FieldHelp op="dem" param="measurementCoords">Coordinates</FieldHelp></template>
+          <select id="mcoords" v-model="settings.measurementCoords" class="field-input field-select">
+            <option value="project">Project CRS ({{ measurementCrs }}), heights kept</option>
+            <option value="wgs84">WGS 84 longitude/latitude (RFC 7946), 2D</option>
+          </select>
+        </SettingsField>
+        <p v-if="settings.format === 'geojson' && !measurementCrs" class="field-hint">
+          No measurement here has a coordinate system, so the file is written in the frames they were measured in and
+          marked as not georeferenced.
+        </p>
+        <p class="field-hint">
+          Every value has its unit beside it. Measurements whose raster, layer or frame has changed since are included
+          and marked stale.
+        </p>
+      </template>
+
+      <!-- Ortho -->
+      <template v-else-if="kind === 'ortho'">
+        <!-- The COG export is the stored file itself, always DEFLATE. -->
+        <SettingsField v-if="isTiff && !isCog && !reprojecting" label="Compression" label-for="ocomp">
+          <select id="ocomp" v-model="settings.compression" class="field-input field-select">
+            <option value="none">None (uncompressed)</option>
+            <option value="deflate">DEFLATE (lossless)</option>
+          </select>
+        </SettingsField>
+        <!-- Empty pixels: an alpha band, or (unticked, and in a JPEG) a NODATA value. -->
+        <label v-if="orthoAlphaApplies" class="checkbox-row">
+          <input type="checkbox" v-model="settings.orthoAlpha" class="checkbox" />
+          <FieldHelp op="orthophoto" param="orthoAlpha">Alpha band (transparent empty pixels)</FieldHelp>
+        </label>
+        <SettingsField v-if="orthoNodataApplies" label-for="onodata">
+          <template #label
+            ><FieldHelp
+              op="orthophoto"
+              param="orthoNodata"
+              :value="settings.orthoNodata"
+              :default-value="EXPORT_DEFAULTS.orthoNodata"
+              >NODATA value</FieldHelp
+            ></template
+          >
+          <input
+            id="onodata"
+            v-model.number="settings.orthoNodata"
+            type="number"
+            min="0"
+            max="255"
+            step="1"
+            class="field-input"
+          />
+        </SettingsField>
+        <SettingsField v-if="isWebTiles" label-for="tfmt">
+          <template #label><FieldHelp op="orthophoto" param="tileFormat">Tile format</FieldHelp></template>
+          <select id="tfmt" v-model="settings.tileFormat" class="field-input field-select">
+            <option value="png">PNG — transparent edges</option>
+            <option value="jpeg">JPEG — smaller, white edges</option>
+            <option value="webp">WebP — small, transparent (newer viewers)</option>
+          </select>
+        </SettingsField>
+        <SettingsField
+          v-if="settings.format === 'jpeg' || (isWebTiles && settings.tileFormat !== 'png')"
+          :label="`${isWebTiles ? 'Tile' : 'JPEG'} quality: ${settings.jpegQuality.toFixed(2)}`"
+          label-for="jq"
+        >
+          <input
+            id="jq"
+            v-model.number="settings.jpegQuality"
+            type="range"
+            min="0.1"
+            max="1"
+            step="0.05"
+            class="field-input range"
+          />
+        </SettingsField>
+      </template>
+
+      <!-- Camera poses -->
+      <template v-else-if="kind === 'poses'">
+        <label class="checkbox-row">
+          <input type="checkbox" v-model="settings.poseOrientation" class="checkbox" />
+          <FieldHelp op="export-camera-poses" param="poseOrientation">Orientation (omega, phi, kappa)</FieldHelp>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" v-model="settings.poseAccuracy" :disabled="estimatedPoses" class="checkbox" />
+          Accuracies{{ estimatedPoses ? ' (imported poses only)' : '' }}
+        </label>
+        <label v-if="estimatedPoses && hasFrame" class="checkbox-row">
+          <input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}
+        </label>
+        <SettingsField v-if="wgs84Offered" label-for="pcoords">
+          <template #label><FieldHelp op="export-camera-poses" param="geoJsonCoords">Coordinates</FieldHelp></template>
+          <select id="pcoords" v-model="settings.geoJsonCoords" class="field-input field-select">
+            <option value="project">Project CRS ({{ posesCrs }}), heights kept</option>
+            <option value="wgs84">WGS 84 longitude/latitude (RFC 7946), height as a property</option>
+          </select>
+        </SettingsField>
+        <p class="field-hint">
+          {{ posesFrameHint }}
+          {{
+            estimatedPoses
+              ? 'Import ▸ Camera Poses reads the file back as pose priors with the same angles.'
+              : 'The poses as imported, with their accuracies.'
           }}
         </p>
       </template>
-      <label v-if="!(textured && textureFormat && settings.includeTexture)" class="checkbox-row">
-        <input type="checkbox" v-model="settings.includeColor" :disabled="settings.format === 'stl'" class="checkbox" />
-        Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}
-      </label>
-      <label v-if="hasFrame" class="checkbox-row">
-        <input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}
-      </label>
-    </template>
 
-    <!-- Model JSON -->
-    <template v-else-if="kind === 'model'">
-      <label v-if="settings.format === 'json'" class="checkbox-row">
-        <input type="checkbox" v-model="settings.includeTracks" class="checkbox" /> Include point tracks (image
-        observations)
-      </label>
-    </template>
+      <!-- Calibration -->
+      <template v-else-if="kind === 'sensors'">
+        <p v-if="settings.sensorSource !== 'entered'" class="field-hint">
+          Focal length and principal point as bundle adjustment ended, in pixels (a film scan's in its fiducial frame);
+          the lens model each group was corrected with, and any radial terms self-calibration fitted on top of it
+          (selfcal_k1…k3).
+        </p>
+      </template>
 
-    <!-- COLMAP model -->
-    <template v-else-if="kind === 'colmap'">
-      <label v-if="settings.format === 'workspace'" class="checkbox-row">
-        <input type="checkbox" v-model="settings.includeImages" class="checkbox" /> Include original source images
-        (larger ZIP)
-      </label>
-    </template>
+      <!-- Matches -->
+      <template v-else-if="kind === 'matches'">
+        <SettingsField label="Content" label-for="mcontent">
+          <select id="mcontent" v-model="settings.matchContent" class="field-input field-select">
+            <option value="matches">Every pair with its matches (keypoint indices)</option>
+            <option value="pairs">The pair list only, with match counts</option>
+          </select>
+        </SettingsField>
+      </template>
 
-    <!-- 3D Tiles -->
-    <template v-else-if="kind === 'tiles3d'">
-      <SettingsField
-        label-for="tiling"
-        :hint="
-          settings.tiling === 'lod'
-            ? tilesMesh
-              ? 'The mesh split into tiles and decimated per level; viewers load detail where the camera is.'
-              : 'One tile per node of the cloud\'s level-of-detail octree; viewers load detail where the camera is.'
-            : 'The whole model in one tile, loaded at once.'
-        "
-      >
-        <template #label><FieldHelp op="export-3d-tiles" param="tiling">Tiling</FieldHelp></template>
-        <select id="tiling" v-model="settings.tiling" class="field-input field-select">
-          <option value="lod">Level of detail (hierarchy of tiles)</option>
-          <option value="single" :disabled="!singleTileOk">
-            Single tile{{ singleTileOk ? '' : ' — too large for one tile' }}
-          </option>
-        </select>
-      </SettingsField>
-      <SettingsField v-if="tilesMesh && settings.tiling === 'lod'" label-for="tiletris">
-        <template #label>
-          <FieldHelp
-            op="export-3d-tiles"
-            param="tileTriangles"
-            :value="settings.tileTriangles"
-            :default-value="EXPORT_DEFAULTS.tileTriangles"
-            >Triangles per tile</FieldHelp
-          >
-        </template>
-        <input
-          id="tiletris"
-          v-model.number="settings.tileTriangles"
-          type="number"
-          min="1000"
-          step="1024"
-          class="field-input"
-        />
-      </SettingsField>
-      <p v-if="textured" class="field-hint">
-        {{
-          settings.tiling === 'lod'
-            ? 'The finest tiles keep the photo texture; the coarser, decimated ones have vertex colours.'
-            : 'The tile is the selected textured mesh, with its photo texture.'
-        }}
-      </p>
-      <label v-if="!textured || settings.tiling === 'lod'" class="checkbox-row"
-        ><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label
-      >
-      <p v-if="tilesSubject?.streamed" class="field-hint">
-        A streamed cloud is written in its own coordinates and placed in the CRS its file names, else the project CRS.
-      </p>
-      <p v-else-if="!hasGeoref" class="field-hint warn-hint">
-        This project has no georeference, so the tileset will have no position on the globe. Georeference the model
-        first.
-      </p>
-    </template>
-
-    <!-- Undistorted images -->
-    <template v-else-if="kind === 'undistorted'">
-      <SettingsField
-        label="Border"
-        label-for="umode"
-        hint="Cropping keeps only the region that samples inside the source image."
-      >
-        <select id="umode" v-model="settings.undistortMode" class="field-input field-select">
-          <option value="crop">Crop to the valid region</option>
-          <option value="full">Keep the full frame (blank borders)</option>
-        </select>
-      </SettingsField>
-      <SettingsField
-        v-if="settings.format === 'jpeg'"
-        :label="`JPEG quality: ${settings.undistortQuality.toFixed(2)}`"
-        label-for="uq"
-      >
-        <input
-          id="uq"
-          v-model.number="settings.undistortQuality"
-          type="range"
-          min="0.5"
-          max="1"
-          step="0.01"
-          class="field-input range"
-        />
-      </SettingsField>
-      <SettingsField
-        label="Maximum dimension"
-        label-for="umax"
-        hint="Longest output side in pixels; 0 = native resolution. Lower it for a smaller ZIP."
-      >
-        <input id="umax" v-model.number="settings.undistortMaxDim" type="number" min="0" step="1" class="field-input" />
-      </SettingsField>
-    </template>
-
-    <!-- DEM -->
-    <template v-else-if="kind === 'dem'">
-      <!-- The hillshade PNG is a rendered preview, the support layer a percentage: no elevation cells to flag. -->
-      <SettingsField
-        v-if="settings.format !== 'png' && settings.format !== 'support' && !reprojecting"
-        label="NODATA value"
-        label-for="nodata"
-        hint="Written for empty cells (holes with no measurement)."
-      >
-        <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input" />
-      </SettingsField>
-      <SettingsField
-        v-if="(isTiff || settings.format === 'support') && !reprojecting"
-        label="Compression"
-        label-for="comp"
-      >
-        <select id="comp" v-model="settings.compression" class="field-input field-select">
-          <option value="none">None (uncompressed)</option>
-          <option value="deflate">DEFLATE (lossless)</option>
-        </select>
-      </SettingsField>
-    </template>
-
-    <!-- Saved measurements -->
-    <template v-else-if="kind === 'measurements'">
-      <SettingsField v-if="settings.format === 'geojson' && measurementCrs" label-for="mcoords">
-        <template #label><FieldHelp op="dem" param="measurementCoords">Coordinates</FieldHelp></template>
-        <select id="mcoords" v-model="settings.measurementCoords" class="field-input field-select">
-          <option value="project">Project CRS ({{ measurementCrs }}), heights kept</option>
-          <option value="wgs84">WGS 84 longitude/latitude (RFC 7946), 2D</option>
-        </select>
-      </SettingsField>
-      <p v-if="settings.format === 'geojson' && !measurementCrs" class="field-hint">
-        No measurement here has a coordinate system, so the file is written in the frames they were measured in and
-        marked as not georeferenced.
-      </p>
-      <p class="field-hint">
-        Every value has its unit beside it. Measurements whose raster, layer or frame has changed since are included and
-        marked stale.
-      </p>
-    </template>
-
-    <!-- Ortho -->
-    <template v-else-if="kind === 'ortho'">
-      <!-- The COG export is the stored file itself, always DEFLATE. -->
-      <SettingsField v-if="isTiff && !isCog && !reprojecting" label="Compression" label-for="ocomp">
-        <select id="ocomp" v-model="settings.compression" class="field-input field-select">
-          <option value="none">None (uncompressed)</option>
-          <option value="deflate">DEFLATE (lossless)</option>
-        </select>
-      </SettingsField>
-      <!-- Empty pixels: an alpha band, or (unticked, and in a JPEG) a NODATA value. -->
-      <label v-if="orthoAlphaApplies" class="checkbox-row">
-        <input type="checkbox" v-model="settings.orthoAlpha" class="checkbox" />
-        <FieldHelp op="orthophoto" param="orthoAlpha">Alpha band (transparent empty pixels)</FieldHelp>
-      </label>
-      <SettingsField v-if="orthoNodataApplies" label-for="onodata">
-        <template #label
-          ><FieldHelp
-            op="orthophoto"
-            param="orthoNodata"
-            :value="settings.orthoNodata"
-            :default-value="EXPORT_DEFAULTS.orthoNodata"
-            >NODATA value</FieldHelp
-          ></template
-        >
-        <input
-          id="onodata"
-          v-model.number="settings.orthoNodata"
-          type="number"
-          min="0"
-          max="255"
-          step="1"
-          class="field-input"
-        />
-      </SettingsField>
-      <SettingsField v-if="isWebTiles" label-for="tfmt">
-        <template #label><FieldHelp op="orthophoto" param="tileFormat">Tile format</FieldHelp></template>
-        <select id="tfmt" v-model="settings.tileFormat" class="field-input field-select">
-          <option value="png">PNG — transparent edges</option>
-          <option value="jpeg">JPEG — smaller, white edges</option>
-          <option value="webp">WebP — small, transparent (newer viewers)</option>
-        </select>
-      </SettingsField>
-      <SettingsField
-        v-if="settings.format === 'jpeg' || (isWebTiles && settings.tileFormat !== 'png')"
-        :label="`${isWebTiles ? 'Tile' : 'JPEG'} quality: ${settings.jpegQuality.toFixed(2)}`"
-        label-for="jq"
-      >
-        <input
-          id="jq"
-          v-model.number="settings.jpegQuality"
-          type="range"
-          min="0.1"
-          max="1"
-          step="0.05"
-          class="field-input range"
-        />
-      </SettingsField>
-    </template>
-
-    <!-- Camera poses -->
-    <template v-else-if="kind === 'poses'">
-      <label class="checkbox-row">
-        <input type="checkbox" v-model="settings.poseOrientation" class="checkbox" />
-        <FieldHelp op="export-camera-poses" param="poseOrientation">Orientation (omega, phi, kappa)</FieldHelp>
-      </label>
-      <label class="checkbox-row">
-        <input type="checkbox" v-model="settings.poseAccuracy" :disabled="estimatedPoses" class="checkbox" />
-        Accuracies{{ estimatedPoses ? ' (imported poses only)' : '' }}
-      </label>
-      <label v-if="estimatedPoses && hasFrame" class="checkbox-row">
-        <input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}
-      </label>
-      <SettingsField v-if="wgs84Offered" label-for="pcoords">
-        <template #label><FieldHelp op="export-camera-poses" param="geoJsonCoords">Coordinates</FieldHelp></template>
-        <select id="pcoords" v-model="settings.geoJsonCoords" class="field-input field-select">
-          <option value="project">Project CRS ({{ posesCrs }}), heights kept</option>
-          <option value="wgs84">WGS 84 longitude/latitude (RFC 7946), height as a property</option>
-        </select>
-      </SettingsField>
-      <p class="field-hint">
-        {{ posesFrameHint }}
-        {{
-          estimatedPoses
-            ? 'Import ▸ Camera Poses reads the file back as pose priors with the same angles.'
-            : 'The poses as imported, with their accuracies.'
-        }}
-      </p>
-    </template>
-
-    <!-- Calibration -->
-    <template v-else-if="kind === 'sensors'">
-      <p v-if="settings.sensorSource !== 'entered'" class="field-hint">
-        Focal length and principal point as bundle adjustment ended, in pixels (a film scan's in its fiducial frame);
-        the lens model each group was corrected with, and any radial terms self-calibration fitted on top of it
-        (selfcal_k1…k3).
-      </p>
-    </template>
-
-    <!-- Matches -->
-    <template v-else-if="kind === 'matches'">
-      <SettingsField label="Content" label-for="mcontent">
-        <select id="mcontent" v-model="settings.matchContent" class="field-input field-select">
-          <option value="matches">Every pair with its matches (keypoint indices)</option>
-          <option value="pairs">The pair list only, with match counts</option>
-        </select>
-      </SettingsField>
-    </template>
-
-    <!-- Vector layer (footprints, contours, imported polygons) -->
-    <template v-else-if="kind === 'vectors'">
-      <SettingsField v-if="wgs84Offered" label="Coordinates" label-for="vcoords">
-        <select id="vcoords" v-model="settings.geoJsonCoords" class="field-input field-select">
-          <option value="project">Project CRS ({{ projectCrs }})</option>
-          <option value="wgs84">WGS 84 longitude/latitude (RFC 7946)</option>
-        </select>
-      </SettingsField>
-      <p v-if="!projectCrs" class="field-hint">
-        The project has no CRS, so the layer is written in its own coordinates.
-      </p>
-    </template>
+      <!-- Vector layer (footprints, contours, imported polygons) -->
+      <template v-else-if="kind === 'vectors'">
+        <SettingsField v-if="wgs84Offered" label="Coordinates" label-for="vcoords">
+          <select id="vcoords" v-model="settings.geoJsonCoords" class="field-input field-select">
+            <option value="project">Project CRS ({{ projectCrs }})</option>
+            <option value="wgs84">WGS 84 longitude/latitude (RFC 7946)</option>
+          </select>
+        </SettingsField>
+        <p v-if="!projectCrs" class="field-hint">
+          The project has no CRS, so the layer is written in its own coordinates.
+        </p>
+      </template>
+    </SettingsStep>
 
     <!-- DEM / ortho GeoTIFF in another CRS: warped block by block in the export worker. -->
-    <template v-if="isRaster && isTiff">
+    <SettingsStep v-if="crsShown" :step="stepNo.crs" title="Coordinate system">
       <SettingsField
         label-for="rcrs"
         :hint="
@@ -824,7 +901,11 @@ const orthoNodataApplies = computed(
           cell size.{{ kind === 'dem' ? ' Heights keep their vertical datum: only the horizontal CRS changes.' : '' }}
         </p>
       </template>
-    </template>
+    </SettingsStep>
+
+    <SettingsStep :step="stepNo.file" title="File">
+      <FileNameField v-model="settings.fileName" :default-name="defaultName" />
+    </SettingsStep>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
@@ -842,6 +923,9 @@ const orthoNodataApplies = computed(
   margin: 0;
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+.format-cards.choice-cards {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
 }
 .field-input.range {
   width: 100%;

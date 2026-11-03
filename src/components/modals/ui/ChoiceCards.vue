@@ -24,6 +24,7 @@ defineEmits(['update:modelValue'])
       class="choice-card"
       :class="{ active: modelValue === o.id }"
       :aria-checked="modelValue === o.id"
+      :data-id="o.id"
       :disabled="o.disabled"
       @click="!o.disabled && $emit('update:modelValue', o.id)"
     >

@@ -66,7 +66,7 @@ test('the size readout, a long side in px, and a DEM exported in a neighbouring 
   await page.locator('.item-name', { hasText: /^DEM$/ }).click({ button: 'right' })
   await page.locator('.ctx-menu').getByRole('button', { name: 'Download…' }).click()
   const dlg = page.getByRole('dialog', { name: 'Export DEM' })
-  await dlg.getByLabel('Format').selectOption('cog')
+  await dlg.getByRole('radiogroup', { name: 'Format' }).locator('[data-id="cog"]').click()
   await expect(dlg.getByLabel('Coordinate system')).toContainText('As built (EPSG:32632)')
   await dlg.getByLabel('Coordinate system').selectOption('other')
   const crs = dlg.getByRole('combobox', { name: 'Coordinate reference system' })

@@ -67,7 +67,7 @@ test('saved measurements export as CSV and GeoJSON with their units', async ({ p
   }
 
   let dialog = await openDialog()
-  await dialog.getByLabel('Format').selectOption('csv')
+  await dialog.getByRole('radiogroup', { name: 'Format' }).locator('[data-id="csv"]').click()
   const csv = await download(page, () => dialog.getByRole('button', { name: 'Export', exact: true }).click())
   expect(csv.name).toMatch(/-measurements\.csv$/)
   const lines = csv.text.trim().split('\n')
@@ -85,7 +85,7 @@ test('saved measurements export as CSV and GeoJSON with their units', async ({ p
 
   // GeoJSON, RFC 7946: UTM 32N's false easting lies on its central meridian, 9°E.
   dialog = await openDialog()
-  await dialog.getByLabel('Format').selectOption('geojson')
+  await dialog.getByRole('radiogroup', { name: 'Format' }).locator('[data-id="geojson"]').click()
   await dialog.getByLabel('Coordinates').selectOption('wgs84')
   const gj = await download(page, () => dialog.getByRole('button', { name: 'Export', exact: true }).click())
   expect(gj.name).toMatch(/-measurements\.geojson$/)
@@ -102,7 +102,7 @@ test('saved measurements export as CSV and GeoJSON with their units', async ({ p
 
   // Project CRS: the legacy crs member, coordinates as measured.
   dialog = await openDialog()
-  await dialog.getByLabel('Format').selectOption('geojson')
+  await dialog.getByRole('radiogroup', { name: 'Format' }).locator('[data-id="geojson"]').click()
   await expect(dialog.getByLabel('Coordinates')).toHaveValue('project')
   const proj = JSON.parse(
     (await download(page, () => dialog.getByRole('button', { name: 'Export', exact: true }).click())).text,
@@ -176,7 +176,7 @@ test('the 3D toolbox exports its own saved list', async ({ page }) => {
   await box.getByRole('button', { name: 'Export…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Export Measurements' })
   await expect(dialog).toContainText('1 3D measurement')
-  await dialog.getByLabel('Format').selectOption('geojson')
+  await dialog.getByRole('radiogroup', { name: 'Format' }).locator('[data-id="geojson"]').click()
   // Nothing here has a CRS: written in the model frame, marked as not georeferenced.
   await expect(dialog.getByLabel('Coordinates')).toHaveCount(0)
   const fc = JSON.parse(
