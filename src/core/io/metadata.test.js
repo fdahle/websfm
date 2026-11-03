@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { droneYprToOpk, normalizeExifMetadata } from './metadata.js'
+import { bandMetadata, droneYprToOpk, normalizeExifMetadata } from './metadata.js'
 
 describe('droneYprToOpk', () => {
   it('maps DJI nadir and heading into photogrammetric OPK', () => {
@@ -99,5 +99,69 @@ describe('normalizeExifMetadata', () => {
       cameraKappa: 3,
       cameraOrientationSource: 'exif-opk',
     })
+  })
+})
+
+describe('bandMetadata', () => {
+  // The fields exifr returns for a MicaSense Altum-PT panel photo (Blue band), in the
+  // shapes it returns them: strings, arrays and a typed-array view.
+  const altumPt = {
+    Make: 'MicaSense',
+    Model: 'Altum-PT',
+    BandName: 'Blue',
+    RigCameraIndex: 0,
+    CaptureId: 'haoUaIv8rJ2ZLmmjrYPD',
+    CentralWavelength: 475,
+    WavelengthFWHM: 32,
+    RigRelatives: '-0.019785, -0.047497, 0.096842',
+    RigTranslations: [-49.01269, -0.2451, 0.718963],
+    RigRelativesReferenceRigCameraIndex: 1,
+    BitsPerSample: 12,
+    BlackLevel: new Uint16Array([240, 240, 240, 240]),
+    DarkRowValue: [240, 240, 240, 240],
+    ExposureTime: 0.0004495,
+    ISOSpeed: 200,
+    RadiometricCalibration: [0.0001485649, 1.230887e-8, -0.00003447885],
+    VignettingPolynomial2DName: '0,0,0,1',
+    VignettingPolynomial2D: '0.495736,0.999182',
+    SpectralIrradiance: 125.66391930832309,
+    HorizontalIrradiance: 134.24668924043058,
+    CalibrationPicture: 2,
+    Albedo: 0.488375,
+    ReflectArea: '655,913,539,912,536,1027,652,1029',
+    PanelSerial: 'RP06-2051037-OB',
+  }
+  it('reads the band, the rig offset and the radiometric model', () => {
+    const b = bandMetadata(altumPt)
+    expect(b).toMatchObject({
+      name: 'Blue',
+      index: 0,
+      captureId: 'haoUaIv8rJ2ZLmmjrYPD',
+      wavelength: 475,
+      thermal: false,
+      rigRef: 1,
+      rigRelatives: [-0.019785, -0.047497, 0.096842],
+      bits: 12,
+      blackLevel: 240,
+      gain: 2,
+      vignette: { poly2D: [0.495736, 0.999182], exponents2D: [0, 0, 0, 1] },
+      panel: {
+        albedo: 0.488375,
+        corners: [
+          [655, 913],
+          [539, 912],
+          [536, 1027],
+          [652, 1029],
+        ],
+        serial: 'RP06-2051037-OB',
+      },
+    })
+    // DLS 2 without IrradianceScaleToSIUnits reports hundredths of W/m²/nm.
+    expect(b.irradiance.horizontal).toBeCloseTo(1.3424668924, 10)
+    expect(normalizeExifMetadata(altumPt).band.name).toBe('Blue')
+  })
+  it('is null for an ordinary photo and marks a thermal band', () => {
+    expect(bandMetadata({ Make: 'DJI', Model: 'FC6310' })).toBeNull()
+    expect(bandMetadata({ BandName: 'LWIR', CaptureId: 'x' }).thermal).toBe(true)
   })
 })

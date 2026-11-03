@@ -36,6 +36,10 @@ verified matches become the [tie point](help:tie-point)s of the sparse
 reconstruction. A false match harms [bundle adjustment](help:bundle-adjustment), so
 every pair is checked with [RANSAC](help:ransac).
 
+Photos from a [multispectral camera](help:multispectral-rig) are paired by its bands:
+only the reference band (green on MicaSense cameras) is matched between captures, by
+the strategy below, and every other band only with its own capture's reference image.
+
 ## Only some images
 Right-click images ▸ **Match features…** matches only the pairs that include them, among
 the pairs the strategy chooses. Every other pair keeps its result.

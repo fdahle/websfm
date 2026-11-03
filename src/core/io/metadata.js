@@ -46,6 +46,94 @@ function metadataNumber(root, names) {
   return Number.isFinite(number) ? number : null
 }
 
+// A list of numbers from an XMP value: exifr gives an array, a typed array, one
+// number, or a comma/space separated string ("0.0, 0.1, 0.2") depending on the tag.
+function numberList(v) {
+  if (v == null || v === '') return null
+  const items =
+    ArrayBuffer.isView(v) || Array.isArray(v) ? Array.from(v) : typeof v === 'number' ? [v] : String(v).split(/[\s,]+/)
+  const out = items.filter((x) => x !== '' && x != null).map(Number)
+  return out.length && out.every(Number.isFinite) ? out : null
+}
+
+const mean = (list) => (list?.length ? list.reduce((s, x) => s + x, 0) / list.length : null)
+
+// One band image of a multispectral rig (MicaSense RedEdge/Altum, and cameras that
+// write the same Pix4D camera XMP): which capture and band it is, the band's offset
+// from the rig's reference band, and what the radiometric model needs (core/radiometry).
+// Null for any other photo. Plain numbers only (see normalizeExifMetadata).
+export function bandMetadata(e = {}) {
+  const name = metadataValue(e, ['BandName'])
+  const captureId = metadataValue(e, ['CaptureId', 'CaptureUUID'])
+  if (name == null || captureId == null) return null
+  const num = (names) => metadataNumber(e, names)
+  const list = (names) => numberList(metadataValue(e, names))
+  const thermal = /^lwir$/i.test(String(name).trim())
+  const iso = num(['ISOSpeed', 'ISO'])
+  // DLS 2 writes irradiance in its own units unless the scale is given (MicaSense
+  // metadata.irradiance_scale_factor): 0.01 when it reports horizontal irradiance, 1
+  // for DLS 1.
+  const horizontal = num(['HorizontalIrradiance'])
+  const scale = num(['IrradianceScaleToSIUnits']) ?? (horizontal != null ? 0.01 : 1)
+  const irr = (names) => {
+    const v = num(names)
+    return v == null ? null : v * scale
+  }
+  const albedo = num(['Albedo'])
+  const area = list(['ReflectArea'])
+  const calibrationPicture = num(['CalibrationPicture'])
+  const vignetteCenter = list(['VignettingCenter'])
+  const vignettePoly = list(['VignettingPolynomial'])
+  const vignettePoly2D = list(['VignettingPolynomial2D'])
+  const vignetteExp2D = list(['VignettingPolynomial2DName'])
+  return {
+    name: String(name).trim(),
+    index: num(['RigCameraIndex', 'BandIndex']),
+    captureId: String(captureId),
+    flightId: metadataValue(e, ['FlightId']) ?? null,
+    wavelength: num(['CentralWavelength', 'CenterWavelength']),
+    fwhm: num(['WavelengthFWHM', 'Bandwidth']),
+    thermal,
+    // The rig: this lens's rotation (degrees, MicaSense Rx·Ry·Rz order) and position
+    // (mm) relative to the reference lens `rigRef`.
+    rigRef: num(['RigRelativesReferenceRigCameraIndex']),
+    rigRelatives: list(['RigRelatives']),
+    rigTranslations: list(['RigTranslations']),
+    // Radiometry: DN → radiance (core/radiometry/micasense.js).
+    bits: num(['BitsPerSample']),
+    blackLevel: mean(list(['BlackLevel'])),
+    darkLevel: mean(list(['DarkRowValue'])),
+    exposure: num(['ExposureTime']),
+    gain: iso != null ? iso / 100 : null,
+    radiometricCal: list(['RadiometricCalibration']),
+    vignette:
+      vignetteCenter?.length === 2 && vignettePoly?.length
+        ? { center: vignetteCenter, poly: vignettePoly }
+        : vignettePoly2D?.length && vignetteExp2D?.length === 2 * vignettePoly2D.length
+          ? { poly2D: vignettePoly2D, exponents2D: vignetteExp2D }
+          : null,
+    irradiance: {
+      spectral: irr(['SpectralIrradiance', 'Irradiance']),
+      horizontal: horizontal == null ? null : horizontal * scale,
+      direct: irr(['DirectIrradiance']),
+      scattered: irr(['ScatteredIrradiance']),
+      solarElevation: num(['SolarElevation']),
+      solarAzimuth: num(['SolarAzimuth']),
+    },
+    // A calibration-panel capture the camera recognised: the panel's albedo in this
+    // band and its corners in the image.
+    panel:
+      calibrationPicture === 2 && albedo != null
+        ? {
+            albedo,
+            corners: area?.length === 8 ? [0, 2, 4, 6].map((i) => [area[i], area[i + 1]]) : null,
+            serial: metadataValue(e, ['PanelSerial']) ?? null,
+          }
+        : null,
+    firmware: metadataValue(e, ['Software', 'SwVersion']) ?? null,
+  }
+}
+
 const deg = (value) => (value * Math.PI) / 180
 const angle = (value) => (value * 180) / Math.PI
 
@@ -151,6 +239,7 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
     cameraAccuracyPhi: metadataNumber(e, ['CameraPhiAccuracy']),
     cameraAccuracyKappa: metadataNumber(e, ['CameraKappaAccuracy']),
     cameraOrientationSource: explicitOpk ? 'exif-opk' : opk ? 'xmp-gimbal' : null,
+    band: bandMetadata(e),
     fileSize,
     // No `raw: e`. For a TIFF, exifr reads the WHOLE file into one buffer and returns
     // some tags (GPSAltitudeRef, OpcodeList3, …) as small typed-array views into it,

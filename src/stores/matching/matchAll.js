@@ -25,6 +25,8 @@ import { planBridgeRepair, bridgeKey, graphPieces } from '../../core/features/br
 import { gapDetectSettings, planGapRedetect } from '../../core/features/gapRedetect.js'
 import { laterPassSpan, pairPassEnd, spanFraction } from '../../core/features/matchProgress.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
+import { findRigs, rigMembership, rigPairs, rigSummary } from '../../core/sensors/rig.js'
+import { isImageEnabled } from '../../core/imageEnabled.js'
 import { lightGlueModelFor } from '../../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../../core/defaults.user.js'
 import { MATCH_TUNING } from '../../core/tuning.js'
@@ -444,6 +446,24 @@ export function createMatchAll({
           )
         }
       }
+    }
+
+    // A multispectral rig: across captures only the reference band is matched (as the
+    // strategy chose its pairs), and each other band with its own capture's reference
+    // image, which ties every band into the reference band's tracks (core/sensors/rig.js).
+    const rigs = findRigs(ready.filter(isImageEnabled))
+    if (rigs.length) {
+      for (const rig of rigs) log(`Camera rig — ${rigSummary(rig)}`, 'info', 'Matching')
+      const before = pairs.length
+      const { kept, added } = rigPairs(pairs, rigMembership(rigs), ready)
+      const have = new Set(kept.map(([a, b]) => pairId(a.uuid, b.uuid)))
+      pairs = [...kept, ...added.filter(([a, b]) => !have.has(pairId(a.uuid, b.uuid)))]
+      log(
+        `Rig pairing: ${kept.length} of ${pluralize(before, 'pair')} kept (reference band across captures, ` +
+          `photos outside the rig), plus ${pluralize(added.length, 'pair')} of each band with its capture's reference`,
+        'info',
+        'Matching',
+      )
     }
 
     // `onlyIds` (the sidebar's Match features… on a selection): the pairs with one of

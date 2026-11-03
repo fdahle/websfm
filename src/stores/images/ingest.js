@@ -63,6 +63,21 @@ export function createIngest({
   thumbnails,
   trackWrite,
 }) {
+  // A multispectral capture of the calibration panel (the camera recognised it in at
+  // least one band) is taken on the ground, close up: it would only disturb alignment.
+  // Every band of it is disabled as its metadata lands; the reflectance calibration
+  // reads it all the same. Enable brings it back.
+  function leavePanelCaptureOut(img) {
+    const id = img.meta.band.captureId
+    const siblings = images.value.filter((x) => x.meta?.band?.captureId === id)
+    if (!siblings.some((x) => x.meta.band.panel)) return
+    for (const x of siblings) {
+      if (x.enabled === false) continue
+      x.enabled = false
+      log(`${x.name}: calibration panel photo — disabled, so alignment leaves it out`, 'info', 'Metadata')
+    }
+  }
+
   // `extraMeta`: fields the file itself cannot carry (a video frame's source and
   // time), merged over what EXIF gave.
   function extractMetadataFor(item, file, projectId, presetDims, extraMeta = null) {
@@ -79,7 +94,8 @@ export function createIngest({
               ? `frame of ${extraMeta.videoSource} at ${Number(extraMeta.videoTime ?? 0).toFixed(3)} s`
               : 'unknown camera')
           const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
-          log(`Metadata: ${file.name} — ${cam}${dim}`, 'success', 'Metadata')
+          log(`Metadata: ${file.name} — ${meta.band ? `${cam} ${meta.band.name}` : cam}${dim}`, 'success', 'Metadata')
+          if (meta.band) leavePanelCaptureOut(found)
           if (isPersisting()) save(projectId)
         }
       })

@@ -323,6 +323,9 @@ export function exifSignature(meta) {
     // Frames of one video share one camera, and only that camera: another video of
     // the same size may come from a different phone or zoom setting.
     meta.videoSource ? `video:${meta.videoSource}` : '',
+    // Each band of a multispectral rig is its own lens, with its own calibration, even
+    // where the bands share make, model, focal length and size.
+    meta.band ? `band:${meta.band.index ?? ''}:${meta.band.name}` : '',
   ]
   const sig = parts.filter(Boolean).join('|')
   return sig || null
@@ -332,7 +335,9 @@ export function exifSignature(meta) {
 export function exifLabel(meta) {
   const cam = [meta?.make, meta?.model].filter(Boolean).join(' ')
   const fl = meta?.focalLength != null ? `${meta.focalLength}mm` : null
-  return [cam || (meta?.videoSource ? `Video ${meta.videoSource}` : 'Unknown camera'), fl].filter(Boolean).join(' · ')
+  return [cam || (meta?.videoSource ? `Video ${meta.videoSource}` : 'Unknown camera'), fl, meta?.band?.name]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 // Seed a sensor object from an image's EXIF. Focal length stays in millimetres
