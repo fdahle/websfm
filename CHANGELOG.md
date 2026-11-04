@@ -171,6 +171,9 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **About ▸ Licenses easier to read.** Each entry fits on one line with a short note of
+  what WebSfM uses it for, and a full license text opens under *License text* instead of
+  filling the list.
 - **Export dialogs laid out like the Tools dialogs.** The formats are cards, each saying
   what its file holds, followed by numbered steps: ① Format, ② the export's own
   settings, ③ the coordinate system of a DEM or orthophoto GeoTIFF, then the file name.

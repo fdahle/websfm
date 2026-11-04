@@ -62,9 +62,12 @@ export const ACKNOWLEDGMENTS = [
 
 /**
  * Bundled third-party components, grouped by where they run. Each entry:
- *   { name, version, license (SPDX), url, notice? }
- * `notice` is the full text to reproduce verbatim when a license demands it;
- * omit it for permissive licenses covered by name + upstream link.
+ *   { name, version, license (SPDX), url, use?, notice?, text? }
+ * `name` is what a user knows it by (no source paths); `use` says in a few words
+ * what WebSfM uses it for; `notice` is a short attribution shown in full; `text`
+ * is a license or copyright text reproduced verbatim when the license demands it,
+ * folded under "License text" in the About dialog. Omit `text` for permissive
+ * licenses covered by name + upstream link.
  */
 export const THIRD_PARTY = [
   {
@@ -101,11 +104,13 @@ export const THIRD_PARTY = [
         url: 'https://github.com/mourner/robust-predicates',
       },
       {
-        name: 'AprilTag tag36h11 codes (core/sfm/tags/tag36h11.js)',
+        // core/sfm/tags/tag36h11.js
+        name: 'AprilTag',
         version: '3',
         license: 'BSD-2-Clause',
         url: 'https://github.com/AprilRobotics/apriltag',
-        notice:
+        use: 'Tag family 36h11, for Detect Targets',
+        text:
           'Copyright (C) 2013-2016, The Regents of The University of Michigan. All rights reserved.\n' +
           'Redistribution and use in source and binary forms, with or without modification, are permitted ' +
           'provided that the following conditions are met:\n' +
@@ -124,22 +129,25 @@ export const THIRD_PARTY = [
           'OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.',
       },
       {
-        name: 'OpenCV ArUco dictionaries (core/sfm/tags/aruco.js)',
+        // core/sfm/tags/aruco.js, from modules/objdetect/src/aruco/predefined_dictionaries.hpp
+        name: 'OpenCV ArUco dictionaries',
         version: '4.x',
         license: 'Apache-2.0',
         url: 'https://github.com/opencv/opencv',
-        notice:
-          'The DICT_4X4, DICT_5X5 and DICT_6X6 codes, from modules/objdetect/src/aruco/' +
-          'predefined_dictionaries.hpp. Copyright (C) 2000-2022, Intel Corporation, all rights reserved; ' +
-          'and others. Licensed under the Apache License, Version 2.0; a copy is at ' +
+        use: 'DICT_4X4, DICT_5X5 and DICT_6X6, for Detect Targets',
+        text:
+          'Copyright (C) 2000-2022, Intel Corporation, all rights reserved; and others.\n' +
+          'Licensed under the Apache License, Version 2.0; a copy is at ' +
           'https://www.apache.org/licenses/LICENSE-2.0',
       },
       {
-        name: 'MicaSense imageprocessing radiometric model (core/radiometry/micasense.js)',
-        version: 'master, 2024',
+        // core/radiometry/micasense.js
+        name: 'MicaSense imageprocessing',
+        version: '2024',
         license: 'MIT',
         url: 'https://github.com/micasense/imageprocessing',
-        notice:
+        use: 'Radiometric model for multispectral cameras',
+        text:
           'Copyright (c) 2017 MicaSense, Inc.\n' +
           'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and ' +
           'associated documentation files (the "Software"), to deal in the Software without restriction, ' +
@@ -172,19 +180,18 @@ export const THIRD_PARTY = [
         version: '0.4.0',
         license: 'MIT OR Apache-2.0',
         url: 'https://github.com/dimforge/poisson_reconstruction',
-        notice:
-          'Vendored under crates/mesh/vendor/ (rayon stripped for threadless WASM, ' +
-          'with a marching-cubes iso patch).',
+        // Vendored under crates/mesh/vendor/ (rayon stripped, marching-cubes iso patch).
+        use: 'Mesh reconstruction',
+        notice: 'WebSfM ships a modified copy: without threads, and with a patch to the surface level.',
       },
       {
         name: 'laz',
         version: '0.12.2',
         license: 'Apache-2.0',
         url: 'https://github.com/laz-rs/laz-rs',
-        notice:
-          'Rust port of LASzip, compiled into crates/lazcodec for LAZ point-cloud ' +
-          'compression. Licensed under the Apache License, Version 2.0; a copy is at ' +
-          'https://www.apache.org/licenses/LICENSE-2.0',
+        // Compiled into crates/lazcodec.
+        use: 'LAZ point-cloud compression (a Rust port of LASzip)',
+        text: 'Licensed under the Apache License, Version 2.0; a copy is at https://www.apache.org/licenses/LICENSE-2.0',
       },
       {
         name: 'byteorder',
@@ -208,15 +215,17 @@ export const THIRD_PARTY = [
     group: 'Learned models (downloaded on demand)',
     items: [
       {
-        name: 'SuperPoint (user-supplied, not distributed)',
-        license: 'Magic Leap academic / non-commercial research license',
+        name: 'SuperPoint',
+        license: 'Non-commercial (Magic Leap)',
         url: 'https://github.com/magicleap/SuperPointPretrainedNetwork',
+        use: 'Not distributed: you supply the weights file yourself',
       },
       { name: 'DISK', license: 'Apache-2.0', url: 'https://github.com/cvlab-epfl/disk' },
       { name: 'ALIKED', license: 'BSD-3-Clause', url: 'https://github.com/Shiaoming/ALIKED' },
       { name: 'LightGlue', license: 'Apache-2.0', url: 'https://github.com/cvg/LightGlue' },
       {
-        name: 'LightGlue-ONNX (ONNX exports)',
+        name: 'LightGlue-ONNX',
+        use: 'ONNX exports of LightGlue',
         license: 'Apache-2.0',
         url: 'https://github.com/fabio-sim/LightGlue-ONNX',
       },
@@ -229,9 +238,10 @@ export const THIRD_PARTY = [
     // in the project picker and in each download's CREDITS.txt.
     group: 'Example data',
     items: Object.values(EXAMPLES).map((e) => ({
-      name: `${e.title} photos — ${e.credit} (${e.dataset})`,
+      name: `${e.title} photos`,
       license: e.licenseId,
       url: e.sourceUrl,
+      use: `${e.credit} · ${e.dataset}`,
       notice: `Thank you to ${e.credit} for sharing these photos. WebSfM uses ${e.changes}.`,
     })),
   },

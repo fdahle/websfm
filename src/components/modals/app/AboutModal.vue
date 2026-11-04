@@ -126,7 +126,12 @@ const tabs = [
             <span v-if="it.version" class="lic-ver">{{ it.version }}</span>
             <span class="lic-badge">{{ it.license }}</span>
           </div>
+          <div v-if="it.use" class="lic-use">{{ it.use }}</div>
           <div v-if="it.notice" class="lic-notice">{{ it.notice }}</div>
+          <details v-if="it.text" class="lic-text">
+            <summary>License text</summary>
+            <pre>{{ it.text }}</pre>
+          </details>
         </div>
       </div>
     </div>
@@ -344,10 +349,36 @@ const tabs = [
   border-radius: 5px;
   white-space: nowrap;
 }
+.lic-use,
 .lic-notice {
   font-size: 11px;
   color: var(--text-dim);
   line-height: 1.45;
-  margin-top: 4px;
+  margin-top: 2px;
+}
+.lic-text {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.lic-text summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.lic-text summary:hover {
+  color: var(--accent);
+}
+.lic-text pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+  background: var(--panel-border);
+  border-radius: 5px;
 }
 </style>
