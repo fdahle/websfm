@@ -210,3 +210,44 @@ describe('format 1 → 2: omega/phi/kappa in the Metashape and Pix4D sense', () 
     expect(out['poses.json']).toBeNull()
   })
 })
+
+describe('version 2 → 3: documents into folders', () => {
+  const step = FORMAT_MIGRATIONS.find((s) => s.from === 2)
+
+  it('moves every document out of the folder top, and leaves project.json', () => {
+    const docs = {
+      'project.json': { name: 'p', formatVersion: 2 },
+      'sensors.json': { sensors: [1] },
+      'gcps.json': { gcps: [] },
+      'poses.json': null,
+      'reconstruction.json': {
+        version: 3,
+        clouds: [],
+        binaryFiles: { 'c.pos': { name: 'reconstruction.json.g.c.pos.bin', bytes: 24 } },
+      },
+      'dialogs.json': { dense: {} },
+    }
+    for (const p of step.documents) if (!(p in docs)) docs[p] = null
+    const out = step.migrate(structuredClone(docs))
+    expect(out['project.json']).toEqual(docs['project.json'])
+    expect(out['sensors.json']).toBeNull()
+    expect(out['data/sensors.json']).toEqual({ sensors: [1] })
+    expect(out['data/gcps.json']).toEqual({ gcps: [] })
+    // A document the project never had is not made up.
+    expect(out['data/poses.json']).toBeNull()
+    // The reconstruction keeps the names of its binary files, which have not moved.
+    expect(out['reconstruction/reconstruction.json']).toEqual(docs['reconstruction.json'])
+    expect(out['reconstruction.json']).toBeNull()
+    expect(out['internal/dialogs.json']).toEqual({ dense: {} })
+  })
+
+  it('runs after version 1 → 2 on the documents that step changed', () => {
+    const plan = migrationPlan(1, 3)
+    const docs = Object.fromEntries(planDocuments(plan).map((p) => [p, null]))
+    docs['project.json'] = { formatVersion: 1, images: [] }
+    docs['poses.json'] = { poses: [{ source: 'exif', orientationSource: 'xmp-gimbal', omega: 10, phi: 0, kappa: 0 }] }
+    const { docs: out } = applyMigrations(docs, plan)
+    expect(out['poses.json']).toBeNull()
+    expect(out['data/poses.json'].poses[0].omega).toBeCloseTo(-10)
+  })
+})

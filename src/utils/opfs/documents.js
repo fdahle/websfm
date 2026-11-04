@@ -1,7 +1,15 @@
 // The small per-project JSON documents: control points, shapefiles, scale bars,
-// measurements, workflows, sensors and camera poses.
+// measurements, workflows, sensors and camera poses. They live in the project's data/
+// folder (core/projectLayout.js); a project saved before format version 3 had them at
+// its top, and its migration moved them.
 import { trackPersistence, ignoreMissing } from '../persistence.js'
 import { getProjectDir, readJson, writeJson } from './base.js'
+import { DATA_DIR } from '../../core/projectLayout.js'
+
+// data/, created by a write; a read of a project without it finds nothing (NotFoundError).
+async function dataDir(projectId, create = false) {
+  return (await getProjectDir(projectId, create)).getDirectoryHandle(DATA_DIR, { create })
+}
 
 // ── Ground Control Points ───────────────────────────────────────────────────────
 // JSON: { crs, importDefaults, gcps: [{ coordinates, covariance metadata,
@@ -9,14 +17,14 @@ import { getProjectDir, readJson, writeJson } from './base.js'
 
 export async function saveGcps(projectId, data) {
   return trackPersistence('saveGcps:' + String(projectId), async () => {
-    const dir = await getProjectDir(projectId, true)
+    const dir = await dataDir(projectId, true)
     await writeJson(dir, 'gcps.json', data)
   })
 }
 
 export async function loadGcps(projectId) {
   try {
-    const dir = await getProjectDir(projectId)
+    const dir = await dataDir(projectId)
     return readJson(dir, 'gcps.json')
   } catch {
     return null
@@ -26,7 +34,7 @@ export async function loadGcps(projectId) {
 export async function deleteGcps(projectId) {
   return trackPersistence('deleteGcps:' + String(projectId), async () => {
     try {
-      const dir = await getProjectDir(projectId)
+      const dir = await dataDir(projectId)
       await dir.removeEntry('gcps.json')
     } catch (error) {
       ignoreMissing(error)
@@ -40,14 +48,14 @@ export async function deleteGcps(projectId) {
 
 export async function saveFootprints(projectId, data) {
   return trackPersistence('saveFootprints:' + String(projectId), async () => {
-    const dir = await getProjectDir(projectId, true)
+    const dir = await dataDir(projectId, true)
     await writeJson(dir, 'footprints.json', data)
   })
 }
 
 export async function loadFootprints(projectId) {
   try {
-    const dir = await getProjectDir(projectId)
+    const dir = await dataDir(projectId)
     return readJson(dir, 'footprints.json')
   } catch {
     return null
@@ -57,7 +65,7 @@ export async function loadFootprints(projectId) {
 export async function deleteFootprints(projectId) {
   return trackPersistence('deleteFootprints:' + String(projectId), async () => {
     try {
-      const dir = await getProjectDir(projectId)
+      const dir = await dataDir(projectId)
       await dir.removeEntry('footprints.json')
     } catch (error) {
       ignoreMissing(error)
@@ -77,14 +85,14 @@ export async function deleteFootprints(projectId) {
 
 export async function saveScaleBars(projectId, data) {
   return trackPersistence('saveScaleBars:' + String(projectId), async () => {
-    const dir = await getProjectDir(projectId, true)
+    const dir = await dataDir(projectId, true)
     await writeJson(dir, 'scalebars.json', data)
   })
 }
 
 export async function loadScaleBars(projectId) {
   try {
-    const dir = await getProjectDir(projectId)
+    const dir = await dataDir(projectId)
     return readJson(dir, 'scalebars.json')
   } catch {
     return null
@@ -94,7 +102,7 @@ export async function loadScaleBars(projectId) {
 export async function deleteScaleBars(projectId) {
   return trackPersistence('deleteScaleBars:' + String(projectId), async () => {
     try {
-      const dir = await getProjectDir(projectId)
+      const dir = await dataDir(projectId)
       await dir.removeEntry('scalebars.json')
     } catch (error) {
       ignoreMissing(error)
@@ -104,12 +112,12 @@ export async function deleteScaleBars(projectId) {
 
 export async function saveMeasurements(projectId, data) {
   return trackPersistence('saveMeasurements:' + String(projectId), async () => {
-    await writeJson(await getProjectDir(projectId, true), 'measurements.json', data)
+    await writeJson(await dataDir(projectId, true), 'measurements.json', data)
   })
 }
 export async function loadMeasurements(projectId) {
   try {
-    return await readJson(await getProjectDir(projectId), 'measurements.json')
+    return await readJson(await dataDir(projectId), 'measurements.json')
   } catch {
     return null
   }
@@ -117,7 +125,7 @@ export async function loadMeasurements(projectId) {
 export async function deleteMeasurements(projectId) {
   return trackPersistence('deleteMeasurements:' + String(projectId), async () => {
     try {
-      await (await getProjectDir(projectId)).removeEntry('measurements.json')
+      await (await dataDir(projectId)).removeEntry('measurements.json')
     } catch (error) {
       ignoreMissing(error)
     }
@@ -129,14 +137,14 @@ export async function deleteMeasurements(projectId) {
 
 export async function saveWorkflows(projectId, data) {
   return trackPersistence('saveWorkflows:' + String(projectId), async () => {
-    const dir = await getProjectDir(projectId, true)
+    const dir = await dataDir(projectId, true)
     await writeJson(dir, 'workflows.json', data)
   })
 }
 
 export async function loadWorkflows(projectId) {
   try {
-    const dir = await getProjectDir(projectId)
+    const dir = await dataDir(projectId)
     return readJson(dir, 'workflows.json')
   } catch {
     return null
@@ -146,7 +154,7 @@ export async function loadWorkflows(projectId) {
 export async function deleteWorkflows(projectId) {
   return trackPersistence('deleteWorkflows:' + String(projectId), async () => {
     try {
-      const dir = await getProjectDir(projectId)
+      const dir = await dataDir(projectId)
       await dir.removeEntry('workflows.json')
     } catch (error) {
       ignoreMissing(error)
@@ -161,14 +169,14 @@ export async function deleteWorkflows(projectId) {
 
 export async function saveSensors(projectId, data) {
   return trackPersistence('saveSensors:' + String(projectId), async () => {
-    const dir = await getProjectDir(projectId, true)
+    const dir = await dataDir(projectId, true)
     await writeJson(dir, 'sensors.json', data)
   })
 }
 
 export async function loadSensors(projectId) {
   try {
-    const dir = await getProjectDir(projectId)
+    const dir = await dataDir(projectId)
     return readJson(dir, 'sensors.json')
   } catch {
     return null
@@ -178,7 +186,7 @@ export async function loadSensors(projectId) {
 export async function deleteSensors(projectId) {
   return trackPersistence('deleteSensors:' + String(projectId), async () => {
     try {
-      const dir = await getProjectDir(projectId)
+      const dir = await dataDir(projectId)
       await dir.removeEntry('sensors.json')
     } catch (error) {
       ignoreMissing(error)
@@ -195,14 +203,14 @@ export async function deleteSensors(projectId) {
 
 export async function savePoses(projectId, data) {
   return trackPersistence('savePoses:' + String(projectId), async () => {
-    const dir = await getProjectDir(projectId, true)
+    const dir = await dataDir(projectId, true)
     await writeJson(dir, 'poses.json', data)
   })
 }
 
 export async function loadPoses(projectId) {
   try {
-    const dir = await getProjectDir(projectId)
+    const dir = await dataDir(projectId)
     return readJson(dir, 'poses.json')
   } catch {
     return null
@@ -212,7 +220,7 @@ export async function loadPoses(projectId) {
 export async function deletePoses(projectId) {
   return trackPersistence('deletePoses:' + String(projectId), async () => {
     try {
-      const dir = await getProjectDir(projectId)
+      const dir = await dataDir(projectId)
       await dir.removeEntry('poses.json')
     } catch (error) {
       ignoreMissing(error)

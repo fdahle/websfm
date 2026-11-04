@@ -24,6 +24,7 @@
 // product's record so the product is computed again.
 
 import { PROJECT_FORMAT_MIN, PROJECT_FORMAT_VERSION } from './projectFormat.js'
+import { MOVED_DOCUMENTS } from './projectLayout.js'
 
 /** @typedef {{ [path: string]: object | null }} ProjectDocuments */
 /**
@@ -90,6 +91,22 @@ export const FORMAT_MIGRATIONS = [
             return { ...p, omega, phi, kappa, omegaEnu, phiEnu, kappaEnu }
           }),
         }
+      }
+      return docs
+    },
+  },
+  {
+    from: 2,
+    note: 'documents moved into folders: data/ (sensors, GCPs, poses, …), reconstruction/, internal/ (dialog settings)',
+    documents: [...Object.keys(MOVED_DOCUMENTS), ...Object.values(MOVED_DOCUMENTS)],
+    // The project folder's top keeps only project.json and folders (core/projectLayout.js).
+    // The reconstruction's binary files stay where they are: its reader looks in both
+    // places, and its next save writes them into reconstruction/.
+    migrate(docs) {
+      for (const [from, to] of Object.entries(MOVED_DOCUMENTS)) {
+        if (docs[from] == null) continue
+        if (docs[to] == null) docs[to] = docs[from]
+        docs[from] = null
       }
       return docs
     },

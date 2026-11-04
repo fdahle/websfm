@@ -22,10 +22,11 @@ export const MANIFEST_NAME = 'manifest.json'
 // Never archived. The dev-console stream is a record of a *session*, not project
 // data — it is often the largest text file in the tree and means nothing in
 // another browser.
-export const ARCHIVE_EXCLUDE = ['log.ndjson', 'log.json']
+// internal/log.ndjson from format version 3 (core/projectLayout.js), at the top before.
+export const ARCHIVE_EXCLUDE = ['internal/log.ndjson', 'log.ndjson', 'log.json']
 // The copies a format migration keeps (utils/opfs/formatMigration.js) undo it in this
 // browser only: the archived documents are already in the new format.
-const MIGRATION_LEFTOVER = /(^|\/)format-migration\.json$|\.v\d+\.bak$/
+const MIGRATION_LEFTOVER = /(^|\/)format-migration\.json$|\.v\d+\.bak$|^internal\/backups\//
 
 // Recomputable but expensive — the "exclude cached/derived data" option drops
 // these three and nothing else. Safe to drop because every one of them heals:
@@ -41,7 +42,7 @@ export function shouldArchivePath(relPath, { includeDerived = true } = {}) {
   if (ARCHIVE_EXCLUDE.includes(path)) return false
   if (MIGRATION_LEFTOVER.test(path)) return false
   // A run journal (core/runJournal.js) belongs to the tab that ran it.
-  if (top === 'runs') return false
+  if (top === 'runs' || path.startsWith('internal/runs/')) return false
   if (!includeDerived && ARCHIVE_DERIVED_DIRS.includes(top)) return false
   return true
 }

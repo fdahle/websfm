@@ -93,6 +93,9 @@ function makeDir(name) {
 
 let root
 const projectDir = (id) => root.dirs.get('websfm').dirs.get('projects').dirs.get(id)
+// The folders of format version 3 (core/projectLayout.js).
+const dataDir = (id) => projectDir(id).dirs.get('data')
+const internalDir = (id) => projectDir(id).dirs.get('internal')
 
 beforeEach(() => {
   root = makeDir('')
@@ -109,14 +112,14 @@ describe('write serialization', () => {
       opfs.savePoses('p1', { crs: 'EPSG:4326', poses: [1, 2] }),
       opfs.savePoses('p1', { crs: 'EPSG:4326', poses: [1, 2, 3] }),
     ])
-    const written = JSON.parse(projectDir('p1').files.get('poses.json').data)
+    const written = JSON.parse(dataDir('p1').files.get('poses.json').data)
     // Last writer wins, and the file is complete JSON rather than interleaved.
     expect(written.poses).toEqual([1, 2, 3])
   })
 
   it('keeps a failed write from cancelling the ones queued behind it', async () => {
     await opfs.savePoses('p2', { poses: [] })
-    const fh = projectDir('p2').files.get('poses.json')
+    const fh = dataDir('p2').files.get('poses.json')
     const realCreate = fh.createWritable.bind(fh)
     let first = true
     fh.createWritable = async function (opts) {
@@ -138,7 +141,7 @@ describe('write serialization', () => {
 
   it('says storage is full when a write exceeds the quota, and passes other errors through', async () => {
     await opfs.savePoses('p3', { poses: [] })
-    const fh = projectDir('p3').files.get('poses.json')
+    const fh = dataDir('p3').files.get('poses.json')
     const fail = (name, message) => {
       fh.createWritable = async () => {
         throw Object.assign(new Error(message), { name })
@@ -174,15 +177,15 @@ describe('write serialization', () => {
 
   it('does not serialize unrelated files', async () => {
     await Promise.all([opfs.savePoses('p3', { poses: [1] }), opfs.saveGcps('p3', [{ id: 'g1' }])])
-    expect(JSON.parse(projectDir('p3').files.get('poses.json').data).poses).toEqual([1])
-    expect(JSON.parse(projectDir('p3').files.get('gcps.json').data)).toEqual([{ id: 'g1' }])
+    expect(JSON.parse(dataDir('p3').files.get('poses.json').data).poses).toEqual([1])
+    expect(JSON.parse(dataDir('p3').files.get('gcps.json').data)).toEqual([{ id: 'g1' }])
   })
 
   it('appends without losing a concurrent entry', async () => {
     // The offset is read inside the lock: reading it outside would give both
     // appends the same start and one would overwrite the other.
     await Promise.all([opfs.appendLog('p4', [{ m: 'a' }]), opfs.appendLog('p4', [{ m: 'b' }])])
-    const lines = projectDir('p4').files.get('log.ndjson').data.trim().split('\n')
+    const lines = internalDir('p4').files.get('log.ndjson').data.trim().split('\n')
     expect(lines.map((l) => JSON.parse(l).m).sort()).toEqual(['a', 'b'])
   })
 
@@ -223,6 +226,7 @@ describe('write serialization', () => {
 describe('binary documents as one unit', () => {
   it("names each document by its metadata path and its saves' lock", () => {
     expect(opfs.binaryDocumentLockKey('p', 'reconstruction.json')).toBe('reconstruction:p')
+    expect(opfs.binaryDocumentLockKey('p', 'reconstruction/reconstruction.json')).toBe('reconstruction:p')
     expect(opfs.binaryDocumentLockKey('p', 'matches/matches.json')).toBe('matches:p')
     expect(opfs.binaryDocumentLockKey('p', 'products/ortho.json')).toBe('product:p:ortho')
     expect(opfs.binaryDocumentLockKey('p', 'project.json')).toBeNull()
@@ -231,6 +235,9 @@ describe('binary documents as one unit', () => {
 
   it('maps a generation file to its document, and nothing else', () => {
     expect(opfs.binaryDocumentOf('reconstruction.json.0f3a.cloud.1.pos.bin')).toBe('reconstruction.json')
+    expect(opfs.binaryDocumentOf('reconstruction/reconstruction.json.0f3a.cloud.1.pos.bin')).toBe(
+      'reconstruction/reconstruction.json',
+    )
     expect(opfs.binaryDocumentOf('matches/matches.json.0f3a.matches.bin')).toBe('matches/matches.json')
     expect(opfs.binaryDocumentOf('products/dem.json.0f3a.data.bin')).toBe('products/dem.json')
     expect(opfs.binaryDocumentOf('products/dem_data.bin')).toBeNull()

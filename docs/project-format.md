@@ -38,6 +38,14 @@ fixture of the current version exists.
 
 ## What a project folder holds
 
+From format version 3 the folder's top holds only `project.json` and folders
+([`projectLayout.js`](../src/core/projectLayout.js)): `data/` for the small documents of
+user data, `reconstruction/` for the model, `internal/` for what WebSfM keeps for itself,
+beside the folders of images, features, matches and products. Version 2 and earlier had
+the documents, the reconstruction's binary files, `dialogs.json`, `log.ndjson`, `runs/`
+and the migration's files at the top; the migration of version 2 moves the documents,
+and the binary files are read from either place and moved by the next save.
+
 "Recompute" says what is lost when the file is missing: *cheap* files are rebuilt on
 open or on demand, *a run* means the user has to run that step again, and *user data*
 cannot be recomputed at all.
@@ -45,30 +53,30 @@ cannot be recomputed at all.
 | Path | Written by | Contents | Recompute |
 | --- | --- | --- | --- |
 | `project.json` | `useImagesStore`, `useProjectsStore` | name, scene type, CRS (and fetched CRS definitions), the image list with each image's metadata and status, image groups, `formatVersion` | user data |
-| `sensors.json` | `useSensorsStore` | cameras: size, pixel size, focal length, principal point, distortion, fiducial or reseau calibration | user data |
+| `data/sensors.json` | `useSensorsStore` | cameras: size, pixel size, focal length, principal point, distortion, fiducial or reseau calibration | user data |
 | `images/<uuid>` | `useImagesStore` (ingest) | the original photos, as imported | user data |
 | `images/index.csv` | `useImagesStore` (with `project.json`, and on open) | which file under `images/` is which photo: `file,name,original_name` ([`imageIndex.js`](../src/core/io/imageIndex.js)); for people browsing the folder, never read back | cheap |
 | `masks/<uuid>.png` | `useImagesStore` (masks) | image masks | user data, or a run (Auto mask) |
 | `images-derived/` | `useImagesStore` (thumbnails) | thumbnails and transcoded previews | cheap |
 | `keypoints/<uuid>.bin`, `keypoint_colors/`, `descriptors/` | `useImagesStore` (detection) | features per image | a run (Detect) |
 | `matches/matches.json` + `.bin` sidecars | `useMatchesStore` | every pair's matches, fundamental matrix, counts and flags, as one packed document ([`matchStorage.js`](../src/core/features/matchStorage.js)) | a run (Match) |
-| `reconstruction.json` + `.bin` sidecars | `useReconstructionStore` | the clouds and meshes (sparse, dense, imported, edited) with cameras, tracks, colours, normals, texture; georeference, run summaries ([`opfs/reconstruction.js`](../src/utils/opfs/reconstruction.js) lists the sidecars) | a run (Sparse, Dense, Mesh) or user data (imports, edits) |
+| `reconstruction/reconstruction.json` + `.bin` sidecars | `useReconstructionStore` | the clouds and meshes (sparse, dense, imported, edited) with cameras, tracks, colours, normals, texture; georeference, run summaries ([`opfs/reconstruction.js`](../src/utils/opfs/reconstruction.js) lists the sidecars) | a run (Sparse, Dense, Mesh) or user data (imports, edits) |
 | `lod/<name>.lod`, `.hier`, `.copc.laz` | `useReconstructionStore` (cloudLod) | level-of-detail octrees of big clouds; an imported COPC file | a run, or user data (a streamed import's only copy) |
 | `depthmaps/index.json`, `<uuid>.{depth,cost,nrm,rgb}.bin`, `<uuid>.png` | `useReconstructionStore` (dense) | depth maps and their previews ([`opfs/depth.js`](../src/utils/opfs/depth.js)); the index's `mapsKey` and `cameraKeys` say which maps a later run may keep ([`depthReuse.js`](../src/core/dense/depthReuse.js); an index without them keeps none) | a run (Depth Maps) |
 | `products/<stem>.json` + `.bin` sidecars | `useReconstructionStore` (products) | DEMs and orthophotos: grid, geotransform, CRS, rasters, COGs, previews ([`opfs/products.js`](../src/utils/opfs/products.js)) | a run (DEM, Orthophoto) |
 | `external/index.json`, `<id>.{bin,cog,src}` | `useExternalStore` | imported reference rasters (DEMs, orthophotos), reflectance maps (`origin: 'reflectance'`, with `bandNames`), and their display planes | user data (the import) |
-| `dialogs.json` | `useDialogSettings` | each Reconstruct dialog's last-run settings, as differences from its defaults | cheap (the defaults) |
-| `gcps.json` | `useGcpsStore` | ground control points, check points and markers with their image marks | user data |
-| `poses.json` | `usePosesStore` | imported or EXIF camera positions and orientations | user data |
-| `scalebars.json` | `useScaleBarsStore` | scale bars between two markers | user data |
-| `measurements.json` | `useMeasurementsStore` | saved measurements | user data |
-| `footprints.json` | `useFootprintsStore` | vector sets: image footprints, contours, imported polygons | a run, or user data (imports) |
-| `workflows.json` | `useWorkflowsStore` | Workflow Builder graphs and their run records | user data |
-| `runs/<stage>.json` | the stage's run (detect, match, depth) | a run journal while the run is under way ([`runJournal.js`](../src/core/runJournal.js)); left behind by a tab that died, it lets the run continue; never archived | — |
-| `log.ndjson` | `useLogStore` | the console, one line per entry; never archived | — |
-| `<name>.v<n>.bak`, `format-migration.json` | format migration | the copies a migration kept, and its progress while it runs; never archived | — |
+| `internal/dialogs.json` | `useDialogSettings` | each Reconstruct dialog's last-run settings, as differences from its defaults | cheap (the defaults) |
+| `data/gcps.json` | `useGcpsStore` | ground control points, check points and markers with their image marks | user data |
+| `data/poses.json` | `usePosesStore` | imported or EXIF camera positions and orientations | user data |
+| `data/scalebars.json` | `useScaleBarsStore` | scale bars between two markers | user data |
+| `data/measurements.json` | `useMeasurementsStore` | saved measurements | user data |
+| `data/footprints.json` | `useFootprintsStore` | vector sets: image footprints, contours, imported polygons | a run, or user data (imports) |
+| `data/workflows.json` | `useWorkflowsStore` | Workflow Builder graphs and their run records | user data |
+| `internal/runs/<stage>.json` | the stage's run (detect, match, depth) | a run journal while the run is under way ([`runJournal.js`](../src/core/runJournal.js)); left behind by a tab that died, it lets the run continue; never archived | — |
+| `internal/log.ndjson` | `useLogStore` | the console, one line per entry; never archived | — |
+| `internal/backups/<path>.v<n>.bak`, `internal/format-migration.json` | format migration | the copies a migration kept, and its progress while it runs; never archived | — |
 
-Some documents carry their own `version` field as well (`reconstruction.json`,
+Some documents carry their own `version` field as well (`reconstruction/reconstruction.json`,
 `depthmaps/index.json`, `external/index.json`, `measurements.json`, fiducial
 calibrations). A reader may check it, but `formatVersion` is what decides whether and
 how a project is migrated.

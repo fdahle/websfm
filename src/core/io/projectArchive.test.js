@@ -155,3 +155,16 @@ describe('reporting helpers', () => {
     ])
   })
 })
+
+describe('the folders of format version 3', () => {
+  it('archive the documents and leave out the log, run journals and migration copies', async () => {
+    const { shouldArchivePath } = await import('./projectArchive.js')
+    expect(shouldArchivePath('data/gcps.json')).toBe(true)
+    expect(shouldArchivePath('internal/dialogs.json')).toBe(true)
+    expect(shouldArchivePath('reconstruction/reconstruction.json')).toBe(true)
+    expect(shouldArchivePath('internal/log.ndjson')).toBe(false)
+    expect(shouldArchivePath('internal/runs/depth.json')).toBe(false)
+    expect(shouldArchivePath('internal/backups/data/gcps.json.v2.bak')).toBe(false)
+    expect(shouldArchivePath('internal/format-migration.json')).toBe(false)
+  })
+})

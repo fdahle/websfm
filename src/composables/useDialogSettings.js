@@ -1,4 +1,5 @@
 import { ref, watch } from 'vue'
+import { DIALOGS_PATH } from '../core/projectLayout.js'
 import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useLog } from './useLog.js'
@@ -24,7 +25,8 @@ import { normalizeSettings, changedSettings, presetName } from '../core/dialogSe
 //             after one was applied, null otherwise
 
 const PRESETS = 'dialog-presets.json'
-const LAST = 'dialogs.json'
+// internal/dialogs.json (core/projectLayout.js); at the folder's top before format version 3.
+const LAST = DIALOGS_PATH
 let presetsCache = null
 
 async function allPresets() {

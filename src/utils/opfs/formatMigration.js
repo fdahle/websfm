@@ -2,14 +2,17 @@
 // (core/formatMigrations.js) when it is opened, in its own storage: browser storage or
 // the user's folder.
 //
-// Restart-safe. Before it changes anything it writes `format-migration.json`, listing
-// the documents the project had, and a copy of each as `<name>.v<from>.bak`. project.json
+// Restart-safe. Before it changes anything it writes `internal/format-migration.json`,
+// listing the documents the project had, and a copy of each as
+// `internal/backups/<path>.v<from>.bak`. (Before format version 3 both sat next to the
+// documents, where an interrupted older run's are still found.) project.json
 // is written last, with the new version. A tab that dies partway leaves the old version
 // in project.json, so the next open runs the migration again, from the copies and the
 // list rather than from the half-migrated documents. The copies stay afterwards, so a bad
 // migration can still be undone by hand.
 import { trackPersistence, persistenceLock, ignoreMissing } from '../persistence.js'
 import { getProjectDir, readJson, writeJson } from './base.js'
+import { BACKUPS_DIR, INTERNAL_DIR, MIGRATION_STATE } from '../../core/projectLayout.js'
 import { PROJECT_FORMAT_VERSION, projectFormatOf } from '../../core/projectFormat.js'
 import {
   FORMAT_MIGRATIONS,
@@ -20,9 +23,10 @@ import {
   splitDocumentPath,
 } from '../../core/formatMigrations.js'
 
-const STATE = 'format-migration.json'
+const STATE = MIGRATION_STATE
 const backupName = (name, from) => `${name}.v${from}.bak`
 const joinPath = (dir, name) => (dir ? `${dir}/${name}` : name)
+const backupsOf = (dir) => (dir ? `${INTERNAL_DIR}/${BACKUPS_DIR}/${dir}` : `${INTERNAL_DIR}/${BACKUPS_DIR}`)
 
 async function dirAt(root, rel, create = false) {
   let dir = root
@@ -50,12 +54,13 @@ async function expandDocuments(root, patterns, from) {
       paths.add(joinPath(dir, name))
       continue
     }
-    const handle = await dirOrNull(root, dir)
-    if (!handle?.keys) continue
-    for await (const n of handle.keys()) {
-      if (!dir && n === STATE) continue
-      if (n.endsWith('.json')) paths.add(joinPath(dir, n))
-      else if (n.endsWith('.json' + suffix)) paths.add(joinPath(dir, n.slice(0, -suffix.length)))
+    for (const handle of [await dirOrNull(root, dir), await dirOrNull(root, backupsOf(dir))]) {
+      if (!handle?.keys) continue
+      for await (const n of handle.keys()) {
+        if (!dir && n === STATE) continue
+        if (n.endsWith('.json')) paths.add(joinPath(dir, n))
+        else if (n.endsWith('.json' + suffix)) paths.add(joinPath(dir, n.slice(0, -suffix.length)))
+      }
     }
   }
   return [...paths]
@@ -82,7 +87,9 @@ export async function migrateProjectFormat(
   return trackPersistence('migrateProjectFormat:' + String(projectId), () =>
     persistenceLock(`project:${projectId}`, async () => {
       const root = await getProjectDir(projectId)
-      const state = await readJson(root, STATE)
+      const internal = await dirAt(root, INTERNAL_DIR, true)
+      // An older version's interrupted run left its list at the folder's top.
+      const state = (await readJson(internal, STATE)) ?? (await readJson(root, STATE))
       const resumed = state?.from === from && Array.isArray(state.present)
       const paths = await expandDocuments(root, planDocuments(plan), from)
       if (resumed) for (const p of state.present) if (!paths.includes(p)) paths.push(p)
@@ -96,19 +103,26 @@ export async function migrateProjectFormat(
           docs[path] = null // created by the interrupted run
           continue
         }
-        const kept = handle ? await readJson(handle, backupName(name, from)) : null
+        const backups = await dirOrNull(root, backupsOf(dir))
+        const kept =
+          (backups ? await readJson(backups, backupName(name, from)) : null) ??
+          (handle ? await readJson(handle, backupName(name, from)) : null)
         docs[path] = kept ?? (handle ? await readJson(handle, name) : null)
       }
       if (!docs['project.json']) throw new Error('project.json is missing or unreadable')
       const present = paths.filter((p) => docs[p] != null)
 
       // Nothing is rewritten before the list and every copy are on disk.
-      if (!resumed) await writeJson(root, STATE, { from, to, present, startedAt: new Date().toISOString() })
+      if (!resumed) await writeJson(internal, STATE, { from, to, present, startedAt: new Date().toISOString() })
       for (const path of present) {
         const { dir, name } = splitDocumentPath(path)
-        const handle = await dirAt(root, dir)
-        if ((await readJson(handle, backupName(name, from))) == null)
-          await writeJson(handle, backupName(name, from), docs[path])
+        const backups = await dirAt(root, backupsOf(dir), true)
+        const legacy = await dirOrNull(root, dir)
+        if (
+          (await readJson(backups, backupName(name, from))) == null &&
+          (legacy ? await readJson(legacy, backupName(name, from)) : null) == null
+        )
+          await writeJson(backups, backupName(name, from), docs[path])
       }
 
       const { docs: next, notes } = applyMigrations(docs, plan)
@@ -123,6 +137,7 @@ export async function migrateProjectFormat(
         }
       }
       await writeJson(root, 'project.json', next['project.json'])
+      await internal.removeEntry(STATE).catch(ignoreMissing)
       await root.removeEntry(STATE).catch(ignoreMissing)
       return { data: next['project.json'], notes }
     }),

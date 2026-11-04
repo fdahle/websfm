@@ -201,6 +201,13 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **A tidier project folder.** A project's folder now holds only `project.json` at its
+  top, with the small documents (GCPs, poses, sensors, scale bars …) in `data/`, the
+  model and its binary files in `reconstruction/`, and the log, last dialog settings,
+  run journals and migration copies in `internal/`. A project from an earlier version
+  is moved over when it is opened (project format 3); its model's files follow as it is
+  read, or with its next save. The fixtures of formats 1 and 2 open with everything they
+  held and end with nothing but `project.json` at the top.
 - **Import ▸ Interoperability names the tools.** The buttons are now WebSfM Project,
   COLMAP, Metashape, Other SfM and Keypoints & Matches, each with a tooltip that says
   what it reads, and each opens a dialog that shows what the files hold and asks what

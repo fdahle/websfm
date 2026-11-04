@@ -297,7 +297,12 @@ export async function exportProjectArchive({
       for (const f of listed) {
         if (!f?.name || /[/\\]/.test(f.name) || seen.has(f.name)) continue
         seen.add(f.name)
-        const file = await opfs.getProjectFile(projectId, dir + f.name)
+        // A reconstruction migrated to format 3 may still have its binary files at the
+        // folder's top until its next save (utils/opfs/reconstruction.js); the archive
+        // puts them beside the document, where they belong.
+        const file =
+          (await opfs.getProjectFile(projectId, dir + f.name)) ??
+          (dir === 'reconstruction/' ? await opfs.getProjectFile(projectId, f.name) : null)
         if (!file || file.size !== f.bytes) {
           // Not a race (no save runs under this lock): the project itself lacks it.
           log(

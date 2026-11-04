@@ -9,6 +9,7 @@ function memoryDirectory(control) {
   const dir = {
     name: 'binary-test',
     files,
+    dirs,
     async *keys() {
       yield* files.keys()
     },
@@ -103,6 +104,8 @@ it('commits cloud buffers atomically when replacing an existing cloud id', async
 })
 
 describe('cloud buffer reuse', () => {
+  // reconstruction/ (core/projectLayout.js)
+  const recon = () => dir.dirs.get('reconstruction')
   const pos = (n, v) => new Float64Array(n * 3).fill(v).buffer
   const cloud = (id, n, v) => ({ id, kind: 'dense', pointCount: n, buffers: { pos: pos(n, v) } })
 
@@ -118,8 +121,8 @@ describe('cloud buffer reuse', () => {
     // Only b's new buffer and the metadata were written; a kept its file through GC.
     expect(control.written.filter((n) => n.endsWith('.bin'))).toEqual([second.files.b.pos.name])
     expect(second.files.a.pos).toEqual(aFile)
-    expect(dir.files.has(aFile.name)).toBe(true)
-    expect(dir.files.has(first.files.b.pos.name)).toBe(false) // b's old generation collected
+    expect(recon().files.has(aFile.name)).toBe(true)
+    expect(recon().files.has(first.files.b.pos.name)).toBe(false) // b's old generation collected
     const saved = await opfs.loadReconstruction('binary-test')
     expect(new Float64Array(saved.clouds[0].buffers.pos)).toEqual(new Float64Array([1, 1, 1]))
     expect(new Float64Array(saved.clouds[1].buffers.pos)).toEqual(new Float64Array(6).fill(3))
@@ -130,13 +133,13 @@ describe('cloud buffer reuse', () => {
 
   it('writes nothing and names the cloud when a reused file has gone', async () => {
     const first = await opfs.saveReconstruction('binary-test', { clouds: [cloud('a', 1, 1)] })
-    dir.files.delete(first.files.a.pos.name) // e.g. another tab's save collected it
-    const before = dir.files.get('reconstruction.json')
+    recon().files.delete(first.files.a.pos.name) // e.g. another tab's save collected it
+    const before = recon().files.get('reconstruction.json')
     const res = await opfs.saveReconstruction('binary-test', {
       clouds: [{ id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: first.files.a }],
     })
     expect(res).toEqual({ ok: false, stale: ['a'] })
-    expect(dir.files.get('reconstruction.json')).toBe(before)
+    expect(recon().files.get('reconstruction.json')).toBe(before)
     // A size mismatch is stale too.
     const again = await opfs.saveReconstruction('binary-test', { clouds: [cloud('a', 1, 1)] })
     const res2 = await opfs.saveReconstruction('binary-test', {
@@ -214,15 +217,65 @@ describe('loading a reconstruction', () => {
     expect(await opfs.loadReconstruction('binary-test')).toBeNull()
   })
   it('throws, rather than reporting no model, when the document is unreadable', async () => {
-    dir.files.set('reconstruction.json', new TextEncoder().encode('{"version":3,"clo'))
+    ;(await dir.getDirectoryHandle('reconstruction')).files.set(
+      'reconstruction.json',
+      new TextEncoder().encode('{"version":3,"clo'),
+    )
     await expect(opfs.loadReconstruction('binary-test')).rejects.toThrow()
   })
   it('throws when a cloud buffer the document names is missing', async () => {
     const res = await opfs.saveReconstruction('binary-test', {
       clouds: [{ id: 'a', kind: 'dense', pointCount: 1, buffers: { pos: new Float64Array(3).buffer } }],
     })
-    dir.files.delete(res.files.a.pos.name)
+    ;(await dir.getDirectoryHandle('reconstruction')).files.delete(res.files.a.pos.name)
     await expect(opfs.loadReconstruction('binary-test')).rejects.toThrow()
+  })
+
+  // Format version 2 kept the binary files at the folder's top; the migration moved only
+  // the document (core/formatMigrations.js), so they are read from there.
+  async function legacyProject({ movable }) {
+    const res = await opfs.saveReconstruction('binary-test', {
+      clouds: [{ id: 'a', kind: 'dense', pointCount: 1, buffers: { pos: new Float64Array([4, 5, 6]).buffer } }],
+    })
+    const recon = await dir.getDirectoryHandle('reconstruction')
+    const name = res.files.a.pos.name
+    dir.files.set(name, recon.files.get(name))
+    recon.files.delete(name)
+    if (movable) {
+      const getFileHandle = dir.getFileHandle.bind(dir)
+      dir.getFileHandle = async (n, o) => ({
+        ...(await getFileHandle(n, o)),
+        move: async (to) => {
+          to.files.set(n, dir.files.get(n))
+          dir.files.delete(n)
+        },
+      })
+    }
+    return { recon, name }
+  }
+
+  it('reads the binary files from the folder top, and moves them where it can', async () => {
+    const { recon, name } = await legacyProject({ movable: true })
+    const saved = await opfs.loadReconstruction('binary-test')
+    expect(new Float64Array(saved.clouds[0].buffers.pos)).toEqual(new Float64Array([4, 5, 6]))
+    expect(dir.files.has(name)).toBe(false)
+    expect(recon.files.has(name)).toBe(true)
+    expect(saved.clouds[0].savedFiles.pos.name).toBe(name)
+  })
+
+  it('without a move, the next save writes them into reconstruction/ and clears the top', async () => {
+    const { recon, name } = await legacyProject({ movable: false })
+    const saved = await opfs.loadReconstruction('binary-test')
+    expect(new Float64Array(saved.clouds[0].buffers.pos)).toEqual(new Float64Array([4, 5, 6]))
+    // Not offered for reuse: it is not where the next save looks.
+    expect(saved.clouds[0].savedFiles).toBeUndefined()
+    const again = await opfs.saveReconstruction('binary-test', {
+      clouds: [{ id: 'a', kind: 'dense', pointCount: 1, buffers: saved.clouds[0].buffers }],
+    })
+    expect(again.ok).toBe(true)
+    expect(dir.files.has(name)).toBe(false)
+    expect([...dir.files.keys()].filter((n) => n.startsWith('reconstruction.json'))).toEqual([])
+    expect(recon.files.has(again.files.a.pos.name)).toBe(true)
   })
 })
 

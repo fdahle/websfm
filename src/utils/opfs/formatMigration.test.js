@@ -124,13 +124,18 @@ describe('migrateProjectFormat', () => {
       expect(get(products, 'dem.json')).toEqual({ width: 4, kind: 'dem' })
       expect(products.files.has('old.json')).toBe(false)
       expect(products.files.get('dem.json.g1.data.bin').data).toBe('binary') // binaries untouched
-      // The copies undo it by hand; the list is gone once the migration finished.
-      expect(get(root, 'gcps.json.v1.bak')).toEqual({ gcps: [{ id: 'a', xyz: [1, 2, 3] }] })
-      expect(get(root, 'project.json.v1.bak')).toEqual({ name: 'P', images: [] })
-      expect(get(products, 'old.json.v1.bak')).toEqual({ width: 2 })
+      // The copies undo it by hand, in internal/backups/ with the folders of the
+      // documents; the list is gone once the migration finished.
+      const internal = root.dirs.get('internal')
+      const backups = internal.dirs.get('backups')
+      expect(get(backups, 'gcps.json.v1.bak')).toEqual({ gcps: [{ id: 'a', xyz: [1, 2, 3] }] })
+      expect(get(backups, 'project.json.v1.bak')).toEqual({ name: 'P', images: [] })
+      expect(get(backups.dirs.get('products'), 'old.json.v1.bak')).toEqual({ width: 2 })
+      expect([...root.files.keys()].filter((n) => n.endsWith('.bak'))).toEqual([])
+      expect(internal.files.has('format-migration.json')).toBe(false)
       expect(root.files.has('format-migration.json')).toBe(false)
-      expect(root.files.has('notes.json.v1.bak')).toBe(false) // it did not exist before
-      expect(root.files.has('poses.json.v1.bak')).toBe(false) // not named by any step
+      expect(backups.files.has('notes.json.v1.bak')).toBe(false) // it did not exist before
+      expect(backups.files.has('poses.json.v1.bak')).toBe(false) // not named by any step
     } finally {
       clearProjectRoot('p1')
     }
@@ -170,6 +175,27 @@ describe('migrateProjectFormat', () => {
       expect(snapshot(root), `killed after ${k} writes`).toEqual(expected)
     }
     clearProjectRoot('p1')
+  })
+
+  it("continues an older version's interrupted run from the copies it left beside the documents", async () => {
+    const root = makeProject()
+    setProjectRoot('p1', root)
+    try {
+      // The older run had copied gcps.json, then rewritten it, then died.
+      put(root, 'format-migration.json', {
+        from: 1,
+        to: 2,
+        present: ['project.json', 'gcps.json', 'products/dem.json', 'products/old.json'],
+      })
+      put(root, 'gcps.json.v1.bak', { gcps: [{ id: 'a', xyz: [1, 2, 3] }] })
+      put(root, 'gcps.json', { gcps: [{ id: 'a', coordinates: [1, 2, 3] }] })
+      await openProject(root)
+      // Migrated once, from the copy, not twice.
+      expect(get(root, 'gcps.json').gcps[0]).toEqual({ id: 'a', coordinates: [1, 2, 3] })
+      expect(root.files.has('format-migration.json')).toBe(false)
+    } finally {
+      clearProjectRoot('p1')
+    }
   })
 
   it('refuses a version it has no step from', async () => {

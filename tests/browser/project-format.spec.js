@@ -98,6 +98,26 @@ for (const version of versions) {
       })
       expect(logged.some((m) => /Project upgraded: format/.test(m))).toBe(true)
     }
+    // The folder's top holds project.json and folders only (core/projectLayout.js), once
+    // the opened project has saved its model: an older project's binary files move into
+    // reconstruction/ as it is read, or with its next save.
+    await page.evaluate(async () => {
+      const store = (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore()
+      const cloud = store.clouds[0]
+      store.setCloudVisible(cloud.id, cloud.visible !== false) // a change that saves the model
+      const { flushPersistence } = await import('/src/utils/persistence.js')
+      await flushPersistence()
+    })
+    const top = await page.evaluate(async () => {
+      const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+      const { getProjectDir } = await import('/src/utils/opfs/base.js')
+      const dir = await getProjectDir(useProjectsStore().currentProjectId)
+      const out = []
+      for await (const [name, handle] of dir.entries()) out.push(handle.kind === 'directory' ? `${name}/` : name)
+      return out.sort()
+    })
+    expect(top.filter((n) => !n.endsWith('/'))).toEqual(['project.json'])
+    expect(top).toEqual(expect.arrayContaining(['data/', 'reconstruction/', 'images/']))
     expect(errors).toEqual([])
   })
 }

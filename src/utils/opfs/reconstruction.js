@@ -3,14 +3,32 @@ import { trackPersistence, persistenceLock, ignoreMissing } from '../persistence
 import { writeBinaryDocument, readBinaryDocument } from '../binaryDocument.js'
 import { mapConcurrent } from '../concurrency.js'
 import { getProjectDir, getRoot, getSubDir, readBin, removeFileIn, writeBin, writeJson } from './base.js'
+import { RECONSTRUCTION_DIR, RECONSTRUCTION_DOCUMENT } from '../../core/projectLayout.js'
+
+// reconstruction/ in the project folder (core/projectLayout.js). Before format version 3
+// the document and its binary files sat at the folder's top. The migration moved the
+// document; its binary files are read from either place, moved over when the document
+// is read (FileSystemHandle.move, where the browser has it), and a save collects any
+// left at the top, having written its own into reconstruction/.
+const DOC = RECONSTRUCTION_DOCUMENT
+async function reconDir(projectId, create = false) {
+  return (await getProjectDir(projectId, create)).getDirectoryHandle(RECONSTRUCTION_DIR, { create })
+}
+const isLegacyFile = (name) => name === DOC || (name.startsWith(`${DOC}.`) && name.endsWith('.bin'))
+async function removeLegacyFiles(root) {
+  if (!root.keys) return
+  const names = []
+  for await (const name of root.keys()) if (isLegacyFile(name)) names.push(name)
+  for (const name of names) await removeFileIn(root, name)
+}
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
-// Metadata → reconstruction.json (version 3):
+// Metadata → reconstruction/reconstruction.json (version 3):
 //   { version: 3, binaryFiles: { key: { name, bytes } }, clouds: [{ id, name, kind, createdAt, pointCount, hasColor,
 //       cameras: [{ uuid, R, t, K, rs? }], viewUuids: [uuid, …] }],
 //     georef, summary, denseSummary }
 // The heavy per-point data lives in binary sidecars, one set per cloud, named
-// `reconstruction.json.{generation}.{cloudId}.{key}.bin`:
+// `reconstruction/reconstruction.json.{generation}.{cloudId}.{key}.bin`:
 //   pos    Float64  3·N   x,y,z (world-frame precision)
 //   col    Uint8    3·N   r,g,b (present only when hasColor)
 //   colorMask Uint8 N     1 when a sparse point has colour; absent on legacy saves
@@ -53,7 +71,8 @@ const RECON_BIN_KEYS = [
 export async function saveReconstruction(projectId, data) {
   return trackPersistence('saveReconstruction:' + String(projectId), async () => {
     return persistenceLock(`reconstruction:${projectId}`, async () => {
-      const dir = await getProjectDir(projectId, true)
+      const root = await getProjectDir(projectId, true)
+      const dir = await reconDir(projectId, true)
       const { clouds = [], ...rest } = data
       const meta = { ...rest, version: 3, clouds: [] }
       const buffers = {}
@@ -65,10 +84,12 @@ export async function saveReconstruction(projectId, data) {
           else if (cloudBuffers?.[key]) buffers[`${c.id}.${key}`] = cloudBuffers[key]
         }
       }
-      const res = await writeBinaryDocument(dir, 'reconstruction.json', meta, buffers, { writeJson, writeBin })
+      const res = await writeBinaryDocument(dir, DOC, meta, buffers, { writeJson, writeBin })
       if (res.stale) {
         return { ok: false, stale: [...new Set(res.stale.map((k) => k.slice(0, k.lastIndexOf('.'))))] }
       }
+      // Every file the committed document names is in reconstruction/ now.
+      await removeLegacyFiles(root).catch(() => {})
       return { ok: true, files: filesByCloud(res.files) }
     })
   })
@@ -90,19 +111,61 @@ function filesByCloud(files) {
 // an unreadable model for an empty one and then save the empty one over it.
 export async function loadReconstruction(projectId) {
   return persistenceLock(`reconstruction:${projectId}`, async () => {
-    let dir, file
+    let root, dir, file
     try {
-      dir = await getProjectDir(projectId)
-      file = await (await dir.getFileHandle('reconstruction.json')).getFile()
+      root = await getProjectDir(projectId)
     } catch (error) {
       ignoreMissing(error)
       return null
     }
+    try {
+      dir = await reconDir(projectId)
+      file = await (await dir.getFileHandle(DOC)).getFile()
+    } catch (error) {
+      ignoreMissing(error)
+      // Only an unmigrated copy has it at the top; there is no other place to look.
+      try {
+        file = await (await root.getFileHandle(DOC)).getFile()
+      } catch (rootError) {
+        ignoreMissing(rootError)
+        return null
+      }
+      dir = null
+    }
     const meta = JSON.parse(await file.text())
     if (!meta) return null
     if (meta.version !== 3) throw new Error(`unsupported document version ${meta.version ?? '(none)'}`)
-    const saved = await readBinaryDocument(dir, meta, readBin)
-    const savedFiles = filesByCloud(meta.binaryFiles)
+    // Each binary file from reconstruction/, else from the folder's top (moved there now
+    // when the browser can move files). A file read from the top is not offered for reuse:
+    // the next save writes it into reconstruction/.
+    const atTop = new Set()
+    const readEither = async (_, name) => {
+      if (dir) {
+        try {
+          return await readBin(dir, name)
+        } catch (error) {
+          ignoreMissing(error)
+        }
+      }
+      const buffer = await readBin(root, name)
+      atTop.add(name)
+      return buffer
+    }
+    const saved = await readBinaryDocument(dir ?? root, meta, readEither)
+    if (dir && atTop.size) {
+      for (const name of [...atTop]) {
+        try {
+          const handle = await root.getFileHandle(name)
+          if (typeof handle.move !== 'function') break
+          await handle.move(dir)
+          atTop.delete(name)
+        } catch {
+          break // left at the top; the next save rewrites it
+        }
+      }
+    }
+    const reusable = Object.fromEntries(Object.entries(meta.binaryFiles).filter(([, f]) => dir && !atTop.has(f.name)))
+    const savedFiles = filesByCloud(reusable)
     await mapConcurrent(meta.clouds || [], 3, async (c) => {
       const buffers = {}
       RECON_BIN_KEYS.forEach((key) => {
@@ -141,12 +204,18 @@ export async function loadReconstruction(projectId) {
 export async function deleteReconstruction(projectId) {
   return trackPersistence('deleteReconstruction:' + String(projectId), () =>
     persistenceLock(`reconstruction:${projectId}`, async () => {
-      const dir = await getProjectDir(projectId)
-      await removeFileIn(dir, 'reconstruction.json')
-      if (dir.keys)
-        for await (const name of dir.keys()) {
-          if (name.startsWith('reconstruction.json.') && name.endsWith('.bin')) await removeFileIn(dir, name)
-        }
+      const root = await getProjectDir(projectId)
+      await removeLegacyFiles(root)
+      let dir
+      try {
+        dir = await reconDir(projectId)
+      } catch (error) {
+        ignoreMissing(error)
+        return
+      }
+      const names = []
+      if (dir.keys) for await (const name of dir.keys()) if (isLegacyFile(name)) names.push(name)
+      for (const name of names) await removeFileIn(dir, name)
     }),
   )
 }

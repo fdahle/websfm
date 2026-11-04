@@ -211,6 +211,8 @@ export async function* walkProjectFiles(projectId, { skip = null } = {}) {
 // is at `relPath`, or null when `relPath` is not one. `binaryDocumentOf(relPath)` → the
 // metadata path a generation file (`<doc>.<generation>.<key>.bin`) belongs to, or null.
 const BINARY_DOCUMENTS = [
+  { re: /^reconstruction\/reconstruction\.json$/, lock: (id) => `reconstruction:${id}` },
+  // Before format version 3 (core/projectLayout.js): its binary files may still be there.
   { re: /^reconstruction\.json$/, lock: (id) => `reconstruction:${id}` },
   { re: /^matches\/matches\.json$/, lock: (id) => `matches:${id}` },
   { re: /^products\/([^/]+)\.json$/, lock: (id, m) => `product:${id}:${m[1]}` },
