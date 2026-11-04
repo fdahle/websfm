@@ -83,7 +83,7 @@ function reprojFor(gcpId, imageId) {
       <template v-for="gcp in gcps" :key="gcp.id">
         <li
           class="list-item"
-          :class="{ selected: gcp.id === sidebar.selectedGcpId }"
+          :class="{ selected: sidebar.isFocused('gcp', gcp.id) }"
           :title="gcp.name"
           @click="
             () => {

@@ -275,6 +275,11 @@ Notable changes to websfm. The format follows
   after 42 s, when it was on course for 648 s (GPU 14 s).
 
 ### Fixed
+- **One highlighted row in the sidebar.** Clicking an image, GCP, product, reference
+  raster or vector layer now moves the highlight there; before, a cloud you had clicked
+  (or a run had just added) stayed highlighted next to it. DEM, orthophoto, reference
+  raster and vector rows highlight when clicked. The cloud last chosen is still the one
+  the tools open on.
 - **Cancel in Reconnect project folder no longer leaves an empty app.** With no project
   open, Cancel (or Esc) goes back to the project list, or to New Project when there is
   none.

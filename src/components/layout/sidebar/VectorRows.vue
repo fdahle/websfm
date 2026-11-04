@@ -48,7 +48,9 @@ function fromMenu(fn) {
   <template v-for="set in sets" :key="set.id">
     <li
       class="list-item"
+      :class="{ selected: sidebar.isFocused('vector', set.id) }"
       :title="`${set.name} — double-click to zoom`"
+      @click="sidebar.focusRow('vector', set.id)"
       @dblclick="sidebar.zoomToVectorSet(set.id)"
       @contextmenu="openCtx($event, { set })"
     >

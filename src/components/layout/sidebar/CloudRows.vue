@@ -20,7 +20,7 @@ const props = defineProps({
 })
 const sidebar = useSidebar()
 const recon = useReconstructionStore()
-const { selectedCloudId, clouds: allClouds } = storeToRefs(recon)
+const { clouds: allClouds } = storeToRefs(recon)
 
 // The main one of each kind is what the next step uses (mainSparseId for the model,
 // mainProductIds for dense and mesh). Its badge only tells products apart: a sparse
@@ -93,7 +93,7 @@ function fromMenu(fn) {
   <template v-for="cloud in clouds" :key="cloud.id">
     <li
       class="list-item"
-      :class="{ selected: cloud.id === selectedCloudId }"
+      :class="{ selected: sidebar.isFocused('cloud', cloud.id) }"
       :title="cloud.name"
       @click="sidebar.selectCloud(cloud.id)"
       @contextmenu="openCloudCtx($event, { cloud })"

@@ -113,7 +113,9 @@ function toggleMap(row) {
       <template v-for="row in productRows" :key="row.id">
         <li
           class="list-item"
+          :class="{ selected: sidebar.isFocused('product', row.id) }"
           :title="`${row.name} — double-click to open`"
+          @click="sidebar.focusRow('product', row.id)"
           @dblclick="sidebar.openProduct(row.id)"
           @contextmenu="openProductCtx($event, { row })"
         >

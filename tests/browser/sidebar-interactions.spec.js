@@ -236,3 +236,30 @@ test('a reference raster declares its accuracy and datum after a confident impor
   await page.locator('.list-item').filter({ hasText: 'rema.tif' }).locator('.expand-btn').click()
   await expect(page.locator('.img-details').filter({ hasText: 'σ horizontal' })).toContainText('2.5')
 })
+
+// One highlighted row in the whole sidebar: clicking a vector set ends a cloud's
+// highlight (it used to stay on the cloud, which still is the one the tools open on).
+test('the sidebar highlights one row at a time', async ({ page }) => {
+  await seed(page)
+  await page.getByRole('button', { name: /Reference Data/ }).click()
+  const north = page.locator('.list-item').filter({ hasText: 'north.laz' })
+  const south = page.locator('.list-item').filter({ hasText: 'south.laz' })
+  const outline = page.locator('.list-item').filter({ hasText: 'Site outline' })
+  await north.click()
+  await expect(north).toHaveClass(/selected/)
+  await outline.click()
+  await expect(outline).toHaveClass(/selected/)
+  await expect(page.locator('.list-item.selected')).toHaveCount(1)
+  // The tools still open on the cloud last chosen.
+  const active = await page.evaluate(
+    async () => (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore().selectedCloud?.name,
+  )
+  expect(active).toMatch(/north\.laz/)
+  // A selection made elsewhere (here the store, as a run adding a cloud does) moves it too.
+  await page.evaluate(async () => {
+    const store = (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore()
+    store.selectCloud(store.clouds.find((c) => c.name.includes('south')).id)
+  })
+  await expect(south).toHaveClass(/selected/)
+  await expect(page.locator('.list-item.selected')).toHaveCount(1)
+})

@@ -252,6 +252,14 @@ function handleItemClick(e, img) {
   sidebar.selectImage(img.id)
 }
 
+// The sidebar has one highlighted row (useSidebarActions ▸ focus): a click on a cloud,
+// GCP or product ends the image selection, so a right-click later never acts on a
+// selection that is no longer shown.
+const imagesFocused = computed(() => sidebar.focus?.kind === 'image')
+watch(imagesFocused, (focused) => {
+  if (!focused) localSelected.value = []
+})
+
 watch(selectedId, (newId) => {
   if (suppressWatch) {
     suppressWatch = false
@@ -456,7 +464,7 @@ function revealRow(key) {
           v-else-if="row.kind === 'image'"
           class="list-item"
           :class="{
-            'selected': selectedSet.has(row.img.id),
+            'selected': imagesFocused && selectedSet.has(row.img.id),
             'unaligned': isUnaligned(row.img),
             'disabled-img': !isImageEnabled(row.img),
             'loading': row.img.previewPending,

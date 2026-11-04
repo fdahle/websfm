@@ -1,4 +1,4 @@
-import { nextTick } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
@@ -64,6 +64,31 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   const unhide = (id, visible) => {
     if (visible) setMapLayerHidden(id, false)
   }
+  // One highlighted row in the whole sidebar. Images, GCPs and clouds each keep a
+  // selection of their own (the image views, the GCP marker, the cloud the tools
+  // open on), and those outlive a click elsewhere: a dense cloud stayed highlighted
+  // while the user clicked a DEM or an image. The highlight is the last row clicked,
+  // or the last selection made elsewhere (a camera picked in 3D, a run's new cloud).
+  // { kind: 'image' | 'gcp' | 'cloud' | 'product' | 'raster' | 'vector', id } or null.
+  const focus = ref(null)
+  const focusRow = (kind, id) => {
+    focus.value = id == null ? null : { kind, id }
+  }
+  const isFocused = (kind, id) => focus.value?.kind === kind && focus.value.id === id
+  const reconStore = useReconstructionStore()
+  watch(
+    () => reconStore.selectedCloudId,
+    (id) => id && focusRow('cloud', id),
+  )
+  watch(
+    () => imagesStore.selectedId,
+    (id) => id && focusRow('image', id),
+  )
+  watch(
+    () => state.selectedGcpId?.value,
+    (id) => id && focusRow('gcp', id),
+  )
+
   const footprintsStore = useFootprintsStore()
   const { sets: vectorSets } = storeToRefs(footprintsStore)
   const { renameSet, setSetVisible, setSetOpacity } = footprintsStore
@@ -128,6 +153,7 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   // Selection chooses the active layer without hiding the others.
   function showCloud(id) {
     selectCloud(id)
+    focusRow('cloud', id)
     activateTab('viewer')
   }
 
@@ -160,8 +186,15 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     // Drops
     addImages: addImagesRouted,
     importFile: openDroppedImport,
+    // The highlighted row (see focus above).
+    focus,
+    focusRow,
+    isFocused,
     // Images
-    selectImage,
+    selectImage: (id) => {
+      selectImage(id)
+      focusRow('image', id)
+    },
     openImage: (id) => openImageTab(id),
     showInfo: (id) => {
       infoImageId.value = id
@@ -210,7 +243,10 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     },
     // GCPs
     removeGcp: confirmRemoveGcp,
-    selectGcp,
+    selectGcp: (id) => {
+      selectGcp(id)
+      focusRow('gcp', id)
+    },
     jumpToImage,
     openGcp: openGcpView,
     // Vector layers (contours in Products, polygon files in Reference Data)

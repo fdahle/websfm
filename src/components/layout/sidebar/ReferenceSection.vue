@@ -105,7 +105,9 @@ const ctxOpenLabel = computed(() =>
       <template v-for="r in rasters" :key="r.id">
         <li
           class="list-item"
+          :class="{ selected: sidebar.isFocused('raster', r.id) }"
           :title="`${r.name} — double-click to open`"
+          @click="sidebar.focusRow('raster', r.id)"
           @dblclick="sidebar.openRaster(r.id)"
           @contextmenu="openCtx($event, { raster: r })"
         >
