@@ -61,6 +61,15 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
   await expect(dialog).toContainText('Scale bars — 2 bars, 1 as checks')
   await dialog.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(dialog).toHaveCount(0)
+  // The dialog closes as the import starts; the scale bars land last, after the
+  // calibration, poses and GCPs (useImportRouting onMetashapeImport).
+  await expect
+    .poll(() =>
+      page.evaluate(async () =>
+        (await import('/src/stores/useScaleBarsStore.js')).useScaleBarsStore().bars.some((b) => b.name === 'check B'),
+      ),
+    )
+    .toBe(true)
 
   const got = await page.evaluate(async () => {
     const { usePosesStore } = await import('/src/stores/usePosesStore.js')

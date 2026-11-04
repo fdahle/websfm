@@ -40,7 +40,7 @@ test('the scale bar toolbox shows the point being marked and leads back or stops
   await page.keyboard.press('Escape')
 
   await startMarking(page)
-  await box.getByRole('button', { name: 'Stop' }).click()
+  await box.getByRole('button', { name: 'Stop', exact: true }).click()
   await expect(box).toHaveCount(0)
   await expect(page.getByText('Set Real-World Scale')).toHaveCount(0)
 })
