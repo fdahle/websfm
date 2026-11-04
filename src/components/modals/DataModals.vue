@@ -33,6 +33,7 @@ import ImportRasterModal from './import/ImportRasterModal.vue'
 import ImportVideoModal from './import/ImportVideoModal.vue'
 import InteropImportModal from './import/InteropImportModal.vue'
 import InteropSourceModal from './import/InteropSourceModal.vue'
+import FeatureImportModal from './import/FeatureImportModal.vue'
 import MetashapeImportModal from './import/MetashapeImportModal.vue'
 import MaskManagerModal from './inspect/MaskManagerModal.vue'
 import MatchListModal from './inspect/MatchListModal.vue'
@@ -166,10 +167,15 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
   <Teleport to="body">
     <InteropSourceModal
       v-if="sfmSourceOpen"
+      :kind="sfmSourceOpen === 'other' ? 'other' : 'colmap'"
       @close="sfmSourceOpen = false"
       @files="pickSfmFiles"
       @folder="pickSfmFolder"
     />
+  </Teleport>
+
+  <Teleport to="body">
+    <FeatureImportModal />
   </Teleport>
 
   <Teleport to="body">

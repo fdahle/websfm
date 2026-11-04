@@ -217,11 +217,44 @@ export const TABS = [
         commands: [
           // Another WebSfM project's photos, features and matches, into this one
           // (composables/useProjectMerge.js); then Add to the model joins them.
-          { id: 'import-project', label: 'WebSfM\nProject', icon: 'folder', needs: ['project'] },
-          { id: 'import-colmap', label: 'SfM\nProject', icon: 'cube' },
+          {
+            id: 'import-project',
+            label: 'WebSfM\nProject',
+            icon: 'folder',
+            needs: ['project'],
+            tip: "Another WebSfM project's photos, features and matches, into this one",
+          },
+          // Each opens a dialog that shows what the file holds and asks what of it to bring in.
+          {
+            id: 'import-colmap',
+            label: 'COLMAP',
+            icon: 'cube',
+            tip: 'A COLMAP database, sparse model or workspace: cameras, keypoints, matches, the sparse model',
+          },
           // Calibration, camera poses and markers from Metashape's XML exports
           // (core/io/metashapeXml.js, components/modals/import/MetashapeImportModal.vue).
-          { id: 'import-metashape', label: 'Metashape\nCameras', icon: 'camera' },
+          {
+            id: 'import-metashape',
+            label: 'Metashape',
+            icon: 'camera',
+            tip: 'Metashape cameras or markers XML: calibration, camera poses, markers and scale bars',
+          },
+          // Bundler, NVM, OpenMVG, OpenSfM, transforms.json (core/io/sfmInterop.js), through
+          // the same dialog as COLMAP.
+          {
+            id: 'import-sfm-other',
+            label: 'Other\nSfM',
+            icon: 'sparse-model',
+            tip: 'Bundler, VisualSFM NVM, OpenMVG, OpenSfM or transforms.json: cameras and the sparse model',
+          },
+          // Plain text or CSV from another detector or matcher (core/io/featureText.js).
+          {
+            id: 'import-features',
+            label: 'Keypoints\n& Matches',
+            icon: 'keypoints',
+            needs: ['images'],
+            tip: 'Keypoints and matches from text or CSV files, such as another detector or matcher writes',
+          },
         ],
       },
     ],

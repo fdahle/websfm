@@ -6,6 +6,18 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Keypoints and matches from text or CSV.** Import ▸ **Keypoints & Matches** reads what
+  another detector or matcher writes: keypoints as an `image,x,y` table, one file per
+  image or Lowe's `.key`, and matches as COLMAP's match list, an `imageA,imageB,indexA,
+  indexB` table, or matched points by position (`imageA,xA,yA,imageB,xB,yB`), whose
+  points become the keypoints. A dialog shows what the files hold and what to import,
+  and the matches are verified as Match Features verifies its own (RANSAC at its default
+  thresholds, on every worker), unless you say they already are. In the browser test,
+  60 true and 6 false matches of a made-up two-view geometry keep 58–61 inliers.
+- **Bundler files.** Import ▸ **Other SfM** reads a Bundler `bundle.out` with its
+  `list.txt` as a sparse model, besides VisualSFM NVM, OpenMVG, OpenSfM and
+  transforms.json; the imported cameras see each point within 0.01 px of where the file
+  says.
 - **A folder offered before a big batch of photos.** When the photos you add would bring
   a project in browser storage to 3 GB of photos or more, WebSfM asks once whether to
   move it to a folder on disk first (Chrome, Edge), and adds the photos there; Keep in
@@ -184,6 +196,11 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **Import ▸ Interoperability names the tools.** The buttons are now WebSfM Project,
+  COLMAP, Metashape, Other SfM and Keypoints & Matches, each with a tooltip that says
+  what it reads, and each opens a dialog that shows what the files hold and asks what
+  of it to import. The COLMAP and Other SfM dialogs now start with what the file holds
+  ticked; before, everything started unticked.
 - **No upper limit on keypoints or detection resolution.** Max keypoints in Detect
   Features (SIFT, SuperPoint, DISK, ALIKED), the LightGlue keypoint budgets in Match
   Features and the detection resolution take any number; the keypoint fields say how much

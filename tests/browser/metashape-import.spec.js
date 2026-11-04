@@ -48,7 +48,7 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
 
   await page.getByRole('button', { name: 'Import', exact: true }).click()
   const chooser = page.waitForEvent('filechooser')
-  await page.locator('.ribbon').getByRole('button', { name: 'Metashape Cameras' }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Metashape', exact: true }).click()
   await (await chooser).setFiles(METASHAPE)
 
   const dialog = page.getByRole('dialog', { name: 'Import Metashape Cameras' })

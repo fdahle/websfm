@@ -34,7 +34,8 @@ order: 30
 Matching finds which [keypoint](help:keypoint)s of two images show the same point. The
 verified matches become the [tie point](help:tie-point)s of the sparse
 reconstruction. A false match harms [bundle adjustment](help:bundle-adjustment), so
-every pair is checked with [RANSAC](help:ransac).
+every pair is checked with [RANSAC](help:ransac). Matches from another matcher come in
+through [Import Keypoints & Matches](guide:import-features), checked the same way.
 
 Photos from a [multispectral camera](help:multispectral-rig) are paired by its bands:
 only the reference band (green on MicaSense cameras) is matched between captures, by

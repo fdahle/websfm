@@ -119,8 +119,20 @@ export function createImporters({
         },
       }
     })
+    // Views written about the image centre (Bundler) become pixels, now the sizes are known.
+    let modelPoints = model.points ?? []
+    if (model.viewsCentered) {
+      const centre = new Map(normalizedImages.map((im) => [im.imageId, [im.K.cx, im.K.cy]]))
+      modelPoints = modelPoints.map((p) => ({
+        ...p,
+        views: p.views.map((v) => {
+          const [cx, cy] = centre.get(v.imageId) ?? [0, 0]
+          return { ...v, x: v.x + cx, y: v.y + cy }
+        }),
+      }))
+    }
     const { cameras, points, matched, unmatched } = colmapToSparse(
-      { images: normalizedImages, points: model.points ?? [] },
+      { images: normalizedImages, points: modelPoints },
       resolve,
     )
     if (cameras.size < 2) {

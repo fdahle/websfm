@@ -1,25 +1,36 @@
 <script setup>
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import { pluralize } from '../../../core/textFormat.js'
 
 const props = defineProps({ session: { type: Object, required: true } })
 const emit = defineEmits(['close', 'run'])
 const db = computed(() => props.session.database)
+const title = computed(() => (props.session.format ? `Import from ${props.session.format}` : 'Import SfM data'))
 const ready = computed(() => props.session.status === 'ready')
-const options = reactive({
+// What the file holds decides the defaults. The dialog opens while the file is still
+// being read, so they are set again once it is (they were all off before).
+const defaults = (session) => ({
   images: false,
-  calibration: !!props.session.database,
-  features: !!props.session.database?.hasKeypoints,
-  descriptors: !!props.session.database?.hasDescriptors,
-  matches: !!props.session.database?.hasVerifiedMatches,
-  matchSource: props.session.database?.hasVerifiedMatches ? 'verified' : 'raw',
+  calibration: !!session.database,
+  features: !!session.database?.hasKeypoints,
+  descriptors: !!session.database?.hasDescriptors,
+  matches: !!session.database?.hasVerifiedMatches,
+  matchSource: session.database?.hasVerifiedMatches ? 'verified' : 'raw',
   replaceMatches: false,
   modelIds:
-    props.session.models
+    session.models
       ?.filter((m) => m.complete)
       .slice(0, 1)
       .map((m) => m.externalId) ?? [],
+})
+const options = reactive(defaults(props.session))
+let defaultsSet = ready.value
+watch(ready, (now) => {
+  if (now && !defaultsSet) {
+    defaultsSet = true
+    Object.assign(options, defaults(props.session))
+  }
 })
 const canImport = computed(
   () =>
@@ -32,7 +43,7 @@ const importReason = computed(() =>
 </script>
 
 <template>
-  <ModalShell title="Import SfM Project" @close="emit('close')">
+  <ModalShell :title="title" @close="emit('close')">
     <div v-if="session.status === 'inspecting'" class="notice">Inspecting {{ session.sourceName }}…</div>
     <div v-else-if="session.status === 'error'" class="notice error">{{ session.error }}</div>
     <template v-else>

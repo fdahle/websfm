@@ -313,7 +313,7 @@ function step(cmd, dir) {
                     class="cmd cmd-small"
                     :class="{ active: isActive(cmd), disabled: isDisabled(cmd) }"
                     :aria-disabled="isDisabled(cmd)"
-                    :title="isDisabled(cmd) ? disabledReason(cmd) : cmdLabel(cmd)"
+                    :title="isDisabled(cmd) ? disabledReason(cmd) : (cmd.tip ?? cmdLabel(cmd))"
                     @click="run(cmd)"
                   >
                     <Icon :name="cmd.icon" class="cmd-icon-sm" />
@@ -336,7 +336,7 @@ function step(cmd, dir) {
                 class="cmd"
                 :class="{ active: isActive(item), danger: item.danger, disabled: isDisabled(item) }"
                 :aria-disabled="isDisabled(item)"
-                :title="isDisabled(item) ? disabledReason(item) : ''"
+                :title="isDisabled(item) ? disabledReason(item) : (item.tip ?? '')"
                 @click="run(item)"
               >
                 <Icon :name="item.icon" class="cmd-icon" />

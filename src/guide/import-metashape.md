@@ -1,11 +1,11 @@
 ---
 id: import-metashape
-title: Import Metashape Cameras
+title: Import from Metashape
 summary: Brings the calibration, camera positions and orientations, the markers with their marks and the scale bars from an Agisoft Metashape project into this one.
 category: Reconstruction pipeline
 order: 12
 ---
-**Import ▸ Metashape Cameras** reads the XML file Metashape writes with **File ▸
+**Import ▸ Metashape** reads the XML file Metashape writes with **File ▸
 Export ▸ Export Cameras**, or with **Export Markers**, which holds the same and the
 markers too. Use it to carry work done in Metashape into WebSfM: a calibrated camera,
 an alignment to start from, or GCPs you have already marked. Load the photos first;

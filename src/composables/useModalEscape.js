@@ -3,6 +3,7 @@ import { useModalsStore } from '../stores/useModalsStore.js'
 import { useGlossaryStore } from '../stores/useGlossaryStore.js'
 import { useGuideStore } from '../stores/useGuideStore.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
+import { useFeatureImport } from './useFeatureImport.js'
 
 // Escape-closes-the-top-most-open-modal, lifted out of App.vue. One ordered list
 // of [is-open, close] pairs, most-transient (stacked-on-top) first; Escape
@@ -27,6 +28,7 @@ export function useModalEscape({
   folderPrompt,
   cancelFolderPrompt,
 }) {
+  const { featureImportSession, closeFeatureImport } = useFeatureImport()
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
   const { currentProjectId } = storeToRefs(useProjectsStore())
@@ -166,6 +168,7 @@ export function useModalEscape({
         },
       ],
       [sfmImportSession?.value, () => onCloseSfmImport?.()],
+      [featureImportSession.value, () => closeFeatureImport()],
       [
         sfmSourceOpen.value,
         () => {

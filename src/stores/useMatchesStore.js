@@ -506,7 +506,8 @@ export const useMatchesStore = registerProjectStore(
           src: null,
           status: 'done',
           enabled: true,
-          weak: src.verified === false,
+          // A pair the gate kept as a registration bridge only (pairGate.js), or one never verified.
+          weak: src.weak ?? src.verified === false,
           source: src.source ?? 'external',
         }
         holdMatches(pid, entry, matches)

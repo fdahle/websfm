@@ -119,16 +119,24 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
       sourceName: files.length === 1 ? files[0].name : `${files.length} selected files`,
     }
     try {
-      if (files.length === 1 && /\.(?:json|nvm)$/i.test(files[0].name)) {
-        const text = await files[0].text()
+      // Bundler: bundle.out with the list.txt that names its images (picked together,
+      // or found in a picked folder); otherwise one JSON or NVM file.
+      const bundleOut = files.find((f) => /\.out$/i.test(f.name))
+      const single = bundleOut ?? (files.length === 1 && /\.(?:json|nvm)$/i.test(files[0].name) ? files[0] : null)
+      if (single) {
+        const text = await single.text()
+        const listFile = bundleOut
+          ? (files.find((f) => /^list\.txt$/i.test(f.name)) ?? files.find((f) => /list.*\.txt$/i.test(f.name)))
+          : null
+        const listText = listFile ? await listFile.text() : null
         signal.throwIfAborted()
-        const model = parseSfmText(text, files[0].name)
+        const model = parseSfmText(text, single.name, { listText })
         const resolve = makeNameResolver(imagesStore.images, { key: 'uuid' })
         const matchedImages = model.images.filter((im) => resolve(im.name)).length
         importSession.value = {
           status: 'ready',
           format: model.format,
-          sourceName: files[0].name,
+          sourceName: single.name,
           database: null,
           models: [
             {

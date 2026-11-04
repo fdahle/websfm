@@ -94,6 +94,7 @@ export const useModalsStore = defineStore('modals', () => {
   const symbologyProductId = ref(null)
   const symbologyCloudId = ref(null)
   // Import ▸ SfM project: choose files or a folder before the import session opens.
+  // Import ▸ COLMAP ('colmap') or Other SfM ('other'): which source dialog is open; false when none.
   const sfmSourceOpen = ref(false)
   // Import ▸ Project into this project: choose which other project (useProjectMerge).
   const importProjectOpen = ref(false)

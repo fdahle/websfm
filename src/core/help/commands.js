@@ -189,6 +189,8 @@ export const CONSOLE_NAMES = {
   'import-images': ['import'],
   'import-video': ['import video', 'video'],
   'import-colmap': ['import colmap', 'colmap-import'],
+  'import-sfm-other': ['import bundler', 'import nvm', 'import openmvg', 'import opensfm'],
+  'import-features': ['import keypoints', 'import matches'],
   'import-metashape': ['import metashape', 'metashape', 'agisoft'],
   'import-project': ['import project', 'merge projects', 'merge blocks'],
   'eval-overview': ['report', 'quality'],

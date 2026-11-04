@@ -8,6 +8,7 @@ import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { FILE_PICKERS, pickFiles } from '../utils/pickFiles.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
 import { useTheme } from './useTheme.js'
+import { useFeatureImport } from './useFeatureImport.js'
 
 // The one command dispatch, lifted out of App.vue: every ribbon button, console
 // verb, viewer menu and interactive workflow block arrives here as a command id
@@ -28,6 +29,7 @@ import { useTheme } from './useTheme.js'
 //   consoleOpen — App's console toggle
 export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, removals, imports, consoleOpen }) {
   const { activateTab, activeView, activeTab, activeImageTab, openProductTab } = tabs
+  const { openFeatureImport } = useFeatureImport()
   const { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab } = viewers
   const {
     showCameras,
@@ -130,7 +132,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   // The choosers the template opens itself (Import ▸ SfM project's two buttons and
   // the project picker's "Open file…").
   function pickSfmFiles() {
-    pickFiles(FILE_PICKERS.sfmFiles, (e) => {
+    pickFiles(sfmSourceOpen.value === 'other' ? FILE_PICKERS.sfmOtherFiles : FILE_PICKERS.sfmFiles, (e) => {
       sfmSourceOpen.value = false
       onColmapPick(e)
     })
@@ -335,7 +337,13 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         pickFiles(FILE_PICKERS.cameraFiducials, onFiducialMarksPick)
         break
       case 'import-colmap':
-        sfmSourceOpen.value = true
+        sfmSourceOpen.value = 'colmap'
+        break
+      case 'import-sfm-other':
+        sfmSourceOpen.value = 'other'
+        break
+      case 'import-features':
+        pickFiles(FILE_PICKERS.features, (e) => openFeatureImport(e.target.files))
         break
       case 'import-metashape':
         pickFiles(FILE_PICKERS.metashape, onMetashapePick)

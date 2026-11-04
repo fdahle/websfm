@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cameraToWorldGl } from './transforms.js'
-import { parseNvm, parseTransformsJson, buildNvmParts, buildOpenMvg } from './sfmInterop.js'
+import { parseNvm, parseTransformsJson, buildNvmParts, buildOpenMvg, parseBundler, parseSfmText } from './sfmInterop.js'
 import { joinParts, jsonParts } from './parts.js'
 
 describe('SfM interop readers', () => {
@@ -96,5 +96,59 @@ describe('NVM / OpenMVG writers — streamed', () => {
       structure: Array.from({ length: doc.structure.length }, (_, i) => doc.structure.at(i)),
     }
     expect(joinParts(jsonParts(doc, { space: 2 }))).toBe(JSON.stringify(materialized, null, 2))
+  })
+})
+
+describe('parseBundler', () => {
+  // A camera turned 0.3 rad about y, a point in front of it: Bundler projects
+  // p = −(R X + t)/z, image (x, y) = f·p with y up about the centre.
+  const a = 0.3
+  const Rb = [
+    [Math.cos(a), 0, Math.sin(a)],
+    [0, 1, 0],
+    [-Math.sin(a), 0, Math.cos(a)],
+  ]
+  const tb = [0.2, -0.1, 0.5]
+  const X = [0.4, 0.7, -5]
+  const f = 800
+  const P = Rb.map((r, i) => r[0] * X[0] + r[1] * X[1] + r[2] * X[2] + tb[i])
+  const xb = (-f * P[0]) / P[2],
+    yb = (-f * P[1]) / P[2]
+  const text = [
+    '# Bundle file v0.3',
+    '2 1',
+    `${f} 0 0`,
+    ...Rb.map((r) => r.join(' ')),
+    tb.join(' '),
+    '0 0 0',
+    '0 0 0',
+    '0 0 0',
+    '0 0 0',
+    '0 0 0',
+    X.join(' '),
+    '200 100 50',
+    `1 0 12 ${xb} ${yb}`,
+  ].join('\n')
+
+  it('turns the Bundler camera into an OpenCV pose that sees the point where Bundler did', () => {
+    const m = parseSfmText(text, 'bundle.out', { listText: 'images/a.jpg 0 800\nimages/b.jpg\n' })
+    expect(m.format).toBe('Bundler bundle.out')
+    // The second camera is all zeros: Bundler did not place it.
+    expect(m.images.map((im) => im.name)).toEqual(['images/a.jpg'])
+    expect(m.warnings.join(' ')).toMatch(/did not place/)
+    const { R, t, K } = m.images[0]
+    const c = R.map((r, i) => r[0] * X[0] + r[1] * X[1] + r[2] * X[2] + t[i])
+    expect(c[2]).toBeGreaterThan(0) // in front, looking down +z
+    const w = 1000,
+      h = 600
+    const view = m.points[0].views[0]
+    expect(m.viewsCentered).toBe(true)
+    expect((K.fx * c[0]) / c[2] + w / 2).toBeCloseTo(view.x + w / 2, 6)
+    expect((K.fy * c[1]) / c[2] + h / 2).toBeCloseTo(view.y + h / 2, 6)
+    expect(m.points[0].color).toEqual([200, 100, 50])
+  })
+
+  it('says when list.txt is missing', () => {
+    expect(parseBundler(text).warnings.join(' ')).toMatch(/No list\.txt/)
   })
 })

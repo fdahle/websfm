@@ -202,7 +202,76 @@ export function parseOpenSfm(data) {
   }
 }
 
-export function parseSfmText(text, fileName = '') {
+// Bundler's bundle.out (v0.3), with the list.txt beside it that names its images in
+// order (`images/0001.jpg [0 focal]` per line). A Bundler camera looks down −z with y up
+// and its image coordinates are centred, y up: flipping y and z of the camera frame gives
+// the OpenCV pose, and a view (x, y) is the pixel (x + w/2, h/2 − y), which the import
+// resolves once it knows the image size (`viewsCentered`). Bundler's k1, k2 have no place
+// in the imported pinhole camera; a warning says when they are not zero.
+export function parseBundler(text, listText = null) {
+  const rows = String(text).split(/\r?\n/)
+  let p = 0
+  while (p < rows.length && /^\s*#/.test(rows[p])) p++
+  const values = rows.slice(p).join(' ').trim().split(/\s+/).map(Number)
+  let v = 0
+  const take = (n) => {
+    if (v + n > values.length) throw new Error('bundle.out ends early')
+    const out = values.slice(v, v + n)
+    v += n
+    return out
+  }
+  const [nCams, nPoints] = take(2)
+  if (!Number.isInteger(nCams) || !Number.isInteger(nPoints)) throw new Error('Not a Bundler bundle.out file')
+  const names = listText
+    ? String(listText)
+        .split(/\r?\n/)
+        .map((l) => l.trim().split(/\s+/)[0])
+        .filter(Boolean)
+    : []
+  const warnings = []
+  if (!names.length) warnings.push('No list.txt: the cameras have no image names, so none can be matched to photos')
+  else if (names.length !== nCams)
+    warnings.push(`list.txt names ${names.length} images, bundle.out has ${nCams} cameras`)
+  const images = []
+  let distorted = 0
+  for (let i = 0; i < nCams; i++) {
+    const [f, k1, k2] = take(3)
+    const Rb = [take(3), take(3), take(3)]
+    const tb = take(3)
+    // A camera Bundler could not place is all zeros.
+    if (!f) continue
+    if (k1 || k2) distorted++
+    images.push({
+      externalId: i,
+      imageId: i,
+      name: names[i] ?? `camera ${i}`,
+      K: { fx: f, fy: f, cx: null, cy: null },
+      R: [Rb[0], Rb[1].map((x) => -x), Rb[2].map((x) => -x)],
+      t: [tb[0], -tb[1], -tb[2]],
+    })
+  }
+  const byId = new Map(images.map((im) => [im.imageId, im]))
+  const points = []
+  for (let i = 0; i < nPoints; i++) {
+    const xyz = take(3),
+      color = take(3),
+      [n] = take(1)
+    const views = []
+    for (let k = 0; k < n; k++) {
+      const [cam, , x, y] = take(4)
+      const im = byId.get(cam)
+      if (im) views.push({ imageId: cam, name: im.name, x, y: -y })
+    }
+    points.push({ xyz, color, error: -1, views })
+  }
+  if (distorted)
+    warnings.push(`${distorted} cameras carry Bundler radial distortion (k1, k2), which the import leaves out`)
+  if (images.length < nCams) warnings.push(`${nCams - images.length} cameras Bundler did not place are left out`)
+  return { format: 'Bundler bundle.out', images, points, viewsCentered: true, warnings }
+}
+
+export function parseSfmText(text, fileName = '', { listText = null } = {}) {
+  if (/^\s*#\s*Bundle file/i.test(text) || /\.out$/i.test(fileName)) return parseBundler(text, listText)
   if (/\.nvm$/i.test(fileName) || /^\s*NVM_V3/i.test(text)) return parseNvm(text)
   const data = JSON.parse(text)
   if (Array.isArray(data?.frames)) return parseTransformsJson(data)
