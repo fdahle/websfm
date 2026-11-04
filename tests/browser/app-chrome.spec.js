@@ -112,10 +112,17 @@ test("What's New does not link glossary terms", async ({ page }) => {
   expect(errors).toEqual([])
 })
 
-test('System info copies a summary for a bug report, with nothing about the project', async ({ page, context }) => {
+test('System info copies a summary for a bug report, with nothing about the project', async ({ page }) => {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  // What the app writes to the clipboard, kept: only Chromium lets a test grant the
+  // clipboard permissions, and reading the real clipboard needs them.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (t) => void (window.__copied = t), readText: async () => window.__copied ?? '' },
+    })
+  })
   await createProject(page)
   await page.getByRole('button', { name: 'Other', exact: true }).click()
   await page.getByRole('button', { name: 'System info', exact: true }).click()
@@ -123,8 +130,9 @@ test('System info copies a summary for a bug report, with nothing about the proj
   const copy = dialog.getByRole('button', { name: 'Copy for bug report' })
   await expect(copy).toBeEnabled()
   await copy.click()
-  const text = await page.evaluate(() => navigator.clipboard.readText())
-  expect(text).toMatch(/^WebSfM \d+\.\d+\.\d+\nBrowser: Chrom[^\n]+ on /)
+  await expect.poll(() => page.evaluate(() => window.__copied ?? '')).toMatch(/^WebSfM /)
+  const text = await page.evaluate(() => window.__copied)
+  expect(text).toMatch(/^WebSfM \d+\.\d+\.\d+\nBrowser: \S[^\n]* on /)
   expect(text).toMatch(/\nGPU: /)
   expect(text).toMatch(/\nProject: in browser storage/)
   expect(errors).toEqual([])

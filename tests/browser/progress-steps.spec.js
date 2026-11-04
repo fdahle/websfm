@@ -27,10 +27,6 @@ test('a run in steps lists them, with the running one counted', async ({ page })
   await expect(steps.nth(0)).toHaveClass(/running/)
   await expect(steps.nth(0)).toContainText('5 / 12 images')
   await expect(steps.nth(1)).toHaveClass(/todo/)
-  await page
-    .locator('.progress-card, .modal, [role=dialog]')
-    .first()
-    .catch(() => {})
   // Straight to the filter: the geometric pass never reported, so it was left out.
   await progress(`p.report(2, 12, 'Filtering', 0.8, 'filter')`)
   await expect(steps.nth(0)).toHaveClass(/done/)
