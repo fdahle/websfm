@@ -6,6 +6,13 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **COPC export.** Export ▸ Point Cloud has a **COPC** format (`.copc.laz`): LAZ 1.4
+  stored as a level-of-detail octree, which QGIS, Potree and PDAL read a part at a time.
+  A streamed cloud is written from its own octree, node for node, without being loaded;
+  another is written with the georeference and downsample chosen. Colour, classes and
+  other attributes, and the CRS as WKT, go in. A 300,000-point export reads in PDAL 2.10
+  (readers.copc and readers.las) and laspy 2.7's CopcReader with every point; laspy's
+  bounded queries return exactly the points a brute-force count finds in each box.
 - **Whole Metashape projects.** Import ▸ **Metashape** now also opens a project (a `.psz`,
   or the folder of a `.psx`): besides the calibration, camera poses, markers and scale
   bars, its tie points come in as keypoints and matches (the unaligned photos' too),

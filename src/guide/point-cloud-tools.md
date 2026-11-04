@@ -76,3 +76,9 @@ A [COPC](help:copc) file (`.copc.laz`) is already an octree, so a large one is c
 into the project as it is and drawn straight away, in about the time of the copy. It
 works like a streamed cloud; edits write new clouds and the file itself never changes.
 Its CRS is shown and kept in LAS/LAZ exports.
+
+**Export ▸ Point Cloud ▸ COPC** writes any cloud as one: a streamed cloud from its
+octree as it is, in its own coordinates; another with the georeference and downsample
+you choose, its octree built for the export. Colour is optional (point format 7, or 6
+without), attributes go in the standard fields or extra bytes as for LAZ, and the
+project CRS goes in as WKT.

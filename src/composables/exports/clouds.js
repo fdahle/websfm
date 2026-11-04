@@ -179,7 +179,8 @@ export function createCloudExports({
     const cloud = exportCloudOf(target)
     if (!cloud) return
     const name = exportFileName(fileName, cloudFileBase(cloud, target))
-    const ext = format === 'las' || format === 'laz' || format === 'xyz' ? format : 'ply'
+    const ext =
+      format === 'copc' ? 'copc.laz' : format === 'las' || format === 'laz' || format === 'xyz' ? format : 'ply'
     const out = await saveTarget(
       `${name}.${ext}`,
       { kind: 'cloud', format, points: cloud.count },

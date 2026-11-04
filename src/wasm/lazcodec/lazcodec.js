@@ -48,6 +48,104 @@ export class CompressedPoints {
 if (Symbol.dispose) CompressedPoints.prototype[Symbol.dispose] = CompressedPoints.prototype.free;
 
 /**
+ * COPC writer's encoder (core/lod/copcWrite.js): LAS 1.4 point formats 6, 7 or 8 in
+ * **variable-size** chunks, one chunk per octree node, as COPC stores them. JS pushes a
+ * node's records, calls `end_chunk`, and reads `position()` before and after to know the
+ * node's byte range in the stream (stream position 0 is the 8-byte chunk-table offset,
+ * so the first chunk starts at 8). The last node is not ended: `finish` closes it and
+ * writes the chunk table, whose offset (the end of the last chunk) is then in the first
+ * 8 bytes of the returned data.
+ */
+export class CopcEncoder {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        CopcEncoderFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_copcencoder_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    drain() {
+        const ret = wasm.copcencoder_drain(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Close the current chunk (the node's points pushed since the last one).
+     */
+    end_chunk() {
+        const ret = wasm.copcencoder_end_chunk(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Close the last chunk and write the chunk table: the 8 head bytes (the table's
+     * stream offset) followed by everything not drained yet.
+     * @returns {CompressedPoints}
+     */
+    finish() {
+        const ret = wasm.copcencoder_finish(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CompressedPoints.__wrap(ret[0]);
+    }
+    /**
+     * @param {number} point_format
+     * @param {number} point_size
+     */
+    constructor(point_format, point_size) {
+        const ret = wasm.copcencoder_new(point_format, point_size);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        CopcEncoderFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * The stream position: bytes written so far, the 8-byte head included.
+     * @returns {number}
+     */
+    position() {
+        const ret = wasm.copcencoder_position(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {Uint8Array} points
+     */
+    push(points) {
+        const ptr0 = passArray8ToWasm0(points, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.copcencoder_push(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * The LASzip VLR payload (user id "laszip encoded", record 22204).
+     * @returns {Uint8Array}
+     */
+    get vlr() {
+        const ret = wasm.copcencoder_vlr(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+if (Symbol.dispose) CopcEncoder.prototype[Symbol.dispose] = CopcEncoder.prototype.free;
+
+/**
  * Streaming decoder: a LAZ file's points a run of chunks at a time, so a file larger
  * than memory can be read (plan-lod ▸ L4). JS reads the chunk table's bytes from the
  * file and asks for each chunk's point and byte counts; it then slices a run of whole
@@ -322,6 +420,9 @@ function __wbg_get_imports() {
 const CompressedPointsFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_compressedpoints_free(ptr, 1));
+const CopcEncoderFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_copcencoder_free(ptr, 1));
 const LazDecoderFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_lazdecoder_free(ptr, 1));

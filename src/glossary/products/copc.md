@@ -25,9 +25,10 @@ WebSfM reads an imported COPC file **in place**: the file is copied into the pro
 as it is, and the 3D view, cropping, DEMs, edits and exports read its nodes from there.
 No octree of its own is built, so a COPC file imports in the time it takes to copy it,
 where a plain LAZ of the same size is decoded and sorted point by point. Its CRS (the
-WKT or GeoKey record) is kept with the cloud and written back on export. COPC is only
-read: clouds WebSfM makes are kept in its own octree, which needs no decompression on
-every read.
+WKT or GeoKey record) is kept with the cloud and written back on export. Clouds WebSfM
+makes are kept in its own octree, which needs no decompression on every read, and
+**Export ▸ Point Cloud ▸ COPC** writes any cloud as a COPC file, node for node from its
+octree, for QGIS, Potree, PDAL or a web viewer.
 
 See also: [Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff), the same idea for
 rasters, and [Point Cloud Tools ▸ COPC files](guide:point-cloud-tools).

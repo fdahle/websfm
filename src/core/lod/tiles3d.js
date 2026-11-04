@@ -205,5 +205,5 @@ export function memoryLodReader(cloud, opts = {}) {
     },
   }
   const layout = { attributes: attributes.map(([name]) => ({ name })) }
-  return { reader, lod: { spacing: root.size / (opts.grid ?? GRID), layout, bounds: { min, max } } }
+  return { reader, lod: { root, spacing: root.size / (opts.grid ?? GRID), layout, bounds: { min, max } } }
 }

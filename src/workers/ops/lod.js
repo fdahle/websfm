@@ -6,6 +6,7 @@ import { openCloudSource, isCopcLod } from '../../core/lod/cloudSource.js'
 import { readCopcMeta } from '../../core/lod/copc.js'
 import { planExtract, extractPoints } from '../../core/lod/extract.js'
 import { lodToLas, lodToText, lasPlanFor } from '../../core/lod/exportStream.js'
+import { lodToCopc, copcBlob, lodWkt } from '../../core/lod/copcWrite.js'
 import {
   streamedEditSource,
   planTiledEdit,
@@ -490,6 +491,28 @@ export function makeLodOps({ lazCodec = null } = {}) {
       const las = lodToLas(reader, lod, { onProgress })
       for await (const p of las.parts) add(p)
       blob = new Blob([las.header(), ...(blob ? [blob] : []), ...batch], { type })
+    } else if (format === 'copc') {
+      // The octree as it is: its nodes are COPC's (core/lod/copcWrite.js).
+      if (!lazCodec) throw new Error('COPC export: the lazcodec module is not available')
+      await lazCodec.ensure()
+      let encoder = null
+      const out = lodToCopc(reader, lod, {
+        createEncoder: (f, size) => (encoder = lazCodec.createCopcEncoder(f, size)),
+        wkt: lodWkt(lod),
+        color,
+        onProgress,
+      })
+      try {
+        if (out.dropped.length)
+          emit('log', [
+            `COPC export: ${out.dropped.join(', ')} not written — no LAS extra-bytes type holds it`,
+            'warn',
+            'Export',
+          ])
+        blob = await copcBlob(out, type)
+      } finally {
+        encoder?.free?.()
+      }
     } else if (format === 'laz') {
       if (!lazCodec) throw new Error('LAZ export: the lazcodec module is not available')
       await lazCodec.ensure()

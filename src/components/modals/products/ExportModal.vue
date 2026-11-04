@@ -81,6 +81,11 @@ const CONFIG = {
       { value: 'ply-ascii', label: 'PLY — ASCII (text)' },
       { value: 'las', label: 'LAS 1.2 (surveying standard)' },
       { value: 'laz', label: 'LAZ — compressed LAS (5–10× smaller)' },
+      {
+        value: 'copc',
+        label: 'COPC — cloud-optimized LAZ (streams in QGIS, Potree)',
+        hint: 'LAZ 1.4 stored as a level-of-detail octree: QGIS, Potree, PDAL and WebSfM read the part they show, so a large cloud opens at once.',
+      },
       { value: 'xyz', label: 'XYZ — plain text (x y z r g b)' },
     ],
   },

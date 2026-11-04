@@ -5,7 +5,7 @@
 
 // Bytes per point: PLY doubles x, y, z + RGB; LAS point formats 2/3; LAZ about a
 // quarter of LAS; XYZ / ASCII PLY lines of about 40 characters.
-const CLOUD_BYTES = { 'ply-binary': 27, 'ply-ascii': 40, 'las': 34, 'laz': 9, 'xyz': 40 }
+const CLOUD_BYTES = { 'ply-binary': 27, 'ply-ascii': 40, 'las': 34, 'laz': 9, 'copc': 10, 'xyz': 40 }
 
 // Bytes per vertex and per triangle.
 const MESH_BYTES = {

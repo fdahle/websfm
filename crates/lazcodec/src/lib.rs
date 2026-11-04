@@ -1,6 +1,7 @@
 //! LASzip (LAZ) compression for point-cloud export/import.
 //!
-//! websfm writes LAS 1.2 point format 2 (`core/io/las.js`). LAZ is the same data
+//! websfm writes LAS 1.2 point format 2 (`core/io/las.js`), and LAS 1.4 point format
+//! 6 or 7 for COPC (`core/lod/copcWrite.js`, `CopcEncoder`). LAZ is the same data
 //! run through LASzip's arithmetic coder — typically 5–10× smaller — and is what
 //! CloudCompare, QGIS, ArcGIS and every survey package actually expect. There is
 //! no credible pure-JS LAZ *writer*, hence this crate.
@@ -208,6 +209,96 @@ impl LazEncoder {
         let mut compressor = self.compressor.take().ok_or("lazcodec: encoder already finished")?;
         compressor.done().map_err(|e| e.to_string())?;
         Ok(CompressedPoints { data: compressor.into_inner().into_bytes(), vlr: std::mem::take(&mut self.vlr) })
+    }
+}
+
+/// COPC writer's encoder (core/lod/copcWrite.js): LAS 1.4 point formats 6, 7 or 8 in
+/// **variable-size** chunks, one chunk per octree node, as COPC stores them. JS pushes a
+/// node's records, calls `end_chunk`, and reads `position()` before and after to know the
+/// node's byte range in the stream (stream position 0 is the 8-byte chunk-table offset,
+/// so the first chunk starts at 8). The last node is not ended: `finish` closes it and
+/// writes the chunk table, whose offset (the end of the last chunk) is then in the first
+/// 8 bytes of the returned data.
+#[wasm_bindgen]
+pub struct CopcEncoder {
+    compressor: Option<LasZipCompressor<'static, DrainSink>>,
+    vlr: Vec<u8>,
+    point_size: u16,
+}
+
+#[wasm_bindgen]
+impl CopcEncoder {
+    #[wasm_bindgen(constructor)]
+    pub fn new(point_format: u8, point_size: u16) -> Result<CopcEncoder, JsError> {
+        Self::create(point_format, point_size).map_err(|e| JsError::new(&e))
+    }
+
+    /// The LASzip VLR payload (user id "laszip encoded", record 22204).
+    #[wasm_bindgen(getter)]
+    pub fn vlr(&self) -> Vec<u8> {
+        self.vlr.clone()
+    }
+
+    pub fn push(&mut self, points: &[u8]) -> Result<(), JsError> {
+        self.push_impl(points).map_err(|e| JsError::new(&e))
+    }
+
+    /// Close the current chunk (the node's points pushed since the last one).
+    pub fn end_chunk(&mut self) -> Result<(), JsError> {
+        self.compressor
+            .as_mut()
+            .ok_or_else(|| JsError::new("lazcodec: encoder already finished"))?
+            .finish_current_chunk()
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// The stream position: bytes written so far, the 8-byte head included.
+    pub fn position(&self) -> f64 {
+        self.compressor.as_ref().map_or(0.0, |c| c.get().pos as f64)
+    }
+
+    pub fn drain(&mut self) -> Result<Vec<u8>, JsError> {
+        Ok(self.compressor.as_mut().ok_or_else(|| JsError::new("lazcodec: encoder already finished"))?.get_mut().drain())
+    }
+
+    /// Close the last chunk and write the chunk table: the 8 head bytes (the table's
+    /// stream offset) followed by everything not drained yet.
+    pub fn finish(&mut self) -> Result<CompressedPoints, JsError> {
+        let mut compressor = self.compressor.take().ok_or_else(|| JsError::new("lazcodec: encoder already finished"))?;
+        compressor.done().map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(CompressedPoints { data: compressor.into_inner().into_bytes(), vlr: std::mem::take(&mut self.vlr) })
+    }
+}
+
+impl CopcEncoder {
+    fn create(point_format: u8, point_size: u16) -> Result<Self, String> {
+        let base: u16 = match point_format {
+            6 => 30,
+            7 => 36,
+            8 => 38,
+            _ => return Err(format!("lazcodec: COPC uses point formats 6-8, not {point_format}")),
+        };
+        if point_size < base {
+            return Err(format!("lazcodec: point_size {point_size} is shorter than format {point_format} ({base})"));
+        }
+        use laz::las::laszip::LazVlrBuilder;
+        let items = LazItemRecordBuilder::default_for_point_format_id(point_format, point_size - base)
+            .map_err(|e| e.to_string())?;
+        let vlr = LazVlrBuilder::new(items).with_variable_chunk_size().build();
+        let mut bytes = Vec::new();
+        vlr.write_to(&mut bytes).map_err(|e| e.to_string())?;
+        let mut compressor = LasZipCompressor::new(DrainSink::new(), vlr).map_err(|e| e.to_string())?;
+        // So the first chunk starts at a known position (8), before any point.
+        compressor.reserve_offset_to_chunk_table().map_err(|e| e.to_string())?;
+        Ok(Self { compressor: Some(compressor), vlr: bytes, point_size })
+    }
+
+    fn push_impl(&mut self, points: &[u8]) -> Result<(), String> {
+        if points.len() > 8 * 1024 * 1024 || points.len() % self.point_size as usize != 0 {
+            return Err("lazcodec: invalid or oversized record chunk".into());
+        }
+        self.compressor.as_mut().ok_or("lazcodec: encoder already finished")?
+            .compress_many(points).map_err(|e| e.to_string())
     }
 }
 
@@ -644,6 +735,50 @@ mod tests {
         let chunks = LazDecoder { vlr: LazVlr::read_from(Cursor::new(&vlr_bytes)).unwrap(), entries: Vec::new() };
         assert_eq!(chunks.decode_chunk_impl(&data[8 + b0..table_at], 2000).unwrap(), &points[1000 * size..]);
         assert_eq!(chunks.decode_chunk_impl(&data[8..8 + b0], 1000).unwrap(), &points[..1000 * size]);
+    }
+
+    // One chunk per node, its byte range from position(), each decoding on its own.
+    #[test]
+    fn copc_encoder_writes_one_chunk_per_node() {
+        let mut enc = CopcEncoder::create(7, 40).unwrap();
+        let size = 40usize;
+        let mut points = vec![0u8; 5000 * size];
+        for (i, p) in points.chunks_mut(size).enumerate() {
+            p[0..4].copy_from_slice(&(i as i32 * 13).to_le_bytes());
+            p[8..12].copy_from_slice(&(i as i32 % 31).to_le_bytes());
+            p[14] = 0x11;
+            p[30..36].copy_from_slice(&[(i % 200) as u8, 1, 2, 3, 4, 5]);
+            p[36..40].copy_from_slice(&(i as f32).to_le_bytes());
+        }
+        let nodes = [0usize, 1200, 1201, 3500, 5000];
+        let mut ranges = Vec::new();
+        assert_eq!(enc.position(), 8.0);
+        for w in 0..4 {
+            let start = enc.position() as usize;
+            enc.push_impl(&points[nodes[w] * size..nodes[w + 1] * size]).unwrap();
+            if w < 3 {
+                enc.compressor.as_mut().unwrap().finish_current_chunk().unwrap();
+                ranges.push((start, enc.position() as usize));
+            } else {
+                ranges.push((start, 0));
+            }
+        }
+        let vlr = enc.vlr.clone();
+        let mut c = enc.compressor.take().unwrap();
+        c.done().unwrap();
+        let data = c.into_inner().into_bytes();
+        let table_at = i64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
+        ranges[3].1 = table_at;
+        let dec = LazDecoder { vlr: LazVlr::read_from(Cursor::new(&vlr)).unwrap(), entries: Vec::new() };
+        for (w, (a, b)) in ranges.iter().enumerate() {
+            let n = (nodes[w + 1] - nodes[w]) as u32;
+            let back = dec.decode_chunk_impl(&data[*a..*b], n).unwrap();
+            assert_eq!(&back[..], &points[nodes[w] * size..nodes[w + 1] * size], "node {w}");
+        }
+        // The chunk table names the same four chunks.
+        let table = LazDecoder::create(&vlr, &data[table_at..]).unwrap();
+        assert_eq!(table.chunk_count(), 4);
+        assert_eq!(table.chunk_points(2), 2299.0);
     }
 
     #[test]

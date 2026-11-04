@@ -1,4 +1,10 @@
-import init, { compress_points, decompress_points, LazEncoder, LazDecoder } from '../../wasm/lazcodec/lazcodec.js'
+import init, {
+  compress_points,
+  decompress_points,
+  LazEncoder,
+  LazDecoder,
+  CopcEncoder,
+} from '../../wasm/lazcodec/lazcodec.js'
 
 // LAZ codec ownership (lazy wasm init, like workers/ops/mesh.js gates the mesh
 // module). Two consumers share one instance: the cloud export op
@@ -57,5 +63,21 @@ export function makeLazCodec() {
     const d = LazDecoder.forChunks(vlrData)
     return { pointSize: () => d.point_size(), decode: (bytes, n) => d.decode_chunk(bytes, n), free: () => d.free() }
   }
-  return { ensure, compress, decompress, createCompressor, createDecoder, createChunkDecoder }
+  // COPC export (core/lod/copcWrite.js): point format 6-8 in variable chunks, one per node.
+  const createCopcEncoder = (format, size) => {
+    const encoder = new CopcEncoder(format, size)
+    return {
+      vlr: encoder.vlr,
+      push: (bytes) => encoder.push(bytes),
+      endChunk: () => encoder.end_chunk(),
+      position: () => encoder.position(),
+      drain: () => encoder.drain(),
+      finish: () => {
+        const packed = encoder.finish()
+        return { data: packed.data() }
+      },
+      free: () => encoder.free(),
+    }
+  }
+  return { ensure, compress, decompress, createCompressor, createDecoder, createChunkDecoder, createCopcEncoder }
 }

@@ -282,6 +282,170 @@ export function writeLasHeader({
 
 const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 
+// ── LAS 1.4: point formats 6 and 7 (COPC, core/lod/copcWrite.js) ──────────────
+
+export const LAS_RECORD_F6 = 30
+export const LAS_RECORD_F7 = 36
+const HEADER_SIZE_14 = 375
+const EVLR_HEADER_SIZE = 60
+
+// The standard fields of point formats 6-10 and the values they hold (as NATIVE_FIELDS
+// for 0-5): returns in 4 bits, the class in a whole byte, the scan angle in 0.006°
+// steps of an int16 (here in degrees, as the decoder gives it).
+export const NATIVE_FIELDS_14 = {
+  intensity: [0, 65535],
+  returnNumber: [0, 15],
+  numberOfReturns: [0, 15],
+  scanDirection: [0, 1],
+  edgeOfFlightLine: [0, 1],
+  classification: [0, 255],
+  synthetic: [0, 1],
+  keyPoint: [0, 1],
+  withheld: [0, 1],
+  overlap: [0, 1],
+  scannerChannel: [0, 3],
+  scanAngle: [-196.6, 196.6],
+  userData: [0, 255],
+  pointSourceId: [0, 65535],
+  gpsTime: null,
+}
+
+/** Point records of format 6 (30 bytes) or 7 (36: + RGB), plus extra bytes; as encodeLasPoints. */
+export function encodeLas14Points({
+  n,
+  getX,
+  getY,
+  getZ,
+  getC,
+  scale,
+  offset,
+  format = 6,
+  recordLength,
+  native = {},
+  extra = [],
+}) {
+  const base = format === 7 ? LAS_RECORD_F7 : LAS_RECORD_F6
+  recordLength ??= base
+  const out = new Uint8Array(n * recordLength)
+  const dv = new DataView(out.buffer)
+  const f = native
+  const writers = extra.map((e) => [e.values, base + e.offset, EXTRA_SETTERS[e.dataType]])
+  let p = 0
+  for (let i = 0; i < n; i++) {
+    dv.setInt32(p, Math.round((getX(i) - offset[0]) / scale[0]), true)
+    dv.setInt32(p + 4, Math.round((getY(i) - offset[1]) / scale[1]), true)
+    dv.setInt32(p + 8, Math.round((getZ(i) - offset[2]) / scale[2]), true)
+    if (f.intensity) dv.setUint16(p + 12, f.intensity[i], true)
+    out[p + 14] =
+      ((f.returnNumber ? f.returnNumber[i] : 1) & 15) | (((f.numberOfReturns ? f.numberOfReturns[i] : 1) & 15) << 4)
+    out[p + 15] =
+      (f.synthetic ? f.synthetic[i] & 1 : 0) |
+      ((f.keyPoint ? f.keyPoint[i] & 1 : 0) << 1) |
+      ((f.withheld ? f.withheld[i] & 1 : 0) << 2) |
+      ((f.overlap ? f.overlap[i] & 1 : 0) << 3) |
+      ((f.scannerChannel ? f.scannerChannel[i] & 3 : 0) << 4) |
+      ((f.scanDirection ? f.scanDirection[i] & 1 : 0) << 6) |
+      ((f.edgeOfFlightLine ? f.edgeOfFlightLine[i] & 1 : 0) << 7)
+    if (f.classification) out[p + 16] = f.classification[i]
+    if (f.userData) out[p + 17] = f.userData[i]
+    if (f.scanAngle) dv.setInt16(p + 18, Math.round(f.scanAngle[i] / 0.006), true)
+    if (f.pointSourceId) dv.setUint16(p + 20, f.pointSourceId[i], true)
+    if (f.gpsTime) dv.setFloat64(p + 22, f.gpsTime[i], true)
+    if (format === 7) {
+      const c = getC(i) || [200, 200, 200]
+      dv.setUint16(p + 30, byte(c[0]) * 257, true)
+      dv.setUint16(p + 32, byte(c[1]) * 257, true)
+      dv.setUint16(p + 34, byte(c[2]) * 257, true)
+    }
+    for (const [values, at, set] of writers) set(dv, p + at, values[i])
+    p += recordLength
+  }
+  return out
+}
+
+/**
+ * LAS 1.4 header (375 bytes) and VLRs. `evlrs` { offset, count } says where the
+ * extended VLRs start. The WKT bit of the global encoding is set, as formats 6-10
+ * require (their CRS is a WKT VLR, never GeoTIFF keys). Point counts go in the 64-bit
+ * fields; the legacy 32-bit ones stay 0, as the spec asks for these formats.
+ */
+export function writeLas14Header({
+  n,
+  vlrs = [],
+  scale,
+  offset,
+  bbox,
+  compressed = false,
+  format = 6,
+  recordLength,
+  pointsByReturn = null,
+  evlrs = null,
+}) {
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bbox
+  const vlrBytes = vlrs.reduce((sum, v) => sum + VLR_HEADER_SIZE + v.data.length, 0)
+  const offsetToPoints = HEADER_SIZE_14 + vlrBytes
+  const out = new Uint8Array(offsetToPoints)
+  const dv = new DataView(out.buffer)
+  asciiField(out, 0, 'LASF', 4)
+  dv.setUint16(6, 1 << 4, true) // global encoding: WKT
+  out[24] = 1
+  out[25] = 4
+  asciiField(out, 26, 'WebSfM', 32)
+  asciiField(out, 58, 'WebSfM', 32)
+  const now = new Date()
+  dv.setUint16(90, Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000), true)
+  dv.setUint16(92, now.getFullYear(), true)
+  dv.setUint16(94, HEADER_SIZE_14, true)
+  dv.setUint32(96, offsetToPoints, true)
+  dv.setUint32(100, vlrs.length, true)
+  out[104] = compressed ? format | 0x80 : format
+  dv.setUint16(105, recordLength, true)
+  dv.setFloat64(131, scale[0], true)
+  dv.setFloat64(139, scale[1], true)
+  dv.setFloat64(147, scale[2], true)
+  dv.setFloat64(155, offset[0], true)
+  dv.setFloat64(163, offset[1], true)
+  dv.setFloat64(171, offset[2], true)
+  dv.setFloat64(179, maxX, true)
+  dv.setFloat64(187, minX, true)
+  dv.setFloat64(195, maxY, true)
+  dv.setFloat64(203, minY, true)
+  dv.setFloat64(211, maxZ, true)
+  dv.setFloat64(219, minZ, true)
+  // 227 start of waveform data u64 = 0
+  if (evlrs) {
+    dv.setBigUint64(235, BigInt(evlrs.offset), true)
+    dv.setUint32(243, evlrs.count, true)
+  }
+  dv.setBigUint64(247, BigInt(n), true)
+  const byReturn = pointsByReturn ?? [n]
+  byReturn.slice(0, 15).forEach((c, k) => dv.setBigUint64(255 + 8 * k, BigInt(c), true))
+  let p = HEADER_SIZE_14
+  for (const v of vlrs) {
+    asciiField(out, p + 2, v.userId, 16)
+    dv.setUint16(p + 18, v.recordId, true)
+    dv.setUint16(p + 20, v.data.length, true)
+    asciiField(out, p + 22, v.description ?? '', 32)
+    out.set(v.data, p + VLR_HEADER_SIZE)
+    p += VLR_HEADER_SIZE + v.data.length
+  }
+  return out
+}
+
+/** An extended VLR: its 60-byte header and data. */
+export function writeEvlr({ userId, recordId, description = '', data }) {
+  const out = new Uint8Array(EVLR_HEADER_SIZE + data.length)
+  const dv = new DataView(out.buffer)
+  asciiField(out, 2, userId, 16)
+  dv.setUint16(18, recordId, true)
+  dv.setBigUint64(20, BigInt(data.length), true)
+  asciiField(out, 28, description, 32)
+  out.set(data, EVLR_HEADER_SIZE)
+  return out
+}
+export const LAS_EVLR_HEADER_SIZE = EVLR_HEADER_SIZE
+export const LAS_VLR_HEADER_SIZE = VLR_HEADER_SIZE
+
 // ── Point attributes ↔ LAS fields ────────────────────────────────────────────
 
 // Standard point-format-2/3 fields, by the attribute name decodeLasPoints gives them,

@@ -11,6 +11,8 @@ import {
 import { zipParts } from '../../utils/zip.js'
 import { cloudToLasParts } from '../../core/io/las.js'
 import { cloudToLaz } from '../../core/io/laz.js'
+import { lodToCopc, memoryCopcSource, copcBlob } from '../../core/lod/copcWrite.js'
+import { epsgToWkt } from '../../core/products/wkt.js'
 import { cloudToXyzParts } from '../../core/io/cloudText.js'
 import { partsToBlob } from '../../utils/blobParts.js'
 import { assembleStripTiff, geoKeysForEpsg, createCogBuilder } from '../../core/products/geotiff.js'
@@ -73,6 +75,33 @@ export function makeExportOps({ lazCodec = null } = {}) {
         }),
         { type: 'application/octet-stream' },
       )
+    } else if (format === 'copc') {
+      // COPC (core/lod/copcWrite.js): the octree built here, one LASzip chunk per node.
+      if (!lazCodec) throw new Error('COPC export: the lazcodec module is not available')
+      await lazCodec.ensure()
+      const flat = {
+        count: src.count ?? src.length,
+        pos: src.pos,
+        col: color ? (src.col ?? null) : null,
+        attributes: src.attributes ?? {},
+      }
+      const { reader, lod } = memoryCopcSource(flat)
+      const wkt = crsCode ? epsgToWkt(crsCode) : null
+      if (crsCode && !wkt) onLog(`COPC: no WKT for EPSG:${crsCode}, so the file names no CRS`, 'warn')
+      let encoder = null
+      const out = lodToCopc(reader, lod, {
+        createEncoder: (f, size) => (encoder = lazCodec.createCopcEncoder(f, size)),
+        wkt,
+        color,
+      })
+      try {
+        if (out.dropped.length)
+          onLog(`COPC: ${out.dropped.join(', ')} not written — no LAS extra-bytes type holds it`, 'warn')
+        blob = await copcBlob(out)
+      } finally {
+        encoder?.free?.()
+      }
+      onLog(`COPC: ${reader.nodes.size.toLocaleString()} octree nodes, point format ${out.plan.format}`, 'info')
     } else if (format === 'las') {
       blob = partsToBlob(cloudToLasParts(src, { crsCode, geographic, onLog }), 'application/octet-stream')
     } else if (format === 'xyz') {

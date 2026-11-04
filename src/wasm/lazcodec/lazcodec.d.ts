@@ -22,6 +22,40 @@ export class CompressedPoints {
 }
 
 /**
+ * COPC writer's encoder (core/lod/copcWrite.js): LAS 1.4 point formats 6, 7 or 8 in
+ * **variable-size** chunks, one chunk per octree node, as COPC stores them. JS pushes a
+ * node's records, calls `end_chunk`, and reads `position()` before and after to know the
+ * node's byte range in the stream (stream position 0 is the 8-byte chunk-table offset,
+ * so the first chunk starts at 8). The last node is not ended: `finish` closes it and
+ * writes the chunk table, whose offset (the end of the last chunk) is then in the first
+ * 8 bytes of the returned data.
+ */
+export class CopcEncoder {
+    free(): void;
+    [Symbol.dispose](): void;
+    drain(): Uint8Array;
+    /**
+     * Close the current chunk (the node's points pushed since the last one).
+     */
+    end_chunk(): void;
+    /**
+     * Close the last chunk and write the chunk table: the 8 head bytes (the table's
+     * stream offset) followed by everything not drained yet.
+     */
+    finish(): CompressedPoints;
+    constructor(point_format: number, point_size: number);
+    /**
+     * The stream position: bytes written so far, the 8-byte head included.
+     */
+    position(): number;
+    push(points: Uint8Array): void;
+    /**
+     * The LASzip VLR payload (user id "laszip encoded", record 22204).
+     */
+    readonly vlr: Uint8Array;
+}
+
+/**
  * Streaming decoder: a LAZ file's points a run of chunks at a time, so a file larger
  * than memory can be read (plan-lod ▸ L4). JS reads the chunk table's bytes from the
  * file and asks for each chunk's point and byte counts; it then slices a run of whole
@@ -106,11 +140,18 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_compressedpoints_free: (a: number, b: number) => void;
+    readonly __wbg_copcencoder_free: (a: number, b: number) => void;
     readonly __wbg_lazdecoder_free: (a: number, b: number) => void;
-    readonly __wbg_lazencoder_free: (a: number, b: number) => void;
     readonly compress_points: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compressedpoints_data: (a: number) => [number, number];
     readonly compressedpoints_vlr: (a: number) => [number, number];
+    readonly copcencoder_drain: (a: number) => [number, number, number, number];
+    readonly copcencoder_end_chunk: (a: number) => [number, number];
+    readonly copcencoder_finish: (a: number) => [number, number, number];
+    readonly copcencoder_new: (a: number, b: number) => [number, number, number];
+    readonly copcencoder_position: (a: number) => number;
+    readonly copcencoder_push: (a: number, b: number, c: number) => [number, number];
+    readonly copcencoder_vlr: (a: number) => [number, number];
     readonly decompress_points: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly lazdecoder_chunk_bytes: (a: number, b: number) => number;
     readonly lazdecoder_chunk_count: (a: number) => number;
@@ -120,10 +161,11 @@ export interface InitOutput {
     readonly lazdecoder_forChunks: (a: number, b: number) => [number, number, number];
     readonly lazdecoder_new: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly lazdecoder_point_size: (a: number) => number;
-    readonly lazencoder_drain: (a: number) => [number, number, number, number];
     readonly lazencoder_finish: (a: number) => [number, number, number];
     readonly lazencoder_new: (a: number, b: number) => [number, number, number];
     readonly lazencoder_push: (a: number, b: number, c: number) => [number, number];
+    readonly lazencoder_drain: (a: number) => [number, number, number, number];
+    readonly __wbg_lazencoder_free: (a: number, b: number) => void;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __externref_table_dealloc: (a: number) => void;
