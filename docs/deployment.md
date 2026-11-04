@@ -146,7 +146,8 @@ Two sites, from one Worker config ([`wrangler.jsonc`](../deploy/cloudflare/wrang
 
 GitHub Actions deploys both (the `deploy` job in
 [`.github/workflows/verify.yml`](../.github/workflows/verify.yml)), after the tests
-pass: for `main` the unit, WASM and Rust tests, for a tag the browser tests as well
+pass: for `main` the lint, unit, WASM, build and Rust checks, for a tag the browser tests
+as well (they also run every night on `main`, without deploying)
 ([development.md ▸ Releases](development.md#releases)). A release is then:
 
 ```bash

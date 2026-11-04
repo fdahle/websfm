@@ -3,12 +3,18 @@ name: Verify
 # src/guide/ and src/glossary/ are built into the app, so they still do. A version tag
 # always runs: path filters do not apply to tag pushes.
 #
-# The browser tests (about 20 min) run for a version tag, a pull request, and by hand
-# (Actions ▸ Verify ▸ Run workflow), not for a push to main: dev.websfm.app is deployed
-# as soon as the fast checks pass, and a release is held to the full suite. Run it by
-# hand on main before `npm run release`, so a failure shows before the tag exists.
+# The browser tests (about 20 min) run for a version tag, a pull request, by hand
+# (Actions ▸ Verify ▸ Run workflow), and every night on main when it has new commits —
+# not for a push to main: dev.websfm.app is deployed as soon as the fast checks pass, the
+# nightly run shows within a day what they cannot see, and a release is held to the full
+# suite. Run it by hand on main before `npm run release`, so a failure shows before the
+# tag exists. The fast checks are separate jobs, so a push waits for the slowest of them.
 on:
   workflow_dispatch:
+  # 02:00 UTC (03:00 in Germany in winter): the full suite on main (`fresh` below
+  # skips a night without commits). GitHub mails the repository owner when it fails.
+  schedule:
+    - cron: '0 2 * * *'
   push:
     paths-ignore:
       - 'README.md'
@@ -29,13 +35,15 @@ on:
       - 'docs/**'
 permissions:
   contents: read
+# A newer push cancels the run before it on the same ref; the nightly run is its own
+# group, so a push at night does not cancel it.
 concurrency:
-  group: verify-${{ github.ref }}
+  group: verify-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: true
 jobs:
   # The jobs start together, and the browser tests are split over three runners per
   # browser (Playwright --shard): a run waits for the slowest of them, not their sum.
-  checks:
+  lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -45,12 +53,48 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
+      - run: npm run typecheck # TypeScript, Vue template bindings, ESLint
       - run: npm run format:check
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - run: npm test
       - run: npm run check:wasm
       - run: npm run test:wasm
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - run: npm run build
+
+  # The nightly run tests only a main that changed since the night before.
+  fresh:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.age.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: age
+        run: |
+          age=$(( $(date +%s) - $(git log -1 --format=%ct) ))
+          echo "Last commit on main: $(( age / 3600 )) h ago"
+          echo "changed=$([ "$age" -lt 90000 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   rust:
     runs-on: ubuntu-latest
@@ -64,7 +108,13 @@ jobs:
       - run: cargo test --manifest-path crates/Cargo.toml --workspace --release --locked
 
   browser:
-    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/v')
+    needs: [fresh]
+    # Runs after `fresh`, which only the nightly run has (skipped otherwise).
+    if: >-
+      !cancelled() &&
+      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' ||
+       startsWith(github.ref, 'refs/tags/v') ||
+       (github.event_name == 'schedule' && needs.fresh.outputs.changed == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -116,12 +166,13 @@ jobs:
   # The R2 files (models, ORT's WebGPU wasm) are not uploaded here: run
   # `deploy-cloudflare.mjs --upload` by hand after a model or ORT change.
   deploy:
-    needs: [checks, rust, browser]
+    needs: [lint, unit, build, rust, browser]
     # A skipped job would skip this one too, so the results are tested by hand: a tag
     # needs the browser tests to have passed, main only that they did not fail.
     if: >-
       !cancelled() && github.event_name == 'push' &&
-      needs.checks.result == 'success' && needs.rust.result == 'success' &&
+      needs.lint.result == 'success' && needs.unit.result == 'success' &&
+      needs.build.result == 'success' && needs.rust.result == 'success' &&
       ((github.ref == 'refs/heads/main' && needs.browser.result == 'skipped') ||
        (startsWith(github.ref, 'refs/tags/v') && needs.browser.result == 'success'))
     runs-on: ubuntu-latest
