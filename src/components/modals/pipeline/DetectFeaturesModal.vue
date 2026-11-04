@@ -28,6 +28,7 @@ import { LEARNED_DETECTORS, learnedDetector, detectorLabel } from '../../../core
 import { MODELS, isRedistributable } from '../../../core/models/registry.js'
 import { planDetection, planImageDetection } from '../../../core/features/detectPlan.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
+import { fmtCount } from '../../../core/stepEffects/format.js'
 
 const props = defineProps({
   // Current image list — used to warn when Append mode would leave a mix of
@@ -224,10 +225,28 @@ const numbers = computed(() => {
     overlap: { label: 'Tile overlap', min: 0, max: 512, integer: true, when: s.tiling !== 'off' },
     contrastThreshold: { label: 'Contrast threshold', min: 0.001, max: 0.5, when: !isLearned.value },
     maxKeypoints: isLearned.value
-      ? { label: 'Max keypoints', min: 128, max: 8192, integer: true }
-      : { label: 'Max keypoints', min: 100, max: 50000, integer: true },
+      ? { label: 'Max keypoints', min: 128, integer: true }
+      : { label: 'Max keypoints', min: 100, integer: true },
   })
 })
+
+// No upper limit on the keypoint caps: the user decides. The hints say what a large
+// value costs in matching against the default, both being per-pair work.
+const workVs = (n, base) => {
+  const x = (Number(n) / base) ** 2
+  return Number.isFinite(x) && x >= 1.5
+    ? ` ${fmtCount(n)} is about ${fmtCount(Math.round(x))}× the work of ${fmtCount(base)}.`
+    : ''
+}
+const siftKeypointCost = computed(() => {
+  const extra = workVs(siftSettings.value.maxKeypoints, DETECT_SIFT_DEFAULTS.maxKeypoints)
+  return extra ? `Matching a pair grows with both photos' keypoints:${extra}` : ''
+})
+const learnedKeypointCost = computed(
+  () =>
+    'LightGlue matching time grows with the square of this.' +
+    workVs(lp.value.maxKeypoints, presetBase.value.maxKeypoints),
+)
 
 const detectRecommendations = computed(() => {
   const out = { ...recommendations.value.detect }
@@ -697,7 +716,7 @@ provideStepLayout('detect-features')
     </SettingsStep>
     <SettingsStep step="4" title="Keep the strongest" :effect="keepStep" :more="2">
       <template #tuning>
-        <SettingsField v-if="!isLearned" label-for="maxKp">
+        <SettingsField v-if="!isLearned" label-for="maxKp" :hint="siftKeypointCost">
           <template #label
             ><FieldHelp
               op="detect-features"
@@ -713,12 +732,11 @@ provideStepLayout('detect-features')
             :aria-invalid="numbers.bad.maxKeypoints"
             type="number"
             min="100"
-            max="50000"
             step="100"
             class="field-input"
           />
         </SettingsField>
-        <SettingsField v-else label-for="sp-maxKp" hint="LightGlue matching cost grows with the square of this.">
+        <SettingsField v-else label-for="sp-maxKp" :hint="learnedKeypointCost">
           <template #label>
             <FieldHelp
               op="detect-features"
@@ -734,7 +752,6 @@ provideStepLayout('detect-features')
             :aria-invalid="numbers.bad.maxKeypoints"
             type="number"
             min="128"
-            max="8192"
             step="128"
             class="field-input"
           />

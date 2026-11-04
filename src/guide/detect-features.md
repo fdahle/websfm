@@ -68,8 +68,9 @@ it off to detect every image once.
 <!-- param: maxKeypoints default: 10000 (SIFT) · 2048 (SuperPoint, DISK, ALIKED) -->
 The keypoint limit per image. SIFT keeps the largest features first, as COLMAP does,
 since they survive viewpoint changes best. Raise it when many images log exactly the
-limit. The learned detectors keep their best-scoring points; their limit stays lower
-because LightGlue's time grows with its square.
+limit; there is no upper bound, and the field says what a large value costs in
+matching. The learned detectors keep their best-scoring points; their default stays
+lower because LightGlue's time grows with its square.
 
 ## Tiling
 <!-- param: tiling  default: Off -->

@@ -324,11 +324,10 @@ const numbers = computed(() => {
     lgMaxKeypoints: {
       label: full ? 'Fallback keypoints per image' : 'Keypoints per image',
       min: full ? 256 : 0,
-      max: 8192,
       integer: true,
       when: lg,
     },
-    lgTileBudget: { label: 'Keypoints per tile', min: 256, max: 8192, integer: true, when: lg && full },
+    lgTileBudget: { label: 'Keypoints per tile', min: 256, integer: true, when: lg && full },
     subsetGateSize: { label: 'Subset size', min: 50, max: 1000, integer: true, when: bf && gate.value.active },
     subsetGateThreshold: {
       label: 'Min subset matches',
@@ -576,7 +575,6 @@ provideStepLayout('match-features')
             :aria-invalid="numbers.bad.lgTileBudget"
             type="number"
             min="256"
-            max="8192"
             step="256"
             class="field-input"
           />
@@ -601,7 +599,6 @@ provideStepLayout('match-features')
             :aria-invalid="numbers.bad.lgMaxKeypoints"
             type="number"
             min="0"
-            max="8192"
             step="256"
             class="field-input"
           />
@@ -741,7 +738,6 @@ provideStepLayout('match-features')
             :aria-invalid="numbers.bad.lgMaxKeypoints"
             type="number"
             min="256"
-            max="8192"
             step="256"
             class="field-input"
           />
