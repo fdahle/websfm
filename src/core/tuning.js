@@ -689,6 +689,15 @@ export const CLASSIFY_TUNING = {
   wallNormalZ: 0.5,
 }
 
+// Adding photos to a project in browser storage (core/io/folderProject.js bigImportOffer):
+// from this many GiB of photos in the project, counting the ones being added, WebSfM
+// offers to move it to a folder on disk first, once per project and page. Keypoints,
+// matches, depth maps and products come to several times the photos, and a browser may
+// cap or clear its storage; a folder is bounded by the disk alone.
+export const FOLDER_OFFER_TUNING = {
+  photosGiB: 3,
+}
+
 // Import ▸ Project into this project (composables/useProjectMerge.js).
 export const PROJECT_IMPORT_TUNING = {
   // Photos read and ingested at a time: the page never holds a whole project as blobs.

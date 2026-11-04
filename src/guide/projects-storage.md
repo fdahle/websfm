@@ -24,7 +24,9 @@ On Chrome, Edge and other Chromium browsers, a project can live in a normal fold
 your disk. Don't rename, move or edit its files while it is open. The photos are in its
 `images` folder under internal ids; `images/index.csv` lists which is which. The browser
 may ask you to reconnect the folder after a restart. **Move to folder…** and **Move to
-browser storage** move a project between the two.
+browser storage** move a project between the two. When photos you add bring a project in
+browser storage to 3 GB of photos or more, WebSfM asks once whether to move it to a
+folder first, since its depth maps and products will take several times that.
 
 ## Duplicate a project
 **Duplicate** in the project list's **⋯** menu copies a project, to try other settings

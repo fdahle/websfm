@@ -20,7 +20,9 @@ import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
 import { setStorageFullHandler } from '../utils/storageFull.js'
-import { isFolderProject, newFolderVerdict } from '../core/io/folderProject.js'
+import { bigImportOffer, folderStorageSupported, isFolderProject, newFolderVerdict } from '../core/io/folderProject.js'
+import { imageFileSize } from '../core/io/imageDuplicates.js'
+import { FOLDER_OFFER_TUNING } from '../core/tuning.js'
 import { chooseDialog, confirmDialog } from './useConfirmations.js'
 import { rememberNewProjectDraft } from './newProjectDraft.js'
 import { pluralize } from '../core/textFormat.js'
@@ -540,13 +542,66 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   }
 
   async function moveCurrentProjectToFolder(id = currentProjectId.value) {
-    if (!id || refuseWhileBusy('Move project')) return
+    if (!id || refuseWhileBusy('Move project')) return false
     // Failed writes do not stop a move (a full browser storage is the reason to move):
     // the copy holds what was saved, and reopenMoved retries the rest in the folder.
     await flushProjectWork().catch(() => {})
     const dirHandle = await pickDirectory()
-    if (!dirHandle) return
-    if (await moveToFolder(id, dirHandle)) await reopenMoved(id)
+    if (!dirHandle) return false
+    if (!(await moveToFolder(id, dirHandle))) return false
+    await reopenMoved(id)
+    return true
+  }
+
+  // ── A big batch of photos into browser storage ──────────────────────────────
+  // Before photos are added to a project in browser storage that will then hold
+  // FOLDER_OFFER_TUNING.photosGiB of them or more, offer a folder on disk: the browser
+  // may cap or clear its storage, and the products come to several times the photos.
+  // Asked once per project and page; Keep in browser adds them as before. Firefox and
+  // Safari cannot write folders, so there the log says it once.
+  const bigImportAsked = new Set()
+  async function offerFolderBeforeImport(files) {
+    const id = currentProjectId.value
+    const entry = projects.value.find((p) => p.id === id)
+    const batchBytes = files.reduce((n, f) => n + (f.size || 0), 0)
+    const projectBytes = useImagesStore().images.reduce((n, img) => n + (imageFileSize(img) ?? 0), 0)
+    const verdict = bigImportOffer({
+      entry,
+      folderSupported: folderStorageSupported(),
+      batchBytes,
+      projectBytes,
+      minBytes: FOLDER_OFFER_TUNING.photosGiB * 1024 ** 3,
+      asked: bigImportAsked.has(id),
+    })
+    if (verdict.reason === 'no-folder-access') {
+      bigImportAsked.add(id)
+      log(
+        `The project's photos come to ${formatBytes(verdict.totalBytes)}, all kept in browser storage; ` +
+          'with its depth maps and products it will take several times that. Chrome and Edge can keep a project in a folder on disk instead.',
+        'warn',
+        'Project',
+      )
+      return
+    }
+    if (!verdict.offer) return
+    bigImportAsked.add(id)
+    const move = await confirmDialog({
+      title: 'Keep this project in a folder?',
+      message:
+        `With these ${pluralize(files.length, 'photo')}, the project holds ${formatBytes(verdict.totalBytes)} of photos, ` +
+        'and its keypoints, depth maps and products will take several times that. Browser storage may be limited or ' +
+        'cleared by the browser; a folder on your disk holds as much as the disk does. Move the project to a folder ' +
+        'first? The photos are then added there.',
+      confirmLabel: 'Choose a folder…',
+      cancelLabel: 'Keep in browser',
+      danger: false,
+    })
+    if (!move) {
+      log(`Adding ${formatBytes(batchBytes)} of photos to browser storage (the folder was declined)`, 'info', 'Project')
+      return
+    }
+    if (!(await moveCurrentProjectToFolder(id)))
+      log('The project stayed in browser storage; adding the photos there', 'info', 'Project')
   }
 
   // Duplicate: a browser project's copy goes into browser storage, a folder project's
@@ -878,6 +933,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     cancelFolderPrompt,
     openProjectFolder,
     moveCurrentProjectToFolder,
+    offerFolderBeforeImport,
     duplicateProjectById,
     moveCurrentProjectToBrowser,
     onSaveProject,

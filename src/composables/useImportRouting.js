@@ -50,6 +50,9 @@ export function useImportRouting({
   importRaster,
   importProjectFile,
   addImages,
+  // Asked before photos are added (useProjectLifecycle offerFolderBeforeImport): may move
+  // the project to a folder first.
+  beforeAddImages = null,
   activateTab,
   showGcps,
   showSensors,
@@ -293,9 +296,13 @@ export function useImportRouting({
   async function addImagesRouted(files) {
     const photos = await forkGeoreferencedRasters(files)
     if (!photos.length || !addImages) return
+    const add = async (list, ...rest) => {
+      await beforeAddImages?.(list)
+      return addImages(list, ...rest)
+    }
     const dups = findDuplicateFiles(photos, useImagesStore().images)
     if (!dups.size) {
-      await addImages(photos)
+      await add(photos)
       return
     }
     const names = [...dups].map((f) => f.name)
@@ -317,12 +324,12 @@ export function useImportRouting({
     })
     if (addAnyway) {
       log(`Adding ${pluralize(dups.size, 'duplicate image')} as separate images`, 'warn', 'Images')
-      await addImages(photos, null, { allowDuplicates: true })
+      await add(photos, null, { allowDuplicates: true })
       return
     }
     log(`Skipped ${pluralize(dups.size, 'duplicate image')} (same name and size): ${shown}`, 'warn', 'Images')
     const rest = photos.filter((f) => !dups.has(f))
-    if (rest.length) await addImages(rest)
+    if (rest.length) await add(rest)
   }
 
   // Decode + classify off-thread, then either commit straight away (the sniff

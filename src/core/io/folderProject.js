@@ -90,3 +90,19 @@ export function folderLabel(entry) {
   const name = entry?.folderName
   return name ? `folder: ${name}` : 'folder'
 }
+
+/**
+ * Photos about to be added: should WebSfM offer to move the project to a folder first?
+ * Only for a project in browser storage, in a browser that can write folders, once
+ * (`asked`), and when the project's photos with the new ones reach `minBytes`.
+ * → { offer, totalBytes, reason } — reason 'folder' | 'asked' | 'small' | 'no-folder-access' | 'offer'
+ */
+export function bigImportOffer({ entry, folderSupported, batchBytes, projectBytes = 0, minBytes, asked = false }) {
+  const totalBytes = (batchBytes || 0) + (projectBytes || 0)
+  const no = (reason) => ({ offer: false, totalBytes, reason })
+  if (!entry || isFolderProject(entry)) return no('folder')
+  if (asked) return no('asked')
+  if (!(totalBytes >= minBytes)) return no('small')
+  if (!folderSupported) return no('no-folder-access')
+  return { offer: true, totalBytes, reason: 'offer' }
+}

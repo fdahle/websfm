@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **A folder offered before a big batch of photos.** When the photos you add would bring
+  a project in browser storage to 3 GB of photos or more, WebSfM asks once whether to
+  move it to a folder on disk first (Chrome, Edge), and adds the photos there; Keep in
+  browser adds them as before. Firefox and Safari, which cannot use folders, say it in
+  the log. Keypoints, matches, depth maps and products take several times the photos,
+  and a browser may limit or clear its storage.
 - **Copy for bug report.** Other ▸ System info has a button that copies your browser and
   OS, GPU, CPU cores, memory, WebGPU and storage as a few lines of text, to paste into a
   bug report; nothing about the project is included, and nothing is sent anywhere. The

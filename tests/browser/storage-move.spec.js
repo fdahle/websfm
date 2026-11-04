@@ -116,3 +116,56 @@ test('a project moved to a folder and back still reads its images and masks', as
   ).not.toBe('folder')
   expect(errors).toEqual([])
 })
+
+// A big batch of photos into browser storage asks to move the project to a folder
+// first (useProjectLifecycle offerFolderBeforeImport); the photos then land there.
+test('a big batch of photos offers a folder first, once, and lands in it', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'folders on disk are Chromium-only')
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.addInitScript(() => {
+    window.showDirectoryPicker = async () => {
+      const root = await navigator.storage.getDirectory()
+      return root.getDirectoryHandle(`big-${Date.now()}`, { create: true })
+    }
+  })
+  await page.goto('/')
+  await page.getByPlaceholder('My Project').fill('Big batch')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  const add = (names) =>
+    page.evaluate(async (names) => {
+      // A threshold of a few bytes stands in for the gigabytes.
+      ;(await import('/src/core/tuning.js')).FOLDER_OFFER_TUNING.photosGiB = 1 / 1024 ** 3
+      const files = await Promise.all(
+        names.map(async (name) => {
+          const canvas = new OffscreenCanvas(64, 48)
+          canvas.getContext('2d').fillRect(0, 0, 32, 48)
+          return new File([await canvas.convertToBlob({ type: 'image/jpeg' })], name, { type: 'image/jpeg' })
+        }),
+      )
+      document.querySelector('#app').__vue_app__._instance.setupState.addImagesRouted(files)
+    }, names)
+  await add(['a.jpg'])
+  const dialog = page.getByRole('dialog').filter({ hasText: 'Keep this project in a folder?' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Choose a folder…' }).click()
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+        const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+        return `${useProjectsStore().currentProject?.storage} ${useImagesStore().images.length}`
+      }),
+    )
+    .toBe('folder 1')
+  // Asked once: the next batch goes straight in (and the project is in a folder now anyway).
+  await add(['b.jpg'])
+  await expect
+    .poll(() =>
+      page.evaluate(async () => (await import('/src/stores/useImagesStore.js')).useImagesStore().images.length),
+    )
+    .toBe(2)
+  await expect(dialog).toHaveCount(0)
+  expect(errors).toEqual([])
+})

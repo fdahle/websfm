@@ -10,6 +10,7 @@ import {
   newFolderVerdict,
   copyVerified,
   folderLabel,
+  bigImportOffer,
 } from './folderProject.js'
 
 const opfsEntry = { id: 'a', storage: STORAGE_OPFS }
@@ -102,5 +103,30 @@ describe('folderLabel', () => {
   it('names the leaf directory (the full path is not exposed to web content)', () => {
     expect(folderLabel(folderEntry)).toBe('folder: survey-2026')
     expect(folderLabel({ storage: STORAGE_FOLDER })).toBe('folder')
+  })
+})
+
+describe('bigImportOffer', () => {
+  const GiB = 1024 ** 3
+  const opfsEntry = { id: 'p', storage: STORAGE_OPFS }
+  const base = { entry: opfsEntry, folderSupported: true, minBytes: 3 * GiB }
+
+  it('offers a folder when the photos reach the size, counting those already there', () => {
+    expect(bigImportOffer({ ...base, batchBytes: 3 * GiB })).toMatchObject({ offer: true, reason: 'offer' })
+    expect(bigImportOffer({ ...base, batchBytes: 1 * GiB, projectBytes: 2.5 * GiB })).toMatchObject({
+      offer: true,
+      totalBytes: 3.5 * GiB,
+    })
+    expect(bigImportOffer({ ...base, batchBytes: 2 * GiB }).reason).toBe('small')
+  })
+
+  it('asks once, never for a folder project, and says when the browser has no folders', () => {
+    expect(bigImportOffer({ ...base, batchBytes: 9 * GiB, asked: true }).reason).toBe('asked')
+    expect(bigImportOffer({ ...base, entry: { storage: STORAGE_FOLDER }, batchBytes: 9 * GiB }).reason).toBe('folder')
+    expect(bigImportOffer({ ...base, entry: null, batchBytes: 9 * GiB }).offer).toBe(false)
+    expect(bigImportOffer({ ...base, folderSupported: false, batchBytes: 9 * GiB })).toMatchObject({
+      offer: false,
+      reason: 'no-folder-access',
+    })
   })
 })

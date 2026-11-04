@@ -529,6 +529,7 @@ const {
   cancelFolderPrompt,
   openProjectFolder,
   moveCurrentProjectToFolder,
+  offerFolderBeforeImport,
   moveCurrentProjectToBrowser,
   duplicateProjectById,
   onSaveProject,
@@ -659,6 +660,7 @@ const {
   // a source photo, so the image path is routed through the georeference fork.
   importRaster,
   addImages,
+  beforeAddImages: offerFolderBeforeImport,
   importProjectFile,
   activateTab,
   showGcps: () => {
