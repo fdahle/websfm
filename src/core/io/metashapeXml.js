@@ -122,12 +122,47 @@ function topLevelAuthority(block) {
   return found
 }
 
+// An exported cameras/markers file has its chunk under <document>; a project's doc.xml
+// (.psz) has it under <document><chunks> (core/io/metashapeProject.js).
 export function readMetashapeXml(text) {
   const root = parseXml(text)
   if (root.name !== 'document') throw new Error('Not a Metashape XML file (no <document>)')
-  const chunkEls = root.children.filter((c) => c.name === 'chunk')
+  const chunkEls = [...root.children.filter((c) => c.name === 'chunk'), ...childrenOf(child(root, 'chunks'), 'chunk')]
   if (!chunkEls.length) throw new Error('The Metashape file holds no chunk')
   return { version: root.attrs.version ?? null, chunks: chunkEls.map(readChunk) }
+}
+
+// What one frame of a project holds beyond the markers (core/io/metashapeProject.js):
+// its tie points (inline in a .psz, or a point_cloud/point_cloud.zip of a .psx), mesh,
+// and whether it has depth maps, a dense cloud, a DEM and an orthomosaic.
+function readFrameAssets(frame) {
+  const pc = child(frame, 'point_cloud')
+  const model = child(frame, 'model')
+  return {
+    pointCloud: pc
+      ? {
+          path: pc.attrs.path ?? null,
+          tracks: child(pc, 'tracks')?.attrs.path ?? null,
+          points: childrenOf(pc, 'points').map((p) => ({
+            componentId: p.attrs.component_id ?? null,
+            path: p.attrs.path,
+          })),
+          projections: childrenOf(pc, 'projections').map((p) => ({ cameraId: p.attrs.camera_id, path: p.attrs.path })),
+        }
+      : null,
+    model: model ? { path: model.attrs.path ?? null, mesh: child(model, 'mesh')?.attrs.path ?? null } : null,
+    has: {
+      depthMaps: !!child(frame, 'depth_maps'),
+      denseCloud: !!child(frame, 'dense_cloud'),
+      elevation: !!child(frame, 'elevation'),
+      orthomosaic: !!child(frame, 'orthomosaic'),
+    },
+  }
+}
+
+/** One <chunk> element (a .psx keeps it in chunk.zip, its frames in frame.zip). */
+export function readMetashapeChunk(el) {
+  return readChunk(el)
 }
 
 function readChunk(el) {
@@ -174,6 +209,7 @@ function readChunk(el) {
   }))
   const crs = readChunkCrs(child(el, 'reference')?.text)
   return {
+    frames: childrenOf(child(el, 'frames'), 'frame').map(readFrameAssets),
     label: el.attrs.label ?? 'Chunk',
     enabled: bool(el.attrs.enabled),
     crs,

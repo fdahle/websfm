@@ -67,6 +67,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     onFiducialMarksPick,
     onColmapPick,
     onMetashapePick,
+    openMetashapeProject,
     onCloudPick,
     onRasterPick,
     onVideoPick,
@@ -142,6 +143,20 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       sfmSourceOpen.value = false
       onColmapPick(e)
     })
+  }
+  // A choice in the Import ▸ COLMAP / Other SfM / Metashape source dialog.
+  function pickInteropSource(choice) {
+    if (sfmSourceOpen.value !== 'metashape') return choice === 'folder' ? pickSfmFolder() : pickSfmFiles()
+    const done = (fn) => (e) => {
+      sfmSourceOpen.value = false
+      fn(e)
+    }
+    if (choice === 'xml') pickFiles(FILE_PICKERS.metashape, done(onMetashapePick))
+    else
+      pickFiles(
+        choice === 'psz' ? FILE_PICKERS.metashapeProject : FILE_PICKERS.sfmFolder,
+        done((e) => openMetashapeProject(e.target.files)),
+      )
   }
   function pickProjectFile() {
     pickFiles(FILE_PICKERS.project, onProjectFilePick)
@@ -346,7 +361,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         pickFiles(FILE_PICKERS.features, (e) => openFeatureImport(e.target.files))
         break
       case 'import-metashape':
-        pickFiles(FILE_PICKERS.metashape, onMetashapePick)
+        sfmSourceOpen.value = 'metashape'
         break
       case 'import-project':
         importProjectOpen.value = true
@@ -630,5 +645,5 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     event.target.value = ''
   }
 
-  return { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile }
+  return { handleCommand, pickSfmFiles, pickSfmFolder, pickInteropSource, pickProjectFile }
 }

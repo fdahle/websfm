@@ -147,8 +147,7 @@ const {
   onImportProject,
   openImageTab,
   openImageWithResiduals,
-  pickSfmFiles,
-  pickSfmFolder,
+  pickInteropSource,
   rasterBeingStyled,
   refreshGcpReport,
   selectGcp,
@@ -167,10 +166,9 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
   <Teleport to="body">
     <InteropSourceModal
       v-if="sfmSourceOpen"
-      :kind="sfmSourceOpen === 'other' ? 'other' : 'colmap'"
+      :kind="typeof sfmSourceOpen === 'string' ? sfmSourceOpen : 'colmap'"
       @close="sfmSourceOpen = false"
-      @files="pickSfmFiles"
-      @folder="pickSfmFolder"
+      @choose="pickInteropSource"
     />
   </Teleport>
 

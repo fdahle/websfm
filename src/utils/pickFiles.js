@@ -37,6 +37,7 @@ export const FILE_PICKERS = {
   imageFiducials: { accept: '.csv,.txt,.tsv,text/*' },
   cameraFiducials: { accept: '.csv,.txt,.tsv,text/*' },
   metashape: { accept: '.xml,application/xml,text/xml' },
+  metashapeProject: { accept: '.psz' },
   sfmFiles: { accept: '.db,.sqlite,.txt,.bin,.zip', multiple: true },
   sfmOtherFiles: { accept: '.out,.txt,.nvm,.json', multiple: true },
   features: { accept: '.txt,.csv,.tsv,.key,.matches,text/*', multiple: true },

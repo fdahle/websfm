@@ -1,9 +1,10 @@
 <script setup>
-// Import ▸ Interoperability ▸ Metashape Cameras: the calibration, camera poses and
-// markers of one chunk of a Metashape XML export (core/io/metashapeXml.js), placed in
+// Import ▸ Interoperability ▸ Metashape: the calibration, camera poses and markers of
+// one chunk of a Metashape XML export or project (core/io/metashapeXml.js), placed in
 // the project's coordinate system (composables/metashapeImport.js). Each part goes
 // through the importer it would take as a file of its own: Import ▸ Calibration,
-// Camera Poses and GCPs.
+// Camera Poses and GCPs. A project (.psz, .psx) adds its tie points as keypoints,
+// matches and a sparse model, and its mesh (core/io/metashapeProject.js).
 import { computed, reactive, ref, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import { planMetashapeImport } from '../../../composables/metashapeImport.js'
@@ -14,7 +15,7 @@ import { pluralize } from '../../../core/textFormat.js'
 import { datumLabel } from '../../../core/verticalDatum.js'
 
 const props = defineProps({
-  data: { type: Object, required: true }, // { fileName, doc }
+  data: { type: Object, required: true }, // { fileName, doc, project? } (composables/metashapeProjectFiles.js)
   projectCrs: { type: String, required: true },
   sensors: { type: Array, default: () => [] },
   images: { type: Array, default: () => [] },
@@ -32,7 +33,19 @@ const chunkIndex = ref(
 const chunk = computed(() => chunks.value[chunkIndex.value])
 const plan = ref(null)
 const failed = ref(null)
-const options = reactive({ calibration: true, poses: true, gcps: true, scaleBars: true })
+const options = reactive({
+  calibration: true,
+  poses: true,
+  gcps: true,
+  scaleBars: true,
+  features: true,
+  verify: false,
+  model: true,
+  mesh: true,
+})
+// A project's tie points and mesh, for the chosen chunk.
+const assets = computed(() => props.data.project?.chunks?.[chunkIndex.value] ?? null)
+const isProject = computed(() => !!props.data.project)
 
 watch(
   [chunk, () => props.projectCrs],
@@ -115,12 +128,34 @@ const sensorSummary = computed(() => {
     .filter(Boolean)
     .join(', ')
 })
+// The tie points of photos in this project.
+const tie = computed(() => {
+  const t = assets.value?.tiePoints
+  if (!t) return null
+  const inProject = new Set(t.keypoints.map((k) => k.label).filter((l) => projectName.value(l)))
+  const pairs = t.pairs.filter((p) => inProject.has(p.a) && inProject.has(p.b))
+  const cameras = t.model.images.filter((im) => projectName.value(im.name)).length
+  return { t, photos: inProject.size, pairs, cameras }
+})
+// What the project holds that WebSfM does not read, and how to bring it in instead.
+const unread = computed(() => {
+  const h = assets.value?.has ?? {}
+  return [
+    h.denseCloud && 'the dense cloud (File ▸ Export ▸ Export Point Cloud as LAS/LAZ, then Import ▸ Point Cloud / Mesh)',
+    h.elevation && 'the DEM (Export DEM as GeoTIFF, then Import ▸ Reference DEM / Ortho)',
+    h.orthomosaic && 'the orthomosaic (Export Orthomosaic as GeoTIFF, then Import ▸ Reference DEM / Ortho)',
+    h.depthMaps && 'the depth maps (Build Depth Maps here instead)',
+  ].filter(Boolean)
+})
 const crsLabel = computed(() => (chunk.value.crs.local ? 'Local frame' : (chunk.value.crs.epsg ?? 'Unnamed CRS')))
 const has = computed(() => ({
   calibration: sized.value.sensors.length > 0,
   poses: poses.value.length > 0,
   gcps: !!plan.value?.gcps.length,
   scaleBars: scaleBars.value.length > 0,
+  features: (tie.value?.photos ?? 0) > 0,
+  model: (tie.value?.cameras ?? 0) >= 2 && (tie.value?.t.counts.points ?? 0) > 0,
+  mesh: !!assets.value?.mesh,
 }))
 const canImport = computed(
   () =>
@@ -128,7 +163,10 @@ const canImport = computed(
     ((options.calibration && has.value.calibration) ||
       (options.poses && has.value.poses) ||
       (options.gcps && has.value.gcps) ||
-      (options.scaleBars && has.value.scaleBars)),
+      (options.scaleBars && has.value.scaleBars) ||
+      (options.features && has.value.features) ||
+      (options.model && has.value.model) ||
+      (options.mesh && has.value.mesh)),
 )
 const importReason = computed(() =>
   canImport.value ? null : !plan.value ? 'Still reading the file' : 'Choose something to import',
@@ -146,15 +184,26 @@ function doImport() {
     scaleBars: options.scaleBars ? scaleBars.value : [],
     crs: props.projectCrs,
     verticalDatum: chunk.value.crs.verticalDatum,
+    project: isProject.value
+      ? {
+          features:
+            options.features && has.value.features
+              ? { keypoints: tie.value.t.keypoints, pairs: tie.value.pairs, verify: options.verify }
+              : null,
+          model: options.model && has.value.model ? tie.value.t.model : null,
+          mesh: options.mesh && has.value.mesh ? assets.value.mesh : null,
+        }
+      : null,
   })
 }
 </script>
 
 <template>
-  <ModalShell title="Import Metashape Cameras" @close="emit('close')">
+  <ModalShell title="Import from Metashape" @close="emit('close')">
     <div class="source-head">
       <div>
-        <strong>Metashape XML</strong><span>{{ data.fileName }}</span>
+        <strong>{{ isProject ? 'Metashape project' : 'Metashape XML' }}</strong
+        ><span>{{ data.fileName }}</span>
       </div>
       <span>{{ crsLabel }}</span>
     </div>
@@ -244,11 +293,60 @@ function doImport() {
           ><span v-else class="muted">— their photos are not in this project</span></label
         >
       </fieldset>
-      <p class="hint">
+      <fieldset v-if="isProject">
+        <legend>From the project</legend>
+        <label
+          :title="has.features ? null : 'The project has no tie points on photos in this project'"
+          :class="{ disabled: !has.features }"
+          ><input
+            v-model="options.features"
+            type="checkbox"
+            :disabled="!has.features"
+            :title="has.features ? null : 'The project has no tie points on photos in this project'"
+          />
+          Keypoints and matches
+          <span v-if="has.features" class="muted"
+            >— the tie points of {{ pluralize(tie.photos, 'photo') }}, {{ pluralize(tie.pairs.length, 'pair') }}</span
+          ></label
+        >
+        <label v-if="options.features && has.features" class="indent"
+          ><input v-model="options.verify" type="checkbox" /> Check the matches geometrically again, as Match Features
+          does</label
+        >
+        <label
+          :title="has.model ? null : 'Fewer than two of its aligned photos are in this project'"
+          :class="{ disabled: !has.model }"
+          ><input
+            v-model="options.model"
+            type="checkbox"
+            :disabled="!has.model"
+            :title="has.model ? null : 'Fewer than two of its aligned photos are in this project'"
+          />
+          Sparse model
+          <span v-if="tie" class="muted"
+            >— {{ pluralize(tie.cameras, 'aligned camera') }}, {{ tie.t.counts.points.toLocaleString() }} tie
+            points</span
+          ></label
+        >
+        <label :title="has.mesh ? null : 'The project has no mesh'" :class="{ disabled: !has.mesh }"
+          ><input
+            v-model="options.mesh"
+            type="checkbox"
+            :disabled="!has.mesh"
+            :title="has.mesh ? null : 'The project has no mesh'"
+          />
+          Mesh
+          <span v-if="has.mesh" class="muted"
+            >— {{ assets.mesh.count.toLocaleString() }} triangles, in the frame of the sparse model</span
+          ></label
+        >
+      </fieldset>
+      <p v-if="isProject && unread.length" class="hint">Not read: {{ unread.join('; ') }}.</p>
+      <p v-if="!isProject" class="hint">
         Export Cameras holds the calibration and the cameras; Export Markers holds those and the markers too.
       </p>
-      <ul v-if="plan.warnings.length || sized.notes.length" class="warnings">
-        <li v-for="w in [...sized.notes, ...plan.warnings]" :key="w">{{ w }}</li>
+      <ul v-if="plan.warnings.length || sized.notes.length || data.project?.notes?.length" class="warnings">
+        <li v-for="w in [...sized.notes, ...plan.warnings, ...(data.project?.notes ?? [])]" :key="w">{{ w }}</li>
       </ul>
     </template>
 
@@ -305,6 +403,9 @@ fieldset {
 }
 label.disabled {
   opacity: 0.55;
+}
+.indent {
+  margin-left: 23px;
 }
 .warnings {
   margin: 8px 0 0;

@@ -6,6 +6,15 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Whole Metashape projects.** Import ▸ **Metashape** now also opens a project (a `.psz`,
+  or the folder of a `.psx`): besides the calibration, camera poses, markers and scale
+  bars, its tie points come in as keypoints and matches (the unaligned photos' too),
+  its aligned cameras and tie points as a sparse model in metres, and its mesh in the
+  same frame. The dense cloud, DEM and orthomosaic are in formats of Metashape's own, so
+  the dialog names those to export as LAS/LAZ or GeoTIFF. On a six-photo Metashape 2.2.2
+  project the imported cameras reproject the tie points exactly as Metashape's own
+  camera.project does (median 0.856 px, p90 2.195, max 11.175 over the same 349
+  projections).
 - **Runs show their steps.** The progress dialog of Sparse Model, Depth Maps, Dense
   Cloud and a mesh in tiles lists the run's steps under the bar (for Depth Maps:
   PatchMatch, the geometric pass of the Full method, the cross-view filter), ticks the

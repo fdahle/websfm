@@ -1,15 +1,16 @@
 ---
 id: import-metashape
 title: Import from Metashape
-summary: Brings the calibration, camera positions and orientations, the markers with their marks and the scale bars from an Agisoft Metashape project into this one.
+summary: Brings the calibration, camera poses, markers and scale bars, and from a whole project its tie points (keypoints, matches, the sparse model) and mesh, from Agisoft Metashape into this one.
 category: Reconstruction pipeline
 order: 12
 ---
 **Import ▸ Metashape** reads the XML file Metashape writes with **File ▸
 Export ▸ Export Cameras**, or with **Export Markers**, which holds the same and the
-markers too. Use it to carry work done in Metashape into WebSfM: a calibrated camera,
-an alignment to start from, or GCPs you have already marked. Load the photos first;
-the file names its cameras by photo name.
+markers too, or a whole project: a `.psz` file, or the folder that holds a `.psx` and
+its `.files` folder. Use it to carry work done in Metashape into WebSfM: a calibrated
+camera, an alignment to start from, or GCPs you have already marked. Load the photos
+first; Metashape names its cameras by photo name.
 
 You choose what comes:
 
@@ -29,6 +30,24 @@ You choose what comes:
 - **Scale bars** between markers or between cameras, with their distance and
   accuracy; one whose reference is turned off comes left out of the fit, as a check.
   A bar between markers needs them here, imported with it or already of the same name.
+
+## From a project
+
+A project brings the same, and from its tie points and mesh:
+
+- **Keypoints and matches**: the tie points of each photo become its keypoints, and
+  two photos that share tie points are matched, the photos Metashape did not align
+  included. They carry no descriptors, so Match Features cannot add matches to them;
+  Detect Features replaces them. **Check the matches geometrically again** runs Match
+  Features' RANSAC on them too.
+- **Sparse model**: the aligned cameras and the tie points, in Metashape's frame, in
+  metres. It is an imported model: georeference it here from the camera positions or
+  GCPs.
+- **Mesh**, in the frame of the sparse model.
+
+The dense cloud, depth maps, DEM and orthomosaic are stored in formats of Metashape's
+own: export them from Metashape (LAS or LAZ, GeoTIFF) and bring them in with **Import ▸
+Point Cloud / Mesh** or **Reference DEM / Ortho**; the dialog says which the project has.
 
 ## Back to Metashape
 

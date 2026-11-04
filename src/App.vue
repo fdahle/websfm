@@ -635,6 +635,7 @@ const {
   onCameraImport,
   onMetashapeImport,
   onMetashapePick,
+  openMetashapeProject,
   onGcpImport,
   onFootprintImport,
   onFiducialImport,
@@ -879,7 +880,7 @@ const mapMeasure = computed(() =>
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 // Every ribbon button, console verb, viewer menu and interactive workflow block.
-const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useCommandDispatch({
+const { handleCommand, pickSfmFiles, pickSfmFolder, pickInteropSource, pickProjectFile } = useCommandDispatch({
   tabs: { activateTab, activeView, activeTab, activeImageTab, openProductTab },
   viewers: { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab },
   view: {
@@ -924,6 +925,7 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useComma
     onFiducialMarksPick,
     onColmapPick,
     onMetashapePick,
+    openMetashapeProject,
     onCloudPick,
     onRasterPick,
     onVideoPick,
@@ -1098,6 +1100,7 @@ provideAppContext({
   pickProjectFile,
   pickSfmFiles,
   pickSfmFolder,
+  pickInteropSource,
   posedImageCount,
   probeMapLayersAt,
   productViewerRefs,

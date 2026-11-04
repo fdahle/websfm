@@ -186,11 +186,11 @@ export function useFeatureImport() {
 
   // F-RANSAC and the acceptance gate of Match Features, per pair, over the worker pool.
   // → the entries importMatches takes (inliers only), and what became of the rest.
-  async function verify(pairs, kpsOf, onProgress) {
+  async function verify(pairs, kpsOf, onProgress, label = 'Keypoints & Matches import') {
     const settings = applyTuningOverrides('match', { ...MATCH_DEFAULTS, ...MATCH_TUNING })
     const workers = Math.max(1, Math.min(POOL_SIZE, pairs.length))
     log(
-      `Keypoints & Matches import: verifying ${pluralize(pairs.length, 'pair')} on ${pluralize(workers, 'worker')} ` +
+      `${label}: verifying ${pluralize(pairs.length, 'pair')} on ${pluralize(workers, 'worker')} ` +
         `(${settings.verifier === 'magsac' ? 'MAGSAC++' : 'RANSAC'} ${settings.ransacThreshPx} px)`,
       'info',
       'Import',
@@ -234,10 +234,61 @@ export function useFeatureImport() {
         inlierCount: result.inlierCount,
         verified: true,
         weak: verdict.weak,
-        source: 'text',
       }
     })
     return { entries: out.filter(Boolean), rejected, weak, workers }
+  }
+
+  /**
+   * Keypoints and index matches into the stores: the dialog's Import, and the Metashape
+   * project import. set { keypoints: Map uuid → { x, y, scale }, pairs: [{ uuidA, uuidB,
+   * idx }] }; options { keypoints, matches, verify, replaceMatches, source, label,
+   * onProgress }. Throws on a store error.
+   */
+  async function importFeatureSet(set, options) {
+    const source = options.source ?? 'text'
+    const label = options.label ?? 'Keypoints & Matches import'
+    const byUuid = new Map(imagesStore.images.map((img) => [img.uuid, img]))
+    const imported = new Map()
+    if (options.keypoints && set.keypoints.size) {
+      const entries = []
+      for (const [uuid, k] of set.keypoints) {
+        const kps = packKeypoints(k)
+        imported.set(uuid, kps)
+        entries.push({ uuid, keypoints: kps, descriptors: null, detector: 'external', source })
+      }
+      await imagesStore.importFeatures(entries, { invalidateMatches: true })
+    }
+    if (options.matches && set.pairs.length) {
+      // Without the set's keypoints, only pairs on keypoints the project has can go in.
+      const pairs = options.keypoints
+        ? set.pairs
+        : set.pairs.filter((p) => !set.keypoints.has(p.uuidA) && !set.keypoints.has(p.uuidB))
+      const kpsOf = async (uuid) => imported.get(uuid) ?? (await imagesStore.readKeypoints(byUuid.get(uuid)))
+      let entries, summary
+      if (options.verify) {
+        const r = await verify(pairs, kpsOf, options.onProgress, label)
+        entries = r.entries.map((e) => ({ ...e, source }))
+        summary =
+          `${pluralize(entries.length, 'pair')} verified` +
+          (r.weak ? ` (${r.weak} weak, kept to register cameras only)` : '') +
+          (r.rejected ? `, ${pluralize(r.rejected, 'pair')} rejected by the geometric check` : '')
+      } else {
+        entries = pairs.map((p) => ({
+          uuidA: p.uuidA,
+          uuidB: p.uuidB,
+          matches: p.idx,
+          rawCount: p.idx.length / 2,
+          inlierCount: p.idx.length / 2,
+          verified: true,
+          weak: false,
+          source,
+        }))
+        summary = `${pluralize(entries.length, 'pair')} taken as already verified`
+      }
+      await matchesStore.importMatches(entries, { replace: !!options.replaceMatches })
+      log(`${label}: ${summary}`, 'success', 'Import')
+    }
   }
 
   /** options { keypoints, matches, verify, replaceMatches } */
@@ -247,49 +298,12 @@ export function useFeatureImport() {
     s.status = 'importing'
     s.error = null
     try {
-      const byUuid = new Map(imagesStore.images.map((img) => [img.uuid, img]))
-      const imported = new Map()
-      if (options.keypoints && s.keypoints.size) {
-        const entries = []
-        for (const [uuid, k] of s.keypoints) {
-          const kps = packKeypoints(k)
-          imported.set(uuid, kps)
-          entries.push({ uuid, keypoints: kps, descriptors: null, detector: 'external', source: 'text' })
-        }
-        await imagesStore.importFeatures(entries, { invalidateMatches: true })
-      }
-      if (options.matches && s.pairs.length) {
-        // Without the files' keypoints, only pairs on keypoints the project has can go in.
-        const pairs = options.keypoints
-          ? s.pairs
-          : s.pairs.filter((p) => !s.keypoints.has(p.uuidA) && !s.keypoints.has(p.uuidB))
-        const kpsOf = async (uuid) => imported.get(uuid) ?? (await imagesStore.readKeypoints(byUuid.get(uuid)))
-        let entries, summary
-        if (options.verify) {
-          const r = await verify(pairs, kpsOf, (done, total) => {
-            s.progress = { done, total }
-          })
-          entries = r.entries
-          summary =
-            `${pluralize(entries.length, 'pair')} verified` +
-            (r.weak ? ` (${r.weak} weak, kept to register cameras only)` : '') +
-            (r.rejected ? `, ${pluralize(r.rejected, 'pair')} rejected by the geometric check` : '')
-        } else {
-          entries = pairs.map((p) => ({
-            uuidA: p.uuidA,
-            uuidB: p.uuidB,
-            matches: p.idx,
-            rawCount: p.idx.length / 2,
-            inlierCount: p.idx.length / 2,
-            verified: true,
-            weak: false,
-            source: 'text',
-          }))
-          summary = `${pluralize(entries.length, 'pair')} taken as already verified`
-        }
-        await matchesStore.importMatches(entries, { replace: !!options.replaceMatches })
-        log(`Keypoints & Matches import: ${summary}`, 'success', 'Import')
-      }
+      await importFeatureSet(s, {
+        ...options,
+        onProgress: (done, total) => {
+          s.progress = { done, total }
+        },
+      })
       closeFeatureImport()
     } catch (err) {
       s.status = 'ready'
@@ -298,5 +312,5 @@ export function useFeatureImport() {
     }
   }
 
-  return { featureImportSession: session, openFeatureImport, closeFeatureImport, commitFeatureImport }
+  return { featureImportSession: session, openFeatureImport, closeFeatureImport, commitFeatureImport, importFeatureSet }
 }

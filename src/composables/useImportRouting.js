@@ -10,6 +10,10 @@ import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../
 import { detectCameraMode } from '../core/io/cameraKind.js'
 import { detectFileKind, isColmapFile } from '../core/io/importKind.js'
 import { readMetashapeXml } from '../core/io/metashapeXml.js'
+import { readMetashapeProject } from './metashapeProjectFiles.js'
+import { makeNameResolver } from '../core/io/nameMatch.js'
+import { useFeatureImport } from './useFeatureImport.js'
+import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { parseFiducialObs } from '../core/io/fiducialObs.js'
 import { parseFiducialMarks } from '../core/io/fiducialMarks.js'
 import { sniffCloudFormat, looksLikeXyzText } from '../core/io/cloudImport.js'
@@ -58,6 +62,7 @@ export function useImportRouting({
   showSensors,
   showPoses,
 }) {
+  const { importFeatureSet } = useFeatureImport()
   const {
     gcpImportOpen,
     gcpImportText,
@@ -675,15 +680,59 @@ export function useImportRouting({
     metashapeImportData.value = { fileName: file.name, doc }
   }
 
+  // ── Import (a whole Metashape project: .psz, or a .psx folder) ───────────────
+  async function openMetashapeProject(files) {
+    const list = [...(files || [])]
+    if (!list.length) return
+    const name = list.find((f) => /\.ps[xz]$/i.test(f.name))?.name ?? 'the Metashape project'
+    log(`Metashape import: reading ${name}…`, 'info', 'Import')
+    try {
+      metashapeImportData.value = await readMetashapeProject(list)
+    } catch (err) {
+      readFailed('the Metashape project', { name }, err)
+    }
+  }
+
+  // A project's tie points (keypoints and matches), sparse model and mesh
+  // (core/io/metashapeProject.js), after the XML parts.
+  async function importMetashapeProjectParts({ features, model, mesh }) {
+    if (features) {
+      const resolve = makeNameResolver(useImagesStore().images, { key: 'uuid' })
+      const uuidOf = new Map(features.keypoints.map((k) => [k.label, resolve(k.label)]))
+      const keypoints = new Map()
+      for (const k of features.keypoints) {
+        const uuid = uuidOf.get(k.label)
+        if (uuid) keypoints.set(uuid, { x: k.x, y: k.y, scale: k.scale })
+      }
+      const pairs = features.pairs
+        .map((p) => ({ uuidA: uuidOf.get(p.a), uuidB: uuidOf.get(p.b), idx: p.idx }))
+        .filter((p) => p.uuidA && p.uuidB)
+      await importFeatureSet(
+        { keypoints, pairs },
+        {
+          keypoints: true,
+          matches: true,
+          verify: !!features.verify,
+          source: 'metashape',
+          label: 'Metashape import',
+        },
+      )
+    }
+    if (model) useReconstructionStore().importInteropModel(model)
+    if (mesh) importCloud(mesh, 'Metashape mesh')
+    if (model || mesh) activateTab('viewer')
+  }
+
   // The dialog's Import: each part through the importer it would take on its own.
-  async function onMetashapeImport({ sensorItems, poses, gcps, scaleBars = [], crs, verticalDatum }) {
+  async function onMetashapeImport({ sensorItems, poses, gcps, scaleBars = [], crs, verticalDatum, project = null }) {
     metashapeImportData.value = null
     if (sensorItems.length) await importSensors(sensorItems)
     if (poses.length) await addPoses(poses, crs)
     if (gcps.length)
       await addGcps(gcps, crs, {}, { convention: '1sigma', unit: 'metres', verticalDatum, rememberDefaults: false }, {})
     if (scaleBars.length) addMetashapeScaleBars(scaleBars)
-    if (poses.length || gcps.length) activateTab('map')
+    if (project) await importMetashapeProjectParts(project)
+    if ((poses.length || gcps.length) && !project?.model && !project?.mesh) activateTab('map')
     if (gcps.length) showGcps?.()
     else if (poses.length) showPoses?.()
     else if (sensorItems.length) showSensors?.()
@@ -775,6 +824,7 @@ export function useImportRouting({
     onCameraImport,
     onMetashapeImport,
     onMetashapePick,
+    openMetashapeProject,
     onGcpImport,
     onFootprintImport,
     onFiducialImport,

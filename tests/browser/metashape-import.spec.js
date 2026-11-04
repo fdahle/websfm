@@ -47,11 +47,15 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
   await openFixture(page)
 
   await page.getByRole('button', { name: 'Import', exact: true }).click()
-  const chooser = page.waitForEvent('filechooser')
   await page.locator('.ribbon').getByRole('button', { name: 'Metashape', exact: true }).click()
+  const chooser = page.waitForEvent('filechooser')
+  await page
+    .getByRole('dialog', { name: 'Import from Metashape' })
+    .getByRole('button', { name: /Cameras or markers XML/ })
+    .click()
   await (await chooser).setFiles(METASHAPE)
 
-  const dialog = page.getByRole('dialog', { name: 'Import Metashape Cameras' })
+  const dialog = page.getByRole('dialog', { name: 'Import from Metashape' })
   await expect(dialog).toContainText('of 42 cameras aligned')
   await expect(dialog).toContainText('5 photos of this project in EPSG:32617')
   await expect(dialog).toContainText('3 points')
@@ -184,5 +188,82 @@ test('exports the cameras, calibration and markers for Metashape', async ({ page
     expect(Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z)).toBeLessThan(1e-4)
     for (const k of ['omega', 'phi', 'kappa']) expect(Math.abs(p[k] - q[k])).toBeLessThan(1e-5)
   }
+  expect(errors).toEqual([])
+})
+
+// A whole project (.psz): its tie points become keypoints and matches, its aligned
+// cameras and tie points a sparse model, its mesh a mesh (core/io/metashapeProject.js).
+// tests/fixtures/metashape/aukerman-tiepoints.psz is six photos, three aligned; the
+// project here holds stand-ins of the same names and size, which is all the import reads.
+test('imports the tie points, sparse model and mesh of a Metashape project', async ({ page }) => {
+  test.setTimeout(120_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.evaluate(async () => {
+    const files = await Promise.all(
+      ['DSC00290', 'DSC00291', 'DSC00292', 'DSC00293', 'DSC00294', 'DSC00295'].map(async (n) => {
+        const canvas = new OffscreenCanvas(2400, 1800)
+        canvas.getContext('2d').fillRect(0, 0, 10, 10)
+        return new File([await canvas.convertToBlob({ type: 'image/jpeg' })], `${n}.JPG`, { type: 'image/jpeg' })
+      }),
+    )
+    await (await import('/src/stores/useImagesStore.js')).useImagesStore().addImages(files)
+  })
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          (await import('/src/stores/useImagesStore.js')).useImagesStore().images.filter((i) => i.meta?.width === 2400)
+            .length,
+      ),
+    )
+    .toBe(6)
+
+  await page.getByRole('button', { name: 'Import', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Metashape', exact: true }).click()
+  const chooser = page.waitForEvent('filechooser')
+  await page
+    .getByRole('dialog', { name: 'Import from Metashape' })
+    .getByRole('button', { name: /Project file/ })
+    .click()
+  await (
+    await chooser
+  ).setFiles(fileURLToPath(new URL('../fixtures/metashape/aukerman-tiepoints.psz', import.meta.url)))
+
+  const dialog = page.getByRole('dialog', { name: 'Import from Metashape' })
+  await expect(dialog).toContainText('Metashape project')
+  await expect(dialog).toContainText('the tie points of 6 photos, 10 pairs')
+  await expect(dialog).toContainText('3 aligned cameras, 169 tie points')
+  await expect(dialog).toContainText('535 triangles')
+  await expect(dialog).toContainText('Not read: the dense cloud')
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const recon = (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore()
+        return recon.clouds.map((c) => `${c.kind} ${c.kind === 'sparse' ? c.cameras.size : c.count}`).sort()
+      }),
+    )
+    .toEqual(['mesh 535', 'sparse 3'])
+  const got = await page.evaluate(async () => {
+    const images = (await import('/src/stores/useImagesStore.js')).useImagesStore().images
+    const matches = (await import('/src/stores/useMatchesStore.js')).useMatchesStore()
+    const sparse = (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore().mainSparseCloud
+    return {
+      keypoints: images.map((i) => i.kpCount),
+      pairs: matches.matchStore.size,
+      matches: [...matches.matchStore.values()].reduce((n, e) => n + e.inlierCount, 0),
+      points: sparse.points.length,
+    }
+  })
+  expect(got.keypoints).toEqual([131, 176, 150, 175, 103, 23])
+  expect(got.pairs).toBe(10)
+  expect(got.matches).toBe(416)
+  expect(got.points).toBe(169)
   expect(errors).toEqual([])
 })
