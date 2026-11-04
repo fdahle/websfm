@@ -3,6 +3,7 @@ import { terminateAll } from '../workers/computeClient.js'
 import { useModelsStore } from '../stores/useModelsStore.js'
 import { useLog } from './useLog.js'
 import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
+import { FUSION_STEPS, SPARSE_STEPS } from '../core/runSteps.js'
 
 // images:           Ref<Array>    — current image list, used to count pending work
 // detectAll:        function      — from useImagesStore
@@ -43,6 +44,11 @@ export function usePipeline({
   // progress modal measures its rate afresh per phase: a phase given the wrong share of
   // the bar then only skews the estimate until the next phase begins.
   const progressPhase = ref('')
+  // The run's steps (core/runSteps.js) and the ids that have reported, for the dialog's
+  // step list; empty for a run of one step.
+  const progressSteps = ref([])
+  const progressSeen = ref([])
+  let seenPhases = new Set()
   // Authoritative bar value, 0..1 and monotonic — NOT current/total. A stage whose
   // `total` grows mid-run (matchAll) or whose counter restarts per sub-run (SfM seed
   // retries / secondary models) would otherwise drive the bar backwards.
@@ -98,7 +104,10 @@ export function usePipeline({
     // The label is the user's "it moved on" signal and changes rarely (per image or
     // per phase, not per pair), so it is never worth withholding for the timer.
     if (progressLabel.value !== pendingProgress.label) progressLabel.value = pendingProgress.label
-    if (progressPhase.value !== pendingProgress.phase) progressPhase.value = pendingProgress.phase
+    if (progressPhase.value !== pendingProgress.phase) {
+      progressPhase.value = pendingProgress.phase
+      progressSeen.value = [...seenPhases]
+    }
   }
 
   function scheduleFlush() {
@@ -116,8 +125,11 @@ export function usePipeline({
 
   // The single progress sink for every stage. `fraction` overrides done/total as the
   // bar value (the SfM phase plan supplies one); otherwise it derives from the count.
-  // `phase` (optional) names the part of the stage running now (progressPhase).
-  function report(done, total, label, fraction, phase) {
+  // `phase` (optional) names the part of the stage running now (progressPhase), and
+  // `steps` (optional) declares the run's step list once it knows it (core/runSteps.js).
+  function report(done, total, label, fraction, phase, steps) {
+    if (Array.isArray(steps)) progressSteps.value = steps
+    if (phase) seenPhases.add(phase)
     const raw = fraction != null ? fraction : total > 0 ? done / total : 0
     // Monotonic: a stage may legitimately re-count (per-phase totals, restarted
     // sub-runs), but the bar must never retreat — a reversal reads as a failure.
@@ -149,9 +161,12 @@ export function usePipeline({
     return useModelsStore().ensureReady(ids)
   }
 
-  function openProgress(title, total = 0, onCancel = null, { indeterminate = false, unit = '' } = {}) {
+  function openProgress(title, total = 0, onCancel = null, { indeterminate = false, unit = '', steps = [] } = {}) {
     cancelScheduledFlush()
     progressTitle.value = title
+    progressSteps.value = steps
+    progressSeen.value = []
+    seenPhases = new Set()
     progressCurrent.value = 0
     progressTotal.value = total
     progressLabel.value = ''
@@ -273,7 +288,9 @@ export function usePipeline({
     if (ready.length < 2) return refused('Sparse reconstruction requires at least two images with keypoints')
     // Reconstruct is a single worker call — cancel by terminating the worker
     // (the store catches the resulting rejection and resets its status).
-    openProgress('Sparse Reconstruction', ready.length, () => terminateAll('reconstruction cancelled'))
+    openProgress('Sparse Reconstruction', ready.length, () => terminateAll('reconstruction cancelled'), {
+      steps: SPARSE_STEPS,
+    })
     await reconstruct(settings, report)
     return finishRun()
   }
@@ -294,6 +311,7 @@ export function usePipeline({
     openProgress('Building Dense Cloud', 1, () => terminateAll('densify cancelled'), {
       indeterminate: true,
       unit: 'maps',
+      steps: FUSION_STEPS,
     })
     await densify(settings, report)
     return finishRun()
@@ -371,6 +389,8 @@ export function usePipeline({
     progressLabel,
     progressUnit,
     progressPhase,
+    progressSteps,
+    progressSeen,
     progressFraction,
     progressIndeterminate,
     progressComplete,

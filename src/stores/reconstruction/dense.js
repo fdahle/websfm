@@ -1,4 +1,5 @@
 import { toRaw } from 'vue'
+import { depthMapSteps, MESH_STEPS } from '../../core/runSteps.js'
 import { computeSourceOf } from '../../utils/image.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
@@ -390,6 +391,23 @@ export function createDense({
         },
         resume: journal ? (journal.phase === 'pass1' ? journal.done : journal.metas) : kept.length ? kept : null,
       })
+      // The progress dialog's step list (core/runSteps.js), now the method is known. An
+      // in-memory run (no project storage) filters inside its one pass.
+      const withPhase = (cb, phase) => cb && ((d, t, lbl, f) => cb(d, t, lbl, f, phase))
+      {
+        const steps = depthMapSteps({
+          geomPass: !!run && settings.geomPass && inputImages.length > 1,
+          filter: !!run && settings.geomConsistency !== false,
+        })
+        const from = journal?.phase
+        const phase =
+          from === 'pass2' || from === 'promote'
+            ? 'pass2'
+            : from?.startsWith('filter') || from === 'promoteFilter'
+              ? 'filter'
+              : 'pass1'
+        onProgress?.(0, inputImages.length, 'Starting the depth maps…', 0, phase, steps)
+      }
       // The saved index lists only the kept maps from here on: the run overwrites the
       // planes of the others, and a run that stops must not leave an index naming them.
       if (run && kept.length && savedIndex && kept.length < savedIndex.maps.length)
@@ -450,7 +468,7 @@ export function createDense({
           inputImages,
           sparse,
           withRegion({ ...settings, streamMaps: !!run }),
-          offset(saved1.size),
+          withPhase(offset(saved1.size), 'pass1'),
           run
             ? (m, ack) => {
                 takePreview(m)
@@ -493,7 +511,7 @@ export function createDense({
               inputImages,
               sparse,
               withRegion({ ...settings, streamMaps: true }),
-              offset(saved2.size),
+              withPhase(offset(saved2.size), 'pass2'),
               (m, ack) => {
                 takePreview(m)
                 const { meta, buffers } = serializeDepthMap(m)
@@ -543,7 +561,14 @@ export function createDense({
             const judge = keptUuids.size
               ? new Set(run.metas.filter((m) => !keptUuids.has(m.uuid)).map((m) => m.uuid))
               : null
-            stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress, judge)
+            stageSummary = await filterSavedDepthMaps(
+              run,
+              settings,
+              stageSummary,
+              loopShare,
+              withPhase(onProgress, 'filter'),
+              judge,
+            )
             journal.summary = stageSummary
             await setPhase('promoteFilter')
           }
@@ -1260,7 +1285,10 @@ export function createDense({
   async function meshOnPool(input, transfer, settings, onProgress) {
     const onLog = (m, l, c) => log(m, l, c)
     const runId = `mesh-${Date.now().toString(36)}`
-    const prep = await workerMeshPrepare({ ...input, runId }, { worker: 0, onLog, onProgress, transfer })
+    const prep = await workerMeshPrepare(
+      { ...input, runId },
+      { worker: 0, onLog, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f, 'prepare'), transfer },
+    )
     if (prep.mesh) return prep
     const { share, tiles: n } = prep
     const tiles = share.tiling.tiles
@@ -1277,8 +1305,10 @@ export function createDense({
     const done = new Float64Array(n)
     const report = (lbl) => {
       const f = done.reduce((a, b) => a + b, 0) / n
-      onProgress?.(Math.round(f * n), n, lbl, (1 - JOIN) * f)
+      onProgress?.(Math.round(f * n), n, lbl, (1 - JOIN) * f, 'tiles')
     }
+    // A mesh in tiles has steps (core/runSteps.js); one in a single piece has none to show.
+    onProgress?.(0, n, `Meshing ${n} tiles…`, 0, 'tiles', MESH_STEPS)
     // Largest tiles first, so the pool does not end on one long straggler.
     const queue = tiles.map((_, i) => i).sort((a, b) => tiles[b].samples - tiles[a].samples)
     const results = new Array(n)
@@ -1302,7 +1332,7 @@ export function createDense({
       }
     }
     await Promise.all(Array.from({ length: workers }, (_, w) => runner(w)))
-    onProgress?.(n, n, 'Joining the tiles…', 1 - JOIN)
+    onProgress?.(n, n, 'Joining the tiles…', 1 - JOIN, 'join')
     return workerMeshFinish({ runId, results }, { worker: 0, onLog })
   }
 

@@ -43,7 +43,8 @@ export function phaseOffsets(phases = SFM_PHASES) {
  *
  * `report(phaseKey, local, label, counts)` — `local` is 0..1 progress *within* the
  * phase (clamped), `counts` an optional `{ done, total }` for the numeric readout.
- * Emits `onProgress(done, total, label, globalFraction)`.
+ * Emits `onProgress(done, total, label, globalFraction, phaseKey)`: the key names the step
+ * for the progress dialog's step list (core/runSteps.js SPARSE_STEPS).
  *
  * `start`/`end` carve out this run's slice of the overall bar, which is what lets a
  * secondary model report its own honest 0..1 without touching the parent's range.
@@ -57,7 +58,7 @@ export function makeProgressReporter(onProgress, { start = 0, end = 1, phases = 
     if (!ph) return
     const clamped = Math.min(1, Math.max(0, local))
     const fraction = start + span * (ph.start + ph.span * clamped)
-    onProgress(counts.done ?? 0, counts.total ?? 0, label ?? ph.label, fraction)
+    onProgress(counts.done ?? 0, counts.total ?? 0, label ?? ph.label, fraction, phaseKey)
   }
 }
 
@@ -71,12 +72,12 @@ export function makeProgressReporter(onProgress, { start = 0, end = 1, phases = 
 export function scopeProgress(onProgress, { start, end, decorate } = {}) {
   if (!onProgress) return undefined
   const span = Math.max(0, end - start)
-  return (done, total, label, fraction) => {
+  return (done, total, label, fraction, phase) => {
     // A child that reports no fraction (an older/plain hook) contributes only its
     // label — better a stalled-but-honest bar than one that jumps to the slice end.
     const local = fraction == null ? null : Math.min(1, Math.max(0, fraction))
     const text = decorate ? decorate(label) : label
-    onProgress(done, total, text, local == null ? undefined : start + span * local)
+    onProgress(done, total, text, local == null ? undefined : start + span * local, phase)
   }
 }
 

@@ -98,6 +98,8 @@ const {
   progressLabel,
   progressOpen,
   progressPhase,
+  progressSteps,
+  progressSeen,
   progressTitle,
   progressTotal,
   progressUnit,
@@ -266,6 +268,8 @@ const progressSpotlight = computed(() =>
       :unit="progressUnit"
       :fraction="progressFraction"
       :phase="progressPhase"
+      :steps="progressSteps"
+      :seen="progressSeen"
       :indeterminate="progressIndeterminate"
       :complete="progressComplete"
       :cancelling="progressCancelling"

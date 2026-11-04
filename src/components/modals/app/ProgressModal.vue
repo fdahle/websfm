@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { formatClock, formatRemaining } from '../../../utils/timeFormat.js'
+import { stepStates } from '../../../core/runSteps.js'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -14,6 +15,10 @@ const props = defineProps({
   // The stage's current phase, when it names one (usePipeline progressPhase). The ETA
   // is measured afresh from each phase's start (see the estimator below).
   phase: { type: String, default: '' },
+  // The run's steps and the ids that have reported (usePipeline progressSteps /
+  // progressSeen): a list under the bar, the running step with its own count and bar.
+  steps: { type: Array, default: () => [] },
+  seen: { type: Array, default: () => [] },
   indeterminate: { type: Boolean, default: false },
   complete: { type: Boolean, default: false },
   cancelling: { type: Boolean, default: false },
@@ -51,6 +56,14 @@ const subPct = computed(() => Math.round((props.current - Math.floor(props.curre
 // The count readout is noise when there is nothing to count (the single-call product
 // ops report 1/1); those stages carry the label alone.
 const showCount = computed(() => props.total > 1)
+
+// The step list, for a run of more than one step. The overall bar stays on top; the
+// running step's own bar is its count (a stage counts afresh in each step: images,
+// then maps), so it says how far this step is, where the overall bar says the run.
+const stepRows = computed(() => (props.steps.length > 1 ? stepStates(props.steps, props.phase, props.seen) : []))
+const stepPct = computed(() => (props.total > 1 ? Math.min(100, Math.floor((100 * props.current) / props.total)) : 0))
+const STEP_MARK = { done: '✓', running: '●', todo: '○', skipped: '–' }
+const STEP_TITLE = { done: 'Done', running: 'Running', todo: 'Still to come', skipped: 'Not needed in this run' }
 
 // Built here rather than interpolated in the template: Vue's whitespace: 'condense'
 // strips a leading whitespace-only text node inside an element, so the space before
@@ -372,9 +385,19 @@ onBeforeUnmount(() => {
       <!-- The phase label carries as much weight as the number: on a long dense run
            "Filtering depth maps (cross-view)" is more reassuring than "63%". -->
       <div v-if="label" class="progress-phase" :title="label">{{ label }}</div>
+      <ol v-if="stepRows.length" class="steps" aria-label="Steps">
+        <li v-for="s in stepRows" :key="s.id" class="step" :class="s.state" :title="STEP_TITLE[s.state]">
+          <span class="step-mark" aria-hidden="true">{{ STEP_MARK[s.state] }}</span>
+          <span class="step-label">{{ s.label }}</span>
+          <template v-if="s.state === 'running' && showCount && !complete">
+            <span class="step-count">{{ countText }}</span>
+            <span class="step-track"><span class="step-fill" :style="{ width: stepPct + '%' }"></span></span>
+          </template>
+        </li>
+      </ol>
       <div class="progress-sub">
         <span class="progress-count">
-          <template v-if="showCount">{{ countText }} · </template>
+          <template v-if="showCount && !stepRows.length">{{ countText }} · </template>
           <span class="progress-time" title="Elapsed time">⏱ {{ elapsed }}</span>
           <!-- The separator carries a literal &nbsp;: the whitespace between these two
                elements is a whitespace-only text node containing a newline, which Vue's
@@ -518,6 +541,50 @@ onBeforeUnmount(() => {
   opacity: 0.45;
 }
 
+.steps {
+  list-style: none;
+  margin: 8px 0 4px;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+.step {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  column-gap: 6px;
+  align-items: center;
+  color: var(--text-dim);
+}
+.step.running {
+  color: var(--text);
+}
+.step.skipped .step-label {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.step-mark {
+  text-align: center;
+}
+.step.done .step-mark {
+  color: var(--accent);
+}
+.step-count {
+  font-variant-numeric: tabular-nums;
+}
+.step-track {
+  grid-column: 2 / -1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--panel-border);
+  overflow: hidden;
+}
+.step-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
 .progress-phase {
   font-size: 12px;
   color: var(--text);

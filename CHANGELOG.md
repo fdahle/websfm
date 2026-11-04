@@ -6,6 +6,11 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Runs show their steps.** The progress dialog of Sparse Model, Depth Maps, Dense
+  Cloud and a mesh in tiles lists the run's steps under the bar (for Depth Maps:
+  PatchMatch, the geometric pass of the Full method, the cross-view filter), ticks the
+  ones done and gives the running one its own count and bar; a step the run leaves out
+  is struck through. The bar on top still shows the whole run.
 - **Keypoints and matches from text or CSV.** Import ▸ **Keypoints & Matches** reads what
   another detector or matcher writes: keypoints as an `image,x,y` table, one file per
   image or Lowe's `.key`, and matches as COLMAP's match list, an `imageA,imageB,indexA,

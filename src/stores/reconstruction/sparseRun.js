@@ -665,7 +665,7 @@ export function createSparseRun({
       input.liveSnapshots = true
       let packedResult = await workerReconstruct(input, {
         onLog: (message, level, category) => log(message, level, category),
-        onProgress: (done, total, label, fraction) => onProgress?.(done, total, label, fraction),
+        onProgress: (done, total, label, fraction, phase) => onProgress?.(done, total, label, fraction, phase),
         onEvent: (ev, [snap]) => {
           if (ev === 'snapshot' && projects.currentProjectId === runProjectId) showLive(snap)
         },

@@ -20,7 +20,7 @@ export function makeSfmOps() {
       onLog: (message, level, category) => emit('log', [message, level, category]),
       // `fraction` is the phase-weighted 0..1 bar value (core/sfm/progressPlan.js);
       // done/total ride along as the numeric readout only.
-      onProgress: (done, total, label, fraction) => emit('progress', [done, total, label, fraction]),
+      onProgress: (done, total, label, fraction, phase) => emit('progress', [done, total, label, fraction, phase]),
       // The model so far, for the live 3D view; its positions are transferred.
       ...(input.liveSnapshots
         ? {
