@@ -99,3 +99,7 @@ A red note at the bottom right opens the console on an error. Read the log first
 records skipped images, thresholds, memory decisions and the failing stage. Then check
 the Quality Report. Change one setting at a time, rerun the earliest affected stage, and
 compare.
+
+To report a bug, **Other ▸ System info ▸ Copy for bug report** copies your browser, OS,
+GPU, memory and storage as text to paste into the report; it holds nothing about the
+project. The console's **Save TXT** starts with the same lines.

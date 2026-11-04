@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Copy for bug report.** Other ▸ System info has a button that copies your browser and
+  OS, GPU, CPU cores, memory, WebGPU and storage as a few lines of text, to paste into a
+  bug report; nothing about the project is included, and nothing is sent anywhere. The
+  console's Save TXT starts with the same lines, and System info now names the browser.
 - **A toolbox while you mark a scale-bar point.** After *Mark point in photos* in Set
   Real-World Scale, a small Scale bar toolbox stays over the workspace: which point is
   being marked, in how many photos so far, and *Back to scale bars* or *Stop*.

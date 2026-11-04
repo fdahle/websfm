@@ -3,18 +3,25 @@ import { formatBytes } from '../../../core/formatBytes.js'
 // Hardware / capability / storage diagnostics. Split out of the About modal
 // (which is now identity + acknowledgments + licenses) because this is a
 // different job: what you point a user at when debugging "what GPU / is SIMD on
-// / how much OPFS is left".
+// / how much OPFS is left". Copy for bug report puts the same facts on the
+// clipboard as a few lines of text (core/systemSummary.js), for the user to paste
+// into an issue themselves.
 import { ref, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import * as opfs from '../../../utils/opfs.js'
 import ModalShell from '../ui/ModalShell.vue'
-import { featureReport } from '../../../core/browserSupport.js'
-import { browserCaps, wasmSimdSupported } from '../../../utils/browserCaps.js'
+import { collectSystemInfo } from '../../../utils/systemInfo.js'
+import { systemSummaryText } from '../../../core/systemSummary.js'
+import { copyToClipboard } from '../../../composables/useToasts.js'
+import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 
 const emit = defineEmits(['close'])
+const { currentProject } = storeToRefs(useProjectsStore())
 
 const gpu = ref('Detecting…')
 const cores = ref(navigator.hardwareConcurrency || 'Unknown')
 const memory = ref(navigator.deviceMemory ? `${navigator.deviceMemory} GB` : 'Unknown')
+const browserLine = ref('Detecting…')
 const webgl2 = ref(false)
 const webgpu = ref(false)
 const wasmSimd = ref(false)
@@ -25,56 +32,33 @@ const opfsAvailable = ref(false)
 const opfsDurable = ref(false)
 const opfsUsed = ref(null)
 const opfsQuota = ref(null)
+const info = ref(null)
 
 onMounted(async () => {
-  const canvas = document.createElement('canvas')
-  const gl2 = canvas.getContext('webgl2')
-  webgl2.value = !!gl2
-
-  const gl = gl2 || canvas.getContext('webgl')
-  if (gl) {
-    // The extension constant is UNMASKED_RENDERER_WEBGL — the WEBGL_-prefixed
-    // spelling is the *extension* name, not a member, so reading it yields
-    // undefined and getParameter(undefined) returns null (a blank field, no error).
-    // Chrome also hides the extension behind privacy settings, hence the RENDERER
-    // fallback (generic, but never empty).
-    const ext = gl.getExtension('WEBGL_debug_renderer_info')
-    const renderer = (ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER)
-    gpu.value = renderer || 'Unknown'
-  } else {
-    gpu.value = 'No WebGL'
-  }
-
-  webgpu.value = !!navigator.gpu
-  // WebGPU reports the real adapter on engines that mask it in WebGL.
-  if (navigator.gpu) {
-    try {
-      const adapter = await navigator.gpu.requestAdapter()
-      const info = adapter && (adapter.info || (adapter.requestAdapterInfo && (await adapter.requestAdapterInfo())))
-      const desc = [info?.description, info?.device, info?.vendor].find((s) => s)
-      if (desc && (!gpu.value || gpu.value === 'Unknown')) gpu.value = desc
-    } catch {
-      /* adapter info is best-effort */
-    }
-  }
-
-  wasmSimd.value = wasmSimdSupported()
-  support.value = featureReport(await browserCaps())
-
+  const i = await collectSystemInfo({ project: currentProject.value })
+  info.value = i
+  gpu.value = i.gpu || 'Unknown'
+  browserLine.value = `${i.browser} on ${i.os}`
+  webgl2.value = !!i.webgl2
+  webgpu.value = !!i.webgpu
+  wasmSimd.value = !!i.simd
+  support.value = i.support
   opfsAvailable.value = await opfs.isAvailable()
-  if (opfsAvailable.value) {
-    opfsDurable.value = await navigator.storage.persisted()
-    const estimate = await opfs.getQuota()
-    opfsUsed.value = estimate.usage ?? null
-    opfsQuota.value = estimate.quota ?? null
-  }
+  opfsDurable.value = !!i.storage.durable
+  opfsUsed.value = i.storage.used ?? null
+  opfsQuota.value = i.storage.quota ?? null
 })
+
+const copySummary = () => info.value && copyToClipboard(systemSummaryText(info.value), 'system summary')
 </script>
 
 <template>
   <ModalShell title="System info" aria-label="System info" @close="emit('close')">
     <div class="section-label">System</div>
     <div class="info-grid">
+      <span class="info-key">Browser</span>
+      <span class="info-val">{{ browserLine }}</span>
+
       <span class="info-key">GPU</span>
       <span class="info-val gpu-val">{{ gpu }}</span>
 
@@ -129,6 +113,18 @@ onMounted(async () => {
     </div>
 
     <template #footer>
+      <button
+        class="btn"
+        :disabled="!info"
+        :title="
+          info
+            ? 'Copy browser, OS, GPU, memory and storage as text, to paste into a bug report. Nothing about your project is included.'
+            : 'Wait for the checks to finish'
+        "
+        @click="copySummary"
+      >
+        Copy for bug report
+      </button>
       <button class="btn" @click="emit('close')">Close</button>
     </template>
   </ModalShell>

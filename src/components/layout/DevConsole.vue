@@ -6,6 +6,8 @@ import { askConfirm } from '../../composables/useConfirmations.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useCommands } from '../../composables/useCommands.js'
 import { commonPrefix } from '../../core/help/commands.js'
+import { collectSystemInfo } from '../../utils/systemInfo.js'
+import { systemSummaryLines } from '../../core/systemSummary.js'
 
 // The command prompt runs through the console environment App builds (useConsoleEnv:
 // the ribbon's dispatch and guard state, the workflow runner, the stores the verbs use).
@@ -360,7 +362,15 @@ async function saveTxt() {
     if (!exportDebug.value && e.level === 'debug') return false
     return true
   })
-  const lines = src.map(fmt)
+  // The file starts with the machine it ran on (core/systemSummary.js): what a bug
+  // report asks for first, and nothing about the project the log does not already say.
+  let head = []
+  try {
+    head = [...systemSummaryLines(await collectSystemInfo({ project: projects.currentProject })), '']
+  } catch {
+    /* the log alone */
+  }
+  const lines = [...head, ...src.map(fmt)]
   const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

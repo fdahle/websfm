@@ -111,3 +111,21 @@ test("What's New does not link glossary terms", async ({ page }) => {
   await expect(dialog.locator('a.glossary-link')).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+test('System info copies a summary for a bug report, with nothing about the project', async ({ page, context }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await createProject(page)
+  await page.getByRole('button', { name: 'Other', exact: true }).click()
+  await page.getByRole('button', { name: 'System info', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'System info' })
+  const copy = dialog.getByRole('button', { name: 'Copy for bug report' })
+  await expect(copy).toBeEnabled()
+  await copy.click()
+  const text = await page.evaluate(() => navigator.clipboard.readText())
+  expect(text).toMatch(/^WebSfM \d+\.\d+\.\d+\nBrowser: Chrom[^\n]+ on /)
+  expect(text).toMatch(/\nGPU: /)
+  expect(text).toMatch(/\nProject: in browser storage/)
+  expect(errors).toEqual([])
+})
