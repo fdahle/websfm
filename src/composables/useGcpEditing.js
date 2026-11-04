@@ -371,6 +371,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     pickGcpFromReference,
     startMarkingPoint,
     exitGcpEdit,
+    scaleSetupMarkerId,
     jumpToImage,
     openGcpView,
     removeGcpAndCloseTab,

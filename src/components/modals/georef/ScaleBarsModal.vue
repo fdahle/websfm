@@ -128,6 +128,17 @@ const canApply = computed(
     recon.sparseCameras.size > 0 &&
     scaleBars.bars.some((bar) => bar.enabled !== false && barReady(bar)),
 )
+// Why a button is greyed out (its tooltip).
+const NO_MODEL = 'Build the sparse model first (Reconstruct ▸ Sparse Model): points are marked in aligned photos.'
+const applyReason = computed(() =>
+  canApply.value
+    ? null
+    : applying.value
+      ? 'Working…'
+      : !recon.sparseCameras.size
+        ? NO_MODEL
+        : 'Needs a distance with both points marked in two photos and its real length entered.',
+)
 const setupBar = computed(() => {
   const unfinished = [...scaleBars.bars].reverse().find((bar) => !barReady(bar))
   return unfinished ?? scaleBars.bars.at(-1) ?? null
@@ -297,6 +308,7 @@ const statusLine = computed(() => {
         <button
           class="btn btn-primary workflow-action"
           :disabled="!recon.sparseCameras.size"
+          :title="recon.sparseCameras.size ? null : NO_MODEL"
           @click="markGuidedEndpoint"
         >
           {{ guidedAction.label }}
@@ -317,7 +329,11 @@ const statusLine = computed(() => {
         <button
           class="btn"
           :disabled="!recon.sparseCameras.size"
-          title="Add a row and choose from points or registered camera centres that already exist"
+          :title="
+            recon.sparseCameras.size
+              ? 'Add a row and choose from points or registered camera centres that already exist'
+              : NO_MODEL
+          "
           @click="addBarFromExisting"
         >
           + Use existing points
@@ -451,7 +467,7 @@ const statusLine = computed(() => {
         marks each time it is used.
       </span>
       <button class="btn" @click="emit('close')">Close</button>
-      <button class="btn btn-primary" :disabled="!canApply" @click="apply">
+      <button class="btn btn-primary" :disabled="!canApply" :title="applyReason" @click="apply">
         {{ applying ? 'Working…' : resolved.source === 'scalebars' ? 'Recalculate scale' : 'Set project scale' }}
       </button>
     </template>

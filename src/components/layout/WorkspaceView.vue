@@ -9,6 +9,7 @@ import { usePosesStore } from '../../stores/usePosesStore.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../../stores/useSensorsStore.js'
+import { useModalsStore } from '../../stores/useModalsStore.js'
 import { useImageViewSettings } from '../../composables/useImageViewSettings.js'
 import { useTabDrag } from '../../composables/useTabDrag.js'
 import { useTheme } from '../../composables/useTheme.js'
@@ -22,6 +23,7 @@ import ViewerGcp from '../viewers/ViewerGcp.vue'
 import RegionToolbox from '../viewers/RegionToolbox.vue'
 import OrientToolbox from '../viewers/OrientToolbox.vue'
 import AlignPairsToolbox from '../viewers/AlignPairsToolbox.vue'
+import ScaleBarMarkingToolbox from '../viewers/ScaleBarMarkingToolbox.vue'
 import TabContextMenu from './TabContextMenu.vue'
 const ProductViewer = defineAsyncComponent(() => import('../viewers/ProductViewer.vue'))
 const ViewerMap = defineAsyncComponent(() => import('../viewers/ViewerMap.vue'))
@@ -115,6 +117,7 @@ const {
   selectGcp,
   jumpToImage,
   exitGcpEdit,
+  scaleSetupMarkerId,
   setGcpGroundPosition,
   addGcpAtCoord,
   pickGcpFromReference,
@@ -129,6 +132,17 @@ const {
   fiducialDisplayForImage,
   markDisplayedFiducial,
 } = useAppContext()
+
+// The scale-bar point being marked (useGcpEditing), and the photos it is marked in.
+const scaleBarPoint = computed(() => {
+  const g = scaleSetupMarkerId.value != null ? gcps.value.find((p) => p.id === scaleSetupMarkerId.value) : null
+  return g ? { name: g.name, marked: (g.observations ?? []).map((o) => o.imageName) } : null
+})
+const modals = useModalsStore()
+function backToScaleBars() {
+  exitGcpEdit()
+  modals.scaleBarsOpen = true
+}
 
 const setViewer = (el) => {
   viewerRef.value = el
@@ -478,6 +492,17 @@ watch(activeTabId, (id) => {
           @pick-gcp="(pick) => pickGcpFromReference(tab.rasterId, pick)"
         />
       </template>
+
+      <!-- A scale-bar point handed from Set Real-World Scale to be marked: over every
+           tab, so it shows where marking stands and leads back to the dialog. -->
+      <ScaleBarMarkingToolbox
+        v-if="scaleBarPoint"
+        :name="scaleBarPoint.name"
+        :marked="scaleBarPoint.marked"
+        :on-photo="activeTab?.type === 'image'"
+        @back="backToScaleBars"
+        @stop="exitGcpEdit"
+      />
     </div>
   </main>
 
