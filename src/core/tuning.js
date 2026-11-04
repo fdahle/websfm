@@ -19,6 +19,12 @@
 // Conservative: a 5000×4735 (23.7 MP) input was the observed failure; ≈4000×4000 leaves
 // margin, and the worker's rethrow is the true backstop if a larger input slips past.
 export const DETECT_TUNING = {
+  // The largest image one untiled SIFT pass holds (pixels at the detection size). The
+  // crate's peak is ~60 B/px of wasm memory (measured 2026-11-04, Node, synthetic
+  // texture: 4 MP 231 MB, 16 MP 917 MB, 36 MP 2.06 GB, 64 MP 3.66 GB), and wasm32 stops
+  // at 4 GiB: 74 MP and 100 MP failed ("unreachable"). Above this the Detect Features
+  // dialog asks for Tiling (core/features/detectPlan.js); a tile is far below it.
+  siftOnePassMaxPx: 64e6,
   // How often a detection run's journal (core/runJournal.js) is rewritten while images
   // finish (each image's features are saved as it finishes). `_journalMs` in a run's
   // settings overrides it; the tests use 0.

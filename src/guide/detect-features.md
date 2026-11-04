@@ -49,7 +49,8 @@ the area too.
 The long side, in pixels, each image is reduced to before detection. Higher finds finer
 texture on large scans, at more cost in detection and matching. Raise it for film scans
 and large aerial frames; lower it for a quick pass. DISK and ALIKED need far more memory
-per pixel, so they start lower.
+per pixel, so they start lower. There is no upper limit; past about 64 MP per image SIFT
+needs Tiling, and the dialog warns about a size no image can reach.
 
 ## Contrast threshold
 <!-- param: contrastThreshold default: 0.01 -->

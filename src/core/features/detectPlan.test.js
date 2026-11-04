@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { planImageDetection, planDetection, plannedTileSize, LEARNED_AUTO_TILE_MAX } from './detectPlan.js'
+import {
+  planImageDetection,
+  planDetection,
+  plannedTileSize,
+  detectionLimits,
+  LEARNED_AUTO_TILE_MAX,
+} from './detectPlan.js'
 import { autoTileSize } from './tiling.js'
 
 const sift = (extra = {}) => ({
@@ -70,5 +76,33 @@ describe('planDetection', () => {
 
   it('is null until an image has a size', () => {
     expect(planDetection([{}], sift())).toBeNull()
+  })
+})
+
+describe('detectionLimits', () => {
+  const sizes = [
+    { width: 6000, height: 4000 }, // 24 MP
+    { width: 20000, height: 20000 }, // 400 MP native
+  ]
+  it('asks for tiling when SIFT would hold a large image in one piece', () => {
+    const p = planDetection(sizes, { maxDim: 12000, tiling: 'off' })
+    expect(p.onePass).toEqual({ count: 1, largest: { width: 12000, height: 12000 } })
+    expect(p.tooLarge.count).toBe(0)
+    // Tiled, or a learned detector (it tiles for the GPU): nothing to say.
+    expect(planDetection(sizes, { maxDim: 12000, tiling: 'on' }).onePass.count).toBe(0)
+    expect(planDetection(sizes, { maxDim: 12000, tiling: 'off', detector: 'disk' }).onePass.count).toBe(0)
+    // At the default resolution every image fits one pass.
+    expect(planDetection(sizes, { maxDim: 2400, tiling: 'off' }).onePass.count).toBe(0)
+  })
+  it('names images whose resized raster cannot exist, whatever the tiling', () => {
+    const p = planDetection(sizes, { maxDim: 20000, tiling: 'on' })
+    expect(p.tooLarge).toEqual({ count: 1, largest: { width: 20000, height: 20000 } })
+    // Not counted twice: tiling cannot help those.
+    expect(planDetection(sizes, { maxDim: 20000, tiling: 'off' }).onePass.count).toBe(0)
+  })
+  it('takes its limits as given', () => {
+    const plans = sizes.map((s) => planImageDetection(s.width, s.height, { maxDim: 6000 }))
+    expect(detectionLimits(plans, {}, { onePassPx: 10e6 }).onePass.count).toBe(2)
+    expect(detectionLimits(plans, {}, { maxSidePx: 5000 }).tooLarge.count).toBe(2)
   })
 })

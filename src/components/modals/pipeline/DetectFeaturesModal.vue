@@ -24,6 +24,7 @@ import {
   DETECT_PRESETS_BY_DETECTOR,
 } from '../../../core/defaults.user.js'
 import { DETECT_TUNING } from '../../../core/tuning.js'
+import { PYRAMID_TUNING } from '../../../core/io/rasterPyramid.js'
 import { LEARNED_DETECTORS, learnedDetector, detectorLabel } from '../../../core/features/learnedDetectors.js'
 import { MODELS, isRedistributable } from '../../../core/models/registry.js'
 import { planDetection, planImageDetection } from '../../../core/features/detectPlan.js'
@@ -218,7 +219,6 @@ const numbers = computed(() => {
     maxDim: {
       label: s.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution',
       min: 100,
-      max: 10000,
       integer: true,
     },
     tileSize: { label: 'Max tile size', min: 256, max: 4096, integer: true, when: s.tiling === 'manual' },
@@ -347,6 +347,10 @@ const plan = computed(() =>
 )
 const fmt = (n) => Number(n).toLocaleString('en-US')
 const dims = (w, h) => `${fmt(w)}×${fmt(h)}`
+// "2 photos (up to 20,000×20,000 px, 400 MP) are" — the start of a limit warning.
+const limitPhotos = ({ count, largest: l }) =>
+  `${count === 1 ? 'One photo' : `${fmt(count)} photos`} (${count === 1 ? '' : 'up to '}${dims(l.width, l.height)} px, ` +
+  `${fmt(Math.round((l.width * l.height) / 1e6))} MP) ${count === 1 ? 'is' : 'are'}`
 const tilingOn = computed(() => activeSettings.value.tiling !== 'off')
 const tileLimit = computed(() => {
   const t = plan.value?.tileSize
@@ -593,13 +597,24 @@ provideStepLayout('detect-features')
             :aria-invalid="numbers.bad.maxDim"
             type="number"
             min="100"
-            max="10000"
             step="100"
             class="field-input"
           />
         </SettingsField>
       </template>
     </SettingsStep>
+    <!-- No upper limit on the resolution: these say what a large one runs into
+         (core/features/detectPlan.js detectionLimits). -->
+    <WarnBox v-if="plan?.tooLarge.count">
+      {{ limitPhotos(plan.tooLarge) }} too large at this resolution: one image holds at most
+      {{ fmt(PYRAMID_TUNING.maxSidePx) }} px a side and {{ fmt(PYRAMID_TUNING.maxAreaPx / 1e6) }} MP, so
+      {{ plan.tooLarge.count === 1 ? 'it fails' : 'they fail' }}. Lower the resolution.
+    </WarnBox>
+    <WarnBox v-if="plan?.onePass.count">
+      {{ limitPhotos(plan.onePass) }} more than one detection pass holds in one piece (about
+      {{ fmt(DETECT_TUNING.siftOnePassMaxPx / 1e6) }} MP) and would run out of memory. Set <b>Tiling</b> to On in step
+      2, or lower the resolution.
+    </WarnBox>
     <SettingsStep step="2" title="Split into tiles" :effect="tileStep" :inactive="!tilingOn || tilingIdle" :more="2">
       <SettingsField
         label-for="tiling"

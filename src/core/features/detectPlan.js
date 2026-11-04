@@ -18,6 +18,8 @@
 import { resolveDetectMaxDim } from './detectResolution.js'
 import { planTiles, autoTileSize, SIFT_TILE_ALIGN } from './tiling.js'
 import { learnedDetector } from './learnedDetectors.js'
+import { DETECT_TUNING } from '../tuning.js'
+import { PYRAMID_TUNING } from '../io/rasterPyramid.js'
 
 // The worker's auto tile size for a learned detector is min(this, what the GPU's
 // reported binding limit allows) — unknowable from the main thread, so the plan uses
@@ -77,5 +79,31 @@ export function planDetection(images, settings = {}) {
     tiled: plans.filter((p) => p.tiles > 1).length,
     maxTiles: Math.max(...plans.map((p) => p.tiles)),
     tileSize: plannedTileSize(settings),
+    ...detectionLimits(plans, settings),
   }
+}
+
+// What the resolution cannot exceed, instead of a cap on the field (the user decides):
+//   tooLarge  images whose resized raster cannot be made at all: one canvas holds at most
+//             PYRAMID_TUNING.maxSidePx a side and maxAreaPx (only a lower resolution helps);
+//   onePass   SIFT images detected in one piece beyond what one pass holds
+//             (DETECT_TUNING.siftOnePassMaxPx, measured): Tiling fixes it.
+// Each is { count, largest: { width, height } | null }. `limits` overrides the tuning (tests).
+export function detectionLimits(plans, settings = {}, limits = {}) {
+  const {
+    maxSidePx = PYRAMID_TUNING.maxSidePx,
+    maxAreaPx = PYRAMID_TUNING.maxAreaPx,
+    onePassPx = DETECT_TUNING.siftOnePassMaxPx,
+  } = limits
+  const sift = !learnedDetector(settings.detector)
+  const summary = (list) => {
+    let largest = null
+    for (const p of list) if (!largest || p.width * p.height > largest.width * largest.height) largest = p
+    return { count: list.length, largest: largest && { width: largest.width, height: largest.height } }
+  }
+  const tooLarge = plans.filter((p) => p.width > maxSidePx || p.height > maxSidePx || p.width * p.height > maxAreaPx)
+  const onePass = sift
+    ? plans.filter((p) => p.tiles === 1 && p.width * p.height > onePassPx && !tooLarge.includes(p))
+    : []
+  return { tooLarge: summary(tooLarge), onePass: summary(onePass) }
 }

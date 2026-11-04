@@ -174,9 +174,14 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
-- **No upper limit on keypoints.** Max keypoints in Detect Features (SIFT, SuperPoint,
-  DISK, ALIKED) and the LightGlue keypoint budgets in Match Features take any number;
-  the field says how much more matching work a value means than the default.
+- **No upper limit on keypoints or detection resolution.** Max keypoints in Detect
+  Features (SIFT, SuperPoint, DISK, ALIKED), the LightGlue keypoint budgets in Match
+  Features and the detection resolution take any number; the keypoint fields say how much
+  more matching work a value means than the default, and Detect Features warns when a
+  photo at the chosen resolution needs Tiling or cannot be made at all.
+  One SIFT pass holds about 64 MP: measured at 60 bytes per pixel of WebAssembly memory
+  (16 MP 0.9 GB, 64 MP 3.7 GB), and 74 MP no longer fit the 4 GiB a module can address.
+  The old 10,000 px limit allowed a 100 MP square scan, which failed the same way.
 - **Greyed-out controls say why.** Hover a disabled button, field or option in any
   dialog, panel or toolbox to see what it is missing or what to do first, as the ribbon
   already did.
