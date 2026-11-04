@@ -498,6 +498,7 @@ export function useQualityReport() {
         (recon.summary?.selfCalDistortion ?? []).some((d) => d.fisheye),
       georef: !!recon.georef,
       rollingShutter: !!recon.summary?.rollingShutter?.length,
+      demHold: !!recon.summary?.demHold,
       dense: recon.clouds.some((c) => c.kind === 'dense' && !c.imported),
       denseViewSelection: recon.depthSummary?.settings?.viewSelection ?? null,
       densePlanarPrior: !!recon.depthSummary?.settings?.planarPrior,

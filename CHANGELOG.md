@@ -63,6 +63,19 @@ Notable changes to websfm. The format follows
   the stored orthophoto and every coarser one is built from its four children, so the
   orthophoto is read once. MBTiles uses the SQLite library WebSfM already loads for COLMAP
   databases, only when it is needed; GDAL 3 reads the result in place.
+- **Hold a model to a reference DEM.** Georeference ▸ **Hold to a reference DEM** rebuilds
+  the sparse model with its tie points over stable ground held to a reference DEM's
+  heights, so a block with only drone GPS or a few GCPs cannot dome or dish; the GCPs or
+  camera positions still place it. Choose the reference (or fetch the Copernicus DEM
+  around the cameras), its height uncertainty (its declared vertical accuracy, else
+  2 m) and optionally a layer of stable ground. Each tie point seen in three or more
+  photos is held along the vertical only, those far from the DEM's height are left out,
+  and the focal length and distortion are re-estimated over two rounds, as with GCPs.
+  Quality Report ▸ Accuracy ▸ Reference DEM Hold shows how many points were held and
+  their height against the DEM before and after. On a synthetic nadir block that domes
+  under GPS alone (σ 2 m, k1 self-calibrated), shape error 0.45 → 0.08 m and height
+  against the ground 0.70 → 0.07 m RMS; real benches (historical photos against REMA,
+  drone blocks with RTK checks) are still to come.
 - **Rolling shutter for drones without a mechanical shutter.** Sparse Model ▸ 4 · Rolling
   shutter ▸ **Estimate the readout time** solves each camera group's readout time in
   bundle adjustment, with each camera's motion taken from the photos taken just before

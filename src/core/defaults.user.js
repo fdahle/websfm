@@ -786,6 +786,13 @@ export const COREG_DEFAULTS = {
   // moves onto the reference, and the products are rebuilt.
   applyTo: 'dem',
 }
+// ── Georeference ▸ Hold to a reference DEM (F13, bundleSession.js) ───────────────
+// The reference's vertical uncertainty (metres), when it declares none: about what the
+// Copernicus and SRTM DEMs reach over open, flat ground. A raster's own declared
+// vertical accuracy (Raster ▸ Accuracy) takes its place.
+export const DEM_HOLD_DEFAULTS = {
+  sigma: 2,
+}
 export const TERRAIN_DEFAULTS = {
   products: ['slope', 'hillshade'],
   slopeUnits: 'degrees', // 'degrees' | 'percent'

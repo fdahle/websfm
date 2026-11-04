@@ -49,15 +49,27 @@ async function getJson(url, init, what) {
 }
 
 // → the imported reference DEM's record.
-export async function fetchCopernicusDem(dem, { onLog } = {}) {
-  const bbox = await lonLatBox(dem)
+export async function fetchCopernicusDem(dem, opts = {}) {
+  return fetchCopernicusDemIn(await lonLatBox(dem), dem.name, opts)
+}
+
+// Georeference ▸ Hold to a reference DEM: over the project's camera positions and GCPs
+// (lon/lat), before there is a DEM. Padded by half the area's size, as the ground the
+// photos see reaches past the camera positions (core/sfm/demHoldGrid.js samples as far).
+export async function fetchCopernicusDemAround(lonLats, name, opts = {}) {
+  const bbox = paddedBox(lonLats, { ...COP_DEM_TUNING, pad: 0.5 })
+  if (!bbox) throw new Error('The project has no camera positions or GCPs to fetch the Copernicus DEM around')
+  return fetchCopernicusDemIn(bbox, name, opts)
+}
+
+async function fetchCopernicusDemIn(bbox, name, { onLog } = {}) {
   const fc = await getJson(
     COP_DEM_SEARCH_URL,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(copDemSearchBody(bbox)) },
     'Copernicus DEM search',
   )
   const tiles = copDemTiles(fc)
-  if (!tiles.length) throw new Error('The Copernicus DEM has no tile over this DEM (open sea has none)')
+  if (!tiles.length) throw new Error('The Copernicus DEM has no tile over this area (open sea has none)')
   const { token } = await getJson(COP_DEM_TOKEN_URL, undefined, 'Copernicus DEM access')
   const t0 = performance.now()
   const { bytes, width, height, min, max } = await fetchCopDemMosaic({
@@ -66,7 +78,7 @@ export async function fetchCopernicusDem(dem, { onLog } = {}) {
     maxPx: COP_DEM_TUNING.maxPx,
   })
   const external = useExternalStore()
-  const file = new File([bytes], `Copernicus DEM (${dem.name}).tif`, { type: 'image/tiff' })
+  const file = new File([bytes], `Copernicus DEM (${name}).tif`, { type: 'image/tiff' })
   const meta = await external.importRaster(file, { forceKind: 'dem', origin: 'copernicus-dem' })
   if (!meta) throw new Error('The fetched Copernicus DEM could not be imported')
   await external.setRasterAccuracy(meta.id, {
@@ -75,7 +87,7 @@ export async function fetchCopernicusDem(dem, { onLog } = {}) {
     verticalDatum: COP_DEM_DATUM,
   })
   onLog?.(
-    `Copernicus DEM over "${dem.name}": ${width} × ${height} cells of 1″ from ${tiles.length} ` +
+    `Copernicus DEM over "${name}": ${width} × ${height} cells of 1″ from ${tiles.length} ` +
       `tile${tiles.length === 1 ? '' : 's'}, heights ${min.toFixed(0)}–${max.toFixed(0)} m above EGM2008, ` +
       `${formatBytes(bytes.byteLength)} in ${((performance.now() - t0) / 1000).toFixed(1)} s, read on one ` +
       `worker. ${copDemAttribution()}.`,

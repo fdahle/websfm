@@ -1,4 +1,4 @@
-import { ensureProjection, isGeographic } from '../../core/crs.js'
+import { ensureProjection, isGeographic, metresPerCrsUnit } from '../../core/crs.js'
 import { isGroundControl } from '../../core/io/gcp.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { precisionFromGcp } from '../../core/gcpAccuracy.js'
@@ -33,6 +33,12 @@ import { extensionBlocker, resolveExistingCameras } from '../../core/sfm/extendM
 import { packSparseCloud } from '../../core/sfm/resultCodec.js'
 import { OPTIMIZE_CAMERAS_DEFAULTS } from '../../core/defaults.user.js'
 import { markRaw, toRaw } from 'vue'
+import { useExternalStore } from '../useExternalStore.js'
+import { useFootprintsStore } from '../useFootprintsStore.js'
+import { demLayerTest } from '../../composables/demLayerTest.js'
+import { demHoldExtent, buildDemHoldGrid } from '../../core/sfm/demHoldGrid.js'
+import { localToGrid, gridToLocal } from '../../core/products/localFrame.js'
+import { datumLabel } from '../../core/verticalDatum.js'
 
 // The sparse reconstruction run, split out of useReconstructionStore: packing the
 // keypoints, matches and survey constraints for the SfM worker, the memory
@@ -162,6 +168,69 @@ export function createSparseRun({
     return { gcps, cameraPriors, surveyFrame }
   }
 
+  // F13 — Georeference ▸ Hold to a reference DEM: the reference sampled once over the
+  // block, in the run's survey frame (surveyConstraintInput) and in the vertical datum
+  // of the control that places the model, with what is not stable ground left out
+  // (core/sfm/demHoldGrid.js). The worker holds the tie points to it
+  // (bundleSession.js runDemAnchoredBundleAdjust).
+  //   request = { referenceId, stableSetId, sigma (metres) }
+  // → { grid, sigma (survey units), reference } or null (logged).
+  async function demHoldInput(request, survey) {
+    if (!request?.referenceId) return null
+    const fail = (why) => {
+      log(`Hold to a reference DEM: ${why}; the model is solved without it`, 'warn', 'Reconstruction')
+      return null
+    }
+    const crs = projects.currentCrs
+    const frame = survey.surveyFrame
+    if (!frame) return fail('it needs a projected coordinate system (Project Settings) and GCPs or camera positions')
+    const external = useExternalStore()
+    const meta = external.rasterById(request.referenceId)
+    if (!meta || meta.kind !== 'dem') return fail('the reference DEM is no longer in the project')
+    // The heights of the control that places the model: the GCPs when three or more
+    // qualify (the georeference's rule), else the camera positions.
+    const control = gcpsStore.gcps.filter((g) => isGroundControl(g, { precision: precisionFromGcp }))
+    const placing = control.length >= 3 ? control : posesStore.poses.filter((p) => p.enabled !== false)
+    const datums = new Set(placing.map((p) => p.verticalDatum ?? 'unknown'))
+    const datum = datums.size === 1 ? [...datums][0] : 'unknown'
+    let sampler
+    try {
+      sampler = await external.referenceDemSampler(meta.id, crs, { strict: true, datum })
+    } catch (err) {
+      return fail(err?.message ?? String(err))
+    }
+    const stable = request.stableSetId ? useFootprintsStore().sets.find((l) => l.id === request.stableSetId) : null
+    const include = stable ? await demLayerTest({ crs }, [stable], crs) : null
+    const extent = demHoldExtent([...survey.cameraPriors.map((p) => [p.x, p.y]), ...survey.gcps.map((g) => [g.x, g.y])])
+    if (!extent) return fail('the project has no GCPs or camera positions to say where the block is')
+    const sampleLocal = (x, y) => {
+      const g = localToGrid([x, y, 0], frame)
+      if (include && !include(g[0], g[1])) return NaN
+      const H = sampler.sample(g[0], g[1])
+      return H == null ? NaN : gridToLocal([g[0], g[1], H], frame)[2]
+    }
+    const grid = buildDemHoldGrid(extent, sampleLocal, { maxSide: SFM_TUNING.demHoldGridSide })
+    if (grid.valid < 4)
+      return fail(`"${meta.name}" has no heights over the block${stable ? ` inside "${stable.name}"` : ''}`)
+    const perUnit = metresPerCrsUnit(crs) ?? 1
+    const refDatum = meta.verticalDatum || 'unknown'
+    const conv = sampler.conversion
+    log(
+      `Hold to a reference DEM: "${meta.name}" sampled over the block on ${grid.w} × ${grid.h} places ` +
+        `${(grid.dx * perUnit).toPrecision(3)} m apart, ${((100 * grid.valid) / (grid.w * grid.h)).toFixed(0)}% ` +
+        `with a height${stable ? ` on "${stable.name}"` : ''}; σ ${request.sigma} m` +
+        (conv && Number.isFinite(conv.min)
+          ? `; heights converted ${datumLabel(conv.from)} → ${datumLabel(conv.to)}`
+          : datum !== refDatum
+            ? `; heights compared as they are (control ${datumLabel(datum)}, reference ${datumLabel(refDatum)})`
+            : ''),
+      'info',
+      'Reconstruction',
+    )
+    delete grid.valid
+    return { grid, sigma: request.sigma / perUnit, reference: meta.name }
+  }
+
   // Run incremental SfM in the compute worker (off the main thread). The heavy
   // orchestration lives in core/sfm/sfm.js; this gathers the plain inputs it needs
   // (keypoints + match graph + settings), streams its log/progress back through
@@ -174,7 +243,7 @@ export function createSparseRun({
   // 'refined', resolveExistingCameras): fixed keeps the model's cameras and stamp, so
   // everything built from them stays current; refined then runs Optimize cameras.
   async function reconstruct(settings = {}, onProgress) {
-    const { addToModel = false, existingCameras = 'auto', ...solverSettings } = settings
+    const { addToModel = false, existingCameras = 'auto', demHold: demHoldRequest = null, ...solverSettings } = settings
     // The console's session overrides of SFM_TUNING knobs (stores/tuningOverrides.js).
     settings = applyTuningOverrides('sfm', solverSettings, (msg) => log(msg, 'warn', 'Reconstruction'))
     const base = addToModel ? mainSparseCloud.value : null
@@ -360,6 +429,7 @@ export function createSparseRun({
       }
 
       const survey = await surveyConstraintInput({ marks: 'raw' })
+      const demHold = base ? null : await demHoldInput(demHoldRequest, survey)
 
       // Keypoints and matches are on disk (TODO ▸ SC-2/SC-3): read image by image and
       // pair by pair straight into the packed, transferred worker input — never all
@@ -512,6 +582,7 @@ export function createSparseRun({
         // GCP anchors + camera priors in one survey frame (surveyConstraintInput).
         gcps: survey.gcps,
         cameraPriors: survey.cameraPriors,
+        ...(demHold ? { demHold } : {}),
         settings,
         // The model to add to: its points are the live cloud's buffers, so they are
         // cloned into the worker, never transferred. The summary carries its frame.

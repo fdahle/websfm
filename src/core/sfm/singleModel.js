@@ -142,7 +142,7 @@ async function recheckRegistrations({
 }
 
 export async function reconstructSingleModel(input, hooks = {}) {
-  const { images, pairs, settings = {}, gcps = [], cameraPriors = [], base = null } = input
+  const { images, pairs, settings = {}, gcps = [], cameraPriors = [], base = null, demHold = null } = input
   // GCP marks arrive in the viewer's pixel-edge convention; keypoints, K and every
   // projection use pixel centres (displayFrame.js markToCentrePx). Convert once, before
   // the film remap and the distortion moves below treat them exactly like keypoints.
@@ -618,6 +618,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       log,
       fixedCameras: extension?.fixed ?? null,
       rig,
+      demHold,
     })
 
     // ── Incremental registration ───────────────────────────────────────────
@@ -722,6 +723,12 @@ export async function reconstructSingleModel(input, hooks = {}) {
       report('gcpBundle', 1, 'GCP-anchored bundle adjustment…', { done: cameras.size, total: imgs.length })
       await bundles.runGcpAnchoredBundleAdjust()
     }
+    // F13: held to a reference DEM (Georeference ▸ Hold to a reference DEM).
+    let demHoldRecord = null
+    if (!extension && demHold && cameras.size >= 2 && tracks.liveCount() >= 10) {
+      report('gcpBundle', 1, 'Holding the model to the reference DEM…', { done: cameras.size, total: imgs.length })
+      demHoldRecord = await bundles.runDemAnchoredBundleAdjust()
+    }
     markStage('bundleAdjust')
 
     const finalTrackPrune = pruneFinalTracks({ cfg, tracks, refreshTracks, keypointsAt, log })
@@ -813,6 +820,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       }
     }
     summary.registrationCheck = registrationCheck
+    if (demHoldRecord) summary.demHold = demHoldRecord
     if (rig) summary.rig = { bands: rig.summary(), placed: rigCompleted.length }
     // Rolling shutter (cfg.rollingShutter): each camera group's estimated readout time.
     if (cfg.rollingShutter === 'on') {

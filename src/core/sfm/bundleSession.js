@@ -33,6 +33,9 @@ import { buildBaObservations, appendObservations, trackPositions, mapObservation
 import { fmtStats } from './modelStats.js'
 import { attachRollingShutter, captureSeconds } from './rollingShutter.js'
 import { pluralize } from '../textFormat.js'
+import { demAnchors } from './demAnchors.js'
+import { demHoldSampler } from './demHoldGrid.js'
+import { frameFromSimilarity } from '../products/georef.js'
 
 export function createBundleSession(ctx) {
   const {
@@ -52,6 +55,7 @@ export function createBundleSession(ctx) {
     log,
     fixedCameras = null,
     rig = null,
+    demHold = null,
   } = ctx
   const isFixed = (uuid) => !!fixedCameras?.has(uuid)
   // Defaults + rationale for these live in defaults.user.js (baIterations,
@@ -860,11 +864,134 @@ export function createBundleSession(ctx) {
     }
   }
 
+  // F13 — Georeference ▸ Hold to a reference DEM: the settled model solved again with
+  // its tie points over stable ground held to a reference DEM along the vertical
+  // (demAnchors.js), so a block held only by drone GPS or a few GCPs cannot bend. The
+  // frame comes from the GCPs (three or more triangulated) or else the camera
+  // positions, and is held inside the solve by them; the anchors are rebuilt each
+  // round, as a point that moves sideways meets the DEM elsewhere. The intrinsics are
+  // re-estimated as in the GCP pass: the bend is the focal and radial distortion
+  // trading against the block's curvature, which fixed intrinsics cannot undo.
+  //   demHold = { grid (demHoldGrid.js, survey frame), sigma (survey units), reference }
+  // → a record for the run summary, or null when it did not run.
+  async function runDemAnchoredBundleAdjust() {
+    if (!demHold?.grid || fixedCameras?.size) return null
+    const sample = demHoldSampler(demHold.grid)
+    const sigma = demHold.sigma
+    const rounds = cfg.demHoldRounds ?? 2
+    const record = { reference: demHold.reference ?? null, sigma, rounds: [], after: null, frame: null }
+    // The frame of this model now: GCPs when three or more triangulate, else the
+    // camera positions. null when there is neither.
+    const frameNow = async (uuidList, ptCount) => {
+      const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
+      const qualifying = qualifyingGcps(gcps, cameras)
+      let gcpSetup = null
+      if (qualifying.length >= 3) {
+        const setup = await buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPointIndex: ptCount })
+        if (!setup.error) gcpSetup = setup
+      }
+      const priorSet = buildCameraPriorConstraints(
+        uuidList,
+        gcpSetup ? { fit: gcpSetup.fit, frame: gcpSetup.frame } : null,
+      )
+      if (gcpSetup) return { gcpSetup, priorSet, frame: gcpSetup.frame, fit: gcpSetup.fit, source: 'gcps' }
+      if (priorSet) {
+        return {
+          gcpSetup: null,
+          priorSet,
+          frame: frameFromSimilarity(priorSet.fit, 'camera-prior'),
+          fit: priorSet.fit,
+          source: 'cameras',
+        }
+      }
+      return null
+    }
+    const anchorsNow = (ptIds, frame) =>
+      demAnchors({
+        points: {
+          pos: trackPositions(tracks, ptIds),
+          vcount: Uint32Array.from(ptIds, (p) => tracks.viewCount(p)),
+        },
+        frame,
+        sample,
+        sigma,
+        maxAnchors: cfg.demHoldMaxAnchors ?? 4000,
+      })
+    const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`
+    for (let round = 0; round < rounds; round++) {
+      if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && baIterations > 0)) return null
+      const uuidList = [...cameras.keys()]
+      const ptIds = tracks.liveIds()
+      const held = await frameNow(uuidList, ptIds.length)
+      if (!held) {
+        log(
+          'Hold to a reference DEM skipped — the model needs three or more GCPs or camera positions to place it on the DEM',
+          'warn',
+          'Reconstruction',
+        )
+        return null
+      }
+      record.frame = held.source
+      const { anchors, stats } = anchorsNow(ptIds, held.frame)
+      if (anchors.length < (cfg.demHoldMinAnchors ?? 20)) {
+        log(
+          `Hold to a reference DEM skipped — ${pluralize(stats.candidates, 'tie point')} over stable ground on the ` +
+            `reference, ${stats.used} usable; it needs at least ${cfg.demHoldMinAnchors ?? 20}`,
+          'warn',
+          'Reconstruction',
+        )
+        return round ? record : null
+      }
+      record.rounds.push({ ...stats })
+      log(
+        `Hold to a reference DEM (round ${round + 1}/${rounds}) — ${pluralize(anchors.length, 'tie point')} held ` +
+          `(σ ${sigma.toPrecision(3)}), ${stats.rejected} left out as too far from the DEM; height against the ` +
+          `DEM ${fmt(stats.median)} median, NMAD ${stats.nmad.toFixed(2)}, in the ${held.source === 'gcps' ? 'GCPs' : 'camera positions'}' frame`,
+        'info',
+        'Reconstruction',
+      )
+      const gcpSetup = held.gcpSetup
+      const gcp = {
+        anchorPts: gcpSetup?.anchorPts ?? [],
+        observations: gcpSetup?.observations ?? [],
+        anchors: [...anchors, ...(gcpSetup?.anchors ?? [])],
+      }
+      const mode =
+        cfg.gcpRefineIntrinsics === 'auto'
+          ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics)
+          : (cfg.gcpRefineIntrinsics ?? 'none')
+      const r = await runBundleAdjust(
+        `DEM-held bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
+        baIterations,
+        mode,
+        { cameraPriors: held.priorSet?.priors ?? null, gcp },
+      )
+      if (!r) return record.rounds.length > 1 ? record : null
+    }
+    // Where the tie points sit against the DEM now, in the frame they were held in.
+    const uuidList = [...cameras.keys()]
+    const ptIds = tracks.liveIds()
+    const held = await frameNow(uuidList, ptIds.length)
+    if (held) {
+      record.after = anchorsNow(ptIds, held.frame).stats
+      const before = record.rounds[0]
+      log(
+        `Hold to a reference DEM: height against the DEM NMAD ${before.nmad.toFixed(2)} → ` +
+          `${record.after.nmad.toFixed(2)}, median ${fmt(before.median)} → ${fmt(record.after.median)} ` +
+          `(${pluralize(record.after.used, 'tie point')})`,
+        'success',
+        'Reconstruction',
+      )
+    }
+    return record
+  }
+
   return {
     runBundleAdjust,
     runLocalBundleAdjust,
     runCameraPriorBundleAdjust,
     runGcpAnchoredBundleAdjust,
+    runDemAnchoredBundleAdjust,
     // { mode, converged } of the last runBundleAdjust, or null (none, rejected, skipped).
     lastSolve: () => lastSolve,
     solverTotals: baSolverTotals,

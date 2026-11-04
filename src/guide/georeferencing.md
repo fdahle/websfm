@@ -43,8 +43,41 @@ point directly.
 
 ## Adjust or transform
 **Adjust reconstruction with GCPs** re-runs bundle adjustment with the control: the
-stronger choice, but it outdates the depth maps and products. **Transform current
-reconstruction** only moves, rotates and scales the model, keeping its shape.
+stronger choice, but it outdates the depth maps and products. **Hold to a reference
+DEM** re-runs it with the tie points held to a reference DEM as well (below).
+**Transform current reconstruction** only moves, rotates and scales the model, keeping
+its shape.
+
+## Hold to a reference DEM
+A block held only by drone GPS, or by a few GCPs, can bend: it domes or dishes by
+metres at its edges while every residual looks fine. **Hold to a reference DEM**
+rebuilds the sparse model with each tie point over stable ground pulled toward a
+reference DEM's height ([reference DEM hold](help:reference-dem-hold)), so the block
+keeps the ground's shape. The GCPs or camera positions still place it; the DEM only
+keeps it from bending. Use it for blocks without good control and for historical
+photos.
+
+## Reference DEM to hold
+<!-- param: holdReference  default: The first imported -->
+The DEM the tie points are held to: a lidar survey or a global DEM. **Copernicus DEM
+(30 m)** fetches the free [Copernicus DEM](help:copernicus-dem) around the camera
+positions and GCPs. Declare its [vertical datum](help:vertical-datum) and your
+control's, so the heights are converted; otherwise the model is shifted by the
+difference.
+
+## Height uncertainty
+<!-- param: holdSigma  default: The DEM's vertical accuracy, else 2 -->
+How far, in metres (1σ), a tie point may sit from the reference's height. It starts at
+the DEM's declared vertical accuracy. Thousands of tie points average the DEM's noise,
+so even a loose value takes out a bend; lower it for a lidar DEM, raise it where the
+reference is coarse against the terrain's relief.
+
+## Stable ground to hold
+<!-- param: holdStable  default: Everywhere -->
+A polygon layer of ground unchanged between the photos and the reference: rock, roads.
+Only tie points inside it are held. Without one, points far from the DEM's height are
+left out on their own, but a large change (a glacier, a new pit, forest in a surface
+model) is better excluded with a layer.
 
 ## Scale bars
 For an object or a local model, mark two points and enter their measured distance.

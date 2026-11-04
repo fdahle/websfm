@@ -43,6 +43,7 @@ export function makeSfmOps() {
     input.pairs = []
     input.gcps = []
     input.cameraPriors = []
+    input.demHold = null
     const bytes = packed.transfer.reduce((sum, buffer) => sum + buffer.byteLength, 0)
     emit('log', [`Compact result ready for transfer (${(bytes / 1024 ** 2).toFixed(1)} MiB)`, 'info', 'Reconstruction'])
     return packed

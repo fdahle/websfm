@@ -17,6 +17,7 @@ import { distortPixel, undistortPixel } from './distortion.js'
 import { projectPoint } from './geometry.js'
 import { aerialBlock } from './syntheticScene.testutil.js'
 import { Uint32PairList } from './matchCodec.js'
+import { buildDemHoldGrid } from './demHoldGrid.js'
 import { canonicalFrame } from './fiducials.js'
 import { keypointSetFrom, mapPositions } from './keypointSet.js'
 import { tracksFrom, pointsOf } from './trackStore.testutil.js'
@@ -902,6 +903,93 @@ describe('reconstruct — GCP-anchored bundle adjustment (F2)', () => {
     )
     expect(out.status).toBe('done')
     expect(logs.some(([, , m]) => m.includes('GCP anchoring skipped'))).toBe(true)
+  })
+})
+
+describe('reconstruct — held to a reference DEM (F13)', () => {
+  // The GCP rig again, its points on a tilted plane that a "reference DEM" (the plane
+  // itself, demHoldGrid.js) describes: the pass runs both rounds in the GCPs' frame,
+  // holds the points to it, and records what it did in the summary.
+  const ground = (x, y) => 10 + 0.2 * x - 0.1 * y
+  function scene(withGcps) {
+    const rng = mulberry32(7)
+    const N = 80
+    const world = Array.from({ length: N }, () => {
+      const x = (rng() - 0.5) * 4,
+        y = (rng() - 0.5) * 3
+      return [x, y, ground(x, y)]
+    })
+    const centers = [
+      [0, 0, 0],
+      [2, 0, 0],
+      [-2, 0, 0],
+    ]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2']
+    const images = uuids.map((uuid, ci) => ({
+      uuid,
+      name: uuid,
+      kpStatus: 'done',
+      meta: META,
+      keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
+    }))
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 3; a++)
+      for (let b = a + 1; b < 3; b++)
+        pairs.push({
+          idA: uuids[a],
+          idB: uuids[b],
+          F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+          matches,
+          inlierCount: N,
+          status: 'done',
+        })
+    const gcps = withGcps
+      ? [0, 1, 2, 3].map((i) => ({
+          x: world[i][0],
+          y: world[i][1],
+          z: world[i][2],
+          accuracyX: 0.05,
+          accuracyY: 0.05,
+          accuracyZ: 0.05,
+          observations: [0, 1, 2].map((c) => ({
+            uuid: uuids[c],
+            px: images[c].keypoints[i].x,
+            py: images[c].keypoints[i].y,
+          })),
+        }))
+      : []
+    const grid = buildDemHoldGrid({ x0: -4, y0: -3, x1: 4, y1: 3 }, ground, { maxSide: 81 })
+    return { images, pairs, gcps, demHold: { grid, sigma: 0.05, reference: 'plane' } }
+  }
+
+  it('holds the tie points to the DEM in the frame of the GCPs', async () => {
+    const logs = []
+    const out = await reconstruct(
+      { ...scene(true), settings: { baIterations: 25 } },
+      { onLog: (m, level, cat) => logs.push([level, cat, m]) },
+    )
+    expect(out.status).toBe('done')
+    expect(logs.some(([, , m]) => m.startsWith('Hold to a reference DEM (round 2/2)'))).toBe(true)
+    const rec = out.summary.demHold
+    expect(rec).toMatchObject({ reference: 'plane', frame: 'gcps' })
+    expect(rec.rounds).toHaveLength(2)
+    expect(rec.rounds[0].used).toBeGreaterThan(50)
+    expect(rec.after.nmad).toBeLessThan(0.02)
+    expect(Math.abs(rec.after.median)).toBeLessThan(0.02)
+  })
+
+  it('says it is skipped with nothing to place the model', async () => {
+    const logs = []
+    const out = await reconstruct(
+      { ...scene(false), settings: { baIterations: 25 } },
+      { onLog: (m, level, cat) => logs.push([level, cat, m]) },
+    )
+    expect(out.status).toBe('done')
+    expect(out.summary.demHold).toBeUndefined()
+    expect(logs.some(([level, , m]) => level === 'warn' && m.startsWith('Hold to a reference DEM skipped'))).toBe(true)
   })
 })
 

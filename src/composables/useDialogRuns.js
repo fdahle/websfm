@@ -75,15 +75,21 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
   // user retains control over its settings. Only after a successful sparse run do we
   // fit the final SfM→project-CRS similarity.
   const georeferenceAfterReconstruct = ref(false)
+  // Georeference ▸ Hold to a reference DEM: { referenceId, stableSetId, sigma } for the
+  // run the Reconstruct dialog starts (sparseRun.js demHoldInput), or null.
+  const demHoldRequest = ref(null)
   function closeReconstructModal() {
     reconstructOpen.value = false
     georeferenceAfterReconstruct.value = false
+    demHoldRequest.value = null
   }
   async function onReconstructRun(settings) {
     const finishGeoreference = georeferenceAfterReconstruct.value
+    const demHold = demHoldRequest.value
     reconstructOpen.value = false
     georeferenceAfterReconstruct.value = false
-    await runReconstruct(settings)
+    demHoldRequest.value = null
+    await runReconstruct(demHold ? { ...settings, demHold } : settings)
     if (finishGeoreference && reconStatus.value === 'done') {
       await georeference()
       await refreshGcpReport()
@@ -91,10 +97,11 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     // The products of the previous model stay (marked outdated), so their tabs stay too.
   }
 
-  async function onGeoreferenceRun({ mode }) {
+  async function onGeoreferenceRun({ mode, demHold = null }) {
     georeferenceOpen.value = false
-    if (mode === 'adjust') {
+    if (mode === 'adjust' || mode === 'dem') {
       georeferenceAfterReconstruct.value = true
+      demHoldRequest.value = mode === 'dem' ? demHold : null
       reconstructOpen.value = true
       return
     }

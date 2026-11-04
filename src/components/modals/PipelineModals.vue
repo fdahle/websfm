@@ -1,6 +1,8 @@
 <script setup>
 import { computed, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
+import { isGroundControl } from '../../core/io/gcp.js'
+import { precisionFromGcp } from '../../core/gcpAccuracy.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
@@ -208,6 +210,16 @@ const croppableClouds = computed(() =>
 )
 const { gcps } = storeToRefs(useGcpsStore())
 const { poses } = storeToRefs(usePosesStore())
+// Georeference ▸ Hold to a reference DEM: the control that places the model, and where
+// the block is (camera positions and GCPs, project CRS) for a Copernicus DEM.
+const controlCount = computed(
+  () => gcps.value.filter((g) => isGroundControl(g, { precision: precisionFromGcp })).length,
+)
+const georefPlaces = computed(() =>
+  [...poses.value.filter((p) => p.enabled !== false), ...gcps.value]
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => [p.x, p.y]),
+)
 const { orthoRasters: referenceOrthos } = storeToRefs(useExternalStore())
 const {
   cropCloudOpen,
@@ -402,8 +414,12 @@ const exportingFootprints = computed(
       :can-transform="canGeoreference"
       :has-matches="matchSummaries.length > 0"
       :gcp-count="gcps.length"
+      :control-count="controlCount"
       :pose-count="poses.length"
       :project-crs="currentCrs"
+      :references="referenceDems"
+      :layers="polygonLayers"
+      :places="georefPlaces"
       @close="georeferenceOpen = false"
       @run="onGeoreferenceRun"
     />

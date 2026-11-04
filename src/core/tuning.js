@@ -183,6 +183,16 @@ export const SFM_TUNING = {
   // at different heights pins the focal (Casa Grande 1978 film, HANDOVER ▸ B-hist).
   gcpRefineIntrinsics: 'auto',
   gcpRefineIntrinsicsMinGcps: 5,
+  // ── F13: held to a reference DEM (bundleSession.js runDemAnchoredBundleAdjust) ──
+  // Rounds of the DEM-held solve, the anchors rebuilt between them (a point that moves
+  // sideways meets the DEM elsewhere): the synthetic doming block settles in two
+  // (demAnchors.ba.test.js). At most demHoldMaxAnchors tie points, spread over the area;
+  // fewer than demHoldMinAnchors over stable ground and the pass is skipped. The
+  // reference is sampled on at most demHoldGridSide² places over the block.
+  demHoldRounds: 2,
+  demHoldMaxAnchors: 4000,
+  demHoldMinAnchors: 20,
+  demHoldGridSide: 400,
   // ── In-registration distortion self-calibration (D3) ──
   // Once the model has this many cameras, the interim BA refines a shared focal + radial
   // k1 and folds the distortion out of the keypoints (+ Kmap) mid-registration, instead

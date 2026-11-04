@@ -1195,6 +1195,49 @@ The **final** georeference used for DEM/ortho is a fresh post-hoc fit against
 whatever cameras remain — anchoring only needs to be "good enough to help
 convergence".
 
+### 6.2b Held to a reference DEM (F13: `core/sfm/demAnchors.js`, `bundleSession.js` `runDemAnchoredBundleAdjust`, 2026-11-04)
+
+Georeference ▸ **Hold to a reference DEM** re-runs the reconstruction with one more
+survey-constrained pass after the camera-prior and GCP passes. A block held only by
+loose camera positions, or by a few GCPs, keeps the focal–distortion–curvature
+correlation of §6.2: it can dome by metres at small residuals, and the camera
+positions cannot stop it because the bent block fits them within their noise. A
+reference DEM (lidar, Copernicus, SRTM) is wrong locally by metres but not bent, so
+many weak height observations from it constrain exactly that low-frequency mode.
+
+**Anchors.** Every live tie point with three or more views is mapped into the survey
+frame through the current frame (the GCPs' similarity when three or more triangulate,
+else the camera positions'), sampled on the reference, and kept when it lies on
+stable ground and on the reference. Its height difference `dz` against the DEM is
+compared with the median of all of them; points beyond max(4·NMAD, 3σ) are left out
+(buildings missing from the DEM, moved ice, blunders). At most 4,000 are kept, one per
+cell of a grid over the block. Each becomes a bundle_adjust anchor (the GCP anchor of
+§6.2, on a real point rather than an extra one) with target = the point moved
+vertically onto the DEM and a **rank-one precision** `P = u uᵀ / (σ·ℓ)²`, `u` the
+survey vertical in the SfM frame and `ℓ` the SfM length of one survey unit: the point
+is held to the DEM's height and is free horizontally, which a coarse DEM cannot judge.
+So no solver change was needed. The GCP anchors and camera priors of that frame stay in
+the same solve, which holds the frame; re-deriving the frame between rounds while the
+solve held nothing let a synthetic block drift in scale 0.94 → 1.35 over three rounds.
+
+**Rounds and intrinsics.** Two rounds, the anchors rebuilt in between (a point that
+moved sideways meets the DEM elsewhere), each through `runBundleAdjust` with the
+self-calibration mode of the last pass, so the intrinsics move and the distortion fold
+applies as in the GCP pass. Fixed intrinsics cannot undo the bend: on the synthetic
+block below, an unmodelled k1 left 1.3 m of the 3.3 m height error.
+
+**Reference sampling.** The reference lives on the main thread (its CRS, its vertical
+datum, a stable-ground polygon layer); the worker gets it once as a grid of heights
+in the survey frame (`core/sfm/demHoldGrid.js`, at most 400 × 400 places over the
+camera positions and GCPs grown by half the block's size, NaN off stable ground), in
+the vertical datum of the control that places the model, and samples it bilinearly.
+
+**Evidence (synthetic, `demAnchors.ba.test.js`).** 3 × 9 nadir photos at 60 m over
+rolling ground, k1 −0.03 self-calibrated with the focal, 0.5 px noise, GPS σ 2 m with
+about 1 m errors: GPS only, shape 0.45 m and height against the ground 0.70 m RMS (k1
+−0.0366, f 997.3 for 1000); held to the true ground at σ 0.2 m, 0.08 m and 0.07 m in two
+rounds.
+
 ### 6.3 A GCP's shape
 
 Surveyed ground coords `x/y/z` with per-axis 1σ accuracy, optional XY/XZ/YZ

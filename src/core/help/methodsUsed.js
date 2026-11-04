@@ -15,7 +15,7 @@ const DETECTORS = {
 /**
  * @param {{
  *   detector?: string|null, matcher?: string|null, verifier?: string|null,
- *   sparse?: boolean, fisheye?: boolean, georef?: boolean, dense?: boolean,
+ *   sparse?: boolean, fisheye?: boolean, georef?: boolean, demHold?: boolean, dense?: boolean,
  *   denseViewSelection?: string|null, densePlanarPrior?: boolean, denseGeomPass?: boolean,
  *   mesh?: boolean, textured?: boolean, dem?: boolean, demFill?: string|null,
  *   coregistration?: { horizontal?: boolean, vertical?: boolean, tilt?: string }|null,
@@ -71,6 +71,12 @@ export function methodsUsed(f = {}) {
       step: 'Rolling shutter',
       method: 'Readout time per camera group in bundle adjustment, camera motion from the capture times',
       refs: ['vautherin2016'],
+    })
+  if (f.demHold)
+    out.push({
+      step: 'Reference DEM hold',
+      method: 'Tie points over stable ground held to a reference DEM along the vertical in bundle adjustment',
+      refs: [],
     })
   if (f.georef)
     out.push({ step: 'Georeferencing', method: 'Similarity from control (unit quaternions)', refs: ['horn1987'] })

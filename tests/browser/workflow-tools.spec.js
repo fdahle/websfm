@@ -1156,6 +1156,107 @@ test('a synthetic three-view scene reconstructs through the store into one spars
   expect(model.liveAfter).toBeNull()
 })
 
+// Georeference ▸ Hold to a reference DEM (F13): four nadir photos with GPS over rolling
+// ground, a reference DEM of that ground, and the reconstruction held to it through the
+// store (sparseRun.js demHoldInput → the worker's runDemAnchoredBundleAdjust).
+test('a reconstruction held to a reference DEM records the hold', async ({ page }) => {
+  await page.goto(harness)
+  const res = await page.evaluate(async () => {
+    const { useMatchesStore } = await import('/src/stores/useMatchesStore.js')
+    const { writeGeoTiff, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
+    const { recon, images, projects, poses, external } = window.workflowTools
+    projects.projects = [{ id: 'hold', crs: 'EPSG:32633' }]
+    projects.currentProjectId = 'hold'
+    const X0 = 500000,
+      Y0 = 5000000,
+      H = 140
+    const ground = (x, y) => 100 + 2 * Math.sin(x / 8) + 1.5 * Math.cos(y / 6)
+    let seed = 23
+    const random = () => {
+      seed = (1664525 * seed + 1013904223) >>> 0
+      return seed / 4294967296
+    }
+    const n = 800,
+      descriptors = Float32Array.from({ length: n * 128 }, random)
+    const points = Array.from({ length: n }, () => {
+      const x = random() * 40 - 20,
+        y = random() * 30 - 15
+      return { x, y, z: ground(x, y) }
+    })
+    const centres = [
+      [-6, -3],
+      [6, -3],
+      [-6, 3],
+      [6, 3],
+    ]
+    images.images = centres.map((_, j) => ({
+      id: `h${j}`,
+      uuid: `h${j}`,
+      name: `hold-${j}`,
+      meta: { width: 1000, height: 1000 },
+    }))
+    await images.importFeatures(
+      images.images.map((im, j) => ({
+        uuid: im.uuid,
+        detector: 'sift',
+        descDim: 128,
+        descriptors: descriptors.slice(),
+        keypoints: points.map((p) => ({
+          x: 500 + (500 * (p.x - centres[j][0])) / (H - p.z),
+          y: 500 - (500 * (p.y - centres[j][1])) / (H - p.z),
+          scale: 1,
+        })),
+      })),
+      { invalidateMatches: false },
+    )
+    await useMatchesStore().matchAll(images.images, {
+      strategy: 'exhaustive',
+      subsetGate: false,
+      minMatches: 8,
+      maxIters: 200,
+      overwrite: true,
+    })
+    await poses.addPoses(
+      centres.map(([x, y], j) => ({ imageName: `hold-${j}`, x: X0 + x, y: Y0 + y, z: H, accXYZ: 0.5 })),
+      'EPSG:32633',
+    )
+    // The reference: 1 m cells over 120 m.
+    const m = 120
+    const ref = new Float32Array(m * m)
+    for (let r = 0; r < m; r++) for (let c = 0; c < m; c++) ref[r * m + c] = ground(c + 0.5 - 60, 60 - (r + 0.5))
+    const meta = await external.importRaster(
+      new File(
+        [
+          writeGeoTiff({
+            width: m,
+            height: m,
+            samples: [{ bits: 32, format: 3 }],
+            photometric: 1,
+            data: new Uint8Array(ref.buffer),
+            pixelScale: [1, 1, 0],
+            tiepoint: [0, 0, 0, X0 - 60, Y0 + 60, 0],
+            geoKeys: geoKeysForEpsg(32633, false),
+          }),
+        ],
+        'ground.tif',
+      ),
+      { forceKind: 'dem' },
+    )
+    await recon.reconstruct({ demHold: { referenceId: meta.id, stableSetId: null, sigma: 0.5 } })
+    return {
+      status: recon.reconStatus,
+      cameras: recon.mainSparseCloud?.cameras?.size ?? 0,
+      hold: JSON.parse(JSON.stringify(recon.summary?.demHold ?? null)),
+    }
+  })
+  expect(res.status).toBe('done')
+  expect(res.cameras).toBe(4)
+  expect(res.hold).toMatchObject({ reference: 'ground.tif', frame: 'cameras' })
+  expect(res.hold.rounds).toHaveLength(2)
+  expect(res.hold.rounds[0].used).toBeGreaterThan(300)
+  expect(res.hold.after.nmad).toBeLessThan(0.3)
+})
+
 test("footprints from poses follow the terrain tiles, in the cameras' vertical datum", async ({ page }) => {
   await page.goto(harness)
   // Flat Terrarium terrain at 500 m: 129·256 + 244 − 32768.

@@ -24,12 +24,16 @@ const imagesStore = useImagesStore()
 const { log } = useLog()
 
 const tab = ref('gcps')
-const TABS = [
+// The reference-DEM hold (Georeference ▸ Hold to a reference DEM) of the last run, when
+// it had one (core/sfm/bundleSession.js runDemAnchoredBundleAdjust).
+const hold = computed(() => recon.summary?.demHold ?? null)
+const TABS = computed(() => [
   { id: 'gcps', label: 'GCP Accuracy' },
   { id: 'poses', label: 'Pose Residuals' },
   { id: 'scale', label: 'Scale Bars' },
   { id: 'dem', label: 'DEM vs GCPs' },
-]
+  ...(hold.value ? [{ id: 'hold', label: 'Reference DEM Hold' }] : []),
+])
 
 const projects = useProjectsStore()
 const crsUnit = computed(() => linearCrsUnit(projects.currentCrs))
@@ -379,6 +383,34 @@ const demTiles = computed(() => [
   { label: 'Sampled', value: demStats.value.n },
   { label: 'Outside DEM', value: demStats.value.outside, tone: demStats.value.outside ? 'warn' : undefined },
 ])
+// ── Reference DEM hold (F13) ──
+const holdTiles = computed(() => {
+  const h = hold.value
+  if (!h) return []
+  const first = h.rounds[0],
+    last = h.after ?? h.rounds.at(-1)
+  return [
+    { label: 'Tie points held', value: first?.used ?? 0, hint: `of ${first?.candidates ?? 0} over stable ground` },
+    { label: 'Left out', value: first?.rejected ?? 0, hint: 'too far from the DEM' },
+    { label: 'NMAD before', value: fmtM(first?.nmad), unit: crsUnit.value, hint: 'height vs DEM' },
+    { label: 'NMAD after', value: fmtM(last?.nmad), unit: crsUnit.value, hint: 'height vs DEM' },
+    { label: 'Median after', value: fmtM(last?.median), unit: crsUnit.value, hint: 'height − DEM' },
+  ]
+})
+const holdRows = computed(() => {
+  const h = hold.value
+  if (!h) return []
+  const rows = h.rounds.map((r, i) => ({ id: i, when: `Round ${i + 1}, before`, ...r }))
+  if (h.after) rows.push({ id: 'after', when: 'After', ...h.after })
+  return rows
+})
+const holdColumns = [
+  { key: 'when', label: 'When' },
+  { key: 'used', label: 'Held', align: 'right' },
+  { key: 'rejected', label: 'Left out', align: 'right' },
+  { key: 'median', label: 'Median Δh', align: 'right', format: fmtM },
+  { key: 'nmad', label: 'NMAD', align: 'right', format: fmtM },
+]
 const demColumns = [
   { key: 'name', label: 'GCP' },
   { key: 'demZ', label: 'DEM Z', align: 'right', format: fmtM },
@@ -463,6 +495,17 @@ const demColumns = [
         are equally weighted, not surveyed.
       </p>
     </template>
+  </template>
+
+  <!-- Reference DEM hold -->
+  <template v-else-if="tab === 'hold' && hold">
+    <StatTiles :tiles="holdTiles" />
+    <DataTable :columns="holdColumns" :rows="holdRows" />
+    <p class="eval-note">
+      Tie points over stable ground held to "{{ hold.reference }}" (± {{ fmtM(hold.sigma) }} {{ crsUnit }}) in the frame
+      of the {{ hold.frame === 'gcps' ? 'GCPs' : 'camera positions' }}: their height minus the DEM's, as the solve saw
+      them. A falling NMAD is the bend taken out; the median is what the DEM and the control disagree by.
+    </p>
   </template>
 
   <!-- DEM vs GCPs -->
