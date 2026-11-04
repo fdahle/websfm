@@ -491,10 +491,18 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
       <SettingsField v-if="kind === 'poses'" label-for="psrc">
         <template #label><FieldHelp op="export-camera-poses" param="source">Source</FieldHelp></template>
         <select id="psrc" v-model="settings.poseSource" class="field-input field-select">
-          <option value="estimated" :disabled="!sources.estimated">
+          <option
+            value="estimated"
+            :disabled="!sources.estimated"
+            :title="sources.estimated ? null : 'Build a sparse model first (Reconstruct ▸ Sparse Model)'"
+          >
             Estimated by the reconstruction ({{ pluralize(sources.estimated ?? 0, 'camera') }})
           </option>
-          <option value="imported" :disabled="!sources.imported">
+          <option
+            value="imported"
+            :disabled="!sources.imported"
+            :title="sources.imported ? null : 'No camera poses imported (Import ▸ Camera Poses)'"
+          >
             Imported poses ({{ pluralize(sources.imported ?? 0, 'pose') }})
           </option>
         </select>
@@ -502,13 +510,25 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
       <SettingsField v-else-if="kind === 'sensors'" label-for="ssrc">
         <template #label><FieldHelp op="export-calibration" param="source">Source</FieldHelp></template>
         <select id="ssrc" v-model="settings.sensorSource" class="field-input field-select">
-          <option value="estimated" :disabled="!sources.estimated">
+          <option
+            value="estimated"
+            :disabled="!sources.estimated"
+            :title="sources.estimated ? null : 'Build a sparse model first (Reconstruct ▸ Sparse Model)'"
+          >
             Estimated by the reconstruction, one row per camera group
           </option>
-          <option value="estimatedPerImage" :disabled="!sources.estimated">
+          <option
+            value="estimatedPerImage"
+            :disabled="!sources.estimated"
+            :title="sources.estimated ? null : 'Build a sparse model first (Reconstruct ▸ Sparse Model)'"
+          >
             Estimated by the reconstruction, one row per image ({{ pluralize(sources.estimated ?? 0, 'camera') }})
           </option>
-          <option value="entered" :disabled="!sources.entered">
+          <option
+            value="entered"
+            :disabled="!sources.entered"
+            :title="sources.entered ? null : 'No camera group has a calibration entered'"
+          >
             As entered ({{ pluralize(sources.entered ?? 0, 'camera group') }})
           </option>
         </select>
@@ -527,8 +547,14 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
     <SettingsStep v-if="optionsShown" :step="stepNo.options" :title="optionsTitle">
       <!-- Point cloud -->
       <template v-if="kind === 'cloud'">
-        <label class="checkbox-row">
-          <input type="checkbox" v-model="settings.includeColor" :disabled="isLasFormat" class="checkbox" />
+        <label :title="isLasFormat ? 'LAS always stores RGB when the cloud has colour' : null" class="checkbox-row">
+          <input
+            type="checkbox"
+            v-model="settings.includeColor"
+            :disabled="isLasFormat"
+            :title="isLasFormat ? 'LAS always stores RGB when the cloud has colour' : null"
+            class="checkbox"
+          />
           Include vertex colours{{ isLasFormat ? ' (LAS always stores RGB when the cloud has colour)' : '' }}
         </label>
         <label v-if="hasFrame" class="checkbox-row"
@@ -557,8 +583,14 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
       <!-- Mesh -->
       <template v-else-if="kind === 'mesh'">
         <template v-if="textured">
-          <label class="checkbox-row">
-            <input type="checkbox" v-model="settings.includeTexture" :disabled="!textureFormat" class="checkbox" />
+          <label :title="textureFormat ? null : 'Only GLB and OBJ carry a texture'" class="checkbox-row">
+            <input
+              type="checkbox"
+              v-model="settings.includeTexture"
+              :disabled="!textureFormat"
+              :title="textureFormat ? null : 'Only GLB and OBJ carry a texture'"
+              class="checkbox"
+            />
             Include the photo texture{{ textureFormat ? '' : ' (GLB or OBJ only)' }}
           </label>
           <p v-if="textureFormat && settings.includeTexture" class="field-hint">
@@ -569,11 +601,16 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
             }}
           </p>
         </template>
-        <label v-if="!(textured && textureFormat && settings.includeTexture)" class="checkbox-row">
+        <label
+          :title="settings.format === 'stl' ? 'STL has no colour' : null"
+          v-if="!(textured && textureFormat && settings.includeTexture)"
+          class="checkbox-row"
+        >
           <input
             type="checkbox"
             v-model="settings.includeColor"
             :disabled="settings.format === 'stl'"
+            :title="settings.format === 'stl' ? 'STL has no colour' : null"
             class="checkbox"
           />
           Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}
@@ -614,7 +651,7 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
           <template #label><FieldHelp op="export-3d-tiles" param="tiling">Tiling</FieldHelp></template>
           <select id="tiling" v-model="settings.tiling" class="field-input field-select">
             <option value="lod">Level of detail (hierarchy of tiles)</option>
-            <option value="single" :disabled="!singleTileOk">
+            <option value="single" :disabled="!singleTileOk" :title="singleTileOk ? null : 'Too large for one tile'">
               Single tile{{ singleTileOk ? '' : ' — too large for one tile' }}
             </option>
           </select>
@@ -807,8 +844,14 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
           <input type="checkbox" v-model="settings.poseOrientation" class="checkbox" />
           <FieldHelp op="export-camera-poses" param="poseOrientation">Orientation (omega, phi, kappa)</FieldHelp>
         </label>
-        <label class="checkbox-row">
-          <input type="checkbox" v-model="settings.poseAccuracy" :disabled="estimatedPoses" class="checkbox" />
+        <label :title="estimatedPoses ? 'Only imported poses carry accuracies' : null" class="checkbox-row">
+          <input
+            type="checkbox"
+            v-model="settings.poseAccuracy"
+            :disabled="estimatedPoses"
+            :title="estimatedPoses ? 'Only imported poses carry accuracies' : null"
+            class="checkbox"
+          />
           Accuracies{{ estimatedPoses ? ' (imported poses only)' : '' }}
         </label>
         <label v-if="estimatedPoses && hasFrame" class="checkbox-row">
@@ -877,7 +920,13 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
         <template #label><FieldHelp :op="rasterOp" param="rasterCrs">Coordinate system</FieldHelp></template>
         <select id="rcrs" v-model="settings.rasterCrs" class="field-input field-select">
           <option value="product">As built ({{ rasterCrs || 'local frame, no CRS' }})</option>
-          <option value="other" :disabled="!rasterCrs">Another CRS…</option>
+          <option
+            value="other"
+            :disabled="!rasterCrs"
+            :title="rasterCrs ? null : 'A raster in the local frame has no CRS to reproject from'"
+          >
+            Another CRS…
+          </option>
         </select>
       </SettingsField>
       <template v-if="rasterCrs && settings.rasterCrs === 'other'">

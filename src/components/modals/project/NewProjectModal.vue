@@ -121,7 +121,13 @@ function submit() {
       <span v-if="folderError" class="crs-hint error">{{ folderError }}</span>
 
       <label class="field-label" style="margin-top: 20px">Coordinate system</label>
-      <CrsPicker v-model="crs" :disabled="sceneType === 'object'" />
+      <CrsPicker
+        v-model="crs"
+        :disabled="sceneType === 'object'"
+        :title="
+          sceneType === 'object' ? 'An object capture has no coordinate system: its scale comes from scale bars' : null
+        "
+      />
       <span class="crs-hint">{{
         sceneType === 'object'
           ? 'Object-capture projects have no coordinate system — scale is set manually.'
@@ -139,7 +145,14 @@ function submit() {
         New here? Open the example project
       </button>
       <button v-if="canCancel" class="btn" @click="emit('cancel')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!name.trim()"
+        :title="name.trim() ? null : 'Enter a project name first'"
+        @click="submit"
+      >
+        Create project
+      </button>
     </template>
   </ModalShell>
 </template>

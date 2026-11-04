@@ -89,16 +89,41 @@ function run() {
           <template #label><FieldHelp op="estimate-normals" param="orient">Point normals face</FieldHelp></template>
           <select id="nrm-orient" v-model="settings.orient" class="field-select">
             <option value="auto">Automatic</option>
-            <option value="cameras" :disabled="!hasCameras">Towards the cameras</option>
+            <option
+              value="cameras"
+              :disabled="!hasCameras"
+              :title="hasCameras ? null : 'Needs a sparse model (Reconstruct ▸ Sparse Model)'"
+            >
+              Towards the cameras
+            </option>
             <option value="up">Upwards (+Z)</option>
-            <option value="existing" :disabled="!source?.nrm">Keep existing side</option>
+            <option
+              value="existing"
+              :disabled="!source?.nrm"
+              :title="source?.nrm ? null : 'This cloud has no normals yet'"
+            >
+              Keep existing side
+            </option>
           </select>
         </SettingsField>
       </SettingsStep>
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || !(settings.k >= 6)" @click="run">Estimate</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || !(settings.k >= 6)"
+        :title="
+          !source
+            ? 'No dense cloud yet: build one with Reconstruct ▸ Dense Model, or import one'
+            : !(settings.k >= 6)
+              ? 'Use at least 6 neighbours'
+              : null
+        "
+        @click="run"
+      >
+        Estimate
+      </button>
     </template>
   </ModalShell>
 </template>

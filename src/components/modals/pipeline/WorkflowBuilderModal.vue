@@ -327,6 +327,7 @@ function gateSummary(run) {
             class="field-input workflow-name"
             :value="workflow.name"
             :disabled="running"
+            :title="running ? 'Wait for the workflow run to finish' : null"
             @change="patchWorkflow({ name: $event.target.value })"
           />
         </label>
@@ -336,22 +337,38 @@ function gateSummary(run) {
             class="field-input field-select"
             :value="workflow.id"
             :disabled="running"
+            :title="running ? 'Wait for the workflow run to finish' : null"
             @change="emit('set-active', $event.target.value)"
           >
             <option v-for="item in workflows" :key="item.id" :value="item.id">{{ item.name }}</option>
           </select>
         </label>
         <div class="toolbar-actions">
-          <button type="button" class="btn btn-compact" :disabled="running" @click="emit('add-workflow')">New</button>
           <button
             type="button"
             class="btn btn-compact"
             :disabled="running"
+            :title="running ? 'Wait for the workflow run to finish' : null"
+            @click="emit('add-workflow')"
+          >
+            New
+          </button>
+          <button
+            type="button"
+            class="btn btn-compact"
+            :disabled="running"
+            :title="running ? 'Wait for the workflow run to finish' : null"
             @click="emit('duplicate-workflow', workflow.id)"
           >
             Duplicate
           </button>
-          <button type="button" class="btn btn-compact" :disabled="running" @click="emit('save-template', workflow.id)">
+          <button
+            type="button"
+            class="btn btn-compact"
+            :disabled="running"
+            :title="running ? 'Wait for the workflow run to finish' : null"
+            @click="emit('save-template', workflow.id)"
+          >
             Save template
           </button>
         </div>
@@ -359,6 +376,13 @@ function gateSummary(run) {
           type="button"
           class="btn btn-compact danger-quiet"
           :disabled="workflows.length < 2 || running"
+          :title="
+            running
+              ? 'Wait for the workflow run to finish'
+              : workflows.length < 2
+                ? 'The project keeps at least one workflow'
+                : null
+          "
           @click="emit('remove-workflow', workflow.id)"
         >
           Delete
@@ -370,6 +394,7 @@ function gateSummary(run) {
             class="field-input"
             :value="workflow.displayLevel"
             :disabled="running"
+            :title="running ? 'Wait for the workflow run to finish' : null"
             aria-label="Settings detail"
             @change="patchWorkflow({ displayLevel: $event.target.value })"
           >
@@ -407,8 +432,22 @@ function gateSummary(run) {
         <div class="recipe-actions">
           <span v-if="recipeDirty" class="field-hint">Edited — not applied yet.</span>
           <button type="button" class="btn" @click="copyRecipe">Copy recipe</button>
-          <button type="button" class="btn" :disabled="!recipeDirty" @click="revertRecipe">Revert</button>
-          <button type="button" class="btn btn-primary" :disabled="!recipeDirty || running" @click="applyRecipe">
+          <button
+            type="button"
+            class="btn"
+            :disabled="!recipeDirty"
+            :title="recipeDirty ? null : 'No changes to the recipe to revert'"
+            @click="revertRecipe"
+          >
+            Revert
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="!recipeDirty || running"
+            :title="running ? 'Wait for the workflow run to finish' : recipeDirty ? null : 'Edit the recipe text first'"
+            @click="applyRecipe"
+          >
             Apply recipe
           </button>
         </div>
@@ -434,6 +473,7 @@ function gateSummary(run) {
                 type="button"
                 class="block-option"
                 :disabled="running"
+                :title="running ? 'Wait for the workflow run to finish' : null"
                 @click="addBlock(block.id)"
               >
                 <span>{{ block.label }}</span
@@ -449,6 +489,7 @@ function gateSummary(run) {
                 type="button"
                 class="btn template-name"
                 :disabled="running"
+                :title="running ? 'Wait for the workflow run to finish' : null"
                 @click="emit('apply-template', item.id)"
               >
                 {{ item.name }}
@@ -482,6 +523,7 @@ function gateSummary(run) {
                 class="field-input field-select"
                 :value="workflow.defaults.warningPolicy"
                 :disabled="running"
+                :title="running ? 'Wait for the workflow run to finish' : null"
                 @change="patchWorkflow({ defaults: { ...workflow.defaults, warningPolicy: $event.target.value } })"
               >
                 <option value="pause">Pause and ask</option>
@@ -495,6 +537,7 @@ function gateSummary(run) {
                 class="field-input field-select"
                 :value="workflow.defaults.reusePolicy"
                 :disabled="running"
+                :title="running ? 'Wait for the workflow run to finish' : null"
                 @change="patchWorkflow({ defaults: { ...workflow.defaults, reusePolicy: $event.target.value } })"
               >
                 <option value="valid">Reuse</option>
@@ -508,7 +551,13 @@ function gateSummary(run) {
             <h3>Build your workflow</h3>
             <p>Add commands from the Blocks panel. They run in order from top to bottom.</p>
             <p>For a sparse model, start with Detect Features, Match Features, then Sparse Model.</p>
-            <button type="button" class="btn btn-primary" :disabled="running" @click="addBlock('detect-features')">
+            <button
+              type="button"
+              class="btn btn-primary"
+              :disabled="running"
+              :title="running ? 'Wait for the workflow run to finish' : null"
+              @click="addBlock('detect-features')"
+            >
               Add Detect Features
             </button>
             <p class="field-hint">Import your images before running. You can configure the workflow now.</p>
@@ -614,6 +663,7 @@ function gateSummary(run) {
                 class="field-input"
                 :value="activeBlock.name"
                 :disabled="running"
+                :title="running ? 'Wait for the workflow run to finish' : null"
                 placeholder="Optional — what jumps go to"
                 aria-label="Block name"
                 @change="renameBlock($event.target.value)"
@@ -622,7 +672,12 @@ function gateSummary(run) {
             </label>
             <template v-if="activeSpec.fields.length">
               <template v-for="field in inspectorFields" :key="field.key">
-                <fieldset v-if="field.type === 'multi'" class="field multi" :disabled="running">
+                <fieldset
+                  v-if="field.type === 'multi'"
+                  class="field multi"
+                  :disabled="running"
+                  :title="running ? 'Wait for the workflow run to finish' : null"
+                >
                   <legend class="field-label">{{ field.label }}</legend>
                   <label v-for="option in optionValues(field)" :key="option" class="multi-option">
                     <input
@@ -633,7 +688,7 @@ function gateSummary(run) {
                     <span>{{ option }}</span>
                   </label>
                 </fieldset>
-                <label v-else class="field">
+                <label v-else class="field" :title="running ? 'Wait for the workflow run to finish' : null">
                   <span class="field-label">
                     <FieldHelp
                       v-if="field.help && field.type === 'number'"
@@ -652,6 +707,7 @@ function gateSummary(run) {
                     v-if="field.type === 'select'"
                     class="field-input field-select"
                     :disabled="running"
+                    :title="running ? 'Wait for the workflow run to finish' : null"
                     :value="activeBlock.settings[field.key]"
                     @change="patchSetting(field.key, $event.target.value, field.type)"
                   >
@@ -663,6 +719,7 @@ function gateSummary(run) {
                     v-else-if="field.type === 'target'"
                     class="field-input field-select"
                     :disabled="running"
+                    :title="running ? 'Wait for the workflow run to finish' : null"
                     :value="targetSelectValue(activeBlock.settings[field.key])"
                     @change="setTarget(field.key, $event.target.value)"
                   >
@@ -675,6 +732,7 @@ function gateSummary(run) {
                       v-if="targetSelectValue(activeBlock.settings[field.key]).startsWith('missing:')"
                       :value="targetSelectValue(activeBlock.settings[field.key])"
                       disabled
+                      :title="'The block this jumped to no longer exists: choose another'"
                     >
                       Missing: {{ activeBlock.settings[field.key] }}
                     </option>
@@ -684,6 +742,7 @@ function gateSummary(run) {
                     class="field-input"
                     type="number"
                     :disabled="running"
+                    :title="running ? 'Wait for the workflow run to finish' : null"
                     :min="field.min"
                     :max="field.max"
                     :value="activeBlock.settings[field.key]"
@@ -694,6 +753,7 @@ function gateSummary(run) {
                     class="field-input"
                     type="text"
                     :disabled="running"
+                    :title="running ? 'Wait for the workflow run to finish' : null"
                     :value="activeBlock.settings[field.key]"
                     @change="patchSetting(field.key, $event.target.value, field.type)"
                   />
@@ -702,6 +762,7 @@ function gateSummary(run) {
                     class="checkbox"
                     type="checkbox"
                     :disabled="running"
+                    :title="running ? 'Wait for the workflow run to finish' : null"
                     :checked="activeBlock.settings[field.key]"
                     @change="patchSetting(field.key, $event.target.checked, field.type)"
                   />
@@ -715,6 +776,7 @@ function gateSummary(run) {
                   class="field-input field-select"
                   :value="activeBlock.reusePolicy"
                   :disabled="running"
+                  :title="running ? 'Wait for the workflow run to finish' : null"
                   @change="patchBlock(activeBlock.id, { reusePolicy: $event.target.value })"
                 >
                   <option value="inherit">Workflow default</option>
@@ -729,6 +791,7 @@ function gateSummary(run) {
                   class="field-input field-select"
                   :value="activeBlock.warningPolicy"
                   :disabled="running"
+                  :title="running ? 'Wait for the workflow run to finish' : null"
                   @change="patchBlock(activeBlock.id, { warningPolicy: $event.target.value })"
                 >
                   <option value="inherit">Workflow default</option>
@@ -781,7 +844,13 @@ function gateSummary(run) {
     <div v-else class="empty-lane">
       <h3>Create your first workflow</h3>
       <p>Combine reconstruction commands, choose their settings, and run them in order.</p>
-      <button type="button" class="btn btn-primary" :disabled="running" @click="emit('add-workflow')">
+      <button
+        type="button"
+        class="btn btn-primary"
+        :disabled="running"
+        :title="running ? 'Wait for the workflow run to finish' : null"
+        @click="emit('add-workflow')"
+      >
         Create workflow
       </button>
     </div>
@@ -798,6 +867,9 @@ function gateSummary(run) {
         type="button"
         class="btn"
         :disabled="!!errors.length"
+        :title="
+          errors.length ? errors[0].message + (errors.length > 1 ? ` (and ${errors.length - 1} more)` : '') : null
+        "
         @click="emit('run', { workflow, fromIndex: workflow.blocks.findIndex((b) => b.id === activeBlock.id) })"
       >
         Run from selected
@@ -815,6 +887,15 @@ function gateSummary(run) {
         type="button"
         class="btn btn-primary"
         :disabled="!workflow || !hasEnabledBlocks || !!errors.length"
+        :title="
+          !workflow
+            ? 'Create a workflow first'
+            : !hasEnabledBlocks
+              ? 'Add a block, or turn one on'
+              : errors.length
+                ? errors[0].message + (errors.length > 1 ? ` (and ${errors.length - 1} more)` : '')
+                : null
+        "
         @click="emit('run', { workflow, fromIndex: 0 })"
       >
         Run workflow

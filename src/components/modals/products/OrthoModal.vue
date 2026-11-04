@@ -241,7 +241,13 @@ provideStepLayout('orthophoto')
       >
         <template #label><FieldHelp op="orthophoto" param="surface">Surface</FieldHelp></template>
         <select id="ortho-surface" v-model="settings.surface" class="field-input field-select">
-          <option v-for="s in surfaces" :key="s.id" :value="s.id" :disabled="!s.available">
+          <option
+            v-for="s in surfaces"
+            :key="s.id"
+            :value="s.id"
+            :disabled="!s.available"
+            :title="s.available ? null : s.hint"
+          >
             {{ s.label }}{{ s.detail ? ` — ${s.detail}` : '' }}{{ s.available ? '' : ' — unavailable' }}
           </option>
         </select>

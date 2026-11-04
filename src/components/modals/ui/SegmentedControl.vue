@@ -1,7 +1,8 @@
 <script setup>
 // A row of mutually-exclusive option buttons (WS5), harvested from the repeated
 // detector-row/detector-btn pattern. v-model binds the selected option id.
-//   options: [{ id, label, disabled? }]   // a disabled option can't be selected
+//   options: [{ id, label, disabled?, reason? }]   // a disabled option can't be selected;
+//   `reason` is its tooltip, saying why (CONTRIBUTING ▸ Disabled controls say why)
 defineProps({
   modelValue: { type: [String, Number, Boolean], default: null },
   options: { type: Array, required: true },
@@ -19,6 +20,7 @@ defineEmits(['update:modelValue'])
       :class="{ active: modelValue === o.id }"
       :aria-pressed="modelValue === o.id"
       :disabled="o.disabled"
+      :title="o.disabled ? o.reason || null : null"
       @click="!o.disabled && $emit('update:modelValue', o.id)"
     >
       {{ o.label }}

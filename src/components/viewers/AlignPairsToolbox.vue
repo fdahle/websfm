@@ -72,7 +72,15 @@ const summary = computed(() => {
     <label class="tb-field">
       <span>Onto</span>
       <select class="tb-input" :value="referenceId" @change="emit('update:referenceId', $event.target.value)">
-        <option v-for="c in references" :key="c.id" :value="c.id" :disabled="c.id === sourceId">{{ c.name }}</option>
+        <option
+          v-for="c in references"
+          :key="c.id"
+          :value="c.id"
+          :disabled="c.id === sourceId"
+          :title="c.id === sourceId ? 'This is the cloud being aligned' : null"
+        >
+          {{ c.name }}
+        </option>
       </select>
       <span></span>
     </label>
@@ -105,8 +113,20 @@ const summary = computed(() => {
       <button class="tb-textbtn" :disabled="!pairs.length" title="Remove the last click" @click="emit('undo')">
         Undo
       </button>
-      <button class="tb-textbtn" :disabled="!pairs.length" @click="emit('clear')">Clear</button>
-      <button class="tb-textbtn primary" :disabled="!fit || !!fit.error" @click="emit('apply', fit.transform)">
+      <button
+        class="tb-textbtn"
+        :disabled="!pairs.length"
+        :title="pairs.length ? null : 'No point pairs picked yet'"
+        @click="emit('clear')"
+      >
+        Clear
+      </button>
+      <button
+        class="tb-textbtn primary"
+        :disabled="!fit || !!fit.error"
+        :title="fit?.error || (fit ? null : 'Pick at least three point pairs first')"
+        @click="emit('apply', fit.transform)"
+      >
         Apply
       </button>
     </div>

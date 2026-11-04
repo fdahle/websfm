@@ -70,6 +70,13 @@ function run() {
       <button
         class="btn btn-primary"
         :disabled="!source || !(settings.count >= 1000 && settings.count <= MAX)"
+        :title="
+          !source
+            ? 'No mesh yet: build one with Reconstruct ▸ Mesh, or import one'
+            : !(settings.count >= 1000 && settings.count <= MAX)
+              ? `Choose between 1,000 and ${MAX.toLocaleString()} points`
+              : null
+        "
         @click="run"
       >
         Sample

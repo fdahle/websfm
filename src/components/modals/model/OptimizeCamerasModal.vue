@@ -68,7 +68,14 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!cloud" @click="run">Optimize</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!cloud"
+        :title="cloud ? null : 'Needs a sparse model (Reconstruct ▸ Sparse Model)'"
+        @click="run"
+      >
+        Optimize
+      </button>
     </template>
   </ModalShell>
 </template>

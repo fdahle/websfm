@@ -47,7 +47,14 @@ const source = computed(() => props.projects.find((p) => p.id === sourceId.value
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source" @click="emit('run', sourceId)">Import</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source"
+        :title="source ? null : 'Choose a project to import'"
+        @click="emit('run', sourceId)"
+      >
+        Import
+      </button>
     </template>
   </ModalShell>
 </template>

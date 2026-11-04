@@ -156,6 +156,16 @@ const canImport = computed(
       ? built.value.gcps.length > 0
       : hasName.value && (hasXY.value || observationsOnly.value) && built.value.gcps.length > 0),
 )
+// Why Import is greyed (its tooltip).
+const importReason = computed(() => {
+  if (canImport.value) return null
+  if (!validDefaults.value)
+    return 'Accuracies must be numbers above 0 (ground accuracy: all three, or leave all three empty)'
+  if (!geojsonMode.value && !hasName.value) return 'Choose the column with the point names'
+  if (!geojsonMode.value && !hasXY.value && !observationsOnly.value)
+    return 'Choose the X and Y columns, or the image and pixel columns for marks only'
+  return 'No points were found in the file'
+})
 
 const axX = computed(() => axisLabels(sourceCrs.value)[0])
 const axY = computed(() => axisLabels(sourceCrs.value)[1])
@@ -337,7 +347,9 @@ function doImport() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!canImport" @click="doImport">Import GCPs</button>
+      <button class="btn btn-primary" :disabled="!canImport" :title="importReason" @click="doImport">
+        Import GCPs
+      </button>
     </template>
   </ModalShell>
 </template>

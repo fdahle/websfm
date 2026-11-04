@@ -132,7 +132,12 @@ function run() {
     </SettingsStep>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!toDisable.length" @click="run">
+      <button
+        class="btn btn-primary"
+        :disabled="!toDisable.length"
+        :title="toDisable.length ? null : 'No photos to disable at this overlap'"
+        @click="run"
+      >
         Disable {{ toDisable.length || '' }} {{ toDisable.length === 1 ? 'photo' : 'photos' }}
       </button>
     </template>

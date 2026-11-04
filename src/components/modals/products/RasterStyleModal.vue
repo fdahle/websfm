@@ -116,13 +116,20 @@ function apply() {
       <label class="field-label">Display</label>
       <div class="seg">
         <button class="seg-btn" :class="{ active: s.mode === 'gray' }" @click="s.mode = 'gray'">Greyscale</button>
-        <button class="seg-btn" :class="{ active: s.mode === 'rgb' }" :disabled="bandCount < 3" @click="s.mode = 'rgb'">
+        <button
+          class="seg-btn"
+          :class="{ active: s.mode === 'rgb' }"
+          :disabled="bandCount < 3"
+          :title="bandCount < 3 ? 'Needs at least three bands' : null"
+          @click="s.mode = 'rgb'"
+        >
           RGB
         </button>
         <button
           class="seg-btn"
           :class="{ active: s.mode === 'index' }"
           :disabled="bandCount < 2"
+          :title="bandCount < 2 ? 'Needs at least two bands' : null"
           @click="s.mode = 'index'"
         >
           Index

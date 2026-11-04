@@ -573,6 +573,7 @@ function revealRow(key) {
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti }"
           :disabled="ctxIsMulti"
+          :title="ctxIsMulti ? 'Works on one image: right-click a single image' : null"
           @click="fromMenu((img) => sidebar.openImage(img.id))"
         >
           {{ ctxOpenLabel }}
@@ -581,6 +582,13 @@ function revealRow(key) {
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }"
           :disabled="ctxIsMulti || !ctxHasPosition"
+          :title="
+            ctxIsMulti
+              ? 'Works on one image: right-click a single image'
+              : !ctxHasPosition
+                ? 'This image has no position (no GPS, footprint or pose)'
+                : null
+          "
           @click="fromMenu((img) => sidebar.zoomToImage(img.id))"
         >
           Locate on map
@@ -590,6 +598,7 @@ function revealRow(key) {
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti }"
           :disabled="ctxIsMulti"
+          :title="ctxIsMulti ? 'Works on one image: right-click a single image' : null"
           @click="fromMenu((img) => sidebar.showInfo(img.id))"
         >
           Show information
@@ -598,6 +607,7 @@ function revealRow(key) {
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti }"
           :disabled="ctxIsMulti"
+          :title="ctxIsMulti ? 'Works on one image: right-click a single image' : null"
           @click="fromMenu((img) => sidebar.downloadImage(img.id))"
         >
           Download original
@@ -606,6 +616,7 @@ function revealRow(key) {
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti }"
           :disabled="ctxIsMulti"
+          :title="ctxIsMulti ? 'Works on one image: right-click a single image' : null"
           @click="fromMenu((img) => startRename(img.id, img.name))"
         >
           Rename
@@ -668,6 +679,7 @@ function revealRow(key) {
           class="ctx-item"
           :class="{ 'ctx-disabled': !menu.row.count }"
           :disabled="!menu.row.count"
+          :title="menu.row.count ? null : 'This group has no images'"
           @click="groupCtxSelect"
         >
           Select images
@@ -678,6 +690,7 @@ function revealRow(key) {
             class="ctx-item"
             :class="{ 'ctx-disabled': groupCtxIndex <= 0 }"
             :disabled="groupCtxIndex <= 0"
+            :title="groupCtxIndex <= 0 ? 'Already the first group' : null"
             @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: -1 }))"
           >
             Move up
@@ -686,6 +699,7 @@ function revealRow(key) {
             class="ctx-item"
             :class="{ 'ctx-disabled': groupCtxIndex >= imageGroups.length - 1 }"
             :disabled="groupCtxIndex >= imageGroups.length - 1"
+            :title="groupCtxIndex >= imageGroups.length - 1 ? 'Already the last group' : null"
             @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: 1 }))"
           >
             Move down

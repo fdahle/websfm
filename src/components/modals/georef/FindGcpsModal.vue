@@ -400,11 +400,30 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
     <SettingsGroup title="Source">
       <SettingsField label="Reference orthophoto" label-for="fg-ref">
         <div class="fg-ref">
-          <select id="fg-ref" v-model="selectedReferenceId" class="field-select" :disabled="busy">
-            <option value="" disabled>Select a reference</option>
+          <select
+            id="fg-ref"
+            v-model="selectedReferenceId"
+            class="field-select"
+            :disabled="busy"
+            :title="busy ? 'Wait for Find GCPs to finish' : null"
+          >
+            <option value="" disabled :title="'Choose a reference from the list'">Select a reference</option>
             <option v-for="r in referenceOrthos" :key="r.id" :value="r.id">{{ r.name }}</option>
           </select>
-          <button class="btn" :disabled="busy || matcher === 'terrain'" @click="s2Open = true">Sentinel-2…</button>
+          <button
+            class="btn"
+            :disabled="busy || matcher === 'terrain'"
+            :title="
+              busy
+                ? 'Wait for Find GCPs to finish'
+                : matcher === 'terrain'
+                  ? 'Terrain matching uses a reference DEM, not an image'
+                  : null
+            "
+            @click="s2Open = true"
+          >
+            Sentinel-2…
+          </button>
         </div>
         <template #hint
           >A georeferenced raster of the same ground: an imported satellite image or older orthophoto, or a Sentinel-2
@@ -413,7 +432,19 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
       </SettingsField>
       <SettingsField label-for="fg-area">
         <template #label><FieldHelp op="georeferencing" param="searchArea">Search area</FieldHelp></template>
-        <select id="fg-area" v-model="searchSetId" class="field-select" :disabled="busy || matcher === 'terrain'">
+        <select
+          id="fg-area"
+          v-model="searchSetId"
+          class="field-select"
+          :disabled="busy || matcher === 'terrain'"
+          :title="
+            busy
+              ? 'Wait for Find GCPs to finish'
+              : matcher === 'terrain'
+                ? 'Terrain matching uses a reference DEM, not an image'
+                : null
+          "
+        >
           <option value="">Auto</option>
           <option v-for="s in stableLayers" :key="s.id" :value="s.id">{{ s.name }}</option>
         </select>
@@ -423,6 +454,7 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
             v-if="offerFootprints"
             class="link-btn fg-footprints"
             :disabled="busy"
+            :title="busy ? 'Wait for Find GCPs to finish' : null"
             @click="emit('compute-footprints')"
           >
             Compute footprints…
@@ -435,6 +467,7 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
           v-if="offerFootprints"
           class="link-btn fg-footprints"
           :disabled="busy"
+          :title="busy ? 'Wait for Find GCPs to finish' : null"
           @click="emit('compute-footprints')"
         >
           Compute footprints…
@@ -445,7 +478,13 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
     <SettingsStep step="1" title="Match" :effect="effects.match">
       <SettingsField label-for="fg-matcher">
         <template #label><FieldHelp op="georeferencing" param="coarseMatcher">Coarse matcher</FieldHelp></template>
-        <select id="fg-matcher" v-model="matcher" class="field-select" :disabled="busy">
+        <select
+          id="fg-matcher"
+          v-model="matcher"
+          class="field-select"
+          :disabled="busy"
+          :title="busy ? 'Wait for Find GCPs to finish' : null"
+        >
           <option value="auto">Auto (SuperPoint if installed, else DISK)</option>
           <option value="disk">DISK + LightGlue</option>
           <option value="superpoint">SuperPoint + LightGlue</option>
@@ -454,14 +493,26 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
         </select>
       </SettingsField>
       <SettingsField v-if="matcher === 'terrain'" label="Reference DEM" label-for="fg-dem-fit">
-        <select id="fg-dem-fit" v-model="demId" class="field-select" :disabled="busy">
+        <select
+          id="fg-dem-fit"
+          v-model="demId"
+          class="field-select"
+          :disabled="busy"
+          :title="busy ? 'Wait for Find GCPs to finish' : null"
+        >
           <option value="">Choose DEM</option>
           <option v-for="r in dems" :key="r.id" :value="r.id">{{ r.name }}</option>
         </select>
       </SettingsField>
       <SettingsField v-else-if="bandCount > 1" label-for="fg-band">
         <template #label><FieldHelp op="georeferencing" param="referenceBand">Reference band</FieldHelp></template>
-        <select id="fg-band" v-model="band" class="field-select" :disabled="busy">
+        <select
+          id="fg-band"
+          v-model="band"
+          class="field-select"
+          :disabled="busy"
+          :title="busy ? 'Wait for Find GCPs to finish' : null"
+        >
           <option v-if="bandCount >= 3" value="rgb">Mean of bands 1–3 (RGB)</option>
           <option v-for="b in bandCount" :key="b" :value="b">Band {{ b }}</option>
         </select>
@@ -490,11 +541,18 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
             max="300"
             step="1"
             :disabled="busy"
+            :title="busy ? 'Wait for Find GCPs to finish' : null"
           />
         </SettingsField>
         <SettingsField label-for="fg-stable">
           <template #label><FieldHelp op="georeferencing" param="stableArea">Stable ground</FieldHelp></template>
-          <select id="fg-stable" v-model="stableSetId" class="field-select" :disabled="busy">
+          <select
+            id="fg-stable"
+            v-model="stableSetId"
+            class="field-select"
+            :disabled="busy"
+            :title="busy ? 'Wait for Find GCPs to finish' : null"
+          >
             <option value="">Anywhere</option>
             <option v-for="s in stableLayers" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
@@ -566,8 +624,22 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
 
       <template v-if="candidates.length">
         <div class="fg-toolbar">
-          <button class="link-btn" :disabled="busy" @click="selectConfident">Select confidence ≥ 50 %</button>
-          <button class="link-btn" :disabled="busy || !reviewed.length" @click="selectNone">Select none</button>
+          <button
+            class="link-btn"
+            :disabled="busy"
+            :title="busy ? 'Wait for Find GCPs to finish' : null"
+            @click="selectConfident"
+          >
+            Select confidence ≥ 50 %
+          </button>
+          <button
+            class="link-btn"
+            :disabled="busy || !reviewed.length"
+            :title="busy ? 'Wait for Find GCPs to finish' : reviewed.length ? null : 'No candidates are selected'"
+            @click="selectNone"
+          >
+            Select none
+          </button>
         </div>
         <DataTable
           class="fg-table"
@@ -583,6 +655,7 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
               class="checkbox"
               :aria-label="`Select candidate ${row.n}`"
               :disabled="busy"
+              :title="busy ? 'Wait for Find GCPs to finish' : null"
               @click.stop
             />
           </template>
@@ -591,7 +664,15 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
 
       <section v-if="active && preview" class="fg-review" :aria-busy="busy">
         <header class="fg-review-head">
-          <button class="btn fg-nav" :disabled="busy" aria-label="Previous candidate" @click="step(-1)">‹</button>
+          <button
+            class="btn fg-nav"
+            :disabled="busy"
+            :title="busy ? 'Wait for Find GCPs to finish' : null"
+            aria-label="Previous candidate"
+            @click="step(-1)"
+          >
+            ‹
+          </button>
           <div class="fg-review-title">
             <strong>Candidate {{ activeIndex + 1 }}</strong>
             <span>
@@ -599,10 +680,25 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
               {{ fmtXY(active.y) }} ({{ projects.currentCrs }})</span
             >
           </div>
-          <label class="checkbox-row"
-            ><input v-model="active.selected" type="checkbox" class="checkbox" :disabled="busy" /> Selected</label
+          <label class="checkbox-row" :title="busy ? 'Wait for Find GCPs to finish' : null"
+            ><input
+              v-model="active.selected"
+              type="checkbox"
+              class="checkbox"
+              :disabled="busy"
+              :title="busy ? 'Wait for Find GCPs to finish' : null"
+            />
+            Selected</label
           >
-          <button class="btn fg-nav" :disabled="busy" aria-label="Next candidate" @click="step(1)">›</button>
+          <button
+            class="btn fg-nav"
+            :disabled="busy"
+            :title="busy ? 'Wait for Find GCPs to finish' : null"
+            aria-label="Next candidate"
+            @click="step(1)"
+          >
+            ›
+          </button>
         </header>
         <div class="fg-pair">
           <figure v-for="side in ['local', 'reference']" :key="side">
@@ -639,7 +735,7 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
           Accept only a candidate that shows the same stable feature in both close-ups: change since the reference and
           relief make false matches. σ XY comes from the reference's pixel size; edit it if you know better.
         </p>
-        <fieldset class="fg-fields" :disabled="busy">
+        <fieldset class="fg-fields" :disabled="busy" :title="busy ? 'Wait for Find GCPs to finish' : null">
           <SettingsField>
             <template #label><FieldHelp op="georeferencing" param="role">Role</FieldHelp></template>
             <SegmentedControl v-model="active.role" :options="ROLES" />
@@ -683,12 +779,31 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
     <SettingsStep step="4" title="Heights" :effect="effects.heights" :inactive="!candidates.length">
       <div v-if="candidates.length" class="fg-row fg-fill">
         <SettingsField label="Reference DEM" label-for="fg-dem">
-          <select id="fg-dem" v-model="demId" class="field-select" :disabled="busy">
+          <select
+            id="fg-dem"
+            v-model="demId"
+            class="field-select"
+            :disabled="busy"
+            :title="busy ? 'Wait for Find GCPs to finish' : null"
+          >
             <option value="">Choose DEM</option>
             <option v-for="r in dems" :key="r.id" :value="r.id">{{ r.name }}</option>
           </select>
         </SettingsField>
-        <button class="btn" :disabled="busy || !demId || !reviewed.length" @click="fillHeights">
+        <button
+          class="btn"
+          :disabled="busy || !demId || !reviewed.length"
+          :title="
+            busy
+              ? 'Wait for Find GCPs to finish'
+              : !demId
+                ? 'Choose a DEM first'
+                : reviewed.length
+                  ? null
+                  : 'Select candidates in the table first'
+          "
+          @click="fillHeights"
+        >
           Fill selected heights
         </button>
       </div>
@@ -728,6 +843,15 @@ const fmtXY = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 3, maxim
         v-if="candidates.length"
         class="btn btn-primary"
         :disabled="busy || !reviewed.length || invalid"
+        :title="
+          busy
+            ? 'Wait for Find GCPs to finish'
+            : !reviewed.length
+              ? 'Select candidates in the table first'
+              : invalid
+                ? 'A selected candidate has an invalid height or accuracy: correct it in the table'
+                : null
+        "
         @click="add"
       >
         Add {{ reviewed.length }} {{ reviewed.length === 1 ? 'candidate' : 'candidates' }}

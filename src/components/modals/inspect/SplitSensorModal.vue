@@ -91,7 +91,12 @@ const um = (v) => `${Math.round(v)} µm`
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="groups.length < 2" @click="emit('split', groups)">
+      <button
+        class="btn btn-primary"
+        :disabled="groups.length < 2"
+        :title="groups.length < 2 ? 'This split gives only one group: choose another way to split' : null"
+        @click="emit('split', groups)"
+      >
         Split into {{ groups.length }} groups
       </button>
     </template>

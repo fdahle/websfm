@@ -189,7 +189,13 @@ provideStepLayout('sparse-reconstruction')
         <template #label
           ><FieldHelp op="sparse-reconstruction" param="existingCameras">Existing cameras</FieldHelp></template
         >
-        <select id="existingCameras" v-model="existingCameras" class="field-input field-select" :disabled="blocked">
+        <select
+          id="existingCameras"
+          v-model="existingCameras"
+          class="field-input field-select"
+          :disabled="blocked"
+          :title="blocked ? extendBlocker : null"
+        >
           <option value="auto">Auto (recommended)</option>
           <option value="fixed">Fixed</option>
           <option value="refined">Refined</option>
@@ -317,6 +323,13 @@ provideStepLayout('sparse-reconstruction')
             v-model="settings.refineIntrinsics"
             class="field-input field-select"
             :disabled="adding || !(settings.baIterations > 0)"
+            :title="
+              adding
+                ? 'Fixed while adding images to the model: Rebuild to change it'
+                : !(settings.baIterations > 0)
+                  ? 'Needs bundle adjustment: set its iterations above 0'
+                  : null
+            "
           >
             <option value="auto">Auto (recommended)</option>
             <option value="none">Off — use sensor table</option>
@@ -346,6 +359,13 @@ provideStepLayout('sparse-reconstruction')
           v-model="settings.rollingShutter"
           class="field-input field-select"
           :disabled="adding || !(settings.baIterations > 0)"
+          :title="
+            adding
+              ? 'Fixed while adding images to the model: Rebuild to change it'
+              : !(settings.baIterations > 0)
+                ? 'Needs bundle adjustment: set its iterations above 0'
+                : null
+          "
         >
           <option value="off">Off</option>
           <option value="on">Estimate the readout time</option>
@@ -368,6 +388,13 @@ provideStepLayout('sparse-reconstruction')
           v-model="settings.cameraRig"
           class="field-input field-select"
           :disabled="adding || !cameraRigs.length"
+          :title="
+            adding
+              ? 'Fixed while adding images to the model: Rebuild to change it'
+              : !cameraRigs.length
+                ? 'No multispectral camera rig among the images'
+                : null
+          "
         >
           <option value="on">One pose per capture</option>
           <option value="off">One pose per photo</option>

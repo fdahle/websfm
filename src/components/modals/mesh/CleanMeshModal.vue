@@ -254,7 +254,20 @@ provideStepLayout('clean-mesh')
       <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || !settings.methods.length" @click="run">Clean</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || !settings.methods.length"
+        :title="
+          !source
+            ? 'No mesh yet: build one with Reconstruct ▸ Mesh, or import one'
+            : !settings.methods.length
+              ? 'Turn on at least one clean-up step'
+              : null
+        "
+        @click="run"
+      >
+        Clean
+      </button>
     </template>
   </ModalShell>
 </template>

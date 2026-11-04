@@ -189,6 +189,7 @@ function onFocusout(event) {
         :aria-activedescendant="activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined"
         :value="query"
         :disabled="disabled || applying"
+        :title="applying ? 'Applying the coordinate system…' : ($attrs.title ?? null)"
         placeholder="Search by EPSG code, name, or area…"
         autocomplete="off"
         spellcheck="false"

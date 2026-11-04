@@ -84,7 +84,14 @@ function run() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="selected.length < 2" @click="run">Merge</button>
+      <button
+        class="btn btn-primary"
+        :disabled="selected.length < 2"
+        :title="selected.length < 2 ? 'Select at least two clouds' : null"
+        @click="run"
+      >
+        Merge
+      </button>
     </template>
   </ModalShell>
 </template>

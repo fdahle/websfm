@@ -80,7 +80,14 @@ const BUFFERED_WARN_BYTES = 2 * 1024 ** 3
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!sizes" @click="emit('run', { includeDerived })">Export…</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!sizes"
+        :title="sizes ? null : 'Still measuring the project'"
+        @click="emit('run', { includeDerived })"
+      >
+        Export…
+      </button>
     </template>
   </ModalShell>
 </template>

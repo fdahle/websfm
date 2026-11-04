@@ -137,7 +137,20 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || !(length > 0)" @click="run">Cut section</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || !(length > 0)"
+        :title="
+          !source
+            ? 'No dense cloud yet: build one with Reconstruct ▸ Dense Model, or import one'
+            : !(length > 0)
+              ? 'Set two different end points for the section line'
+              : null
+        "
+        @click="run"
+      >
+        Cut section
+      </button>
     </template>
   </ModalShell>
 </template>

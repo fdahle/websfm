@@ -252,6 +252,7 @@ provideStepLayout('fiducial-detect')
           step="0.05"
           class="field-input range"
           :disabled="running"
+          :title="running ? 'Wait for the detection to finish' : null"
         />
       </SettingsField>
     </SettingsStep>
@@ -275,16 +276,30 @@ provideStepLayout('fiducial-detect')
       <template #tuning>
         <SettingsField>
           <template #label>Overwrite existing detections</template>
-          <label class="checkbox-row">
-            <input v-model="settings.overwrite" type="checkbox" class="checkbox" :disabled="running" /> Enabled
+          <label :title="running ? 'Wait for the detection to finish' : null" class="checkbox-row">
+            <input
+              v-model="settings.overwrite"
+              type="checkbox"
+              class="checkbox"
+              :disabled="running"
+              :title="running ? 'Wait for the detection to finish' : null"
+            />
+            Enabled
           </label>
         </SettingsField>
         <SettingsField
           hint="Uses the detected film frame to exclude scanner background, merging with an existing mask unless overwrite is enabled."
         >
           <template #label>Generate background masks</template>
-          <label class="checkbox-row">
-            <input v-model="settings.generateMasks" type="checkbox" class="checkbox" :disabled="running" /> Enabled
+          <label :title="running ? 'Wait for the detection to finish' : null" class="checkbox-row">
+            <input
+              v-model="settings.generateMasks"
+              type="checkbox"
+              class="checkbox"
+              :disabled="running"
+              :title="running ? 'Wait for the detection to finish' : null"
+            />
+            Enabled
           </label>
         </SettingsField>
       </template>
@@ -351,7 +366,12 @@ provideStepLayout('fiducial-detect')
       >
         {{ results ? 'Done' : 'Cancel' }}
       </button>
-      <button class="btn btn-primary" :disabled="running || !images.length" @click="run">
+      <button
+        class="btn btn-primary"
+        :disabled="running || !images.length"
+        :title="running ? 'Wait for the detection to finish' : images.length ? null : 'This camera group has no images'"
+        @click="run"
+      >
         {{ running ? 'Detecting…' : 'Detect Fiducials' }}
       </button>
     </template>

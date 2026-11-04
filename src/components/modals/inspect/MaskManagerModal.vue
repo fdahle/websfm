@@ -153,7 +153,18 @@ function edit(img) {
     @close="emit('close')"
   >
     <div class="subbar">
-      <button class="btn" :disabled="busy || !grouping.sizedGroups.length" @click="importForAll">
+      <button
+        class="btn"
+        :disabled="busy || !grouping.sizedGroups.length"
+        :title="
+          busy
+            ? 'Wait for the masks to be written'
+            : !grouping.sizedGroups.length
+              ? 'The image sizes are not known yet: wait for the images to load'
+              : null
+        "
+        @click="importForAll"
+      >
         Import &amp; apply to all…
       </button>
       <button
@@ -182,12 +193,48 @@ function edit(img) {
       </div>
       <div class="plan-actions">
         <span class="opt-label"><FieldHelp op="masks" param="importExisting">If a mask exists</FieldHelp>:</span>
-        <label class="opt"><input v-model="existing" type="radio" value="replace" :disabled="busy" /> Replace</label>
-        <label class="opt"><input v-model="existing" type="radio" value="merge" :disabled="busy" /> Merge</label>
+        <label :title="busy ? 'Wait for the masks to be written' : null" class="opt"
+          ><input
+            v-model="existing"
+            type="radio"
+            value="replace"
+            :disabled="busy"
+            :title="busy ? 'Wait for the masks to be written' : null"
+          />
+          Replace</label
+        >
+        <label :title="busy ? 'Wait for the masks to be written' : null" class="opt"
+          ><input
+            v-model="existing"
+            type="radio"
+            value="merge"
+            :disabled="busy"
+            :title="busy ? 'Wait for the masks to be written' : null"
+          />
+          Merge</label
+        >
         <span class="spacer"></span>
         <span v-if="progress" class="hint">{{ progress.done }} / {{ progress.total }}</span>
-        <button class="btn sm ghost" :disabled="busy" @click="cancelFolder">Cancel</button>
-        <button class="btn sm" :disabled="busy || !folderPlan.pairs.length" @click="runFolderImport">
+        <button
+          class="btn sm ghost"
+          :disabled="busy"
+          :title="busy ? 'Wait for the masks to be written' : null"
+          @click="cancelFolder"
+        >
+          Cancel
+        </button>
+        <button
+          class="btn sm"
+          :disabled="busy || !folderPlan.pairs.length"
+          :title="
+            busy
+              ? 'Wait for the masks to be written'
+              : folderPlan.pairs.length
+                ? null
+                : 'No mask file in the folder matches an image'
+          "
+          @click="runFolderImport"
+        >
           Import {{ folderPlan.pairs.length }} mask{{ folderPlan.pairs.length !== 1 ? 's' : '' }}
         </button>
       </div>
@@ -209,7 +256,14 @@ function edit(img) {
             >
               Import &amp; apply to group…
             </button>
-            <button class="btn sm ghost" :disabled="busy" @click="clearGroup(group)">Clear group</button>
+            <button
+              class="btn sm ghost"
+              :disabled="busy"
+              :title="busy ? 'Wait for the masks to be written' : null"
+              @click="clearGroup(group)"
+            >
+              Clear group
+            </button>
           </div>
         </div>
 
@@ -219,9 +273,23 @@ function edit(img) {
             <span class="name" :title="img.name">{{ img.name }}</span>
             <span class="badge" :class="{ on: !!img.mask }">{{ img.mask ? 'Masked' : 'None' }}</span>
             <div class="row-actions">
-              <button class="btn sm" :disabled="busy" @click="importForImage(img)">Import…</button>
+              <button
+                class="btn sm"
+                :disabled="busy"
+                :title="busy ? 'Wait for the masks to be written' : null"
+                @click="importForImage(img)"
+              >
+                Import…
+              </button>
               <button class="btn sm" @click="edit(img)">Edit</button>
-              <button class="btn sm ghost" :disabled="busy || !img.mask" @click="clearImage(img)">Clear</button>
+              <button
+                class="btn sm ghost"
+                :disabled="busy || !img.mask"
+                :title="busy ? 'Wait for the masks to be written' : img.mask ? null : 'This image has no mask'"
+                @click="clearImage(img)"
+              >
+                Clear
+              </button>
             </div>
           </div>
         </div>

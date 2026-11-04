@@ -452,7 +452,15 @@ provideStepLayout('detect-features')
     >
       <template #label><FieldHelp op="detect-features" param="detector">Detector</FieldHelp></template>
       <select id="detector-sel" v-model="detector" class="field-input field-select">
-        <option v-for="d in detectors" :key="d.id" :value="d.id" :disabled="d.disabled">{{ d.label }}</option>
+        <option
+          v-for="d in detectors"
+          :key="d.id"
+          :value="d.id"
+          :disabled="d.disabled"
+          :title="d.disabled ? d.reason || null : null"
+        >
+          {{ d.label }}
+        </option>
       </select>
     </SettingsField>
 

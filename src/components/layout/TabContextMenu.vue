@@ -46,9 +46,30 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div class="tab-ctx-menu" :style="{ left: x + 'px', top: y + 'px' }" data-modal-exempt @click.stop>
       <button class="tab-ctx-item" @click="pick('close')">Close</button>
-      <button class="tab-ctx-item" :disabled="!hasOthers" @click="pick('close-others')">Close others</button>
-      <button class="tab-ctx-item" :disabled="!hasLeft" @click="pick('close-left')">Close to the left</button>
-      <button class="tab-ctx-item" :disabled="!hasRight" @click="pick('close-right')">Close to the right</button>
+      <button
+        class="tab-ctx-item"
+        :disabled="!hasOthers"
+        :title="hasOthers ? null : 'No other tabs are open'"
+        @click="pick('close-others')"
+      >
+        Close others
+      </button>
+      <button
+        class="tab-ctx-item"
+        :disabled="!hasLeft"
+        :title="hasLeft ? null : 'No tabs to the left'"
+        @click="pick('close-left')"
+      >
+        Close to the left
+      </button>
+      <button
+        class="tab-ctx-item"
+        :disabled="!hasRight"
+        :title="hasRight ? null : 'No tabs to the right'"
+        @click="pick('close-right')"
+      >
+        Close to the right
+      </button>
       <div class="tab-ctx-sep" />
       <button class="tab-ctx-item" @click="pick('close-all')">Close all</button>
     </div>

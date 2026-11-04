@@ -99,8 +99,24 @@ function run() {
         </SettingsField>
       </SettingsStep>
       <SettingsStep step="2" title="Sign" :effect="effects.sign" :inactive="!signable">
-        <label class="checkbox-row"
-          ><input v-model="settings.signed" type="checkbox" class="checkbox" :disabled="!signable" />
+        <label
+          class="checkbox-row"
+          :title="
+            signable
+              ? null
+              : 'Needs a reference with normals: a mesh, or a cloud with normals (Tools ▸ Point Cloud ▸ Normals)'
+          "
+          ><input
+            v-model="settings.signed"
+            type="checkbox"
+            class="checkbox"
+            :disabled="!signable"
+            :title="
+              signable
+                ? null
+                : 'Needs a reference with normals: a mesh, or a cloud with normals (Tools ▸ Point Cloud ▸ Normals)'
+            "
+          />
           <FieldHelp
             op="cloud-distance"
             param="signed"
@@ -113,7 +129,20 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || !reference" @click="run">Compute</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || !reference"
+        :title="
+          !source
+            ? 'No dense cloud yet: build one with Reconstruct ▸ Dense Model, or import one'
+            : !reference
+              ? 'Choose a reference to measure against'
+              : null
+        "
+        @click="run"
+      >
+        Compute
+      </button>
     </template>
   </ModalShell>
 </template>

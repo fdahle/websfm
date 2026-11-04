@@ -361,7 +361,20 @@ provideStepLayout('filter-cloud')
       <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || !settings.methods.length" @click="run">Filter</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || !settings.methods.length"
+        :title="
+          !source
+            ? 'No dense cloud yet: build one with Reconstruct ▸ Dense Model, or import one'
+            : !settings.methods.length
+              ? 'Turn on at least one filter'
+              : null
+        "
+        @click="run"
+      >
+        Filter
+      </button>
     </template>
   </ModalShell>
 </template>

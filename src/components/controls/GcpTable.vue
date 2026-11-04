@@ -169,7 +169,7 @@ function onPositionInput(gcp, axis, e) {
             }
           "
         >
-          <option value="" disabled>Convert heights to…</option>
+          <option value="" disabled :title="'Choose a height system from the list'">Convert heights to…</option>
           <option v-for="d in CONVERTIBLE" :key="d.id" :value="d.id">{{ d.label }}</option>
         </select>
       </template>
@@ -388,6 +388,7 @@ function onPositionInput(gcp, axis, e) {
                         min="0"
                         step="any"
                         :disabled="obs.imageId == null"
+                        :title="obs.imageId == null ? 'This photo is not loaded yet' : null"
                         :value="obs.accuracyX ?? gcp.accuracyImgX"
                         @click.stop
                         @change="onObsAccuracyInput(gcp, obs, 'x', $event)"
@@ -400,6 +401,7 @@ function onPositionInput(gcp, axis, e) {
                         min="0"
                         step="any"
                         :disabled="obs.imageId == null"
+                        :title="obs.imageId == null ? 'This photo is not loaded yet' : null"
                         :value="obs.accuracyY ?? gcp.accuracyImgY"
                         @click.stop
                         @change="onObsAccuracyInput(gcp, obs, 'y', $event)"

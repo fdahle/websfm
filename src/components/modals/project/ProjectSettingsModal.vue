@@ -214,7 +214,20 @@ onMounted(measure)
             <span>Recomputable data</span>
             <small>Image transcodes, depth maps, DEMs, and orthophotos.</small>
           </div>
-          <button class="btn danger" :disabled="clearing || measuring || !derivedBytes" @click="onClearDerived">
+          <button
+            class="btn danger"
+            :disabled="clearing || measuring || !derivedBytes"
+            :title="
+              clearing
+                ? 'Clearing…'
+                : measuring
+                  ? 'Still measuring the storage'
+                  : !derivedBytes
+                    ? 'Nothing to clear'
+                    : null
+            "
+            @click="onClearDerived"
+          >
             Clear {{ derivedBytes ? formatBytes(derivedBytes) : '' }}
           </button>
         </div>

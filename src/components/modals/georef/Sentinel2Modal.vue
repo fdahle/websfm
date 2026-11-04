@@ -218,7 +218,15 @@ const rowClass = (row) => ({ 's2-chosen': row.id === chosenId.value })
       >
         {{ scenes ? 'Search again' : 'Search scenes' }}
       </button>
-      <button v-if="scenes?.length" class="btn btn-primary" :disabled="!chosen || !!busy" @click="fetchScene">
+      <button
+        v-if="scenes?.length"
+        class="btn btn-primary"
+        :disabled="!chosen || !!busy"
+        :title="
+          busy ? 'Wait for the search or download to finish' : !chosen ? 'Choose a scene in the list first' : null
+        "
+        @click="fetchScene"
+      >
         Fetch {{ chosen?.date ?? '' }}
       </button>
     </template>

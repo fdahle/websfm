@@ -115,21 +115,36 @@ function run() {
       <SettingsGroup title="Source">
         <SettingsField label="Product" label-for="clip-kind">
           <select id="clip-kind" v-model="kind" class="field-select">
-            <option value="dem" :disabled="!dem">DEM</option>
-            <option value="ortho" :disabled="!ortho">Orthophoto</option>
+            <option value="dem" :disabled="!dem" :title="dem ? null : 'Build a DEM first (Reconstruct ▸ DEM)'">
+              DEM
+            </option>
+            <option
+              value="ortho"
+              :disabled="!ortho"
+              :title="ortho ? null : 'Build an orthophoto first (Reconstruct ▸ Orthophoto)'"
+            >
+              Orthophoto
+            </option>
           </select>
         </SettingsField>
       </SettingsGroup>
       <SettingsStep step="1" title="Polygon" :effect="effects.polygon">
         <SettingsField>
           <template #label><FieldHelp op="clip-raster" param="polygon">Polygon</FieldHelp></template>
-          <label class="checkbox-row"
+          <label
+            :title="
+              candidates.length ? null : 'No saved area measurements to clip by: measure an area on the product first'
+            "
+            class="checkbox-row"
             ><input
               v-model="sourceMode"
               type="radio"
               value="measurement"
               class="checkbox"
               :disabled="!candidates.length"
+              :title="
+                candidates.length ? null : 'No saved area measurements to clip by: measure an area on the product first'
+              "
             />
             A saved area measurement on this {{ kind === 'ortho' ? 'orthophoto' : 'DEM' }}</label
           >
@@ -168,7 +183,16 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!product || !polygons?.length" @click="run">Export clipped</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!product || !polygons?.length"
+        :title="
+          !product ? 'Build a DEM or orthophoto first' : polygons?.length ? null : 'Choose or draw a polygon first'
+        "
+        @click="run"
+      >
+        Export clipped
+      </button>
     </template>
   </ModalShell>
 </template>

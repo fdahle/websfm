@@ -119,7 +119,15 @@ function run() {
         </SettingsField>
         <SettingsField label-for="coreg-ref">
           <template #label><FieldHelp op="coregister-dem" param="reference">Reference DEM</FieldHelp></template>
-          <select id="coreg-ref" v-model="referenceId" class="field-select" :disabled="!references.length">
+          <select
+            id="coreg-ref"
+            v-model="referenceId"
+            class="field-select"
+            :disabled="!references.length"
+            :title="
+              references.length ? null : 'No reference DEM imported: import one, or fetch the Copernicus DEM below'
+            "
+          >
             <option v-if="!references.length" :value="null">None imported</option>
             <option v-for="r in references" :key="r.id" :value="r.id">{{ r.name }}</option>
           </select>
@@ -131,7 +139,19 @@ function run() {
               : 'The DEM has no coordinate system, so no global DEM can be fetched for it.'
           "
         >
-          <button class="btn" type="button" :disabled="!demInCrs || fetching" @click="fetchCopDem">
+          <button
+            class="btn"
+            type="button"
+            :disabled="!demInCrs || fetching"
+            :title="
+              fetching
+                ? 'Fetching…'
+                : demInCrs
+                  ? null
+                  : 'The DEM has no coordinate system, so no global DEM can be fetched for it'
+            "
+            @click="fetchCopDem"
+          >
             {{ fetching ? 'Fetching the Copernicus DEM…' : 'Copernicus DEM (30 m)' }}
           </button>
         </SettingsField>
@@ -184,7 +204,17 @@ function run() {
           <select id="coreg-tilt" v-model="settings.tilt" class="field-select">
             <option value="off">Off</option>
             <option value="plane">Plane</option>
-            <option value="quadratic" :disabled="georef">Quadratic surface</option>
+            <option
+              value="quadratic"
+              :disabled="georef"
+              :title="
+                georef
+                  ? 'A georeference can only shift and tilt: apply to a copy of the DEM for a curved correction'
+                  : null
+              "
+            >
+              Quadratic surface
+            </option>
           </select>
         </SettingsField>
       </SettingsStep>
@@ -200,7 +230,18 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!dems.length || !!effects.blocked || fetching" @click="run">
+      <button
+        class="btn btn-primary"
+        :disabled="!dems.length || !!effects.blocked || fetching"
+        :title="
+          !dems.length
+            ? 'Build a DEM first (Reconstruct ▸ DEM)'
+            : fetching
+              ? 'Wait for the Copernicus DEM to arrive'
+              : effects.blocked || null
+        "
+        @click="run"
+      >
         Co-register
       </button>
     </template>

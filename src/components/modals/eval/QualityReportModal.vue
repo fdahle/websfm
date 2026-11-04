@@ -122,7 +122,7 @@ async function onExport() {
     </div>
 
     <template #footer>
-      <button class="btn" :disabled="exporting" @click="onExport">
+      <button class="btn" :disabled="exporting" :title="exporting ? 'Exporting…' : null" @click="onExport">
         {{ exporting ? 'Exporting…' : 'Export report' }}
       </button>
       <button class="btn" @click="emit('close')">Close</button>

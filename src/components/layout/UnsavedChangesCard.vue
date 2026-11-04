@@ -68,13 +68,24 @@ async function dismiss() {
       <span class="persistence-detail">{{ persistenceFailures[0].error?.message || 'Storage write failed' }}</span>
     </template>
     <div class="persistence-actions">
-      <button v-if="canMove" class="btn btn-primary" :disabled="pendingPersistence > 0" @click="move">
+      <button
+        v-if="canMove"
+        class="btn btn-primary"
+        :disabled="pendingPersistence > 0"
+        :title="pendingPersistence > 0 ? 'Wait for the saves in progress to finish' : null"
+        @click="move"
+      >
         Move to folder…
       </button>
       <button v-else-if="full && !isFolderProject(currentProject)" class="btn" @click="openProjectSettings">
         Project settings…
       </button>
-      <button class="btn" :disabled="pendingPersistence > 0" @click="retryPersistence().catch(() => {})">
+      <button
+        class="btn"
+        :disabled="pendingPersistence > 0"
+        :title="pendingPersistence > 0 ? 'Wait for the saves in progress to finish' : null"
+        @click="retryPersistence().catch(() => {})"
+      >
         Retry saving
       </button>
       <button class="btn" @click="dismiss">Dismiss</button>

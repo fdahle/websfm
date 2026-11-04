@@ -731,7 +731,14 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
               :placeholder="`${TOOLS[shownKind]?.label} ${records.length + 1}`"
               @keydown.enter.stop="canSave && saveMeasurement()"
             />
-            <button class="btn btn-primary btn-sm" :disabled="!canSave" @click="saveMeasurement">
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="!canSave"
+              :title="
+                canSave ? null : unavailable ? 'Measuring is not available on this product' : result.error || hint
+              "
+              @click="saveMeasurement"
+            >
               Save measurement
             </button>
           </template>

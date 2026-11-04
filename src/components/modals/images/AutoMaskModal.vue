@@ -146,7 +146,18 @@ const applyToAll = () => applyToGroups(grouping.value.sizedGroups)
     </div>
 
     <div class="subbar">
-      <button class="btn" :disabled="busy || !grouping.sizedGroups.length" @click="applyToAll">
+      <button
+        class="btn"
+        :disabled="busy || !grouping.sizedGroups.length"
+        :title="
+          busy
+            ? 'Wait for the masks to be written'
+            : !grouping.sizedGroups.length
+              ? 'The image sizes are not known yet: wait for the images to load'
+              : null
+        "
+        @click="applyToAll"
+      >
         Apply to all groups
       </button>
       <span class="hint">{{ grouping.hint }}</span>

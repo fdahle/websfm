@@ -140,6 +140,17 @@ adds, removes or renames a setting, operation or user-visible feature:
    [docs/METHODS.md](docs/METHODS.md). The unit tests fail on a key that does not
    resolve, an entry nothing cites, or one missing from METHODS.md.
 
+## Disabled controls say why
+
+A greyed-out control says on hover what it is missing or what to do, in the user's
+terms: "Build a DEM first (Reconstruct ▸ DEM)", "Needs three GCPs marked in two aligned
+photos each", "Wait for the run to finish". Put the reason in the disabled element's own
+`title` (a disabled control may not pass hover on to its label), reuse the reason a
+`WarnBox` or an effect's `blocked` line already gives rather than wording it twice, and
+give a disabled `ChoiceCards` option its `reason`. The ribbon does the same through
+`commandReason`. A unit test (`src/components/disabledReasons.test.js`) fails on a
+disabled control without a `title`.
+
 ## Menu labels
 
 A menu item or a small button ends in **…** when it needs more from you before it acts:

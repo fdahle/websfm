@@ -220,6 +220,7 @@ function toggleMap(row) {
           class="ctx-item"
           :class="{ 'ctx-disabled': !menu.row.visible && !!menu.row.mapBlocked }"
           :disabled="!menu.row.visible && !!menu.row.mapBlocked"
+          :title="!menu.row.visible && menu.row.mapBlocked ? menu.row.mapBlocked : null"
           @click="fromMenu(toggleMap)"
         >
           {{ mapCtxLabel(menu.row) }}

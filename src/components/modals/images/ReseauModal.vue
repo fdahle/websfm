@@ -141,15 +141,42 @@ const um = (v) => (v == null ? '—' : `${v.toFixed(1)} µm`)
     <template v-else>
       <div class="grid">
         <label class="lbl" for="reseau-sensor"><FieldHelp op="reseau" param="sensor">Sensor</FieldHelp></label>
-        <select id="reseau-sensor" v-model="sensorId" class="field-input field-select" :disabled="busy">
+        <select
+          id="reseau-sensor"
+          v-model="sensorId"
+          class="field-input field-select"
+          :disabled="busy"
+          :title="busy ? 'Wait for the reseau detection to finish' : null"
+        >
           <option v-for="s in candidates" :key="s.id" :value="s.id">{{ s.label }} — {{ s.pixelSize }} mm/px</option>
         </select>
 
         <span class="lbl"><FieldHelp op="reseau" param="mode">Scans</FieldHelp></span>
         <span class="modes">
-          <label><input v-model="mode" type="radio" value="whole" :disabled="busy" /> Whole frames</label>
+          <label :title="busy ? 'Wait for the reseau detection to finish' : null"
+            ><input
+              v-model="mode"
+              type="radio"
+              value="whole"
+              :disabled="busy"
+              :title="busy ? 'Wait for the reseau detection to finish' : null"
+            />
+            Whole frames</label
+          >
           <label :title="halfPairs.length ? '' : 'No <name>_a / <name>_b pairs among this sensor\'s scans'">
-            <input v-model="mode" type="radio" value="halves" :disabled="busy || !halfPairs.length" />
+            <input
+              v-model="mode"
+              type="radio"
+              value="halves"
+              :disabled="busy || !halfPairs.length"
+              :title="
+                busy
+                  ? 'Wait for the reseau detection to finish'
+                  : halfPairs.length
+                    ? null
+                    : 'No <name>_a / <name>_b pairs among this camera group\'s scans'
+              "
+            />
             Half frames ({{ pluralize(halfPairs.length, 'pair') }})
           </label>
         </span>
@@ -172,6 +199,7 @@ const um = (v) => (v == null ? '—' : `${v.toFixed(1)} µm`)
             min="0.1"
             step="0.5"
             :disabled="busy"
+            :title="busy ? 'Wait for the reseau detection to finish' : null"
           />
           mm</span
         >
@@ -189,6 +217,7 @@ const um = (v) => (v == null ? '—' : `${v.toFixed(1)} µm`)
               min="1"
               step="1"
               :disabled="busy"
+              :title="busy ? 'Wait for the reseau detection to finish' : null"
               aria-label="Film width"
             />
             ×
@@ -199,6 +228,7 @@ const um = (v) => (v == null ? '—' : `${v.toFixed(1)} µm`)
               min="1"
               step="1"
               :disabled="busy"
+              :title="busy ? 'Wait for the reseau detection to finish' : null"
               aria-label="Film height"
             />
             mm
@@ -219,6 +249,7 @@ const um = (v) => (v == null ? '—' : `${v.toFixed(1)} µm`)
             min="0.05"
             step="0.05"
             :disabled="busy"
+            :title="busy ? 'Wait for the reseau detection to finish' : null"
           />
           mm</span
         >
@@ -237,6 +268,7 @@ const um = (v) => (v == null ? '—' : `${v.toFixed(1)} µm`)
             min="0.001"
             step="0.005"
             :disabled="busy"
+            :title="busy ? 'Wait for the reseau detection to finish' : null"
           />
           mm</span
         >
@@ -249,8 +281,13 @@ const um = (v) => (v == null ? '—' : `${v.toFixed(1)} µm`)
         <p class="hint">
           Each pair is stitched into one frame on the film grid; the lattice's size comes from the halves themselves.
         </p>
-        <label class="opt"
-          ><input v-model="removeHalves" type="checkbox" :disabled="busy" />
+        <label :title="busy ? 'Wait for the reseau detection to finish' : null" class="opt"
+          ><input
+            v-model="removeHalves"
+            type="checkbox"
+            :disabled="busy"
+            :title="busy ? 'Wait for the reseau detection to finish' : null"
+          />
           <FieldHelp op="reseau" param="removeHalves" :value="removeHalves" :default-value="true"
             >Remove the halves after stitching</FieldHelp
           ></label
@@ -317,6 +354,17 @@ const um = (v) => (v == null ? '—' : `${v.toFixed(1)} µm`)
       <button
         class="btn btn-primary"
         :disabled="busy || !sensor || !sensorImages.length || (mode === 'whole' && !crossCount)"
+        :title="
+          busy
+            ? 'Wait for the reseau detection to finish'
+            : !sensor
+              ? 'Choose a camera group first'
+              : !sensorImages.length
+                ? 'This camera group has no images'
+                : mode === 'whole' && !crossCount
+                  ? 'The grid settings give no crosses: check the spacing and size'
+                  : null
+        "
         @click="run"
       >
         {{ mode === 'halves' ? 'Stitch' : 'Detect' }}

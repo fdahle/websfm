@@ -205,6 +205,14 @@ const hasXY = computed(() => mapping.value.x != null && mapping.value.y != null)
 const canImport = computed(() =>
   mode.value === 'sensor' ? sensorCount.value > 0 : hasImage.value && hasXY.value && poseCount.value > 0,
 )
+// Why Import is greyed (its tooltip).
+const importReason = computed(() => {
+  if (canImport.value) return null
+  if (mode.value === 'sensor') return 'No camera calibrations found in the file'
+  if (!hasImage.value) return 'Choose the column with the image names'
+  if (!hasXY.value) return 'Choose the X and Y columns'
+  return 'No rows with a position were found'
+})
 
 function doImport() {
   if (!canImport.value) return
@@ -330,7 +338,7 @@ function doImport() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!canImport" @click="doImport">
+      <button class="btn btn-primary" :disabled="!canImport" :title="importReason" @click="doImport">
         {{ mode === 'sensor' ? 'Import calibration' : 'Import poses' }}
       </button>
     </template>

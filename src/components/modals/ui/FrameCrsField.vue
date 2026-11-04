@@ -38,6 +38,11 @@ const BLOCKED_REASON = {
   geographic: ' — geographic CRS',
   evidence: ' — needs ≥3 camera positions or GCPs',
 }
+// The same, as the option's tooltip.
+const BLOCKED_TITLE = {
+  geographic: 'The project CRS is geographic (degrees): choose a projected CRS to get metres',
+  evidence: 'Georeferencing needs at least three camera positions or GCPs',
+}
 
 const appliedCrsSuggestion = ref(false)
 function applyCrsSuggestion(suggestion) {
@@ -69,7 +74,11 @@ watch(
     </template>
     <select :id="id" v-model="crs" class="field-input field-select">
       <option value="local">{{ hasScale ? 'Local (metres, no CRS)' : 'Local (model units)' }}</option>
-      <option value="project" :disabled="!canGeoreference">
+      <option
+        value="project"
+        :disabled="!canGeoreference"
+        :title="canGeoreference ? null : (BLOCKED_TITLE[georeferenceBlocker] ?? 'The model is not georeferenced yet')"
+      >
         {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : (BLOCKED_REASON[georeferenceBlocker] ?? '') }}
       </option>
     </select>

@@ -26,6 +26,9 @@ const canImport = computed(
     ready.value &&
     (options.images || options.calibration || options.features || options.matches || options.modelIds.length),
 )
+const importReason = computed(() =>
+  canImport.value ? null : !ready.value ? 'Still reading the file' : 'Choose something to import',
+)
 </script>
 
 <template>
@@ -77,22 +80,60 @@ const canImport = computed(
           groups)</label
         >
         <label><input v-model="options.features" type="checkbox" /> Keypoints ({{ db.features.length }} images)</label>
-        <label :class="{ disabled: !options.features || !db.hasDescriptors }"
-          ><input v-model="options.descriptors" type="checkbox" :disabled="!options.features || !db.hasDescriptors" />
+        <label
+          :title="
+            !options.features
+              ? 'Import the keypoints too: descriptors belong to them'
+              : !db.hasDescriptors
+                ? 'The file has no descriptors WebSfM can use'
+                : null
+          "
+          :class="{ disabled: !options.features || !db.hasDescriptors }"
+          ><input
+            v-model="options.descriptors"
+            type="checkbox"
+            :disabled="!options.features || !db.hasDescriptors"
+            :title="
+              !options.features
+                ? 'Import the keypoints too: descriptors belong to them'
+                : !db.hasDescriptors
+                  ? 'The file has no descriptors WebSfM can use'
+                  : null
+            "
+          />
           Compatible descriptors</label
         >
-        <label :class="{ disabled: !options.features }"
-          ><input v-model="options.matches" type="checkbox" :disabled="!options.features" /> Matches (requires the
-          imported keypoint indices)</label
+        <label
+          :title="options.features ? null : 'Import the keypoints too: matches refer to them'"
+          :class="{ disabled: !options.features }"
+          ><input
+            v-model="options.matches"
+            type="checkbox"
+            :disabled="!options.features"
+            :title="options.features ? null : 'Import the keypoints too: matches refer to them'"
+          />
+          Matches (requires the imported keypoint indices)</label
         >
         <div v-if="options.matches" class="inline-options">
-          <label
-            ><input v-model="options.matchSource" type="radio" value="verified" :disabled="!db.hasVerifiedMatches" />
+          <label :title="db.hasVerifiedMatches ? null : 'The file has no verified matches'"
+            ><input
+              v-model="options.matchSource"
+              type="radio"
+              value="verified"
+              :disabled="!db.hasVerifiedMatches"
+              :title="db.hasVerifiedMatches ? null : 'The file has no verified matches'"
+            />
             Verified inliers</label
           >
-          <label
-            ><input v-model="options.matchSource" type="radio" value="raw" :disabled="!db.hasRawMatches" /> Raw
-            matches</label
+          <label :title="db.hasRawMatches ? null : 'The file has no raw matches'"
+            ><input
+              v-model="options.matchSource"
+              type="radio"
+              value="raw"
+              :disabled="!db.hasRawMatches"
+              :title="db.hasRawMatches ? null : 'The file has no raw matches'"
+            />
+            Raw matches</label
           >
           <label><input v-model="options.replaceMatches" type="checkbox" /> Replace conflicting pairs</label>
         </div>
@@ -108,8 +149,19 @@ const canImport = computed(
 
       <fieldset v-if="session.models.length">
         <legend>Sparse reconstructions</legend>
-        <label v-for="model in session.models" :key="model.externalId" :class="{ disabled: !model.complete }">
-          <input v-model="options.modelIds" type="checkbox" :value="model.externalId" :disabled="!model.complete" />
+        <label
+          :title="model.complete ? null : 'This model is incomplete in the file'"
+          v-for="model in session.models"
+          :key="model.externalId"
+          :class="{ disabled: !model.complete }"
+        >
+          <input
+            v-model="options.modelIds"
+            type="checkbox"
+            :value="model.externalId"
+            :disabled="!model.complete"
+            :title="model.complete ? null : 'This model is incomplete in the file'"
+          />
           {{ model.name }} — {{ model.registeredImages }} cameras, {{ model.pointCount }} points
           <span v-if="!model.complete"> (incomplete)</span>
         </label>
@@ -121,6 +173,7 @@ const canImport = computed(
       <button
         class="btn btn-primary"
         :disabled="!canImport"
+        :title="importReason"
         @click="emit('run', { ...options, modelIds: [...options.modelIds] })"
       >
         {{ session.status === 'importing' ? 'Importing…' : 'Import selected' }}

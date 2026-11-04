@@ -79,7 +79,9 @@ function save() {
       <p v-else class="presets-empty">No saved presets for this dialog yet.</p>
       <form class="presets-save" @submit.prevent="save">
         <input ref="input" v-model="name" type="text" maxlength="60" placeholder="Name these settings" />
-        <button type="submit" class="btn" :disabled="!name.trim()">Save</button>
+        <button type="submit" class="btn" :disabled="!name.trim()" :title="name.trim() ? null : 'Type a name first'">
+          Save
+        </button>
       </form>
       <button
         type="button"

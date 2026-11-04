@@ -6,6 +6,9 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **A toolbox while you mark a scale-bar point.** After *Mark point in photos* in Set
+  Real-World Scale, a small Scale bar toolbox stays over the workspace: which point is
+  being marked, in how many photos so far, and *Back to scale bars* or *Stop*.
 - **Multispectral cameras.** Photos from a MicaSense RedEdge or Altum are read band by
   band: each band becomes its own sensor, the photos of one trigger form a capture, and
   captures of the calibration panel are disabled when imported, so alignment leaves them
@@ -171,6 +174,13 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **Greyed-out controls say why.** Hover a disabled button, field or option in any
+  dialog, panel or toolbox to see what it is missing or what to do first, as the ribbon
+  already did.
+- **Georeference laid out like the other dialogs.** The coordinate system and the
+  control on hand sit under Source, the three methods are cards (Adjust with GCPs, Hold
+  to a reference DEM, Transform only) that say on hover why one cannot be chosen, and
+  each method's steps say what it will do.
 - **About ▸ Licenses easier to read.** Each entry fits on one line with a short note of
   what WebSfM uses it for, and a full license text opens under *License text* instead of
   filling the list.

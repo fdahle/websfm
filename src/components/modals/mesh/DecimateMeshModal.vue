@@ -132,7 +132,20 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!valid" @click="run">Decimate</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!valid"
+        :title="
+          !source
+            ? 'No mesh yet: build one with Reconstruct ▸ Mesh, or import one'
+            : valid
+              ? null
+              : 'Set a target of at least 4 triangles, below the mesh\'s current count'
+        "
+        @click="run"
+      >
+        Decimate
+      </button>
     </template>
   </ModalShell>
 </template>

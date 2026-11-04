@@ -79,8 +79,22 @@ const fmt = (v) => Number(v.toPrecision(6))
       </button>
     </div>
     <div class="tb-row">
-      <button class="tb-textbtn primary" :disabled="!valid" @click="emit('apply')">Apply</button>
-      <button class="tb-textbtn danger" :disabled="savedState === 'none'" @click="emit('clear')">Remove region</button>
+      <button
+        class="tb-textbtn primary"
+        :disabled="!valid"
+        :title="valid ? null : 'The region needs a size above 0 on every axis'"
+        @click="emit('apply')"
+      >
+        Apply
+      </button>
+      <button
+        class="tb-textbtn danger"
+        :disabled="savedState === 'none'"
+        :title="savedState === 'none' ? 'No region is set' : null"
+        @click="emit('clear')"
+      >
+        Remove region
+      </button>
     </div>
   </FloatingToolbox>
 </template>

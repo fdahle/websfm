@@ -291,6 +291,7 @@ function step(cmd, dir) {
                       class="step-btn"
                       :aria-label="`Smaller ${cmd.label.toLowerCase()}`"
                       :disabled="stepperValue(cmd) <= cmd.min"
+                      :title="stepperValue(cmd) <= cmd.min ? 'Already the smallest' : null"
                       @click="step(cmd, -1)"
                     >
                       −
@@ -300,6 +301,7 @@ function step(cmd, dir) {
                       class="step-btn"
                       :aria-label="`Larger ${cmd.label.toLowerCase()}`"
                       :disabled="stepperValue(cmd) >= cmd.max"
+                      :title="stepperValue(cmd) >= cmd.max ? 'Already the largest' : null"
                       @click="step(cmd, 1)"
                     >
                       +

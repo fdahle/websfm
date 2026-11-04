@@ -72,7 +72,14 @@ function copy() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Close</button>
-      <button class="btn btn-primary" :disabled="loading || !!error" @click="copy">Copy</button>
+      <button
+        class="btn btn-primary"
+        :disabled="loading || !!error"
+        :title="loading ? 'Still collecting the summary' : error ? 'The summary could not be collected' : null"
+        @click="copy"
+      >
+        Copy
+      </button>
     </template>
   </ModalShell>
 </template>

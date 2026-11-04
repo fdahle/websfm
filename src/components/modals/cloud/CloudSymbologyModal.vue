@@ -138,8 +138,22 @@ function apply(close = false) {
     </p>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn" :disabled="!validRange" @click="apply()">Apply</button>
-      <button class="btn btn-primary" :disabled="!validRange" @click="apply(true)">OK</button>
+      <button
+        class="btn"
+        :disabled="!validRange"
+        :title="validRange ? null : 'Set a valid range: the maximum must be above the minimum'"
+        @click="apply()"
+      >
+        Apply
+      </button>
+      <button
+        class="btn btn-primary"
+        :disabled="!validRange"
+        :title="validRange ? null : 'Set a valid range: the maximum must be above the minimum'"
+        @click="apply(true)"
+      >
+        OK
+      </button>
     </template>
   </ModalShell>
 </template>

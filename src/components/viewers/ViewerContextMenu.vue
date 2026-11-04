@@ -6,7 +6,7 @@ import { useMenuPlacement } from '../../composables/useMenuPlacement.js'
 
 const props = defineProps({
   menu: { type: Object, default: null }, // { x, y } | null
-  items: { type: Array, default: () => [] }, // [{ id, label, active?, separator?, disabled? }]
+  items: { type: Array, default: () => [] }, // [{ id, label, active?, separator?, disabled?, reason? }] — `reason` is a disabled item's tooltip
 })
 const emit = defineEmits(['select'])
 const { el, pos } = useMenuPlacement(() => props.menu)
@@ -22,6 +22,7 @@ const { el, pos } = useMenuPlacement(() => props.menu)
           class="vctx-item"
           :class="{ disabled: it.disabled }"
           :disabled="it.disabled"
+          :title="it.disabled ? it.reason || null : null"
           @click="!it.disabled && emit('select', it.id)"
         >
           <span class="vctx-check">{{ it.active ? '✓' : '' }}</span

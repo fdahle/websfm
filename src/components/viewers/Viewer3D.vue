@@ -1263,7 +1263,7 @@ onBeforeUnmount(() => {
       close-title="Stop the turntable"
       @close="setTurntable(false)"
     >
-      <label class="tb-field turn-field">
+      <label :title="recording ? 'Stop the recording to change it' : null" class="tb-field turn-field">
         <FieldHelp
           op="3d-view"
           param="secondsPerTurn"
@@ -1279,6 +1279,7 @@ onBeforeUnmount(() => {
           step="1"
           :value="turntableSeconds"
           :disabled="recording"
+          :title="recording ? 'Stop the recording to change it' : null"
           @change="(e) => setTurntableSeconds(e.target.value)"
         />
       </label>

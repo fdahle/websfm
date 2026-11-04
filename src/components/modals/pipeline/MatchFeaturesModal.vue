@@ -664,8 +664,14 @@ provideStepLayout('match-features')
                 >Subset gate (fast pre-test)</FieldHelp
               ></template
             >
-            <label class="checkbox-row"
-              ><input v-model="settings.subsetGate" type="checkbox" class="checkbox" :disabled="!!gate.reason" />
+            <label :title="gate.reason || null" class="checkbox-row"
+              ><input
+                v-model="settings.subsetGate"
+                type="checkbox"
+                class="checkbox"
+                :disabled="!!gate.reason"
+                :title="gate.reason || null"
+              />
               {{ gate.reason ? 'Not used for this run' : 'Enabled' }}</label
             >
           </SettingsField>

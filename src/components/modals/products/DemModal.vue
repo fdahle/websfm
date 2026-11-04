@@ -207,8 +207,20 @@ provideStepLayout('dem')
         <template #label><FieldHelp op="dem" param="points">Points</FieldHelp></template>
         <select id="dem-points" v-model="settings.points" class="field-input field-select">
           <option value="all">All points (DSM)</option>
-          <option value="ground" :disabled="!groundSource">Ground only (DTM)</option>
-          <option value="classes" :disabled="!groundSource">Classes…</option>
+          <option
+            value="ground"
+            :disabled="!groundSource"
+            :title="groundSource ? null : 'Classify the cloud first (Tools ▸ Point Cloud ▸ Classify Points)'"
+          >
+            Ground only (DTM)
+          </option>
+          <option
+            value="classes"
+            :disabled="!groundSource"
+            :title="groundSource ? null : 'Classify the cloud first (Tools ▸ Point Cloud ▸ Classify Points)'"
+          >
+            Classes…
+          </option>
         </select>
       </SettingsField>
       <SettingsField v-if="settings.points === 'classes'" hint="Only points of these classes go into the grid.">

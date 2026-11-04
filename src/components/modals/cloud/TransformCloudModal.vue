@@ -139,7 +139,16 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || !!parsed.error" @click="run">Transform</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || !!parsed.error"
+        :title="
+          !source ? 'No dense cloud yet: build one with Reconstruct ▸ Dense Model, or import one' : parsed.error || null
+        "
+        @click="run"
+      >
+        Transform
+      </button>
     </template>
   </ModalShell>
 </template>

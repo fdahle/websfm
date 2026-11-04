@@ -239,8 +239,16 @@ const ctxItems = computed(() => [
     id: 'add-gcp-here',
     label: isModel.value ? 'Add GCP here (project CRS only)' : 'Add GCP here',
     disabled: !ctxCoord.value || isModel.value,
+    reason: isModel.value
+      ? 'The model frame has no map position: switch the map to the project CRS'
+      : 'No map position under the pointer',
   },
-  { id: 'copy-coords', label: 'Copy coordinates', disabled: !ctxCoord.value },
+  {
+    id: 'copy-coords',
+    label: 'Copy coordinates',
+    disabled: !ctxCoord.value,
+    reason: 'No map position under the pointer',
+  },
 ])
 function onCtxSelect(id) {
   closeCtx()

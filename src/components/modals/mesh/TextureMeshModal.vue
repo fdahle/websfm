@@ -241,7 +241,22 @@ provideStepLayout('texture-mesh')
       <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!valid" @click="run">Texture</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!valid"
+        :title="
+          !source
+            ? 'No mesh yet: build one with Reconstruct ▸ Mesh, or import one'
+            : !cameraCount
+              ? 'Needs a sparse model with cameras (Reconstruct ▸ Sparse Model)'
+              : valid
+                ? null
+                : 'Allow at least one texture page'
+        "
+        @click="run"
+      >
+        Texture
+      </button>
     </template>
   </ModalShell>
 </template>

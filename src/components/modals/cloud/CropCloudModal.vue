@@ -191,7 +191,20 @@ function run() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || liveKept === 0" @click="run">Crop</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || liveKept === 0"
+        :title="
+          !source
+            ? 'No dense cloud yet: build one with Reconstruct ▸ Dense Model, or import one'
+            : liveKept === 0
+              ? 'The crop keeps no points: move or resize the region'
+              : null
+        "
+        @click="run"
+      >
+        Crop
+      </button>
     </template>
   </ModalShell>
 </template>

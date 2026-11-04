@@ -534,7 +534,7 @@ export const useReconstructionStore = registerProjectStore(
             : null,
           hint: meshCloud.value
             ? 'Rasterises the mesh from above. Watertight, so there are no surface holes — the fix for a patchy ortho.'
-            : 'Build a mesh first (Products ▸ Mesh).',
+            : 'Build a mesh first (Reconstruct ▸ Mesh).',
         },
         {
           id: 'plane',

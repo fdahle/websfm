@@ -146,7 +146,22 @@ function run() {
     </SettingsStep>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!valid || !runnable" @click="run">Detect targets</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!valid || !runnable"
+        :title="
+          !valid
+            ? 'Enter a target size above 0, a search radius of at least 5 px and a minimum score between 0 and 1'
+            : !runnable
+              ? tags
+                ? 'No photos to search'
+                : 'Nothing to look for: a GCP needs coordinates and a georeference, or marks in two photos'
+              : null
+        "
+        @click="run"
+      >
+        Detect targets
+      </button>
     </template>
   </ModalShell>
 </template>

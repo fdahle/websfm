@@ -134,7 +134,12 @@ function groupFlagged() {
       >
         {{ grouped ? 'Grouped ✓' : 'Group flagged' }}
       </button>
-      <button class="btn btn-danger" :disabled="!flagged.length" @click="emit('remove', flagged)">
+      <button
+        class="btn btn-danger"
+        :disabled="!flagged.length"
+        :title="flagged.length ? null : 'No images are flagged'"
+        @click="emit('remove', flagged)"
+      >
         Remove flagged…
       </button>
       <button class="btn btn-primary" @click="emit('close')">Close</button>

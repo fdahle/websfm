@@ -110,8 +110,22 @@ function onDrop(item, ev) {
       >
         Download ({{ totalMB }} MB)
       </button>
-      <button v-else-if="!downloading && anySupplied" class="btn btn-primary" disabled>Waiting for the file…</button>
-      <button v-else class="btn" disabled>Downloading…</button>
+      <button
+        v-else-if="!downloading && anySupplied"
+        class="btn btn-primary"
+        disabled
+        :title="downloading ? 'The model is downloading' : 'Waiting for the file you chose to be read'"
+      >
+        Waiting for the file…
+      </button>
+      <button
+        v-else
+        class="btn"
+        disabled
+        :title="downloading ? 'The model is downloading' : 'Waiting for the file you chose to be read'"
+      >
+        Downloading…
+      </button>
     </template>
   </ModalShell>
 </template>

@@ -136,7 +136,20 @@ provideStepLayout('smooth-mesh')
       <ShowAdvancedSettings />
 
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source || !valid" @click="run">Smooth</button>
+      <button
+        class="btn btn-primary"
+        :disabled="!source || !valid"
+        :title="
+          !source
+            ? 'No mesh yet: build one with Reconstruct ▸ Mesh, or import one'
+            : !valid
+              ? 'Needs at least 1 iteration, a smoothing weight above 0, and shrink compensation below minus that weight'
+              : null
+        "
+        @click="run"
+      >
+        Smooth
+      </button>
     </template>
   </ModalShell>
 </template>

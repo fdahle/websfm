@@ -28,6 +28,8 @@ Rules that are easy to miss:
   advanced fields in `#tuning` show with Show advanced settings), effects from
   `src/core/stepEffects/` in two lengths
   ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Dialogs of a processing step*).
+- A disabled control has a `title` saying why, in the user's terms
+  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Disabled controls say why*; a unit test checks).
 - Keyboard shortcuts live in `src/core/help/shortcuts.js`: a handler tests
   `matches(e, id)` and a tooltip shows `keyLabel(id)`; never compare `e.key` or type
   "(Ctrl+Z)" by hand ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in

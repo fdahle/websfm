@@ -373,11 +373,24 @@ onMounted(refreshStorage)
             placeholder="Attribution, e.g. © Provider"
             aria-label="Satellite attribution"
             :disabled="!satUrlDraft.trim()"
+            :title="satUrlDraft.trim() ? null : 'Enter a tile URL first'"
             @keydown.enter="applySatelliteSource"
           />
           <div class="setting-actions">
-            <button class="btn" :disabled="!satDirty" @click="applySatelliteSource">Apply</button>
-            <button class="btn" :disabled="!satelliteUrl && !satUrlDraft" @click="resetSatelliteSource">
+            <button
+              class="btn"
+              :disabled="!satDirty"
+              :title="satDirty ? null : 'No changes to apply'"
+              @click="applySatelliteSource"
+            >
+              Apply
+            </button>
+            <button
+              class="btn"
+              :disabled="!satelliteUrl && !satUrlDraft"
+              :title="!satelliteUrl && !satUrlDraft ? 'Already using Esri' : null"
+              @click="resetSatelliteSource"
+            >
               Use Esri
             </button>
             <span v-if="satError" class="field-error">{{ satError }}</span>
@@ -558,6 +571,7 @@ onMounted(refreshStorage)
             v-else-if="storageDurable === false"
             class="btn"
             :disabled="storageBusy"
+            :title="storageBusy ? 'Wait for the storage request to finish' : null"
             @click="requestDurableStorage"
           >
             {{ storageBusy ? 'Requesting…' : 'Request' }}
@@ -573,7 +587,14 @@ onMounted(refreshStorage)
               when needed.</span
             >
           </div>
-          <button class="btn" :disabled="storageBusy" @click="clearModelCache">Clear models</button>
+          <button
+            class="btn"
+            :disabled="storageBusy"
+            :title="storageBusy ? 'Wait for the storage request to finish' : null"
+            @click="clearModelCache"
+          >
+            Clear models
+          </button>
         </div>
 
         <div v-if="storageMessage" class="status-message" aria-live="polite">{{ storageMessage }}</div>

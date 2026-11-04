@@ -93,6 +93,17 @@ function run() {
       <button
         class="btn btn-primary"
         :disabled="!metrics || !selected || cloud.points.length - selected < 6 || !(threshold >= 0)"
+        :title="
+          !metrics
+            ? 'Still measuring the points'
+            : !(threshold >= 0)
+              ? 'Enter a threshold of 0 or more'
+              : !selected
+                ? 'No points pass this threshold'
+                : cloud.points.length - selected < 6
+                  ? 'This would leave fewer than 6 points: raise the threshold'
+                  : null
+        "
         @click="run"
       >
         Delete selected + refine

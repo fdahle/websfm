@@ -40,6 +40,7 @@ const preview = computed(() =>
 
 const matchedCount = computed(() => built.value.filter((fp) => matchImage(fp.imageName)).length)
 const canImport = computed(() => built.value.length > 0)
+const importReason = computed(() => (canImport.value ? null : 'No footprints were found in the file'))
 
 function doImport() {
   if (!canImport.value) return
@@ -98,7 +99,9 @@ function doImport() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!canImport" @click="doImport">Import footprints</button>
+      <button class="btn btn-primary" :disabled="!canImport" :title="importReason" @click="doImport">
+        Import footprints
+      </button>
     </template>
   </ModalShell>
 </template>

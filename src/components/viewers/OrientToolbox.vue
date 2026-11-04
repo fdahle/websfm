@@ -79,7 +79,12 @@ const fmt = (v) => v.map((x) => x.toFixed(3)).join(', ')
 
     <div class="tb-row">
       <button class="tb-textbtn primary" @click="emit('apply')">Apply</button>
-      <button class="tb-textbtn danger" :disabled="savedState === 'none'" @click="emit('clear')">
+      <button
+        class="tb-textbtn danger"
+        :disabled="savedState === 'none'"
+        :title="savedState === 'none' ? 'No orientation is set' : null"
+        @click="emit('clear')"
+      >
         Remove orientation
       </button>
     </div>

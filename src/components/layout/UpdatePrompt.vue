@@ -41,7 +41,9 @@ const detail = computed(() => {
       </div>
       <div class="up-actions">
         <button v-if="!updateActive" class="up-later" @click="postponeUpdate">Later</button>
-        <button class="up-reload" :disabled="busy" @click="reloadIntoUpdate">Reload</button>
+        <button class="up-reload" :disabled="busy" :title="busy ? 'Reloading…' : null" @click="reloadIntoUpdate">
+          Reload
+        </button>
       </div>
     </div>
   </Teleport>

@@ -130,6 +130,9 @@ const canImport = computed(
       (options.gcps && has.value.gcps) ||
       (options.scaleBars && has.value.scaleBars)),
 )
+const importReason = computed(() =>
+  canImport.value ? null : !plan.value ? 'Still reading the file' : 'Choose something to import',
+)
 
 function doImport() {
   if (!canImport.value) return
@@ -185,26 +188,56 @@ function doImport() {
 
       <fieldset>
         <legend>Import</legend>
-        <label :class="{ disabled: !has.calibration }"
-          ><input v-model="options.calibration" type="checkbox" :disabled="!has.calibration" /> Calibration
-          <span v-if="has.calibration" class="muted">— {{ sensorSummary }}</span></label
+        <label
+          :title="has.calibration ? null : 'The file has no calibration for photos in this project'"
+          :class="{ disabled: !has.calibration }"
+          ><input
+            v-model="options.calibration"
+            type="checkbox"
+            :disabled="!has.calibration"
+            :title="has.calibration ? null : 'The file has no calibration for photos in this project'"
+          />
+          Calibration <span v-if="has.calibration" class="muted">— {{ sensorSummary }}</span></label
         >
-        <label :class="{ disabled: !has.poses }"
-          ><input v-model="options.poses" type="checkbox" :disabled="!has.poses" /> Camera positions and orientations
+        <label
+          :title="has.poses ? null : 'None of its aligned photos is in this project'"
+          :class="{ disabled: !has.poses }"
+          ><input
+            v-model="options.poses"
+            type="checkbox"
+            :disabled="!has.poses"
+            :title="has.poses ? null : 'None of its aligned photos is in this project'"
+          />
+          Camera positions and orientations
           <span v-if="has.poses" class="muted"
             >— {{ pluralize(poses.length, 'photo') }} of this project in {{ projectCrs }}, as priors</span
           ><span v-else-if="plan.poses.length" class="muted">— none of its photos is in this project</span></label
         >
-        <label :class="{ disabled: !has.gcps }"
-          ><input v-model="options.gcps" type="checkbox" :disabled="!has.gcps" /> GCPs and markers with their marks
+        <label :title="has.gcps ? null : 'The file has no GCPs or markers'" :class="{ disabled: !has.gcps }"
+          ><input
+            v-model="options.gcps"
+            type="checkbox"
+            :disabled="!has.gcps"
+            :title="has.gcps ? null : 'The file has no GCPs or markers'"
+          />
+          GCPs and markers with their marks
           <span v-if="has.gcps" class="muted"
             >— {{ pluralize(plan.gcps.length, 'point')
             }}<template v-if="joining">, {{ joining }} joining a GCP of the same name</template
             ><template v-if="!chunk.crs.local">, heights {{ datumLabel(chunk.crs.verticalDatum) }}</template></span
           ></label
         >
-        <label v-if="plan.scaleBars.length" :class="{ disabled: !has.scaleBars }"
-          ><input v-model="options.scaleBars" type="checkbox" :disabled="!has.scaleBars" /> Scale bars
+        <label
+          :title="has.scaleBars ? null : 'None of its scale bars ends on a marker or photo in this project'"
+          v-if="plan.scaleBars.length"
+          :class="{ disabled: !has.scaleBars }"
+          ><input
+            v-model="options.scaleBars"
+            type="checkbox"
+            :disabled="!has.scaleBars"
+            :title="has.scaleBars ? null : 'None of its scale bars ends on a marker or photo in this project'"
+          />
+          Scale bars
           <span v-if="has.scaleBars" class="muted"
             >— {{ pluralize(scaleBars.length, 'bar') }}, {{ scaleBars.filter((b) => !b.enabled).length }} as
             checks</span
@@ -221,7 +254,7 @@ function doImport() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!canImport" @click="doImport">Import</button>
+      <button class="btn btn-primary" :disabled="!canImport" :title="importReason" @click="doImport">Import</button>
     </template>
   </ModalShell>
 </template>

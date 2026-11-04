@@ -59,6 +59,14 @@ const canImport = computed(() =>
     ? matchedMarks.value > 0
     : targets.value.some((t, i) => t && groups.value[i].marks.length),
 )
+// Why Import is greyed (its tooltip).
+const importReason = computed(() =>
+  canImport.value
+    ? null
+    : props.data.kind === 'image'
+      ? 'No marks in the file match a photo in this project'
+      : 'Choose a camera group for at least one set of marks',
+)
 const importLabel = computed(() =>
   props.data.kind === 'image' ? `Import ${plural(matchedMarks.value, 'mark')}` : 'Import marks',
 )
@@ -195,7 +203,9 @@ function doImport() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!canImport" @click="doImport">{{ importLabel }}</button>
+      <button class="btn btn-primary" :disabled="!canImport" :title="importReason" @click="doImport">
+        {{ importLabel }}
+      </button>
     </template>
   </ModalShell>
 </template>

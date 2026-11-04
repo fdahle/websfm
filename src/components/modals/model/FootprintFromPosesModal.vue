@@ -244,7 +244,14 @@ function run() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="breakdown.ok === 0" @click="run">Compute footprints</button>
+      <button
+        class="btn btn-primary"
+        :disabled="breakdown.ok === 0"
+        :title="breakdown.ok === 0 ? 'No pose can be placed yet: step 2 says why' : null"
+        @click="run"
+      >
+        Compute footprints
+      </button>
     </template>
   </ModalShell>
 </template>

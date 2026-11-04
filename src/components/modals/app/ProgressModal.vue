@@ -390,7 +390,12 @@ onBeforeUnmount(() => {
         Drag to look around the model as it grows. The rest of the app unlocks when the run finishes.
       </div>
       <div v-if="cancelable" class="progress-actions">
-        <button class="btn-cancel" :disabled="cancelling" @click="emit('cancel')">
+        <button
+          class="btn-cancel"
+          :disabled="cancelling"
+          :title="cancelling ? 'Already cancelling' : null"
+          @click="emit('cancel')"
+        >
           {{ cancelling ? 'Cancelling…' : 'Cancel' }}
         </button>
       </div>

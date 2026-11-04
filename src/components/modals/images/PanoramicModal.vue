@@ -106,7 +106,13 @@ async function run() {
     <template v-else>
       <div class="grid">
         <label class="lbl" for="pan-sensor"><FieldHelp op="panoramic" param="sensor">Sensor</FieldHelp></label>
-        <select id="pan-sensor" v-model="sensorId" class="field-input field-select" :disabled="busy">
+        <select
+          id="pan-sensor"
+          v-model="sensorId"
+          class="field-input field-select"
+          :disabled="busy"
+          :title="busy ? 'Wait for the strips to be split' : null"
+        >
           <option v-for="s in candidates" :key="s.id" :value="s.id">
             {{ s.label }} — f {{ focalMmOf(s) }} mm, {{ s.pixelSize }} mm/px
           </option>
@@ -130,6 +136,7 @@ async function run() {
             min="0"
             step="1"
             :disabled="busy"
+            :title="busy ? 'Wait for the strips to be split' : null"
           />
           <span class="unit">0 = Auto</span></span
         >
@@ -153,6 +160,7 @@ async function run() {
             max="50"
             step="5"
             :disabled="busy"
+            :title="busy ? 'Wait for the strips to be split' : null"
           />
           %</span
         >
@@ -163,8 +171,13 @@ async function run() {
         ({{ preview.segDeg.toFixed(1) }}° each).
         <template v-if="preview.aspect < 3"> These scans are not much longer than high: are they panoramic?</template>
       </p>
-      <label class="opt"
-        ><input v-model="settings.removeStrips" type="checkbox" :disabled="busy" />
+      <label :title="busy ? 'Wait for the strips to be split' : null" class="opt"
+        ><input
+          v-model="settings.removeStrips"
+          type="checkbox"
+          :disabled="busy"
+          :title="busy ? 'Wait for the strips to be split' : null"
+        />
         <FieldHelp
           op="panoramic"
           param="removeStrips"
@@ -205,7 +218,22 @@ async function run() {
     <template #footer>
       <button v-if="busy" class="btn" @click="cancel = true">Cancel</button>
       <button v-else class="btn" @click="emit('close')">Close</button>
-      <button class="btn btn-primary" :disabled="busy || !sensor || !strips.length" @click="run">Split</button>
+      <button
+        class="btn btn-primary"
+        :disabled="busy || !sensor || !strips.length"
+        :title="
+          busy
+            ? 'Wait for the strips to be split'
+            : !sensor
+              ? 'Choose a camera group first'
+              : !strips.length
+                ? 'This camera group has no images'
+                : null
+        "
+        @click="run"
+      >
+        Split
+      </button>
     </template>
   </ModalShell>
 </template>
