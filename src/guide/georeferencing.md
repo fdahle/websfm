@@ -41,12 +41,13 @@ mark points, open an image and choose **Tools ▸ Images ▾ ▸ Edit GCPs**; wi
 in front, the same entry places the surveyed points on the map. Right-click adds a
 point directly.
 
-## Adjust or transform
-**Adjust reconstruction with GCPs** re-runs bundle adjustment with the control: the
-stronger choice, but it outdates the depth maps and products. **Hold to a reference
-DEM** re-runs it with the tie points held to a reference DEM as well (below).
-**Transform current reconstruction** only moves, rotates and scales the model, keeping
-its shape.
+## Method
+<!-- param: method  default: Adjust with GCPs when three are marked -->
+**Adjust with GCPs** re-runs bundle adjustment with the control: the stronger choice,
+but it outdates the depth maps and products. **Hold to a reference DEM** re-runs it
+with the tie points held to a reference DEM as well (below). **Transform only** moves,
+rotates and scales the model, keeping its shape: quick, and nothing needs rebuilding.
+A greyed-out method says on hover what it is missing.
 
 ## Hold to a reference DEM
 A block held only by drone GPS, or by a few GCPs, can bend: it domes or dishes by
@@ -82,6 +83,9 @@ model) is better excluded with a layer.
 ## Scale bars
 For an object or a local model, mark two points and enter their measured distance.
 Several scale bars reveal marking errors. Scale bars give metric units, not a CRS.
+While you mark a point, a Scale bar toolbox shows how many photos it is marked in;
+**Back to scale bars** returns to the dialog, and it reopens by itself after the second
+photo.
 
 ## Verify accuracy
 Check GCP and camera residuals in the Quality Report. A low residual proves little when

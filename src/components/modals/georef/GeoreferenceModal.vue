@@ -4,11 +4,17 @@ import ModalShell from '../ui/ModalShell.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
-import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
+import SettingsGroup from '../ui/SettingsGroup.vue'
+import ChoiceCards from '../ui/ChoiceCards.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { DEM_HOLD_DEFAULTS } from '../../../core/defaults.user.js'
 import { demHoldEffects } from '../../../core/stepEffects/demHold.js'
-import { ensureProjection, isGeographic, transform } from '../../../core/crs.js'
+import {
+  georeferenceMethods,
+  georeferenceSource,
+  georeferenceFitEffect,
+} from '../../../core/stepEffects/georeference.js'
+import { crsInfo, ensureProjection, isGeographic, transform } from '../../../core/crs.js'
 import { fetchCopernicusDemAround } from '../../../composables/useCopernicusDem.js'
 import { useLog } from '../../../composables/useLog.js'
 
@@ -19,7 +25,6 @@ const props = defineProps({
   canAdjustWithGcps: { type: Boolean, default: false },
   canTransform: { type: Boolean, default: false },
   hasMatches: { type: Boolean, default: false },
-  gcpCount: { type: Number, default: 0 },
   // Enabled ground control with coordinates (the frame of a DEM hold).
   controlCount: { type: Number, default: 0 },
   poseCount: { type: Number, default: 0 },
@@ -32,7 +37,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'run'])
-const mode = ref(props.canAdjustWithGcps && props.hasMatches ? 'adjust' : 'transform')
 
 // Hold to a reference DEM: the reference, its height uncertainty (its declared vertical
 // accuracy, else the default), the stable ground.
@@ -50,6 +54,23 @@ watch(
 const stableSetId = ref('')
 const stable = computed(() => props.layers.find((l) => l.id === stableSetId.value) ?? null)
 const geographic = computed(() => isGeographic(props.projectCrs))
+
+// The three methods, each disabled with its reason (core/stepEffects/georeference.js).
+const project = computed(() => ({
+  crs: props.projectCrs,
+  crsName: props.projectCrs ? crsInfo(props.projectCrs).name : '',
+  geographic: geographic.value,
+  hasMatches: props.hasMatches,
+  gcps: props.controlCount,
+  poses: props.poseCount,
+  adjustReady: props.canAdjustWithGcps,
+  transformReady: props.canTransform,
+}))
+const methods = computed(() => georeferenceMethods(project.value))
+const source = computed(() => georeferenceSource(project.value))
+// Start on the first method that can run: Adjust with GCPs when there is control.
+const mode = ref(methods.value.find((m) => !m.disabled)?.id ?? 'transform')
+const fitEffect = computed(() => georeferenceFitEffect(mode.value, project.value))
 const hold = computed(() =>
   demHoldEffects(
     { sigma: sigma.value },
@@ -63,9 +84,6 @@ const hold = computed(() =>
       hasMatches: props.hasMatches,
     },
   ),
-)
-const canHold = computed(
-  () => props.hasMatches && !geographic.value && (props.controlCount >= 3 || props.poseCount >= 3),
 )
 
 // Without a reference DEM of one's own: the Copernicus DEM around the camera positions
@@ -89,13 +107,21 @@ async function fetchCopDem() {
   }
 }
 
-const canRun = computed(() =>
-  mode.value === 'adjust'
-    ? props.canAdjustWithGcps && props.hasMatches
-    : mode.value === 'dem'
-      ? !hold.value.blocked
-      : props.canTransform,
+const fetchReason = computed(() =>
+  fetching.value
+    ? 'Fetching…'
+    : geographic.value
+      ? 'The project CRS is in degrees: choose a projected CRS in Project Settings.'
+      : !props.places.length
+        ? 'Needs camera positions or GCPs to know where to fetch.'
+        : null,
 )
+
+// Why the chosen method cannot run, or null.
+const blocked = computed(() =>
+  mode.value === 'dem' ? hold.value.blocked : (methods.value.find((m) => m.id === mode.value)?.reason ?? null),
+)
+const canRun = computed(() => !blocked.value)
 function run() {
   if (mode.value !== 'dem') return emit('run', { mode: mode.value })
   emit('run', {
@@ -107,49 +133,36 @@ function run() {
 
 <template>
   <ModalShell title="Georeference" @close="emit('close')">
-    <p class="intro">
-      Place the relative reconstruction in
-      <b
-        ><GlossaryTerm id="coordinate-reference-system">{{ projectCrs || 'the project CRS' }}</GlossaryTerm></b
-      >
-      using existing ground control or registered camera positions.
-    </p>
+    <SettingsGroup title="Source">
+      <SettingsField label="Coordinate system">
+        <span class="readout">{{ source.crs }}</span>
+        <template #hint>The model is fitted into this CRS. Change it in Project Settings.</template>
+      </SettingsField>
+      <SettingsField label="Control">
+        <span class="readout">{{ source.control }}</span>
+      </SettingsField>
+    </SettingsGroup>
 
-    <div class="mode-list">
-      <label class="mode-card" :class="{ active: mode === 'adjust', disabled: !canAdjustWithGcps || !hasMatches }">
-        <input v-model="mode" type="radio" value="adjust" :disabled="!canAdjustWithGcps || !hasMatches" />
-        <span>
-          <b>Adjust reconstruction with <GlossaryTerm id="ground-control-point">GCPs</GlossaryTerm></b>
-          <small
-            >Rebuild the sparse model with GCP-constrained bundle adjustment, then fit it to the project CRS.
-            Recommended after adding control.</small
-          >
-        </span>
-      </label>
-      <label class="mode-card" :class="{ active: mode === 'dem', disabled: !canHold }">
-        <input v-model="mode" type="radio" value="dem" :disabled="!canHold" />
-        <span>
-          <b>Hold to a reference DEM</b>
-          <small
-            >Rebuild the sparse model with its tie points held to a reference DEM, so a block with only drone GPS or a
-            few GCPs cannot bend, then fit it to the project CRS.</small
-          >
-        </span>
-      </label>
-      <label class="mode-card" :class="{ active: mode === 'transform', disabled: !canTransform }">
-        <input v-model="mode" type="radio" value="transform" :disabled="!canTransform" />
-        <span>
-          <b>Transform current reconstruction only</b>
-          <small>Fit scale, rotation and translation without changing camera or point geometry.</small>
-        </span>
-      </label>
-    </div>
+    <SettingsField>
+      <template #label><FieldHelp op="georeferencing" param="method">Method</FieldHelp></template>
+      <ChoiceCards v-model="mode" :options="methods" class="method-cards" aria-label="Method" />
+    </SettingsField>
 
     <template v-if="mode === 'dem'">
       <SettingsStep step="1" title="Reference DEM" :effect="hold.reference">
         <SettingsField label-for="hold-ref">
           <template #label><FieldHelp op="georeferencing" param="holdReference">Reference DEM</FieldHelp></template>
-          <select id="hold-ref" v-model="referenceId" class="field-select" :disabled="!references.length">
+          <select
+            id="hold-ref"
+            v-model="referenceId"
+            class="field-select"
+            :disabled="!references.length"
+            :title="
+              references.length
+                ? null
+                : 'Import a reference DEM (Import ▸ Reference DEM / Ortho), or fetch the Copernicus DEM below'
+            "
+          >
             <option v-if="!references.length" :value="null">None imported</option>
             <option v-for="r in references" :key="r.id" :value="r.id">{{ r.name }}</option>
           </select>
@@ -157,7 +170,13 @@ function run() {
         <SettingsField
           hint="Or fetch the free global Copernicus DEM (from TanDEM-X) around the camera positions and GCPs."
         >
-          <button class="btn" type="button" :disabled="!places.length || geographic || fetching" @click="fetchCopDem">
+          <button
+            class="btn"
+            type="button"
+            :disabled="!places.length || geographic || fetching"
+            :title="fetchReason"
+            @click="fetchCopDem"
+          >
             {{ fetching ? 'Fetching the Copernicus DEM…' : 'Copernicus DEM (30 m)' }}
           </button>
         </SettingsField>
@@ -185,21 +204,9 @@ function run() {
         </SettingsField>
       </SettingsStep>
     </template>
+    <SettingsStep v-else step="1" :title="mode === 'adjust' ? 'Adjust and fit' : 'Fit'" :effect="fitEffect" />
 
-    <p class="summary">
-      {{ gcpCount }} GCP{{ gcpCount === 1 ? '' : 's' }} · {{ poseCount }} camera position{{
-        poseCount === 1 ? '' : 's'
-      }}
-    </p>
-
-    <WarnBox v-if="mode === 'dem' && hold.blocked">{{ hold.blocked }}</WarnBox>
-    <WarnBox v-else-if="!canRun">
-      <template v-if="mode === 'adjust'">
-        Adjustment needs feature matches and at least three enabled 3D control points, each marked in two registered
-        images.
-      </template>
-      <template v-else> Georeferencing needs at least three eligible GCPs or registered 3D camera positions. </template>
-    </WarnBox>
+    <WarnBox v-if="blocked">{{ blocked }}</WarnBox>
     <WarnBox v-else-if="mode !== 'transform'">
       The adjusted sparse model replaces the current one. Depth maps, the computed dense model, DEM, orthophoto and mesh
       will need to be rebuilt.
@@ -207,7 +214,7 @@ function run() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!canRun" @click="run">
+      <button class="btn btn-primary" :disabled="!canRun" :title="blocked" @click="run">
         {{ mode === 'transform' ? 'Georeference' : 'Continue to adjustment' }}
       </button>
     </template>
@@ -216,61 +223,16 @@ function run() {
 
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
-.intro,
-.summary {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text);
-}
-.summary {
-  color: var(--text-dim);
-}
-.mode-list {
-  display: grid;
-  gap: 8px;
-}
-.mode-card {
-  display: flex;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  background: var(--bg);
-  cursor: pointer;
-}
-.mode-card.active {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-.mode-card.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.mode-card input {
-  margin-top: 2px;
-  accent-color: var(--accent);
-}
-.mode-card span {
-  display: grid;
-  gap: 3px;
-}
-.mode-card b {
+.readout {
   font-size: 13px;
   color: var(--text);
 }
-.mode-card small {
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-dim);
+.method-cards.choice-cards {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 .hold-error {
   margin: 0;
   font-size: 12px;
   color: var(--danger);
-}
-.btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 </style>

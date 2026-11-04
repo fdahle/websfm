@@ -413,7 +413,6 @@ const exportingFootprints = computed(
       :can-adjust-with-gcps="canGeoreferenceGcps && canGeoreference"
       :can-transform="canGeoreference"
       :has-matches="matchSummaries.length > 0"
-      :gcp-count="gcps.length"
       :control-count="controlCount"
       :pose-count="poses.length"
       :project-crs="currentCrs"

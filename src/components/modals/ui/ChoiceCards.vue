@@ -6,7 +6,9 @@
 // Presentational: v-model binds the selected option id, exactly like SegmentedControl.
 // Unlike PresetCards this sets ONE setting, so there is no "· modified" state — the
 // selected card simply is the current value.
-//   options: [{ id, label, blurb?, disabled? }]
+//   options: [{ id, label, blurb?, disabled?, reason? }]
+// `reason` says why a disabled card cannot be chosen (its tooltip; CONTRIBUTING ▸
+// Disabled controls say why).
 defineProps({
   modelValue: { type: [String, Number, Boolean], default: null },
   options: { type: Array, required: true },
@@ -26,6 +28,7 @@ defineEmits(['update:modelValue'])
       :aria-checked="modelValue === o.id"
       :data-id="o.id"
       :disabled="o.disabled"
+      :title="o.disabled ? o.reason || null : null"
       @click="!o.disabled && $emit('update:modelValue', o.id)"
     >
       <span v-if="$slots.visual" class="choice-card-visual"><slot name="visual" :option="o" /></span>
