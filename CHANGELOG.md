@@ -83,7 +83,10 @@ Notable changes to websfm. The format follows
   follow the corrected block. On the Mavic Air 2 photos with depth maps at 1,000 px, where
   the shift is under a pixel, the products came out the same within noise as with the
   setting off (depth-map cost median 0.282 against 0.279, 9.5 against 9.8 million dense
-  points, orthophoto seams 1.89 against 1.91 × the interior).
+  points, orthophoto seams 1.89 against 1.91 × the interior). At 2,000 px (High) the
+  depth maps matched slightly better (cost median 0.210 against 0.215 over the 54 maps,
+  p95 0.695 against 0.697, 78.5 against 78.3 % of the pixels kept in fusion, 39.3 against
+  41.2 million points) and the mosaic was unchanged (seams 1.88 against 1.87 ×).
 - **Metashape interchange, both ways.** Import ▸ **Metashape Cameras**
   reads the XML of Metashape's Export Cameras or Export Markers and takes, as you choose,
   the calibration of each camera, the positions and orientations of the aligned cameras
