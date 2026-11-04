@@ -436,6 +436,47 @@ export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_d
 }
 
 /**
+ * @param {Uint8Array} ref_gray
+ * @param {number} ref_w
+ * @param {number} ref_h
+ * @param {Float32Array} ref_k
+ * @param {Uint8Array} src_gray
+ * @param {Uint32Array} src_dims
+ * @param {Float32Array} src_k
+ * @param {Float32Array} src_rel
+ * @param {Uint8Array} src_mask
+ * @param {number} window
+ * @param {number} best_k
+ * @param {number} sigma_spatial
+ * @param {number} sigma_color
+ * @param {number} window_step
+ * @param {Float32Array} hyps
+ * @returns {Float32Array}
+ */
+export function plane_costs(ref_gray, ref_w, ref_h, ref_k, src_gray, src_dims, src_k, src_rel, src_mask, window, best_k, sigma_spatial, sigma_color, window_step, hyps) {
+    const ptr0 = passArray8ToWasm0(ref_gray, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF32ToWasm0(ref_k, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(src_gray, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray32ToWasm0(src_dims, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArrayF32ToWasm0(src_k, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ptr5 = passArrayF32ToWasm0(src_rel, wasm.__wbindgen_malloc);
+    const len5 = WASM_VECTOR_LEN;
+    const ptr6 = passArray8ToWasm0(src_mask, wasm.__wbindgen_malloc);
+    const len6 = WASM_VECTOR_LEN;
+    const ptr7 = passArrayF32ToWasm0(hyps, wasm.__wbindgen_malloc);
+    const len7 = WASM_VECTOR_LEN;
+    const ret = wasm.plane_costs(ptr0, len0, ref_w, ref_h, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, window, best_k, sigma_spatial, sigma_color, window_step, ptr7, len7);
+    var v9 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v9;
+}
+
+/**
  * Recover camera pose from the essential matrix E using a cheirality check.
  *
  * # Inputs

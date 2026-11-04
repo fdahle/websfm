@@ -217,6 +217,19 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **A faulty GPU no longer spoils depth maps.** Depth Maps checks the GPU's matching cost
+  on the first map against the CPU's; when they disagree, that map, the rest of the run
+  and later runs are computed on the CPU, and the log says so. The check now judges the
+  median difference: the RMS it judged before reached 7e-3 on a correct NVIDIA GPU (its
+  texture filter rounds a few low-texture pixels far off) and only warned. A correct
+  GPU's median is 1.4e-4 on five Aukerman photos and ≤ 1.3e-5 on synthetic scenes; the
+  shader with its homography sign flipped gave 2e-1 and moved the run, which is moved
+  above 1e-2. The CPU's cost is now the reference itself (the check and the tests call
+  the Rust code a CPU run uses), instead of a third copy in JavaScript, and both kernels
+  are held to the same depth accuracy on six synthetic scenes (best-K, ACMH, a shallow
+  plane, the sparse window, the planar prior on a textureless strip, the geometric pass):
+  the CPU kernel on every push, the GPU kernel on a software GPU in the nightly browser
+  tests.
 - **A tidier project folder.** A project's folder now holds only `project.json` at its
   top, with the small documents (GCPs, poses, sensors, scale bars …) in `data/`, the
   model and its binary files in `reconstruction/`, and the log, last dialog settings,

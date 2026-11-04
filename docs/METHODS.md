@@ -1744,7 +1744,7 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   sources that *measured* the pixel: a warp leaving the source, a masked texel or
   <4 overlapping samples returns a no-measurement sentinel and is excluded. A flat
   patch is split by side (variance floor 1e-6 on the 0..255 scale, identical in
-  all three kernels): a flat **reference** patch is unmeasurable ⇒ excluded, but a
+  both kernels, CPU and GPU): a flat **reference** patch is unmeasurable ⇒ excluded, but a
   textured reference warped onto a flat **source** patch (saturated snow, sky,
   shadow) is evidence *against* the hypothesis ⇒ the max cost 2.0. Excluding it
   instead let a wrong depth that lands on flat areas in all but one source win on
@@ -1838,8 +1838,12 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
 **Two backends**, same math: **WebGPU** is preferred automatically when the browser
 exposes it, with **WASM/CPU** as the unsupported/error fallback and an explicit user
 opt-out. The GPU kernel (`workers/gpu/patchmatch.wgsl`, ~0.1 s/img vs minutes on
-CPU) retains per-image fallback and a first-image A/B validation
-(`GPU validate: … RMS …`, must stay < 5e-3).
+CPU) retains per-image fallback and a first-image A/B validation: the GPU's final cost
+against the Rust cost of the same planes (`mvs.rs` `plane_costs`), judged on the median
+difference (`GPU validate: …`; a run moves to the CPU above `DENSE_TUNING.gpuCheckMax`).
+Both kernels are held to the same depth accuracy on synthetic scenes with a known depth
+(`tests/bench/patchmatchCases.js`: the Rust kernel in the unit tests, the WGSL kernel on
+SwiftShader in the nightly browser suite).
 
 **Method caveats a colleague will probe:**
 - The plane-induced homography is `H = R + t·nᵀ/d` for plane `n·X = d` with

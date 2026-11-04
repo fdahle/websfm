@@ -383,6 +383,22 @@ export const DENSE_TUNING = {
   // A first GPU map slower than this (ms) has the second map computed on the CPU to
   // compare, and the run continues on the faster of the two (workers/ops/dense.js).
   gpuProbeMs: 8000,
+  // The GPU check on a run's first map (depthMap.js hooks.validate): the median difference
+  // between the GPU's final cost and the Rust cost of the same planes (mvs.rs plane_costs).
+  // Over gpuCheckWarn the log warns (more than this GPU's rounding explains); over
+  // gpuCheckMax the run, and later runs in the session, move to the CPU
+  // (workers/ops/dense.js): the GPU computes something else, a broken kernel or driver.
+  // Smaller drift between the kernels is the nightly browser suite's to catch
+  // (tests/browser/gpu-depth.spec.js, exact f32 on SwiftShader), not a user's run.
+  // The median, not the RMS: a hardware sampler's 8-bit filter weights leave a few
+  // low-texture pixels far off, so a correct kernel's RMS reaches 7e-3 on an NVIDIA Turing
+  // (synthetic scenes, tests/bench/patchmatchCases.js) while its median is ≤ 1.3e-5 there
+  // and 1.4e-4 on five Aukerman photos (SwiftShader: ~5e-7). The shader with its homography
+  // sign flipped (the old "freckle" bug): 2e-1 on the same photos. Rust against itself with
+  // a setting changed: best-K +1 or the other window step 1.5e-4–1.1e-3, a 2 % warp error
+  // 5.5e-3–9e-3 (2026-11-04).
+  gpuCheckWarn: 1e-3,
+  gpuCheckMax: 1e-2,
   // The CPU map of that comparison gives up after a pyramid level once it is on course
   // to take gpuProbeGiveUp× the GPU's time for it (core/dense/gpuProbe.js). Melville,
   // 10,500 px film scans at High: the GPU map 94 s, the CPU map 78 min.

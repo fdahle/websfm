@@ -17,18 +17,26 @@ everything here touches
 
 ## Invariants (read before touching the math)
 
-- **Three kernels, one algorithm.** `patchmatch.wgsl`, `core/dense/planeCost.js`,
-  and `crates/reconstruction/src/mvs.rs` implement the *same* PatchMatch cost.
-  Change all three (and the `aggRef` closure in `core/dense/mvs.js`) in lockstep
-  or not at all.
+- **Two kernels, one algorithm.** `patchmatch.wgsl` and
+  `crates/reconstruction/src/mvs.rs` implement the *same* PatchMatch (cost, best-K,
+  propagation, ACMH, prior, geometric pass). Change both in lockstep or not at all.
+  The Rust cost is the reference: `mvs.rs` `plane_costs` (JS `planeCosts` in
+  `core/sfm/reconstruction.js`) is what the A/B check and `core/dense/planeCost.test.js`
+  score against, so there is no third copy to keep in step.
 - **Plane homography is `R + t·nᵀ/d`** for plane `n·X = d`, `d = n·P`. The `+` is
   load-bearing — a `−` (the Hartley–Zisserman convention for `n·X + d = 0`)
   mirrors the warp across the epipolar line and the cost never bottoms out at the
   true depth (the 2026-07 "freckle" bug).
-- **The A/B check is necessary but not sufficient.** The worker validates GPU vs
-  CPU on the first image (`GPU validate: … RMS …`); it must stay **RMS < 5e-3**.
-  That only proves the three kernels *agree*, not that the warp is *correct* —
-  validate any homography change against a non-zero-baseline ground-truth warp.
+- **The A/B check catches a broken GPU, not drift.** On a run's first map the worker
+  scores the GPU's final planes with the Rust cost (`GPU validate: …`) and judges the
+  **median** difference: over `DENSE_TUNING.gpuCheckWarn` the line warns, over
+  `gpuCheckMax` the run (and later runs in the session) moves to WASM. The RMS is no
+  guide: a hardware sampler's 8-bit filter weights put a correct kernel's RMS near 7e-3.
+  The thresholds sit far above hardware rounding, so smaller drift between the kernels
+  is the nightly suite's to catch (below).
+- **Agreeing is not being right.** The check proves the kernels compute the same cost,
+  not that the warp is correct; `tests/bench/patchmatchCases.js` holds both to the
+  truth on synthetic scenes.
 - Per-image fallback to WASM on any GPU error; sample coords are clamped to each
   array layer's valid `(w, h)`.
 
@@ -61,8 +69,19 @@ Drop-in for the WASM `match_descriptors`, selected by the same "Use GPU" setting
 
 ## Testing
 
-WGSL runs only in a real browser with WebGPU — Vitest/`tsc` can't exercise it.
-Changes here need a manual browser run and a look at the `GPU validate:` log line.
+WGSL runs only in a browser with WebGPU — Vitest/`tsc` can't exercise it.
+
+- **PatchMatch**: `tests/bench/patchmatchCases.js` holds six synthetic scenes with a
+  known depth (best-K, ACMH, a shallow plane, the sparse window, the planar prior on a
+  textureless strip, the geometric pass) and the depth accuracy both kernels must reach.
+  `core/dense/patchmatchQuality.test.js` runs them on the Rust kernel with every
+  `npm test`; `tests/browser/gpu-depth.spec.js` runs them on this kernel in the nightly
+  browser suite, on Chrome's software WebGPU (SwiftShader, `--use-webgpu-adapter=swiftshader`,
+  no GPU needed), where texture filtering is exact f32 and the cost must match the Rust
+  cost to a median of 1e-5. `node scripts/bench/gpu-depth-check.mjs` runs the same cases
+  on this machine's GPU (`--swiftshader` for the software one); run it after a kernel
+  change, since a hardware sampler rounds differently.
+- **Matcher**: `node scripts/bench/gpu-match-check.mjs` (below).
 
 For kernel work before that browser run, the `webgpu` npm package (Dawn's Node
 bindings — the same D3D12/Vulkan/Metal backends Chrome uses) runs these modules

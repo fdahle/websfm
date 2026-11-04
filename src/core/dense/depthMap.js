@@ -3,8 +3,7 @@
 // its GPU↔CPU validation), the per-map speckle filter, quality presets and Stage A's
 // knobs (depthMapSettings). The cross-view filter that follows is geomFilter.js.
 
-import { computeDepthMap } from '../sfm/reconstruction.js'
-import { planeCostRef, aggregateValidCosts } from './planeCost.js'
+import { computeDepthMap, planeCosts } from '../sfm/reconstruction.js'
 import { DENSE_TUNING } from '../tuning.js'
 import { normalizeRegion } from '../products/region.js'
 import { viewIndex, positionsInRegion } from './sparseInput.js'
@@ -358,66 +357,56 @@ export async function depthMapForImage(
     }
   }
 
-  // GPU↔CPU validation (WebGPU port). Two checks against the first source:
-  //   1. cost consistency — recompute the plane cost on the CPU reference at the
-  //      GPU's own final (depth, normal); should match to ~e-3 (f32 + hardware
-  //      sampler precision). A larger RMS signals a kernel transcription bug.
+  // GPU↔CPU validation (WebGPU port), over every source:
+  //   1. cost consistency — score the GPU's own final (depth, normal) with the Rust cost
+  //      a CPU run uses (mvs.rs plane_costs). Judged on the median difference
+  //      (DENSE_TUNING.gpuCheckWarn / gpuCheckMax): `gpuCheck.ok` false means the GPU
+  //      computes something else, and the caller moves the run to the CPU.
   //   2. convergence — the median final cost; PatchMatch should pull this well
   //      below the ~1.0 of random/unmatched (the signal the sweeps actually work).
+  let gpuCheck = null
   if (hooks.validate && src.length) {
-    const radius = Math.min(5, Math.max(1, window)) // match mvs.rs / wgsl radius cap
-    const refC = { gray: ref.gray, w: ref.width, h: ref.height, fx: ref.K.fx, fy: ref.K.fy, cx: ref.K.cx, cy: ref.K.cy }
-    const srcCs = src.map((s) => ({
-      gray: s.gray,
-      w: s.w,
-      h: s.h,
-      fx: s.K.fx,
-      fy: s.K.fy,
-      cx: s.K.cx,
-      cy: s.K.cy,
-      R: s.R,
-      t: s.t,
-      mask: s.mask,
-    }))
-    const k = Math.min(Math.max(bestK, 1), srcCs.length) // reported best-K (upper bound)
-    // Best-K aggregation matching the GPU's aggCost: exclude no-measurement
-    // sources (INVALID sentinel) instead of averaging their max cost in.
-    const aggRef = (u, v, depth, n) => {
-      if (depth <= 0) return 2
-      const cs = srcCs.map((sc) =>
-        planeCostRef(refC, sc, u, v, depth, n, radius, { sigmaSpatial, sigmaColor }, windowStep),
-      )
-      return aggregateValidCosts(cs, bestK)
-    }
+    const k = Math.min(Math.max(bestK, 1), src.length) // reported best-K (upper bound)
     const stride = Math.max(1, Math.floor(dm.depth.length / 4000))
-    const costs = []
-    let sse = 0,
-      max = 0,
-      cnt = 0
+    const idx = []
+    const hyps = []
     for (let i = 0; i < dm.depth.length; i += stride) {
-      const u = i % ref.width,
-        v = (i / ref.width) | 0
       const n = dm.normals ? [dm.normals[i * 3], dm.normals[i * 3 + 1], dm.normals[i * 3 + 2]] : [0, 0, -1]
-      const cpu = aggRef(u, v, dm.depth[i], n)
-      const diff = Math.abs(cpu - dm.cost[i])
-      sse += diff * diff
-      if (diff > max) max = diff
-      cnt++
-      costs.push(dm.cost[i])
+      idx.push(i)
+      hyps.push({ u: i % ref.width, v: (i / ref.width) | 0, depth: dm.depth[i], n })
     }
-    const rms = cnt ? Math.sqrt(sse / cnt) : 0
-    costs.sort((a, b) => a - b)
+    const cpu = await planeCosts(ref.gray, ref.width, ref.height, ref.K, src, hyps, {
+      window,
+      bestK,
+      sigmaSpatial,
+      sigmaColor,
+      windowStep,
+    })
+    const costs = idx.map((i) => dm.cost[i]).sort((a, b) => a - b)
+    // No reference (planeCosts refused the input): no verdict either way.
+    const diffs = cpu ? idx.map((i, j) => Math.abs(cpu[j].agg - dm.cost[i])).sort((a, b) => a - b) : []
+    const n = diffs.length
+    const at = (q) => (n ? diffs[Math.min(n - 1, Math.floor(q * n))] : 0)
+    gpuCheck = {
+      rms: n ? Math.sqrt(diffs.reduce((s, d) => s + d * d, 0) / n) : 0,
+      median: at(0.5),
+      p90: at(0.9),
+      max: n ? diffs[n - 1] : 0,
+      n,
+      ok: !(at(0.5) > DENSE_TUNING.gpuCheckMax),
+    }
     const medCost = costs.length ? costs[costs.length >> 1] : 0
     hooks.onLog?.(
-      `GPU validate: cost consistency RMS ${rms.toExponential(2)} (max ${max.toExponential(2)}) ` +
-        `over ${cnt} px; median final cost ${medCost.toFixed(3)} (${srcCs.length} src, best-${k})`,
-      rms < 5e-3 ? 'success' : 'warn',
+      `GPU validate: cost consistency RMS ${gpuCheck.rms.toExponential(2)} (median ${gpuCheck.median.toExponential(2)}, ` +
+        `90 % ${gpuCheck.p90.toExponential(2)}, max ${gpuCheck.max.toExponential(2)}) ` +
+        `over ${n} px; median final cost ${medCost.toFixed(3)} (${src.length} src, best-${k})`,
+      gpuCheck.median > DENSE_TUNING.gpuCheckWarn ? 'warn' : 'success',
       'Dense',
     )
   }
 
   // Carry the seeding diagnostics through so the caller can log them.
-  return { ...dm, depthMin, depthMax, seeded }
+  return { ...dm, depthMin, depthMax, seeded, ...(gpuCheck ? { gpuCheck } : {}) }
 }
 
 // The geometric-consistency pass for one image (ACMP's last stage, Xu & Tao 2020; COLMAP's

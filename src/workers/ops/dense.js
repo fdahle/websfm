@@ -53,7 +53,8 @@ import { shareableArray } from '../../core/bigArray.js'
 // swap + first-image GPU↔CPU A/B validation live inside computeDepthMaps.
 // Depth maps: GPU or CPU, as measured on a slow GPU (the probe in depthMaps below), per
 // device for the life of this worker: a Full run's second pass and later runs start on
-// the faster. GPUDevice → 'cpu' | 'gpu'.
+// the faster. 'broken': the GPU check on a first map failed (its cost is not the CPU's),
+// so they run on the CPU too. GPUDevice → 'cpu' | 'gpu' | 'broken'.
 const gpuVerdict = new WeakMap()
 // Thrown by the GPU-or-CPU comparison's CPU map when it cannot win (the probe in depthMaps).
 const PROBE_LOST = Symbol('probe lost')
@@ -386,6 +387,12 @@ export function makeDenseOps({ rasterize }) {
         emit('log', [
           'Depth maps: the CPU was measured faster than this GPU earlier in this session — running on the CPU',
           'info',
+          'Dense',
+        ])
+      } else if (state && gpuVerdict.get(state.device) === 'broken') {
+        emit('log', [
+          "Depth maps: this GPU's matching cost differed from the CPU's earlier in this session — running on the CPU",
+          'warn',
           'Dense',
         ])
       } else if (state) {
@@ -796,6 +803,26 @@ export function makeDenseOps({ rasterize }) {
               throw err
             }
           }
+        // The GPU check on the run's first map (depthMapForImage hooks.validate): a GPU whose
+        // cost is not the Rust cost of the same planes (DENSE_TUNING.gpuCheckMax) computes
+        // something else, a broken kernel or driver. This map again, the rest of the run and
+        // later runs in this session on the CPU (gpuVerdict).
+        if (backend && dm?.gpuCheck && !dm.gpuCheck.ok) {
+          emit('log', [
+            `Depth maps: the GPU's matching cost differs from the CPU's on ${img.name} ` +
+              `(median ${dm.gpuCheck.median.toExponential(1)}) — this run continues on the CPU (WASM), which is slower`,
+            'warn',
+            'Dense',
+          ])
+          backend = undefined
+          gpuFallbacks++
+          if (gpuDevice) gpuVerdict.set(gpuDevice, 'broken')
+          ds = settingsFor()
+          dm = await depthMapForImage(ref, sources, sparse.pos, ds, backend, {
+            onLog: hooks.onLog,
+            onProgress: hooks.onProgress,
+          })
+        }
         const imgMs = performance.now() - tImg
         {
           // Time per pixel and source view: the two maps compared see different images.

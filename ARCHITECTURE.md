@@ -108,7 +108,7 @@ to the algorithm; the other steps differ only in file names.
 | add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
 | add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |
 | add per-project state | a store in `stores/` | register it with `registerProjectStore` (`stores/projectStores.js`) so it saves and reopens with the project |
-| change a WebGPU kernel | `workers/gpu/` | the PatchMatch cost exists three times (WGSL, JS, Rust) and changes in all three ([`workers/gpu/README.md`](src/workers/gpu/README.md)) |
+| change a WebGPU kernel | `workers/gpu/` | PatchMatch exists twice (WGSL, Rust `mvs.rs`) and changes in both; `tests/bench/patchmatchCases.js` holds both to the same accuracy (`npm test` for Rust, the nightly browser suite and `scripts/bench/gpu-depth-check.mjs` for WGSL) ([`workers/gpu/README.md`](src/workers/gpu/README.md)) |
 | explain a concept | a new entry in `src/glossary/<category>/` | aliases auto-link it in all help text |
 | add an example dataset | `core/examples.js` | `scripts/examples/make-example.py`, `scripts/fetch-examples.mjs`, a walkthrough in `src/guide/` |
 

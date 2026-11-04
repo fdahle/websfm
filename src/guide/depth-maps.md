@@ -112,6 +112,8 @@ With WebGPU (Settings ▸ Compute), the graphics card computes the maps; otherwi
 are spread over all CPU workers, each with its share of the memory budget, and the log
 says how many. When the GPU is slow (integrated graphics), one map is also tried on the
 CPU and the run continues on the faster; **Method ▸ Fast** then saves most of the time.
+If the GPU's results on the first map disagree with the CPU's (a faulty driver), the
+run moves to the CPU and the log says so.
 Each map is saved as soon as it is done, so the image count doesn't multiply memory.
 If the browser runs out of memory, lower the quality first.
 

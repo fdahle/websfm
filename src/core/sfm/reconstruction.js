@@ -6,6 +6,7 @@ import init, {
   bundle_adjust_rs,
   bundle_adjust_rig,
   compute_depth_map,
+  plane_costs,
   undistort_brown_pixels,
   GuidedSearch,
 } from '../../wasm/reconstruction/reconstruction.js'
@@ -749,6 +750,81 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   }
 }
 
+// The source views packed as mvs.rs (compute_depth_map, plane_costs) takes them: pixels,
+// masks and (when `srcDepth` is given) first-pass depth planes concatenated; per source
+// its w,h, its fx,fy,cx,cy and its pose relative to the reference (R row-major, then t).
+function packSources(sources, srcDepth = null) {
+  const n = sources.length
+  let total = 0
+  for (const s of sources) total += s.w * s.h
+  const srcGray = new Uint8Array(total)
+  const srcMask = new Uint8Array(total) // 0/1, parallel to srcGray (0 where no mask)
+  const srcDims = new Uint32Array(n * 2)
+  const srcK = new Float32Array(n * 4)
+  const srcRel = new Float32Array(n * 12)
+  const srcDepthAll = srcDepth ? new Float32Array(total) : new Float32Array(0)
+  let off = 0
+  sources.forEach((s, i) => {
+    srcGray.set(s.gray, off)
+    if (srcDepth?.[i]) srcDepthAll.set(srcDepth[i].subarray(0, s.w * s.h), off)
+    if (s.mask) srcMask.set(s.mask.subarray(0, s.w * s.h), off)
+    off += s.w * s.h
+    srcDims[i * 2] = s.w
+    srcDims[i * 2 + 1] = s.h
+    srcK.set([s.K.fx, s.K.fy, s.K.cx, s.K.cy], i * 4)
+    const { R, t } = s
+    srcRel.set(
+      [R[0][0], R[0][1], R[0][2], R[1][0], R[1][1], R[1][2], R[2][0], R[2][1], R[2][2], t[0], t[1], t[2]],
+      i * 12,
+    )
+  })
+  return { srcGray, srcMask, srcDims, srcK, srcRel, srcDepthAll }
+}
+
+// Sentinel plane cost of a source that gives no measurement (the warp leaves it, lands on
+// a masked texel or covers < 4 px, or the reference patch is flat): mvs.rs INVALID.
+export const PLANE_COST_INVALID = 1e9
+
+// The photometric PatchMatch cost of given plane hypotheses, from the same Rust code a
+// CPU depth map run scores them with (mvs.rs plane_costs). The WebGPU kernel's A/B check
+// compares against it; the tests pin the cost's behaviour through it.
+//   refGray, refW, refH, refK, sources: as computeDepthMap
+//   hyps: [{ u, v, depth, n: [nx, ny, nz] }]  (pixel, depth, unit normal, camera frame)
+//   opts: { window=3, bestK=3, sigmaSpatial=0, sigmaColor=0, windowStep=1 }  (as computeDepthMap)
+// Returns [{ costs: Float32Array (per source; ≥ 1e8 = no measurement), agg }] — agg the
+// best-K cost a depth map hands on — or null on bad input.
+export async function planeCosts(refGray, refW, refH, refK, sources, hyps, opts = {}) {
+  await ensureWasm()
+  const { window = 3, bestK = 3, sigmaSpatial = 0, sigmaColor = 0, windowStep = 1 } = opts
+  const n = sources.length
+  if (n === 0 || refW * refH === 0) return null
+  const { srcGray, srcMask, srcDims, srcK, srcRel } = packSources(sources)
+  const flat = new Float32Array(hyps.length * 6)
+  hyps.forEach((h, i) => flat.set([h.u, h.v, h.depth, h.n[0], h.n[1], h.n[2]], i * 6))
+  const raw = plane_costs(
+    refGray,
+    refW,
+    refH,
+    new Float32Array([refK.fx, refK.fy, refK.cx, refK.cy]),
+    srcGray,
+    srcDims,
+    srcK,
+    srcRel,
+    srcMask,
+    window,
+    bestK,
+    sigmaSpatial,
+    sigmaColor,
+    Math.max(1, windowStep | 0),
+    flat,
+  )
+  if (!raw || raw.length < hyps.length * (n + 1)) return null
+  return hyps.map((_, i) => ({
+    costs: raw.slice(i * (n + 1), i * (n + 1) + n),
+    agg: raw[i * (n + 1) + n],
+  }))
+}
+
 // PatchMatch multi-view-stereo depth map for one reference image (dense recon).
 //   refGray:  Uint8Array grayscale, length refW*refH
 //   refK:     { fx, fy, cx, cy } at the reference's WORKING resolution
@@ -801,32 +877,8 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
   const n = sources.length
   if (n === 0 || refW * refH === 0) return null
 
-  // Concatenate source pixels; pack per-source dims, intrinsics, relative pose.
-  let total = 0
-  for (const s of sources) total += s.w * s.h
-  const srcGray = new Uint8Array(total)
-  const srcMask = new Uint8Array(total) // 0/1, parallel to srcGray (0 where no mask)
-  const srcDims = new Uint32Array(n * 2)
-  const srcK = new Float32Array(n * 4)
-  const srcRel = new Float32Array(n * 12)
   const geomOn = geomWeight > 0 && Array.isArray(srcDepth) && srcDepth.length >= n
-  const srcDepthAll = geomOn ? new Float32Array(total) : new Float32Array(0)
-  let off = 0
-  sources.forEach((s, i) => {
-    srcGray.set(s.gray, off)
-    if (geomOn && srcDepth[i]) srcDepthAll.set(srcDepth[i].subarray(0, s.w * s.h), off)
-    if (s.mask) srcMask.set(s.mask.subarray(0, s.w * s.h), off)
-    off += s.w * s.h
-    srcDims[i * 2] = s.w
-    srcDims[i * 2 + 1] = s.h
-    srcK.set([s.K.fx, s.K.fy, s.K.cx, s.K.cy], i * 4)
-    const { R, t } = s
-    srcRel.set(
-      [R[0][0], R[0][1], R[0][2], R[1][0], R[1][1], R[1][2], R[2][0], R[2][1], R[2][2], t[0], t[1], t[2]],
-      i * 12,
-    )
-  })
-
+  const { srcGray, srcMask, srcDims, srcK, srcRel, srcDepthAll } = packSources(sources, geomOn ? srcDepth : null)
   const refKArr = new Float32Array([refK.fx, refK.fy, refK.cx, refK.cy])
   const mt = await threadedWasm(threads)
   const raw = (mt ? mt.compute_depth_map : compute_depth_map)(

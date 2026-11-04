@@ -1,5 +1,44 @@
-import { describe, it, expect } from 'vitest'
-import { planeCostRef, aggregateValidCosts, INVALID, VAR_FLOOR } from './planeCost.js'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { beforeAll, describe, it, expect } from 'vitest'
+import initRecon from '../../wasm/reconstruction/reconstruction.js'
+import { planeCosts, PLANE_COST_INVALID as INVALID } from '../sfm/reconstruction.js'
+
+// The PatchMatch plane cost, through the Rust code a CPU depth map run scores hypotheses
+// with (mvs.rs plane_costs). The WebGPU kernel (workers/gpu/patchmatch.wgsl) computes the
+// same cost; its run-time A/B check compares it against this one.
+beforeAll(async () => {
+  const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
+  await initRecon({ module_or_path: await readFile(fileURLToPath(wasmUrl)) })
+})
+
+// Per-patch intensity-variance floor of the cost (mvs.rs and patchmatch.wgsl VAR_FLOOR).
+const VAR_FLOOR = 1e-6
+
+// One source's cost (or, `agg`, the best-K cost over `src` when it is an array).
+//   ref: { gray, w, h, fx, fy, cx, cy };  src: { gray, w, h, fx, fy, cx, cy, R, t, mask? }
+//   bil: { sigmaSpatial, sigmaColor } or null;  step: between window samples
+async function costOf(ref, src, u, v, depth, n, radius, bil = null, step = 1, agg = false, bestK = 1) {
+  const srcs = (Array.isArray(src) ? src : [src]).map((s) => ({
+    gray: s.gray,
+    w: s.w,
+    h: s.h,
+    K: { fx: s.fx, fy: s.fy, cx: s.cx, cy: s.cy },
+    R: s.R,
+    t: s.t,
+    mask: s.mask ?? null,
+  }))
+  const [r] = await planeCosts(
+    ref.gray,
+    ref.w,
+    ref.h,
+    { fx: ref.fx, fy: ref.fy, cx: ref.cx, cy: ref.cy },
+    srcs,
+    [{ u, v, depth, n }],
+    { window: radius, bestK, sigmaSpatial: bil?.sigmaSpatial ?? 0, sigmaColor: bil?.sigmaColor ?? 0, windowStep: step },
+  )
+  return agg ? r.agg : r.costs[0]
+}
 
 // A textured w×h gray image (diagonal ramp) so ZNCC has variance to work with.
 function ramp(w, h) {
@@ -19,17 +58,17 @@ const I = [
 const refOf = (gray) => ({ gray, w: W, h: H, ...K })
 const srcOf = (gray, R = I, t = [0, 0, 0]) => ({ gray, w: W, h: H, ...K, R, t })
 
-describe('planeCostRef', () => {
+describe('plane cost', () => {
   const gray = ramp(W, H)
   const n = [0, 0, -1] // frontal plane
 
-  it('is ~0 when the source is identical with identity pose (perfect correlation)', () => {
+  it('is ~0 when the source is identical with identity pose (perfect correlation)', async () => {
     // t=0, R=I ⇒ every reference pixel warps to itself ⇒ ZNCC = 1 ⇒ cost = 0.
-    const c = planeCostRef(refOf(gray), srcOf(gray), 8, 8, 5, n, 2)
+    const c = await costOf(refOf(gray), srcOf(gray), 8, 8, 5, n, 2)
     expect(c).toBeLessThan(1e-6)
   })
 
-  it('bottoms out at the TRUE depth through a non-zero baseline (homography sign)', () => {
+  it('bottoms out at the TRUE depth through a non-zero baseline (homography sign)', async () => {
     // The t=0 cases above can't catch a wrong sign on the t·nᵀ/d term (it vanishes).
     // Build a real disparity: ref cam = world, src cam translated +tx in x ⇒ relative
     // pose R=I, t=[tx,0,0]. For a fronto-parallel plane at depth Z (n=[0,0,-1]) the
@@ -58,46 +97,46 @@ describe('planeCostRef', () => {
       }
     const refO = { gray: refG, w, h, ...k }
     const srcO = { gray: srcG, w, h, ...k, R: I, t: [tx, 0, 0] }
-    const cTrue = planeCostRef(refO, srcO, 32, 32, Z, [0, 0, -1], 2)
-    const cWrong = planeCostRef(refO, srcO, 32, 32, Z * 1.5, [0, 0, -1], 2)
+    const cTrue = await costOf(refO, srcO, 32, 32, Z, [0, 0, -1], 2)
+    const cWrong = await costOf(refO, srcO, 32, 32, Z * 1.5, [0, 0, -1], 2)
     expect(cTrue).toBeLessThan(1e-3) // near-perfect correlation at the true geometry
     expect(cWrong).toBeGreaterThan(0.2) // a wrong depth is clearly worse
   })
 
-  it('is ~2 when the source is the photometric inverse (anti-correlation)', () => {
+  it('is ~2 when the source is the photometric inverse (anti-correlation)', async () => {
     const inv = gray.map((g) => 255 - g)
-    const c = planeCostRef(refOf(gray), srcOf(inv), 8, 8, 5, n, 2)
+    const c = await costOf(refOf(gray), srcOf(inv), 8, 8, 5, n, 2)
     expect(c).toBeGreaterThan(2 - 1e-6)
   })
 
-  it('returns the INVALID sentinel when the warp leaves the source image', () => {
+  it('returns the INVALID sentinel when the warp leaves the source image', async () => {
     // A large translation pushes the warped patch far outside the source bounds:
     // no measurement, so aggregation can exclude it rather than average a 2.0 in.
-    const c = planeCostRef(refOf(gray), srcOf(gray, I, [1000, 1000, 0]), 8, 8, 5, n, 2)
+    const c = await costOf(refOf(gray), srcOf(gray, I, [1000, 1000, 0]), 8, 8, 5, n, 2)
     expect(c).toBeGreaterThanOrEqual(1e8)
     expect(c).toBe(INVALID)
   })
 
-  it('returns the INVALID sentinel when the warp lands on a masked source texel', () => {
+  it('returns the INVALID sentinel when the warp lands on a masked source texel', async () => {
     // Whole source masked ⇒ every warped sample is excluded, like out-of-bounds.
     const mask = new Uint8Array(W * H).fill(1)
-    const c = planeCostRef(refOf(gray), { ...srcOf(gray), mask }, 8, 8, 5, n, 2)
+    const c = await costOf(refOf(gray), { ...srcOf(gray), mask }, 8, 8, 5, n, 2)
     expect(c).toBe(INVALID)
   })
 
-  it('is independent of intensity scale of each signal (ZNCC invariance)', () => {
+  it('is independent of intensity scale of each signal (ZNCC invariance)', async () => {
     // Halving the source brightness must not change ZNCC ⇒ same cost.
     const half = gray.map((g) => (g / 2) | 0)
-    const a = planeCostRef(refOf(gray), srcOf(gray), 8, 8, 5, n, 2)
-    const b = planeCostRef(refOf(gray), srcOf(half), 8, 8, 5, n, 2)
+    const a = await costOf(refOf(gray), srcOf(gray), 8, 8, 5, n, 2)
+    const b = await costOf(refOf(gray), srcOf(half), 8, 8, 5, n, 2)
     expect(Math.abs(a - b)).toBeLessThan(1e-3)
   })
 })
 
 // P1: PatchMatch spatial propagation must intersect a pixel's ray with the
 // neighbour's PLANE, not copy the neighbour's raw depth (which only holds fronto-
-// parallel). This is a pure-JS reference of the exact propagation the mvs.rs / wgsl
-// kernels now run, driven by the real planeCostRef, on a synthetic slanted plane.
+// parallel). A JS model of the propagation step the mvs.rs / wgsl kernels run, scored
+// by the real Rust plane cost, on a synthetic slanted plane.
 describe('PatchMatch propagation on a slanted plane (P1 freckle fix)', () => {
   const norm3 = (v) => {
     const m = Math.hypot(v[0], v[1], v[2]) || 1
@@ -162,10 +201,10 @@ describe('PatchMatch propagation on a slanted plane (P1 freckle fix)', () => {
   // reaches a pixel is propagation. `mode` selects the fixed plane-intersection
   // candidate ('plane') vs the old raw-depth copy ('depth'). The plane is slanted in
   // x, so raw-depth copies across a row are maximally wrong.
-  function run(scene, mode, passes = 8) {
+  async function run(scene, mode, passes = 8) {
     const { ref, src, N, dmin, dmax, W, H, k, gtDepth } = scene
     const radius = 2
-    const agg = (u, v, d) => aggregateValidCosts([planeCostRef(ref, src, u, v, d, N, radius)], 1)
+    const agg = (u, v, d) => costOf(ref, src, u, v, d, N, radius, null, 1, true)
     const rayx = (u) => (u - k.cx) / k.fx,
       rayy = (v) => (v - k.cy) / k.fy
     const depth = new Float64Array(W * H),
@@ -174,13 +213,13 @@ describe('PatchMatch propagation on a slanted plane (P1 freckle fix)', () => {
       for (let u = 0; u < W; u++) {
         const i = v * W + u
         depth[i] = dmax // deliberately-bad constant init
-        cost[i] = agg(u, v, depth[i])
+        cost[i] = await agg(u, v, depth[i])
       }
     const anchorCol = 3
     for (let v = 0; v < H; v++) {
       const i = v * W + anchorCol
       depth[i] = gtDepth[i]
-      cost[i] = agg(anchorCol, v, depth[i])
+      cost[i] = await agg(anchorCol, v, depth[i])
     }
     const candidate = (u, v, ju, jv) => {
       const j = jv * W + ju
@@ -189,7 +228,7 @@ describe('PatchMatch propagation on a slanted plane (P1 freckle fix)', () => {
       const denom = N[0] * rayx(u) + N[1] * rayy(v) + N[2]
       return (depth[j] * nrj) / denom
     }
-    const relaxAt = (u, v) => {
+    const relaxAt = async (u, v) => {
       const i = v * W + u
       const neigh = [
         [u - 1, v],
@@ -201,7 +240,7 @@ describe('PatchMatch propagation on a slanted plane (P1 freckle fix)', () => {
         if (ju < 0 || jv < 0 || ju >= W || jv >= H) continue
         const cd = candidate(u, v, ju, jv)
         if (cd <= dmin || cd >= dmax) continue
-        const c = agg(u, v, cd)
+        const c = await agg(u, v, cd)
         if (c < cost[i]) {
           cost[i] = c
           depth[i] = cd
@@ -209,21 +248,21 @@ describe('PatchMatch propagation on a slanted plane (P1 freckle fix)', () => {
       }
     }
     for (let p = 0; p < passes; p++) {
-      for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) relaxAt(u, v) // forward
-      for (let v = H - 1; v >= 0; v--) for (let u = W - 1; u >= 0; u--) relaxAt(u, v) // backward
+      for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) await relaxAt(u, v) // forward
+      for (let v = H - 1; v >= 0; v--) for (let u = W - 1; u >= 0; u--) await relaxAt(u, v) // backward
     }
     return depth
   }
 
   // Accuracy over the *scorable* pixels (where a source measurement exists at GT —
   // border pixels whose warp leaves the source can't be estimated by any method).
-  function fracWithin(scene, depth, tol = 0.01) {
+  async function fracWithin(scene, depth, tol = 0.01) {
     const { ref, src, N, gtDepth, W, H } = scene
     let ok = 0,
       total = 0
     for (let v = 0; v < H; v++)
       for (let u = 0; u < W; u++) {
-        if (planeCostRef(ref, src, u, v, gtDepth[v * W + u], N, 2) >= 1e8) continue
+        if ((await costOf(ref, src, u, v, gtDepth[v * W + u], N, 2)) >= 1e8) continue
         total++
         const i = v * W + u
         if (Math.abs(depth[i] - gtDepth[i]) / gtDepth[i] <= tol) ok++
@@ -231,45 +270,77 @@ describe('PatchMatch propagation on a slanted plane (P1 freckle fix)', () => {
     return ok / total
   }
 
-  it('fills a slanted plane to ≥95% within 1% via plane-intersection propagation', () => {
+  it('fills a slanted plane to ≥95% within 1% via plane-intersection propagation', async () => {
     const scene = slantedScene()
-    const frac = fracWithin(scene, run(scene, 'plane'))
+    const frac = await fracWithin(scene, await run(scene, 'plane'))
     expect(frac).toBeGreaterThanOrEqual(0.95)
   })
 
-  it('raw-depth propagation (the old bug) fails on the same slanted plane', () => {
+  it('raw-depth propagation (the old bug) fails on the same slanted plane', async () => {
     const scene = slantedScene()
-    const planeFrac = fracWithin(scene, run(scene, 'plane'))
-    const depthFrac = fracWithin(scene, run(scene, 'depth'))
+    const planeFrac = await fracWithin(scene, await run(scene, 'plane'))
+    const depthFrac = await fracWithin(scene, await run(scene, 'depth'))
     // The correct method vastly outperforms copying raw neighbour depth.
     expect(depthFrac).toBeLessThan(0.5)
     expect(planeFrac).toBeGreaterThan(depthFrac + 0.4)
   })
 })
 
-describe('aggregateValidCosts (best-K over valid sources)', () => {
-  it('excludes an out-of-bounds source; agg == mean of the two valid costs', () => {
-    // One INVALID (no measurement) + two valid ⇒ mean of the two valid only.
-    const c = aggregateValidCosts([0.2, INVALID, 0.4], 3)
-    expect(c).toBeCloseTo(0.3, 12)
+describe('best-K aggregation over valid sources', () => {
+  const gray = ramp(W, H)
+  const n = [0, 0, -1]
+  // Sources of known cost at the centre pixel: the same image (≈ 0), its inverse (2),
+  // two partly correlated ones (in between), one the warp leaves and one fully masked
+  // (both INVALID).
+  const same = srcOf(gray)
+  const inv = srcOf(gray.map((g) => 255 - g))
+  const other = new Uint8Array(W * H).map((_, i) => ((i % W) * 11 + ((i / W) | 0) * 3) % 256)
+  const mixA = srcOf(gray.map((g, i) => (0.7 * g + 0.3 * other[i]) | 0))
+  const mixB = srcOf(gray.map((g, i) => (0.4 * g + 0.6 * other[i]) | 0))
+  const oob = srcOf(gray, I, [1000, 1000, 0])
+  const masked = { ...srcOf(gray), mask: new Uint8Array(W * H).fill(1) }
+  const all = async (srcs, bestK) => {
+    const [r] = await planeCosts(
+      gray,
+      W,
+      H,
+      K,
+      srcs.map((s) => ({ gray: s.gray, w: W, h: H, K, R: s.R, t: s.t, mask: s.mask ?? null })),
+      [{ u: 8, v: 8, depth: 5, n }],
+      { window: 2, bestK },
+    )
+    return r
+  }
+
+  it('excludes an out-of-bounds source; agg == mean of the two valid costs', async () => {
+    const r = await all([same, oob, inv], 3)
+    expect(r.costs[1]).toBe(INVALID)
+    expect(r.agg).toBeCloseTo((r.costs[0] + r.costs[2]) / 2, 6)
+    expect(r.agg).toBeCloseTo(1, 3)
   })
 
-  it('returns the max cost 2.0 when every source is out of bounds', () => {
-    expect(aggregateValidCosts([INVALID, INVALID], 3)).toBe(2.0)
+  it('returns the max cost 2.0 when every source is out of bounds', async () => {
+    expect((await all([oob, oob], 3)).agg).toBe(2.0)
   })
 
-  it('a masked (INVALID) source behaves like an out-of-bounds one', () => {
-    // Same result whether the excluded source is masked or OOB — both are INVALID.
-    expect(aggregateValidCosts([0.5, INVALID], 2)).toBeCloseTo(0.5, 12)
+  it('a masked source behaves like an out-of-bounds one', async () => {
+    const a = await all([mixA, masked], 2)
+    const b = await all([mixA, oob], 2)
+    expect(a.costs[1]).toBe(INVALID)
+    expect(a.agg).toBe(b.agg)
+    expect(a.agg).toBeCloseTo(a.costs[0], 6)
   })
 
-  it('clamps bestK to the valid count (bestK > nValid)', () => {
-    // Two valid sources, bestK 4 ⇒ mean of both (not padded with sentinels).
-    expect(aggregateValidCosts([0.1, INVALID, 0.3, INVALID], 4)).toBeCloseTo(0.2, 12)
+  it('clamps bestK to the valid count (bestK > nValid)', async () => {
+    const r = await all([mixA, oob, mixB, masked], 4)
+    expect(r.agg).toBeCloseTo((r.costs[0] + r.costs[2]) / 2, 6)
   })
 
-  it('takes the k smallest of the valid costs when nValid > bestK', () => {
-    expect(aggregateValidCosts([0.9, 0.1, 0.5, 0.3], 2)).toBeCloseTo(0.2, 12) // (0.1+0.3)/2
+  it('takes the k smallest of the valid costs when nValid > bestK', async () => {
+    const r = await all([inv, mixB, same, mixA], 2)
+    const sorted = [...r.costs].sort((a, b) => a - b)
+    expect(sorted[1]).toBeLessThan(sorted[2]) // the two smallest are distinct from the rest
+    expect(r.agg).toBeCloseTo((sorted[0] + sorted[1]) / 2, 6)
   })
 })
 
@@ -282,26 +353,21 @@ describe('flat patches: reference ⇒ INVALID, source ⇒ max cost', () => {
   const flat = new Uint8Array(W * H).fill(255) // saturated
   const n = [0, 0, -1]
 
-  it('textured ref vs flat (255) source scores the max cost 2.0, not INVALID', () => {
-    const c = planeCostRef(refOf(gray), srcOf(flat), 8, 8, 5, n, 2)
+  it('textured ref vs flat (255) source scores the max cost 2.0, not INVALID', async () => {
+    const c = await costOf(refOf(gray), srcOf(flat), 8, 8, 5, n, 2)
     expect(c).toBe(2.0)
   })
 
-  it('flat ref returns INVALID whatever the source', () => {
-    expect(planeCostRef(refOf(flat), srcOf(gray), 8, 8, 5, n, 2)).toBe(INVALID)
-    expect(planeCostRef(refOf(flat), srcOf(flat), 8, 8, 5, n, 2)).toBe(INVALID)
+  it('flat ref returns INVALID whatever the source', async () => {
+    expect(await costOf(refOf(flat), srcOf(gray), 8, 8, 5, n, 2)).toBe(INVALID)
+    expect(await costOf(refOf(flat), srcOf(flat), 8, 8, 5, n, 2)).toBe(INVALID)
   })
 
-  it('a wrong hypothesis landing on flat sources no longer wins best-K', () => {
-    // Wrong depth: two of three sources see flat areas, the third a chance 0.25.
-    const flatCost = planeCostRef(refOf(gray), srcOf(flat), 8, 8, 5, n, 2)
-    const wrong = aggregateValidCosts([flatCost, flatCost, 0.25], 3)
-    // True depth: three honest-but-noisy matches.
-    const truth = aggregateValidCosts([0.3, 0.35, 0.4], 3)
-    expect(truth).toBeCloseTo(0.35, 12)
-    expect(wrong).toBeGreaterThan(truth) // (2+2+0.25)/3 ≈ 1.42
-    // The old behaviour (flat source ⇒ INVALID) let the wrong hypothesis win.
-    expect(aggregateValidCosts([INVALID, INVALID, 0.25], 3)).toBeLessThan(truth)
+  it('flat sources stay in best-K, so a wrong hypothesis landing on them does not win', async () => {
+    // Wrong depth: two of three sources see flat areas, the third a perfect chance
+    // match. The old behaviour (flat source ⇒ INVALID) averaged only that one: ≈ 0.
+    const wrong = await costOf(refOf(gray), [srcOf(flat), srcOf(flat), srcOf(gray)], 8, 8, 5, n, 2, null, 1, true, 3)
+    expect(wrong).toBeCloseTo(4 / 3, 4) // (2 + 2 + 0) / 3
   })
 })
 
@@ -379,19 +445,19 @@ describe('ZNCC f32 precision (shifted accumulation, GPU emulation)', () => {
     patches.push([rv, sv])
   }
 
-  it('shifted f32 sums agree with the f64 cost to < 1e-4', () => {
+  it('shifted f32 sums agree with the f64 cost to < 1e-4', async () => {
     let maxErr = 0
     for (const [rv, sv] of patches) maxErr = Math.max(maxErr, Math.abs(cost32(rv, sv, true) - cost64(rv, sv)))
     expect(maxErr).toBeLessThan(1e-4)
   })
 
-  it('unshifted f32 sums do NOT (the bug this formulation fixes)', () => {
+  it('unshifted f32 sums do NOT (the bug this formulation fixes)', async () => {
     const errs = patches.map(([rv, sv]) => Math.abs(cost32(rv, sv, false) - cost64(rv, sv))).sort((a, b) => a - b)
     expect(errs[errs.length - 1]).toBeGreaterThan(1e-3)
     expect(errs[errs.length >> 1]).toBeGreaterThan(1e-4) // median, not one outlier
   })
 
-  it('planeCostRef (shifted f64) matches the textbook two-pass ZNCC', () => {
+  it('the Rust cost (shifted sums) matches the textbook two-pass ZNCC', async () => {
     // Identity pose ⇒ the source patch is the source image itself.
     const refG = new Uint8Array(W * H),
       srcG = new Uint8Array(W * H)
@@ -399,7 +465,7 @@ describe('ZNCC f32 precision (shifted accumulation, GPU emulation)', () => {
       refG[i] = 238 + ((i * 7 + (i >> 4)) % 4)
       srcG[i] = 238 + ((i * 5 + (i >> 4)) % 4)
     }
-    const c = planeCostRef(refOf(refG), srcOf(srcG), 8, 8, 5, [0, 0, -1], 2)
+    const c = await costOf(refOf(refG), srcOf(srcG), 8, 8, 5, [0, 0, -1], 2)
     const rv = [],
       sv = []
     for (let y = 6; y <= 10; y++)
@@ -407,11 +473,11 @@ describe('ZNCC f32 precision (shifted accumulation, GPU emulation)', () => {
         rv.push(refG[y * W + x])
         sv.push(srcG[y * W + x])
       }
-    expect(Math.abs(c - cost64(rv, sv))).toBeLessThan(1e-9)
+    expect(Math.abs(c - cost64(rv, sv))).toBeLessThan(1e-6) // f32 out
   })
 })
 
-describe('planeCostRef — bilateral weighting', () => {
+describe('plane cost — bilateral weighting', () => {
   // An object edge: the left half is the object, on the hypothesised plane, the right
   // half a background of another colour that the source sees shifted (parallax).
   const W = 32,
@@ -442,15 +508,15 @@ describe('planeCostRef — bilateral weighting', () => {
   }
   const n = [0, 0, -1]
 
-  it('off is the plain cost exactly', () => {
-    expect(planeCostRef(ref, src, 13, 16, 5, n, 3, { sigmaSpatial: 3, sigmaColor: 0 })).toBe(
-      planeCostRef(ref, src, 13, 16, 5, n, 3),
+  it('off is the plain cost exactly', async () => {
+    expect(await costOf(ref, src, 13, 16, 5, n, 3, { sigmaSpatial: 3, sigmaColor: 0 })).toBe(
+      await costOf(ref, src, 13, 16, 5, n, 3),
     )
   })
 
-  it('on, the other side of the edge barely counts', () => {
-    const plain = planeCostRef(ref, src, 13, 16, 5, n, 3)
-    const bil = planeCostRef(ref, src, 13, 16, 5, n, 3, { sigmaSpatial: 3, sigmaColor: 25 })
+  it('on, the other side of the edge barely counts', async () => {
+    const plain = await costOf(ref, src, 13, 16, 5, n, 3)
+    const bil = await costOf(ref, src, 13, 16, 5, n, 3, { sigmaSpatial: 3, sigmaColor: 25 })
     expect(plain).toBeGreaterThan(0.01) // the shifted background costs the plain window
     expect(bil).toBeLessThan(plain / 10)
   })

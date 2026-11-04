@@ -24,7 +24,7 @@ const INVALID : f32 = 1e9;
 const INVALID_THRESH : f32 = 1e8;
 // Per-patch intensity-variance floor (0..255 scale). Flat REFERENCE patch ⇒
 // INVALID (unmeasurable); textured ref onto a flat SOURCE patch ⇒ max cost 2.0
-// (bad hypothesis, never dropped from best-K). Identical in mvs.rs / planeCost.js.
+// (bad hypothesis, never dropped from best-K). Identical in mvs.rs.
 const VAR_FLOOR : f32 = 1e-6;
 
 struct Params {
@@ -132,7 +132,7 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
   var sumR = 0.0; var sumS = 0.0; var sumRR = 0.0; var sumSS = 0.0; var sumRS = 0.0; var cnt = 0.0;
   // Sums are over values SHIFTED by the first contributing sample. ZNCC is
   // shift-invariant, but raw f32 sums (Σx² up to 255²·121 ≈ 7.9e6) minus n·mean²
-  // cancel catastrophically on bright low-contrast patches. Same in mvs.rs/planeCost.js.
+  // cancel catastrophically on bright low-contrast patches. Same in mvs.rs.
   var kR = 0.0; var kS = 0.0;
   var sumW = 0.0;
   let rc = textureLoad(refTex, vec2<i32>(i32(u), i32(v)), 0).r * 255.0;
@@ -147,8 +147,8 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
                           (f32(yi) - params.rcy) / params.rfy, 1.0);
       let nr  = dot(n, ray);
       // Plane-induced homography R + t·nᵀ/d for n·X = d (d = n·P). The "+" (not the
-      // H&Z "−") is required by this d-sign convention — see mvs.rs. Lockstep w/ the
-      // Rust + planeCost.js kernels.
+      // H&Z "−") is required by this d-sign convention — see mvs.rs. Lockstep with the
+      // Rust kernel.
       let xs  = vec3<f32>(dot(R0, ray) + T.x * nr / d,
                           dot(R1, ray) + T.y * nr / d,
                           dot(R2, ray) + T.z * nr / d);
@@ -473,7 +473,7 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   // 1. Spatial propagation from the 4-neighbours' PLANES: intersect THIS pixel's
   // viewing ray with the neighbour's plane rather than copying its raw depth (which
   // only holds fronto-parallel — the depth-map "freckle" bug). Kept in lockstep with
-  // mvs.rs / planeCost.js.
+  // mvs.rs.
   let rxI = (f32(u) - params.rcx) / params.rfx;
   let ryI = (f32(v) - params.rcy) / params.rfy;
   var off = array<vec2<i32>, 4>(vec2<i32>(-1, 0), vec2<i32>(1, 0), vec2<i32>(0, -1), vec2<i32>(0, 1));

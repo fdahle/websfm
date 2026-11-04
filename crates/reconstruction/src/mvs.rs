@@ -66,7 +66,7 @@ const INVALID_THRESH: f64 = 1e8;
 // flat SOURCE patch (saturated snow, sky, shadow) is evidence against the
 // hypothesis ⇒ max cost 2.0 — as INVALID it would drop out of best-K and let a
 // wrong depth win on the one remaining source's chance correlation.
-// Identical in planeCost.js and patchmatch.wgsl (VAR_FLOOR).
+// Identical in patchmatch.wgsl (VAR_FLOOR).
 const VAR_FLOOR: f64 = 1e-6;
 
 // Bilateral-weighted NCC (COLMAP's patch cost): each window sample counts with
@@ -76,11 +76,11 @@ const VAR_FLOOR: f64 = 1e-6;
 // σs = the window radius, σc = 0.2 of the intensity range; WebSfM's default σc is 25 grey
 // levels (DENSE_TUNING.bilateralSigmaColor, measured on ETH3D). `color` ≤ 0 = off: every
 // weight exactly 1.0, so every sum is the unweighted one bit for bit. Same in
-// planeCost.js and patchmatch.wgsl.
+// patchmatch.wgsl.
 // The patch a hypothesis is scored on: its half-size, the step between its samples (1 =
 // every pixel; 2 = every other row and column, as COLMAP and ACMM sample a larger window
 // for the cost of a smaller one; the centre row and column are kept), and the bilateral
-// weights. Same in planeCost.js and patchmatch.wgsl.
+// weights. Same in patchmatch.wgsl.
 #[derive(Clone, Copy)]
 pub(crate) struct Patch { radius: i32, step: i32, bil: Bilateral, geom: Option<Geom> }
 
@@ -192,7 +192,7 @@ fn mean_best_costs(costs: impl Iterator<Item = f64>, best_k: usize) -> f64 {
 // 2.0; when the source provides no measurement (warp OOB / masked / <4 px /
 // textureless reference patch) it returns the INVALID sentinel so `agg_cost` can exclude it rather than average it in.
 // The reference agg_cost is checked against (tests); the kernel runs window_cost.
-#[cfg_attr(not(test), allow(dead_code))]
+// plane_costs exports it per source.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn plane_cost(
     refimg: &[u8], rw: usize, rh: usize,
@@ -219,7 +219,7 @@ pub(crate) fn plane_cost(
     // top-biased patch). Values are SHIFTED by the first contributing sample
     // (ZNCC is shift-invariant) so the sums stay small — mandatory in the f32 GPU
     // kernel (raw Σx² minus n·mean² cancels on bright low-contrast patches), kept
-    // here so the three kernels are the same math.
+    // here so the two kernels are the same math.
     let mut sum_r = 0.0; let mut sum_s = 0.0;
     let mut sum_rr = 0.0; let mut sum_ss = 0.0; let mut sum_rs = 0.0;
     let mut cnt = 0.0; let mut sum_w = 0.0;
@@ -448,6 +448,87 @@ fn window_cost(src: &SrcView, win: &[WinSample], d: f64) -> f64 {
     1.0 - ncc
 }
 
+// The source views packed as compute_depth_map and plane_costs take them: pixels (and the
+// optional mask and first-pass depth planes) concatenated, per source its w,h, its
+// fx,fy,cx,cy and its pose relative to the reference (R row-major, then t). None when a
+// buffer is shorter than the dimensions say.
+fn unpack_sources<'a>(
+    src_gray: &'a [u8], src_dims: &[u32], src_k: &[f32], src_rel: &[f32],
+    src_mask: &'a [u8], src_depth: &'a [f32],
+) -> Option<Vec<SrcView<'a>>> {
+    let n_src = src_dims.len() / 2;
+    let mut srcs: Vec<SrcView> = Vec::with_capacity(n_src);
+    let mut off = 0usize;
+    for s in 0..n_src {
+        let w = src_dims[s*2] as usize;
+        let h = src_dims[s*2+1] as usize;
+        let len = w * h;
+        if off + len > src_gray.len() || src_k.len() < (s+1)*4 || src_rel.len() < (s+1)*12 {
+            return None;
+        }
+        let r = [
+            [src_rel[s*12] as f64, src_rel[s*12+1] as f64, src_rel[s*12+2] as f64],
+            [src_rel[s*12+3] as f64, src_rel[s*12+4] as f64, src_rel[s*12+5] as f64],
+            [src_rel[s*12+6] as f64, src_rel[s*12+7] as f64, src_rel[s*12+8] as f64],
+        ];
+        // Mask is optional: use the matching slice only when src_mask covers all
+        // sources (same concatenated layout as src_gray), else treat as unmasked.
+        let mask: &[u8] = if src_mask.len() >= src_gray.len() { &src_mask[off..off+len] } else { &[] };
+        let sdepth: &[f32] = if src_depth.len() >= src_gray.len() { &src_depth[off..off+len] } else { &[] };
+        srcs.push(SrcView {
+            gray: &src_gray[off..off+len], mask, w, h,
+            fx: src_k[s*4] as f64, fy: src_k[s*4+1] as f64,
+            cx: src_k[s*4+2] as f64, cy: src_k[s*4+3] as f64,
+            r, t: [src_rel[s*12+9] as f64, src_rel[s*12+10] as f64, src_rel[s*12+11] as f64],
+            depth: sdepth,
+        });
+        off += len;
+    }
+    Some(srcs)
+}
+
+// The photometric cost of given plane hypotheses, for checking another kernel against
+// this one (the WebGPU kernel's A/B check, core/dense/depthMap.js) and for the tests.
+// `hyps`: 6 per hypothesis — u, v (reference pixel), depth, normal (camera frame). Sources
+// packed as compute_depth_map takes them, the patch as it builds it (radius capped at 5).
+// Returns n_src + 1 values per hypothesis: each source's plane_cost (INVALID = no
+// measurement), then agg_cost, the best-K cost a depth map run hands on. Empty on bad
+// input.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn plane_costs(
+    ref_gray: &[u8], ref_w: u32, ref_h: u32, ref_k: &[f32],
+    src_gray: &[u8], src_dims: &[u32], src_k: &[f32], src_rel: &[f32], src_mask: &[u8],
+    window: u32, best_k: u32, sigma_spatial: f32, sigma_color: f32, window_step: u32,
+    hyps: &[f32],
+) -> Vec<f32> {
+    let (rw, rh) = (ref_w as usize, ref_h as usize);
+    if rw * rh == 0 || ref_gray.len() < rw * rh || ref_k.len() < 4 { return vec![]; }
+    let Some(srcs) = unpack_sources(src_gray, src_dims, src_k, src_rel, src_mask, &[]) else {
+        return vec![];
+    };
+    if srcs.is_empty() { return vec![]; }
+    let (rfx, rfy, rcx, rcy) = (ref_k[0] as f64, ref_k[1] as f64, ref_k[2] as f64, ref_k[3] as f64);
+    let radius = (window.max(1) as i32).min(5);
+    let patch = Patch::new(radius, window_step.max(1) as i32, Bilateral::new(sigma_spatial as f64, sigma_color as f64));
+    let bk = best_k.max(1) as usize;
+    let mut out = Vec::with_capacity(hyps.len() / 6 * (srcs.len() + 1));
+    for h in hyps.chunks_exact(6) {
+        let (u, v) = (h[0] as usize, h[1] as usize);
+        let (depth, n) = (h[2] as f64, [h[3] as f64, h[4] as f64, h[5] as f64]);
+        if h[0] < 0.0 || h[1] < 0.0 || u >= rw || v >= rh {
+            out.extend(std::iter::repeat(INVALID as f32).take(srcs.len()));
+            out.push(2.0);
+            continue;
+        }
+        for src in &srcs {
+            out.push(plane_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, src, u, v, depth, &n, patch) as f32);
+        }
+        out.push(agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, depth, &n, patch) as f32);
+    }
+    out
+}
+
 // Depth-proposal half-span as a fraction of the current depth at refinement scale 1
 // (COLMAP: perturbation 1/2^(iter+1) ⇒ ±50 % on the first sweep). Same in patchmatch.wgsl.
 const DEPTH_PERTURB_REL: f64 = 0.5;
@@ -496,34 +577,9 @@ pub fn compute_depth_map(
     // contributes in full); film scans / low-texture surfaces need the larger window.
     let radius = (window.max(1) as i32).min(5);
 
-    // Unpack source views (slice the concatenated pixel buffer by dimensions).
-    let mut srcs: Vec<SrcView> = Vec::with_capacity(n_src);
-    let mut off = 0usize;
-    for s in 0..n_src {
-        let w = src_dims[s*2] as usize;
-        let h = src_dims[s*2+1] as usize;
-        let len = w * h;
-        if off + len > src_gray.len() || src_k.len() < (s+1)*4 || src_rel.len() < (s+1)*12 {
-            return vec![];
-        }
-        let r = [
-            [src_rel[s*12] as f64, src_rel[s*12+1] as f64, src_rel[s*12+2] as f64],
-            [src_rel[s*12+3] as f64, src_rel[s*12+4] as f64, src_rel[s*12+5] as f64],
-            [src_rel[s*12+6] as f64, src_rel[s*12+7] as f64, src_rel[s*12+8] as f64],
-        ];
-        // Mask is optional: use the matching slice only when src_mask covers all
-        // sources (same concatenated layout as src_gray), else treat as unmasked.
-        let mask: &[u8] = if src_mask.len() >= src_gray.len() { &src_mask[off..off+len] } else { &[] };
-        let sdepth: &[f32] = if src_depth.len() >= src_gray.len() { &src_depth[off..off+len] } else { &[] };
-        srcs.push(SrcView {
-            gray: &src_gray[off..off+len], mask, w, h,
-            fx: src_k[s*4] as f64, fy: src_k[s*4+1] as f64,
-            cx: src_k[s*4+2] as f64, cy: src_k[s*4+3] as f64,
-            r, t: [src_rel[s*12+9] as f64, src_rel[s*12+10] as f64, src_rel[s*12+11] as f64],
-            depth: sdepth,
-        });
-        off += len;
-    }
+    let Some(srcs) = unpack_sources(src_gray, src_dims, src_k, src_rel, src_mask, src_depth) else {
+        return vec![];
+    };
 
     let bk = best_k.max(1) as usize;
     let bil = Bilateral::new(sigma_spatial as f64, sigma_color as f64);
@@ -839,7 +895,7 @@ mod tests {
         assert_eq!(mean_best_costs([INVALID].into_iter(), 3), 2.0);
     }
 
-    // Mirrors planeCost.test.js: identity pose, frontal plane ⇒ every reference
+    // As planeCost.test.js sets it up: identity pose, frontal plane ⇒ every reference
     // pixel warps onto itself, so the source patch is exactly the given image.
     fn cost_against(refimg: &[u8], srcimg: &[u8]) -> f64 {
         let (w, h) = (16usize, 16usize);
