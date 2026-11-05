@@ -68,6 +68,21 @@ function writeSrc(dv, o, s) {
 export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opts = {}) {
   const state = await ensureDevice()
   if (!state) return null
+  // Every buffer and texture the map makes is destroyed however the run ends: a failed
+  // GPU run falls back to the CPU (workers/ops/dense.js), and its state and cost buffers
+  // (20 bytes a pixel) would otherwise hold GPU memory until a garbage collection. An
+  // error scope a pre-flight throw left open is popped too.
+  const owned = []
+  const scopes = { open: 0 }
+  try {
+    return await depthMapOnDevice(state, (r) => (owned.push(r), r), scopes, refGray, refW, refH, refK, sources, opts)
+  } finally {
+    for (const r of owned) r.destroy()
+    for (; scopes.open > 0; scopes.open--) state.device.popErrorScope().catch(() => {})
+  }
+}
+
+async function depthMapOnDevice(state, own, scopes, refGray, refW, refH, refK, sources, opts) {
   const { device } = state
   const npix = refW * refH
   if (npix === 0 || !sources.length) return null
@@ -136,15 +151,18 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // reason the worker can log before falling back to WASM. LIFO: validation pops first.
   device.pushErrorScope('out-of-memory')
   device.pushErrorScope('validation')
+  scopes.open = 2
 
-  const refTex = uploadGray(device, refGray, refW, refH)
+  const refTex = own(uploadGray(device, refGray, refW, refH))
 
   // ── Sources as a texture_2d_array: each in its own maxW×maxH layer ─────────
-  const srcArrTex = device.createTexture({
-    size: [maxW, maxH, nSrc],
-    format: 'r8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  })
+  const srcArrTex = own(
+    device.createTexture({
+      size: [maxW, maxH, nSrc],
+      format: 'r8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    }),
+  )
   srcList.forEach((s, layer) => {
     device.queue.writeTexture(
       { texture: srcArrTex, origin: [0, 0, layer] },
@@ -158,11 +176,13 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // Always created (the shader binding is mandatory); layers for unmasked sources
   // stay zero. The 0/1 LUT is scaled to 0/255 so the shader's `> 0.5` test works
   // against the r8unorm-normalised texel.
-  const srcMaskTex = device.createTexture({
-    size: [maxW, maxH, nSrc],
-    format: 'r8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  })
+  const srcMaskTex = own(
+    device.createTexture({
+      size: [maxW, maxH, nSrc],
+      format: 'r8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    }),
+  )
   srcList.forEach((s, layer) => {
     if (!s.mask) return
     const bytes = new Uint8Array(s.w * s.h)
@@ -211,12 +231,14 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   pv.setFloat32(108, 0.5 / Math.max(1e-30, priorSigN * priorSigN), true)
   pv.setFloat32(112, geomOn ? geomWeight : 0, true)
   pv.setFloat32(116, geomMax, true)
-  const paramsBuf = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const paramsBuf = own(device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }))
   const storageOf = (arr) => {
-    const b = device.createBuffer({
-      size: Math.max(16, arr.byteLength),
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    })
+    const b = own(
+      device.createBuffer({
+        size: Math.max(16, arr.byteLength),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      }),
+    )
     device.queue.writeBuffer(b, 0, arr)
     return b
   }
@@ -246,11 +268,11 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   const sbuf = new ArrayBuffer(96 * nSrc)
   const sv = new DataView(sbuf)
   srcList.forEach((s, idx) => writeSrc(sv, idx * 96, s))
-  const srcBuf = device.createBuffer({ size: 96 * nSrc, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
+  const srcBuf = own(device.createBuffer({ size: 96 * nSrc, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }))
   device.queue.writeBuffer(srcBuf, 0, sbuf)
 
   // ── Control uniform (32 bytes), rewritten before each dispatch ─────────────
-  const ctrlBuf = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const ctrlBuf = own(device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }))
   // `scale` = the sweep's refinement scale (refineSchedule.js), the value mvs.rs
   // derives from the same perturbStart and iteration; `rowOffset` the band's first row.
   const writeCtrl = (mode, parity, iter, rowOffset = 0) => {
@@ -266,10 +288,12 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   // ── Seed (storage, read-only); dummy when absent ───────────────────────────
   const seedArr = hasSeed ? seedDepth : new Float32Array(1)
-  const seedBuf = device.createBuffer({
-    size: Math.max(4, seedArr.byteLength),
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  })
+  const seedBuf = own(
+    device.createBuffer({
+      size: Math.max(4, seedArr.byteLength),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    }),
+  )
   device.queue.writeBuffer(seedBuf, 0, seedArr)
 
   // ── Persistent state (depth+normal as vec4) + cost ─────────────────────────
@@ -290,10 +314,12 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     )
   }
 
-  const stateBuf = device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
+  const stateBuf = own(
+    device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }),
+  )
   // ACMH's per-pixel temporal view prior (patchmatch.wgsl selView); a dummy otherwise.
-  const selViewBuf = device.createBuffer({ size: acmh ? npix * 4 : 4, usage: GPUBufferUsage.STORAGE })
-  const costBuf = device.createBuffer({ size: costBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
+  const selViewBuf = own(device.createBuffer({ size: acmh ? npix * 4 : 4, usage: GPUBufferUsage.STORAGE }))
+  const costBuf = own(device.createBuffer({ size: costBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC }))
 
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
@@ -375,7 +401,9 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // failure later, and names the actual cause.
   let valErr, oomErr
   try {
+    scopes.open--
     valErr = await device.popErrorScope()
+    scopes.open--
     oomErr = await device.popErrorScope()
   } catch (err) {
     const lost = state.lossInfo
@@ -400,8 +428,12 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   await settle()
 
   // ── Readback ───────────────────────────────────────────────────────────────
-  const stateRead = device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
-  const costRead = device.createBuffer({ size: costBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+  const stateRead = own(
+    device.createBuffer({ size: stateBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+  )
+  const costRead = own(
+    device.createBuffer({ size: costBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+  )
   const enc = device.createCommandEncoder()
   enc.copyBufferToBuffer(stateBuf, 0, stateRead, 0, stateBytes)
   enc.copyBufferToBuffer(costBuf, 0, costRead, 0, costBytes)
@@ -421,25 +453,6 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     normals[i * 3 + 1] = stateArr[i * 4 + 2]
     normals[i * 3 + 2] = stateArr[i * 4 + 3]
   }
-
-  for (const r of [
-    refTex,
-    srcArrTex,
-    srcMaskTex,
-    paramsBuf,
-    srcBuf,
-    ctrlBuf,
-    seedBuf,
-    stateBuf,
-    selViewBuf,
-    seedNBuf,
-    priorBuf,
-    srcDepthBuf,
-    costBuf,
-    stateRead,
-    costRead,
-  ])
-    r.destroy?.()
 
   return { depth, cost, width: refW, height: refH, normals }
 }

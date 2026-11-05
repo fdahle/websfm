@@ -29,6 +29,7 @@ import { pluralize } from '../core/textFormat.js'
 import { EXAMPLES, downloadExample } from '../core/examples.js'
 import { useGuideStore } from '../stores/useGuideStore.js'
 import { preloadDialogSettings } from './useDialogSettings.js'
+import { releaseIdleWorkers } from '../workers/computeClient.js'
 
 // Everything that opens, creates, switches, moves, saves or deletes a project,
 // lifted out of App.vue. Owns the blocking load overlay (`projectLoading` +
@@ -140,6 +141,10 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     clearSensors()
     clearProjectStores()
     clearViewerScene()
+    // The compute workers keep what the last project left in them: model sessions,
+    // decoded raster tiles, and garbage an idle worker never collects. A fresh pool
+    // starts the next project with the tab's memory back (computeClient.js).
+    releaseIdleWorkers()
   }
 
   // What a reopened project holds — the data that once filled the renderer's ~4 GB
