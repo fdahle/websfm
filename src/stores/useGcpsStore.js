@@ -12,10 +12,11 @@ import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { pluralize } from '../core/textFormat.js'
+import { REFERENCE_ACCURACY_DEFAULTS } from '../core/defaults.user.js'
 
 // Default accuracy of image observations (marker projections), in pixels.
 // Ground-coordinate accuracy has no implicit default: it must be declared.
-const DEFAULT_ACCURACY_IMG = 1.0
+const DEFAULT_ACCURACY_IMG = REFERENCE_ACCURACY_DEFAULTS.markerPx
 
 // Project-scoped store: ground control points, stored in the project's working CRS.
 //

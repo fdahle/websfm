@@ -11,14 +11,15 @@ import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { exifPoseFromMetadata, projectExifPose } from '../core/io/exifPose.js'
 import { suggestProjectedCrs, formatLatLon } from '../core/crsSuggest.js'
+import { REFERENCE_ACCURACY_DEFAULTS } from '../core/defaults.user.js'
 
 // Camera poses (exterior orientation / extrinsics): one per image, used as
 // georeferencing priors for bundle adjustment. Positions are stored in the
 // project working CRS — exactly like GCPs/footprints — and re-projected when the
 // CRS changes. Imported orientation angles pass through unchanged; EXIF/XMP
 // true-north attitudes are rotated into grid north and constrain pose-prior BA.
-const DEFAULT_ACC_XYZ = 5.0 // position prior accuracy, project-CRS units (m)
-const DEFAULT_ACC_ANGLE = 2.0 // orientation prior accuracy, degrees
+const DEFAULT_ACC_XYZ = REFERENCE_ACCURACY_DEFAULTS.positionM // project-CRS units
+const DEFAULT_ACC_ANGLE = REFERENCE_ACCURACY_DEFAULTS.orientationDeg
 
 export const usePosesStore = registerProjectStore(
   defineStore('poses', () => {

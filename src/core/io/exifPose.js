@@ -3,10 +3,11 @@
 
 import { isGeographic, metresToCrsUnits, transform } from '../crs.js'
 import { opkMatrix, opkFromMatrix } from '../footprint.js'
+import { REFERENCE_ACCURACY_DEFAULTS } from '../defaults.user.js'
 
-export const EXIF_GPS_DEFAULT_HORIZONTAL_ACCURACY = 10 // metres
-export const EXIF_GPS_DEFAULT_VERTICAL_ACCURACY = 20 // metres
-export const EXIF_ORIENTATION_DEFAULT_ACCURACY = 5 // degrees
+export const EXIF_GPS_DEFAULT_HORIZONTAL_ACCURACY = REFERENCE_ACCURACY_DEFAULTS.exifHorizontalM
+export const EXIF_GPS_DEFAULT_VERTICAL_ACCURACY = REFERENCE_ACCURACY_DEFAULTS.exifVerticalM
+export const EXIF_ORIENTATION_DEFAULT_ACCURACY = REFERENCE_ACCURACY_DEFAULTS.exifOrientationDeg
 
 const finite = (v) => v != null && v !== '' && Number.isFinite(Number(v))
 

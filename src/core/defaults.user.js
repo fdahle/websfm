@@ -357,6 +357,23 @@ export const DENSE_FUSE_PRESET_META = [
   { id: 'high', label: 'Full', blurb: 'Every pixel · densest · default' },
 ]
 
+// Accuracies a reference record gets when its source gives none. They weight it in the
+// bundle adjustment, and the Reference and GCP tables show and edit them per row.
+export const REFERENCE_ACCURACY_DEFAULTS = {
+  // Photo GPS and attitude from EXIF/XMP (core/io/exifPose.js): consumer GNSS is metres
+  // off, and worse in height.
+  exifHorizontalM: 10,
+  exifVerticalM: 20,
+  exifOrientationDeg: 5,
+  // A camera position or orientation whose source gives no accuracy, such as a
+  // reference file without accuracy columns (stores/usePosesStore.js); in project units.
+  positionM: 5,
+  orientationDeg: 2,
+  // A GCP marker in a photo, in pixels (stores/useGcpsStore.js). Ground coordinates
+  // have no default accuracy: it must be declared.
+  markerPx: 1,
+}
+
 // Reconstruct ▸ Find GCPs (composables/useFindGcps.js, FindGcpsModal.vue).
 export const FIND_GCPS_DEFAULTS = {
   matcher: 'auto', // 'auto' (SuperPoint if installed, else DISK) | 'disk' | 'superpoint' | 'sift' | 'terrain'

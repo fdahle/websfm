@@ -23,7 +23,8 @@ grid, works as well.
 GPS or imported camera positions georeference the model once three registered cameras
 have them. Consumer GNSS is metres off, so check the residuals. Accurate positions
 (RTK/PPK) also correct the dome a nadir block can bend into; give them their real
-accuracy, as the 5 m default carries little weight.
+accuracy, as the defaults carry little weight: 10 m across and 20 m in height for photo
+GPS, 5 m for a position file without accuracies.
 
 An RTK antenna sits some centimetres from the lens. Enter that offset per sensor with
 the **GNSS** button in the **Sensor table**, in metres in camera axes (x right, y down,
