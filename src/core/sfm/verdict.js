@@ -42,14 +42,14 @@ const TRACK3_ACT_PCT = 20
 // essentially every residual and the filter removes nothing, so a reprojection tail
 // survives by construction rather than because the geometry is bad. Mirrored as
 // GATE_HEADROOM_NOTE in summaryDigest.js.
-const GATE_HEADROOM_WARN = 2
+export const GATE_HEADROOM_WARN = 2
 
 // Share of images at the keypoint cap above which the cap — not contrastThreshold — is
 // what selected the keypoints. It selects by DoG response, which biases toward
 // high-contrast texture and away from spatial uniformity, so a saturated cap is a
 // plausible contributing cause of an uneven per-image residual spread. Mirrored as
 // KP_CAP_NOTE_PCT in summaryDigest.js.
-const KP_CAP_WARN_PCT = 90
+export const KP_CAP_WARN_PCT = 90
 
 const worst = (a, b) => (a === 'red' || b === 'red' ? 'red' : a === 'yellow' || b === 'yellow' ? 'yellow' : 'green')
 

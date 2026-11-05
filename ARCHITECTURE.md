@@ -127,7 +127,9 @@ to the algorithm; the other steps differ only in file names.
   must not be in a transfer list (the compute client and worker filter them out).
 - **Default settings have one home.** User-facing defaults are in
   `src/core/defaults.user.js` and internal tuning values in `src/core/tuning.js`.
-  The dialogs and the core code read the same objects.
+  The dialogs and the core code read the same objects. Fixed facts that several
+  modules share (the WGS84 ellipsoid, Web Mercator's latitude limit, the NMAD factor)
+  are in `src/core/constants.js`.
 - **The Ribbon chooses; a floating toolbox runs.** Ribbon commands open a dialog or
   start a tool. The controls for a running tool live in its toolbox over the view.
 - **Keyboard shortcuts have one home.** `core/help/shortcuts.js` names every key and

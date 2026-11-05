@@ -1,3 +1,5 @@
+import { NMAD_K } from '../constants.js'
+
 // F13 — reference-DEM-constrained bundle adjustment (TODO ▸ F13, issue #8): sparse points
 // over stable ground pulled toward a reference DEM, as a weak "the ground is about here"
 // prior, so a block without ground control cannot bend. Pure: points, the georeference
@@ -50,7 +52,7 @@ export function demAnchors({
   const dzs = cand.map((c) => c.dz).sort((a, b) => a - b)
   const median = dzs[dzs.length >> 1]
   const dev = dzs.map((d) => Math.abs(d - median)).sort((a, b) => a - b)
-  const nmad = 1.4826 * dev[dev.length >> 1]
+  const nmad = NMAD_K * dev[dev.length >> 1]
   const reach = Math.max(outlierK * nmad, 3 * sigma)
   const kept = cand.filter((c) => Math.abs(c.dz - median) <= reach)
   const picked = spreadEvenly(kept, maxAnchors)

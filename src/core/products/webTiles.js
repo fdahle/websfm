@@ -5,9 +5,11 @@
 // parent tile is built from; the worker (workers/ops/webTiles.js) reads the raster and
 // encodes.
 
+import { WEB_MERCATOR_MAX_LAT, WGS84_A } from '../constants.js'
+
 export const TILE = 256
-const R = 6378137 // the sphere Web Mercator projects
-const MAX_LAT = 85.0511287798066
+const R = WGS84_A // the sphere Web Mercator projects
+const MAX_LAT = WEB_MERCATOR_MAX_LAT
 
 // Metres per pixel of a tile at latitude `lat` and zoom `z`.
 export function tileResolution(lat, z) {

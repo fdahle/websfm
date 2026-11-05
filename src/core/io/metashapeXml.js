@@ -26,6 +26,7 @@
 
 import { parseXml, child, childrenOf, childNumber, numberList } from './xmlLite.js'
 import { opkFromMatrix } from '../footprint.js'
+import { WGS84_A, WGS84_F } from '../constants.js'
 
 // ── Reading ───────────────────────────────────────────────────────────────────
 
@@ -249,7 +250,7 @@ function readScalebar(el) {
 // The ellipsoid of a proj4 definition: { a, f }. Null when the definition names none
 // this table knows (then a georeferenced chunk cannot be placed).
 const ELLIPSOIDS = {
-  WGS84: [6378137, 1 / 298.257223563],
+  WGS84: [WGS84_A, WGS84_F],
   GRS80: [6378137, 1 / 298.257222101],
   bessel: [6377397.155, 1 / 299.1528128],
   intl: [6378388, 1 / 297],
@@ -679,7 +680,7 @@ export function geodeticToGeocentric([lonDeg, latDeg, h], { a, f }) {
   ]
 }
 
-const WGS84 = { a: 6378137, f: 1 / 298.257223563 }
+const WGS84 = { a: WGS84_A, f: WGS84_F }
 // As Metashape 2.2 writes it.
 export const WGS84_WKT =
   'GEOGCS["WGS 84",DATUM["World Geodetic System 1984 ensemble",' +

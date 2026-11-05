@@ -27,11 +27,7 @@
 import { isStreamed } from '../lod/streamed.js'
 import { MAX_FLOAT64_XYZ_POINTS } from '../bufferLimit.js'
 import { EXPORT_DEFAULTS } from '../defaults.user.js'
-
-// WGS84 ellipsoid.
-const WGS84_A = 6378137.0
-const WGS84_F = 1 / 298.257223563
-const WGS84_E2 = WGS84_F * (2 - WGS84_F)
+import { WGS84_A, WGS84_E2 } from '../constants.js'
 
 // Geodetic (lon°, lat°, ellipsoidal height m) → earth-centred earth-fixed
 // (EPSG:4978) metres — the frame every 3D Tiles transform lands in.

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { asPairList } from '../../core/sfm/matchCodec.js'
+import { MAX_SCALE, MIN_SCALE } from '../../composables/useImageViewport.js'
 
 const props = defineProps({
   imageA: { type: Object, required: true },
@@ -75,8 +76,6 @@ const overlayCanvas = ref(null)
 const L = ref({ scale: 1, tx: 0, ty: 0 })
 const R = ref({ scale: 1, tx: 0, ty: 0 })
 
-const MIN_SCALE = 0.05
-const MAX_SCALE = 40
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v))
 }

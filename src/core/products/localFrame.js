@@ -39,9 +39,7 @@
 // Heights stay in the vertical unit of the CRS.
 
 import { geodeticToEcef } from './tiles3d.js'
-
-const WGS84_A = 6378137
-const WGS84_E2 = 0.00669437999014
+import { WGS84_A, WGS84_E2 } from '../constants.js'
 
 // Second-order coefficient c = k·(g_E − i·g_N) as [re, im].
 const coeff = (f) => [f.k * (f.gE || 0), -f.k * (f.gN || 0)]

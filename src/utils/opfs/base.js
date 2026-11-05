@@ -4,8 +4,9 @@
 import { MAX_BUFFER_BYTES } from '../../core/bufferLimit.js'
 import { chunksOf, isSharedArray, shareableArray } from '../../core/bigArray.js'
 import { blobChunks } from '../blobParts.js'
+import { KP_STRIDE } from '../../core/features/keypoints.js'
 
-export const FLOATS_PER_KP = 6 // x, y, nx, ny, scale, response
+export const FLOATS_PER_KP = KP_STRIDE // x, y, nx, ny, scale, response (core/features/keypoints.js)
 
 export async function getRoot() {
   const root = await navigator.storage.getDirectory()

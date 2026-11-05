@@ -19,8 +19,9 @@ import { imageFrame, fitView, zoomAbout, screenToImage } from '../utils/imageVie
 //   onViewChange  — schedule an overlay repaint (after fit / zoom)
 //   onFrameChange — the native frame was re-derived to a different size or
 //                   preview state after load (late TIFF metadata) and refitted
-const MIN_SCALE = 0.05
-const MAX_SCALE = 40
+// The zoom range of every image viewer (ViewerMatch.vue reads it too).
+export const MIN_SCALE = 0.05
+export const MAX_SCALE = 40
 
 export function useImageViewport({ container, imgEl, image, onViewChange, onFrameChange }) {
   const scale = ref(1)

@@ -26,6 +26,7 @@ import { packAtlas } from './packing.js'
 import { bakeAtlas, applyGains } from './bake.js'
 import { levelSeams } from './seamLevel.js'
 import { pluralize } from '../../textFormat.js'
+import { NMAD_K } from '../../constants.js'
 
 const MIN_SCALE = 1 / 64
 
@@ -488,7 +489,7 @@ function dropInconsistentViews(cand, gains, minTol) {
     for (let i = 0; i < n; i++) devs.push(dev[f * K + i])
   }
   devs.sort((x, y) => x - y)
-  const tolerance = Math.max(minTol, 3 * 1.4826 * (devs.length ? devs[devs.length >> 1] : 0))
+  const tolerance = Math.max(minTol, 3 * NMAD_K * (devs.length ? devs[devs.length >> 1] : 0))
   let faces = 0,
     dropped = 0
   for (let f = 0; f < F; f++) {
@@ -551,7 +552,7 @@ function consensusInliers(pt, img, rgb, gains, nPoints) {
   const rs = []
   for (let o = 0; o < O; o++) if (resid[o] >= 0) rs.push(resid[o])
   rs.sort((a, b) => a - b)
-  const sigma = 1.4826 * (rs.length ? rs[rs.length >> 1] : 0)
+  const sigma = NMAD_K * (rs.length ? rs[rs.length >> 1] : 0)
   const tol = Math.max(GAIN_MIN_TOL, 3 * sigma)
   const keep = []
   for (let o = 0; o < O; o++) if (resid[o] >= 0 && resid[o] <= tol) keep.push(o)

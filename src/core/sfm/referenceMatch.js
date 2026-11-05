@@ -1,4 +1,5 @@
 import { applyHomography } from '../features/guidedTiles.js'
+import { METRES_PER_DEGREE } from '../constants.js'
 
 // Geometry of the coarse-to-fine ortho-to-reference matcher (workers/ops/
 // referenceGcps.js runs the features; this decides where to look). Every
@@ -244,8 +245,8 @@ export function gpsSearchOutline(lonLats, { minPadMetres = 300, perEdge = 8 } = 
     lat1 = Math.max(lat1, lat)
   }
   const midLat = (((lat0 + lat1) / 2) * Math.PI) / 180
-  const padLat = Math.max(0.5 * (lat1 - lat0), minPadMetres / 111320)
-  const padLon = Math.max(0.5 * (lon1 - lon0), minPadMetres / (111320 * Math.max(0.01, Math.cos(midLat))))
+  const padLat = Math.max(0.5 * (lat1 - lat0), minPadMetres / METRES_PER_DEGREE)
+  const padLon = Math.max(0.5 * (lon1 - lon0), minPadMetres / (METRES_PER_DEGREE * Math.max(0.01, Math.cos(midLat))))
   const a = [lon0 - padLon, Math.max(-90, lat0 - padLat)],
     b = [lon1 + padLon, Math.min(90, lat1 + padLat)]
   const out = []

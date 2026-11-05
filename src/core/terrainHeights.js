@@ -1,5 +1,6 @@
 import { TERRAIN, decodeTerrarium } from './basemaps.js'
 import { TILE_CACHE_MAX_ZOOM } from './offlineCache.js'
+import { WEB_MERCATOR_MAX_LAT } from './constants.js'
 
 // Ground heights from the global terrain: the Terrarium tiles the Terrain basemap
 // shades (core/basemaps.js TERRAIN), read as numbers. Their sources (SRTM, NOAA
@@ -17,7 +18,7 @@ export const TERRAIN_MAX_TILES = 64
 // Fractional Web-Mercator tile coordinates of a lon/lat at level z.
 export function tileCoords(lon, lat, z) {
   const n = 2 ** z
-  const phi = (Math.max(-85.0511, Math.min(85.0511, lat)) * Math.PI) / 180
+  const phi = (Math.max(-WEB_MERCATOR_MAX_LAT, Math.min(WEB_MERCATOR_MAX_LAT, lat)) * Math.PI) / 180
   return [((lon + 180) / 360) * n, ((1 - Math.log(Math.tan(phi) + 1 / Math.cos(phi)) / Math.PI) / 2) * n]
 }
 

@@ -1,5 +1,6 @@
 import { cameraCenter } from '../sfm/geometry.js'
 import { fitSimilarity, applySimilarity } from '../products/georef.js'
+import { WGS84_A, WGS84_E2 } from '../constants.js'
 
 // ── Camera centres vs independent GNSS positions (pure) ──────────────────────
 // When the images carry positions the reconstruction never saw (EXIF GNSS, with no
@@ -14,9 +15,8 @@ import { fitSimilarity, applySimilarity } from '../products/georef.js'
 // east-north-up frame at their centroid, which is Cartesian and metric, so the
 // similarity needs no map projection.
 
-const A = 6378137
-const F = 1 / 298.257223563
-const E2 = F * (2 - F)
+const A = WGS84_A
+const E2 = WGS84_E2
 const RAD = Math.PI / 180
 
 export function geodeticToEcef(latDeg, lonDeg, h) {

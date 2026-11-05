@@ -4,8 +4,9 @@
 // positions and the lon/lat → raster CRS transform.
 
 import { MAX_BUFFER_BYTES } from '../bufferLimit.js'
+import { METRES_PER_DEGREE } from '../constants.js'
 
-const M_PER_DEG = 111320
+const M_PER_DEG = METRES_PER_DEGREE
 
 /**
  * `points`: [[lon, lat], …] of the project's images (and GCPs). `toRaster(lon, lat)` →

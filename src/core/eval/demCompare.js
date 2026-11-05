@@ -19,8 +19,8 @@
 // reports that quote them.
 
 import { coregisterNuthKaab } from './demCoregister.js'
+import { NMAD_K } from '../constants.js'
 
-const NMAD_K = 1.4826 // NMAD = 1.4826 · median |ΔZ − median|; equals σ for a normal
 // Co-registration (demCoregister.js) on at most this many of the compared cells: each
 // costs about a dozen reference samples, and 20,000 pin a metre-scale shift.
 const COREG_MAX_POINTS = 20000

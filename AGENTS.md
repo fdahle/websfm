@@ -13,7 +13,9 @@ Rules that are easy to miss:
 
 - `src/core/` is pure: no Vue, Pinia, OPFS or DOM. Plain data in, plain data out.
 - User-facing defaults live in `src/core/defaults.user.js`, internal tuning in
-  `src/core/tuning.js`; nothing else hard-codes them.
+  `src/core/tuning.js`; nothing else hard-codes them. Fixed facts several modules
+  share (the WGS84 ellipsoid, the NMAD factor) are defined once in
+  `src/core/constants.js`.
 - After a change under `crates/`, run `npm run build:wasm` and commit `src/wasm/`
   with it.
 - Use every core for heavy CPU work. Spread independent items (images, pairs, maps,

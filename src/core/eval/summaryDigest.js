@@ -10,6 +10,7 @@
 
 import { formatBytes } from '../formatBytes.js'
 import { nounFor, pluralize } from '../textFormat.js'
+import { GATE_HEADROOM_WARN, KP_CAP_WARN_PCT } from '../sfm/verdict.js'
 
 // A second, equally important use (added 2026-07-25): the **baseline record**. The
 // owed verification runs in TODO.md are all "dataset × settings → numbers", and a
@@ -292,12 +293,12 @@ function kv(obj) {
 
 // Share of images at the keypoint cap above which the digest flags it. Not an
 // EVAL_THRESHOLDS entry: this is a run-shape note in a config echo, not a health tile.
-// Matched to verdict.js KP_CAP_WARN_PCT so the two never disagree on screen.
-const KP_CAP_NOTE_PCT = 90
+// It is verdict.js KP_CAP_WARN_PCT, so the two never disagree on screen.
+const KP_CAP_NOTE_PCT = KP_CAP_WARN_PCT
 
 // Track-filter gate ÷ observed p95 above which the gate is called inactive. Mirrors
 // verdict.js GATE_HEADROOM_WARN for the same reason as KP_CAP_NOTE_PCT.
-const GATE_HEADROOM_NOTE = 2
+const GATE_HEADROOM_NOTE = GATE_HEADROOM_WARN
 
 function configLines(config) {
   const out = []

@@ -24,6 +24,7 @@ import { rasterGroundScale, rasterUnits } from '../../core/products/rasterUnits.
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { pluralize } from '../../core/textFormat.js'
 import { demRef } from '../../core/products/demWindow.js'
+import { METRES_PER_DEGREE } from '../../core/constants.js'
 
 // The raster exports, split out of useExports: DEM and orthophoto (GeoTIFF / COG,
 // ASCII grid, world files) and the Tools ▸ Products ▾ derivatives — contours,
@@ -233,7 +234,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       }
     }
     const bbox = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)]
-    const gsd = o.gsd * (isGeographic(info.crs) ? 111320 : metresPerCrsUnit(info.crs) || 1)
+    const gsd = o.gsd * (isGeographic(info.crs) ? METRES_PER_DEGREE : metresPerCrsUnit(info.crs) || 1)
     const { minZoom, maxZoom } = zoomRange({ gsd, lat: (bbox[1] + bbox[3]) / 2, bbox })
     const name = exportFileName(fileName, defaultExportName('ortho', { format, base: projectBase() }))
     const { blob, tiles } = await workerWebTiles(

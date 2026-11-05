@@ -28,7 +28,7 @@ import { meshSurface, planeSurface } from '../../core/products/surface.js'
 import { createCogBuilder, geoKeysForEpsg, crsTagInfo, planCogFromTiles } from '../../core/products/geotiff.js'
 import { DEM_PLANE_MAX, DEM_TILE, ORTHO_TILE, MAX_RASTER_SIDE, orthoGridFor } from '../../core/products/rasterSize.js'
 import { TAB_BUFFER_POOL_BYTES, isBufferAllocationFailure } from '../../core/bufferLimit.js'
-import { formatBytes } from '../../core/dense/memBudget.js'
+import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
 import { traceContours, contoursToGeoJSON, contoursToDxf } from '../../core/products/contours.js'
 import { terrainProducts } from '../../core/products/terrain.js'
 import { clipDem, clipOrtho, polygonPixelWindow, windowGeometry } from '../../core/products/rasterClip.js'
@@ -585,7 +585,7 @@ export function makeProductsOps({ rasterize } = {}) {
     // A block-built DEM surface (SAT-3) is read from its COG, as fine as the memory
     // budget allows (a fifth of it for the Float32 heights + mask), not its overview.
     if (surface?.kind === 'dem' && surface.grid?.cog) {
-      const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : 2 * 1024 ** 3
+      const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
       const g = surface.grid
       const read = await readDemGrid(g, null, Math.floor(budget / 5 / 5))
       say(
@@ -685,7 +685,7 @@ export function makeProductsOps({ rasterize } = {}) {
     // budget, set it.
     const cacheFor = (k) => {
       const perShare = (total) => total / k - blockBytes - (1 + photoPrefetch) * maxCacheEntry
-      const forBudget = Number.isFinite(budget) ? perShare(budget - pyramidBytes) : 2 * 1024 ** 3
+      const forBudget = Number.isFinite(budget) ? perShare(budget - pyramidBytes) : DEFAULT_BUDGET_BYTES
       const forTab = perShare(0.75 * TAB_BUFFER_POOL_BYTES - (settings.pageBytes ?? 0) - pyramidBytes) - maxCacheEntry
       return { bytes: Math.max(maxCacheEntry, Math.min(forBudget, forTab)), tabBound: forTab < forBudget }
     }

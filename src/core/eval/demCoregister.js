@@ -15,7 +15,8 @@
 // Shift convention: `shift` = [east, north] is where the DEM sits relative to the
 // reference, in DEM units: the DEM's feature at p + shift is the reference's at p.
 
-const NMAD_K = 1.4826
+import { NMAD_K } from '../constants.js'
+
 const D2R = Math.PI / 180
 
 function median(v) {

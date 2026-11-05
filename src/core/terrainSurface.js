@@ -6,10 +6,11 @@
 import { ensureProjection, transformer } from './crs.js'
 import { terrainSampler, terrainZoom, TERRAIN_DATUM, fetchTerrariumTile } from './terrainHeights.js'
 import { heightShifter } from './verticalDatum.js'
+import { WEB_MERCATOR_MAX_LAT } from './constants.js'
 
 export const TERRAIN_SURFACE_NAME = 'Background terrain'
 // Web-Mercator tiles stop here: no terrain nearer the poles.
-const MAX_LAT = 85.0511
+const MAX_LAT = WEB_MERCATOR_MAX_LAT
 
 // The lon/lat box of a projected box: a grid of points over it, since its edges
 // curve in longitude/latitude (and a polar box holds its pole inside).

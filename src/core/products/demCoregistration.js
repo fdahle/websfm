@@ -20,8 +20,8 @@
 
 import { coregisterNuthKaab } from '../eval/demCoregister.js'
 import { COREG_TUNING } from '../tuning.js'
+import { NMAD_K } from '../constants.js'
 
-const NMAD_K = 1.4826
 function median(v) {
   const s = Float64Array.from(v).sort()
   const n = s.length

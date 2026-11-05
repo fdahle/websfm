@@ -4,6 +4,7 @@ import { applyHomography } from '../features/guidedTiles.js'
 import { pixelToWorld } from '../io/rasterSample.js'
 import { centreToMarkPx } from './displayFrame.js'
 import { matchConfidence } from './referenceMatch.js'
+import { METRES_PER_DEGREE } from '../constants.js'
 
 // The orthophoto's coordinate frame (SfM ↔ its map coordinates), from its record.
 export function orthoFrame(ortho) {
@@ -238,7 +239,7 @@ export function referencePick(
 ) {
   const world = pixelToWorld(reference, col, row)
   const [x, y] = toProject([world.x, world.y])
-  const k = 111320,
+  const k = METRES_PER_DEGREE,
     cosLat = Math.cos((y * Math.PI) / 180)
   const toAccuracy = geographic
     ? (p) => {

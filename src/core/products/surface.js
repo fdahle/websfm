@@ -19,6 +19,8 @@
 // come out in the same top-left-origin (row 0 = max-Y) convention so they drop
 // straight into orthorectify()/the GeoTIFF writers.
 
+import { NMAD_K } from '../constants.js'
+
 // Hard cap on the longer grid side (matches dem.js); gsd is grown to respect it.
 const MAX_GRID = 4096
 
@@ -250,7 +252,7 @@ export function fitPlane(points, opts = {}) {
     const sorted = Float64Array.from(abs).sort()
     const mad = sorted[sorted.length >> 1]
     if (mad > 0) {
-      const cut = 2.5 * 1.4826 * mad
+      const cut = 2.5 * NMAD_K * mad
       const use = new Uint8Array(n0)
       let kept = 0
       for (let i = 0; i < n0; i++)
