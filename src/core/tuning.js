@@ -506,6 +506,10 @@ export const DENSE_TUNING = {
   // A worker streaming depth maps waits while more than this many of its maps are not
   // saved yet (each is ~23 B/px held on the page until its write lands).
   depthMapsUnsaved: 2,
+  // The parallel depth filter's comparison cache per worker (stores/reconstruction/
+  // dense.js densifyParallel): a quarter of the budget split over the workers, at most
+  // this. An eighth of the budget split K ways starved the cache (96 MB each on quarry).
+  densifyCacheMaxMiB: 512,
 }
 
 // Mesh (screened Poisson) internals read in core/products/mesh.js but NOT exposed in
@@ -609,6 +613,14 @@ export const TEXTURE_TUNING = {
   // face its own corners) and welded first; without shared vertices every face would
   // be a chart of its own.
   weldOpenShare: 0.5,
+  // GPU vs CPU depth on the first view the mesh covers enough of to judge (at least
+  // gpuCheckCoverage of its grid): below gpuAgreeMin of the covered pixels agreeing, the
+  // run falls back to the CPU pass (workers/ops/texture.js). Rasterisers differ by a
+  // pixel along occluder edges, which weigh more among covered pixels than among all of
+  // them. A view that covers less is not judged: it takes the CPU pass, and the next
+  // view is checked.
+  gpuAgreeMin: 0.95,
+  gpuCheckCoverage: 0.02,
 }
 
 // ── Resident feature data (stores; TODO ▸ SC-2/SC-3) ─────────────────────────────
@@ -621,6 +633,10 @@ export const TEXTURE_TUNING = {
 export const RESIDENT_TUNING = {
   keypointCacheMiB: 256,
   matchCacheMiB: 256,
+  // Decoded tiles of tiled-pyramid photos (a native scan past the canvas limit; the
+  // fiducial and GCP windows revisit the same tiles), kept in EACH compute worker
+  // (workers/rasterSource.js): the pool may hold this many times its size.
+  rasterTileCacheMiB: 256,
   // One read of the matches file serves every consecutive pair inside this window
   // (core/features/matchStorage.js planMatchReads).
   matchReadWindowMiB: 32,
@@ -718,6 +734,67 @@ export const FOLDER_OFFER_TUNING = {
 export const PROJECT_IMPORT_TUNING = {
   // Photos read and ingested at a time: the page never holds a whole project as blobs.
   photosPerBatch: 16,
+}
+
+// Adding photos, masks and reference rasters (stores/images/ingest.js, maskImport.js,
+// thumbnails.js; workers/ops/io.js).
+export const IMPORT_TUNING = {
+  // Photos whose stored copies are looked up at a time after an import: the lookups are
+  // storage round trips (~5 ms each, measured on 300 images).
+  readBackConcurrency: 16,
+  // TIFF transcodes in flight, bounded by pixels rather than by count. Each holds the
+  // decoded RGBA, its canvas and the JPEG + PNG encodes (~12 bytes per pixel), all in
+  // the renderer process (the workers share it). A batch used to transcode all its
+  // files at once: 32 Iceland 1980 scans (130 MP each) killed the renderer, and with
+  // GPU canvas the overlapping readbacks failed 31 of 125 images. A file larger than
+  // the budget still runs, alone.
+  tiffTranscodePixels: 400e6,
+  // The share of the tab's buffer pool a mask import may hold; image transcodes of the
+  // same folder may still be running beside it.
+  maskPoolShare: 0.25,
+  // Thumbnails generated at a time, in their own worker (workers/thumbnail.worker.js).
+  thumbnailConcurrency: 2,
+  // Import ▸ Reference raster: the memory a conversion to a tiled COG may decode the
+  // source into; a source needing more is used as it is.
+  rasterConversionMiB: 512,
+}
+
+// File ▸ Save project file (utils/projectFile.js): archived files up to this size are
+// read into memory once, so the archive holds the version they had when it started.
+export const PROJECT_FILE_TUNING = {
+  snapshotInMemoryMiB: 64,
+}
+
+// Tools ▸ Cloud and Mesh edits (stores/reconstruction/cloudEdits.js).
+export const CLOUD_EDIT_TUNING = {
+  // A crop of a streamed cloud becomes a resident one: at most this many points.
+  streamedCropMaxPoints: 25_000_000,
+  // From this many points the outlier filter and normals split the cloud into slabs over
+  // the worker pool (each slab with a margin); below it one worker is as quick.
+  splitMinPoints: 1_000_000,
+  splitPointsPerWorker: 400_000,
+  // From this many triangles Decimate splits an untextured mesh into blocks over the pool
+  // (core/products/meshBlocks.js), each worker taking at least splitTrianglesPerWorker.
+  decimateSplitMinTriangles: 500_000,
+  splitTrianglesPerWorker: 250_000,
+  // A streamed REFERENCE (alignment, distance) is read where the source is, at full
+  // detail up to this many points, coarser beyond (the log says so).
+  streamedReferenceMaxPoints: 12_000_000,
+}
+
+// Tools ▸ Georeferencing ▸ Find GCPs, the learned look (workers/ops/referenceGcps.js).
+export const FIND_GCPS_TUNING = {
+  // The coarse look reads both rasters at up to this many samples a side.
+  coarseDim: 1536,
+  // A learned look reads both rasters at up to learnedDim samples a side (a 4-band
+  // orthophoto read stays inside rasterWindow's 16 M-sample budget), detects in tiles
+  // of learnedTile px and gives LightGlue the strongest lightglueKeypoints of each.
+  learnedDim: 2000,
+  learnedTile: 1024,
+  lightglueKeypoints: 2048,
+  // A learned look counts when this many matches agree on one homography (hist-sfm's
+  // minimum); wrong rotations on Rachel gave at most 8.
+  learnedMinInliers: 20,
 }
 
 // Tools ▸ Products ▸ Co-register DEM… (core/products/demCoregistration.js).

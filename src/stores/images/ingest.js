@@ -8,16 +8,13 @@ import { pyramidSource } from '../../utils/image.js'
 import { markRaw } from 'vue'
 import { pluralize } from '../../core/textFormat.js'
 import { uniqueImageLabel } from '../../core/io/imageDuplicates.js'
+import { IMPORT_TUNING } from '../../core/tuning.js'
 
-const READ_BACK_CONCURRENCY = 16
+const READ_BACK_CONCURRENCY = IMPORT_TUNING.readBackConcurrency
 
-// TIFF transcodes in flight, bounded by pixels rather than by count. Each holds the
-// decoded RGBA, its canvas and the JPEG + PNG encodes (~12 bytes per pixel), all in
-// the renderer process (the workers share it). A batch used to transcode all its
-// files at once: 32 Iceland 1980 scans (130 MP each) killed the renderer, and with
-// GPU canvas the overlapping readbacks failed 31 of 125 images. A file larger than
-// the budget still runs, alone.
-const TIFF_TRANSCODE_PIXEL_BUDGET = 400e6
+// TIFF transcodes in flight, bounded by pixels rather than by count (core/tuning.js says
+// why). A file larger than the budget still runs, alone.
+const TIFF_TRANSCODE_PIXEL_BUDGET = IMPORT_TUNING.tiffTranscodePixels
 function createPixelBudget(cap) {
   let inFlight = 0
   const waiting = []

@@ -24,6 +24,7 @@ import {
 import { percentileRange } from '../core/io/tonalStretch.js'
 import { readTiffTag } from '../utils/tiff.js'
 import { inflateSync } from 'fflate'
+import { RESIDENT_TUNING } from '../core/tuning.js'
 
 export const isPyramid = (src) => src?.kind === 'pyramid'
 
@@ -184,8 +185,8 @@ async function encodeLevel(desc, k, type, quality, maxLong = Infinity) {
 
 // ── read ────────────────────────────────────────────────────────────────────
 
-// Decoded tiles, bounded by bytes (fiducial and GCP windows revisit the same tiles).
-const TILE_CACHE_BYTES = 256 * 1024 ** 2
+// Decoded tiles, bounded by bytes (RESIDENT_TUNING.rasterTileCacheMiB).
+const TILE_CACHE_BYTES = RESIDENT_TUNING.rasterTileCacheMiB * 2 ** 20
 const tileCache = new Map()
 let tileCacheBytes = 0
 /**

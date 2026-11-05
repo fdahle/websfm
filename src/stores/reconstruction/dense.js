@@ -885,9 +885,9 @@ export function createDense({
   // Returns { cloud, summary } or null (refused, already logged).
   async function densifyParallel(mapsInput, settings, budget, workers, onProgress, stillCurrent) {
     const t0 = performance.now()
-    // Each worker's comparison cache; the plan's preflight counts it per worker. An
-    // eighth of the budget split K ways starved the cache (96 MB each on quarry).
-    const cacheBytes = Math.floor(Math.min(512 * 1024 ** 2, budget / (4 * workers)))
+    // Each worker's comparison cache (DENSE_TUNING.densifyCacheMaxMiB); the plan's
+    // preflight counts it per worker.
+    const cacheBytes = Math.floor(Math.min(DENSE_TUNING.densifyCacheMaxMiB * 2 ** 20, budget / (4 * workers)))
     const fuseSettings = withRegion({ ...settings, memBudgetBytes: budget, cacheBytes, parallel: workers })
     const PLAN_SHARE = FUSION_PLAN_SHARE
     const onLog = (m, l, c) => log(m, l, c)

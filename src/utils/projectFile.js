@@ -26,6 +26,7 @@ import {
   ARCHIVE_DERIVED_DIRS,
 } from '../core/io/projectArchive.js'
 import { pluralize } from '../core/textFormat.js'
+import { PROJECT_FILE_TUNING } from '../core/tuning.js'
 
 // ── Save target ───────────────────────────────────────────────────────────────
 // `showSaveFilePicker` streams straight to disk at constant memory and is the
@@ -104,7 +105,7 @@ async function openArchiveSink(suggestedName) {
 // Two passes buy an exact total for the size pre-flight and for progress, and a
 // pruned walk when derived data is excluded.
 // Archived files up to this size are read into memory once (see the export loop).
-const SNAPSHOT_IN_MEMORY_BYTES = 64 * 1024 * 1024
+const SNAPSHOT_IN_MEMORY_BYTES = PROJECT_FILE_TUNING.snapshotInMemoryMiB * 2 ** 20
 
 async function collectEntries(projectId, includeDerived) {
   const skip = includeDerived ? null : (relPath, kind) => kind === 'directory' && ARCHIVE_DERIVED_DIRS.includes(relPath)

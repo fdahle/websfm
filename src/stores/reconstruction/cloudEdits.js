@@ -16,22 +16,19 @@ import { stampOf } from '../../core/products/productSet.js'
 import { planCloudSlabs, gatherPoints } from '../../core/products/cloudSlabs.js'
 import { planMeshBlocks, blockMesh, joinBlocks, BLOCK_HEADROOM } from '../../core/products/meshBlocks.js'
 import { cloudBounds, estimateSpacing } from '../../core/products/cloudEdit.js'
+import { CLOUD_EDIT_TUNING } from '../../core/tuning.js'
 
-// A crop of a streamed cloud becomes a resident one: at most this many points.
-const STREAMED_CROP_MAX_POINTS = 25_000_000
+// Sizes that decide how an edit runs (core/tuning.js CLOUD_EDIT_TUNING says why).
+const {
+  streamedCropMaxPoints: STREAMED_CROP_MAX_POINTS,
+  splitMinPoints: SPLIT_MIN_POINTS,
+  splitPointsPerWorker: SPLIT_POINTS_PER_WORKER,
+  decimateSplitMinTriangles: DECIMATE_SPLIT_MIN_TRIANGLES,
+  splitTrianglesPerWorker: SPLIT_TRIANGLES_PER_WORKER,
+  streamedReferenceMaxPoints: STREAMED_REFERENCE_MAX_POINTS,
+} = CLOUD_EDIT_TUNING
 // Edits a streamed cloud takes as it is (core/lod/transform.js); the rest need a crop.
 const STREAMED_EDIT_MODES = new Set(['crop', 'mask', 'classify', 'filter', 'classify-ground', 'transform'])
-// From this many points the outlier filter and normals split the cloud into slabs over
-// the worker pool (each slab with a margin); below it one worker is as quick.
-const SPLIT_MIN_POINTS = 1_000_000
-const SPLIT_POINTS_PER_WORKER = 400_000
-// From this many triangles Decimate splits an untextured mesh into blocks over the pool
-// (core/products/meshBlocks.js), each worker taking at least SPLIT_TRIANGLES_PER_WORKER.
-const DECIMATE_SPLIT_MIN_TRIANGLES = 500_000
-const SPLIT_TRIANGLES_PER_WORKER = 250_000
-// A streamed REFERENCE (alignment, distance) is read where the source is, at full
-// detail up to this many points, coarser beyond (the log says so).
-const STREAMED_REFERENCE_MAX_POINTS = 12_000_000
 
 // Tools-tab edits (`editClouds` modes, dispatched by workers/ops/cloud.js):
 // Mesh ▾ tools read a mesh (mesh-sample turns it into a dense cloud) …

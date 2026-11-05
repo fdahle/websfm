@@ -26,6 +26,7 @@ import {
   describeStyle,
 } from '../../core/io/rasterStyle.js'
 import { pluralize } from '../../core/textFormat.js'
+import { IMPORT_TUNING } from '../../core/tuning.js'
 
 // File-interop ops: parse a dropped/picked point-cloud, mesh or georeferenced
 // raster off the main thread (a 500 MB LAS — or a 200 MB REMA tile — parsed on
@@ -533,7 +534,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
     return { result: { style: resolvedStyle, previewDataUrl, decodedBands, ms: performance.now() - t0 } }
   }
 
-  async function prepareRasterCog([{ file, meta, budget = 512 * 1024 * 1024 }]) {
+  async function prepareRasterCog([{ file, meta, budget = IMPORT_TUNING.rasterConversionMiB * 2 ** 20 }]) {
     const started = performance.now()
     // Cache source blocks within this one job. For an untiled TIFF a block may
     // be the full image; the preflight bounds that cache before decoding.

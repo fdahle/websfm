@@ -3,6 +3,7 @@ import { MASK_IMPORT_DEFAULTS } from '../../core/defaults.user.js'
 import { maskFromFile, POOL_SIZE } from '../../workers/computeClient.js'
 import { pluralize } from '../../core/textFormat.js'
 import { TAB_BUFFER_POOL_BYTES } from '../../core/bufferLimit.js'
+import { IMPORT_TUNING } from '../../core/tuning.js'
 
 // Masks ▸ Import folder: one mask file per image, paired by name
 // (core/io/maskFiles.js), split out of useImagesStore. Each file is decoded, sized
@@ -12,9 +13,8 @@ import { TAB_BUFFER_POOL_BYTES } from '../../core/bufferLimit.js'
 
 // A mask's working memory on its worker: the decoded RGBA, the canvas, the PNG encode.
 const MASK_BYTES_PER_PIXEL = 12
-// The share of the tab's buffer pool a mask import may hold; image transcodes of the
-// same folder may still be running beside it.
-const MASK_POOL_SHARE = 0.25
+// The share of the tab's buffer pool a mask import may hold.
+const MASK_POOL_SHARE = IMPORT_TUNING.maskPoolShare
 export function createMaskImport({ imageById, images, log, updateMask }) {
   // Which files would go where, for the dialog's preview. → matchMaskFiles' result.
   function planMaskImport(files) {

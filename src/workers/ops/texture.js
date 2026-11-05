@@ -10,13 +10,9 @@ import { projectVertices, rasterizeDepth } from '../../core/products/texture/vis
 import { createTextureDepthGpu, compareDepth } from '../gpu/textureDepthGpu.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
 
-// GPU vs CPU depth on the first view the mesh covers enough of to judge (at least
-// GPU_CHECK_COVERAGE of its grid): below GPU_AGREE_MIN of the covered pixels agreeing,
-// the run falls back to the CPU pass. Rasterisers differ by a pixel along occluder
-// edges, which weigh more among covered pixels than among all of them. A view that
-// covers less is not judged: it takes the CPU pass, and the next view is checked.
-const GPU_AGREE_MIN = 0.95
-const GPU_CHECK_COVERAGE = 0.02
+// GPU vs CPU depth on the first view the mesh covers enough of to judge
+// (TEXTURE_TUNING says how it is judged).
+const { gpuAgreeMin: GPU_AGREE_MIN, gpuCheckCoverage: GPU_CHECK_COVERAGE } = TEXTURE_TUNING
 
 // Mesh texture op (plan-texture T2). The core (core/products/texture/) is pure; this
 // worker side supplies what needs the browser: each photo decoded at the scale the

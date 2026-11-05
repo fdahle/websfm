@@ -31,17 +31,16 @@ import {
   similarityHomography,
   homographyRotation,
 } from '../../core/sfm/referenceLook.js'
+import { FIND_GCPS_TUNING } from '../../core/tuning.js'
 
-const COARSE_DIM = 1536
-// A learned look reads both rasters at up to this many samples a side (a 4-band
-// orthophoto read stays inside rasterWindow's 16 M-sample budget), detects in tiles
-// of LEARNED_TILE px and gives LightGlue the strongest LIGHTGLUE_KEYPOINTS of each.
-const LEARNED_DIM = 2000
-const LEARNED_TILE = 1024
-const LIGHTGLUE_KEYPOINTS = 2048
-// A learned look counts when this many matches agree on one homography (hist-sfm's
-// minimum); wrong rotations on Rachel gave at most 8.
-const LEARNED_MIN_INLIERS = 20
+// The look's sizes and acceptance (core/tuning.js FIND_GCPS_TUNING says why).
+const {
+  coarseDim: COARSE_DIM,
+  learnedDim: LEARNED_DIM,
+  learnedTile: LEARNED_TILE,
+  lightglueKeypoints: LIGHTGLUE_KEYPOINTS,
+  learnedMinInliers: LEARNED_MIN_INLIERS,
+} = FIND_GCPS_TUNING
 
 // Find GCPs (Tools ▸ Georeferencing): match the project orthophoto to a
 // georeferenced reference band (or the mean of its first three bands), coarse to fine.

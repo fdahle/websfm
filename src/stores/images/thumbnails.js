@@ -3,6 +3,7 @@ import * as opfs from '../../utils/opfs.js'
 import { makeThumbnail } from '../../workers/thumbnailClient.js'
 import { createKeyedQueue, QueueCancelled } from '../../utils/keyedQueue.js'
 import { THUMB_MAX_DIM, SOURCE_UNREADABLE } from '../../utils/thumbnail.js'
+import { IMPORT_TUNING } from '../../core/tuning.js'
 
 // Per-image list thumbnails (TODO ▸ SC-8), composed into useImagesStore. Lists,
 // tables, grids and the 3D camera glyphs show `img.thumb` — a ≤256 px JPEG, shaped
@@ -24,7 +25,7 @@ import { THUMB_MAX_DIM, SOURCE_UNREADABLE } from '../../utils/thumbnail.js'
 //     also overwrites the stored copy); a second failure leaves the placeholder.
 //     The full image is unaffected — that is `reportImageLoadError`'s job, and it is
 //     called here only when the display URL itself turns out to be unreadable.
-export const THUMB_CONCURRENCY = 2
+export const THUMB_CONCURRENCY = IMPORT_TUNING.thumbnailConcurrency
 
 export function createImageThumbnails({
   imageById,
