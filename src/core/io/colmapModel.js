@@ -7,11 +7,11 @@
 //   • COLMAP's qvec/tvec is **world-to-camera**, exactly websfm's `R`,`t`
 //     (`R` row-major, `t=[x,y,z]`, camera centre `C=−Rᵀt`). Only R↔quaternion
 //     conversion is needed (Hamilton, `[qw,qx,qy,qz]`, `qw ≥ 0`).
-//   • websfm is pinhole throughout (distortion removed at ingest), so we export
-//     the **PINHOLE** model (`fx fy cx cy`). On import, distortion coefficients
-//     of SIMPLE_RADIAL/RADIAL/OPENCV cameras are read for fx/fy/cx/cy only and
-//     the distortion terms are dropped (observations are treated as pinhole,
-//     consistent with the rest of the pipeline) — the caller should warn.
+//   • websfm's model is pinhole (the lens removed from its observations), so we
+//     export the **PINHOLE** model (`fx fy cx cy`) with undistorted observations. On
+//     import, each camera's lens (SIMPLE_RADIAL / RADIAL / OPENCV / FULL_OPENCV /
+//     OPENCV_FISHEYE) is read (lensFromCamera), the observations are undistorted with
+//     it, and the imported cloud records it as its calibration.
 //
 // The intermediate "ColmapModel" mirrors the on-disk shape exactly so
 // serialize→parse is a clean round-trip:
@@ -27,6 +27,7 @@ import { asKeypoints } from '../features/keypoints.js'
 import { makeNameResolver as makeIdResolver } from './nameMatch.js'
 import { PART_BYTES, PART_CHARS, lineParts, chunkedByteWriter } from './parts.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
+import { undistortPixel } from '../sfm/distortion.js'
 
 // ── Rotation ↔ quaternion (Hamilton, world-to-cam) ───────────────────────────
 
@@ -94,6 +95,26 @@ const CAMERA_MODELS = {
   RADIAL: { params: ['f', 'cx', 'cy', 'k1', 'k2'] },
   OPENCV: { params: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2'] },
   FULL_OPENCV: { params: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'p1', 'p2', 'k3', 'k4', 'k5', 'k6'] },
+  OPENCV_FISHEYE: { params: ['fx', 'fy', 'cx', 'cy', 'k1', 'k2', 'k3', 'k4'] },
+}
+
+// A COLMAP camera's lens as WebSfM's lens (core/sfm/distortion.js), or null for a
+// pinhole one. COLMAP's OPENCV / RADIAL / SIMPLE_RADIAL are Brown–Conrady, FULL_OPENCV
+// its rational extension, OPENCV_FISHEYE Kannala–Brandt; src/core/sfm/colmapCameras.test.js
+// checks the mapping against COLMAP's own projections.
+export function lensFromCamera({ model, params }) {
+  const spec = CAMERA_MODELS[model]
+  if (!spec) return null
+  const p = Object.fromEntries(spec.params.map((name, i) => [name, params[i] ?? 0]))
+  const lens = {
+    SIMPLE_RADIAL: () => ({ k1: p.k, k2: 0, k3: 0, p1: 0, p2: 0 }),
+    RADIAL: () => ({ k1: p.k1, k2: p.k2, k3: 0, p1: 0, p2: 0 }),
+    OPENCV: () => ({ k1: p.k1, k2: p.k2, k3: 0, p1: p.p1, p2: p.p2 }),
+    FULL_OPENCV: () => ({ k1: p.k1, k2: p.k2, k3: p.k3, k4: p.k4, k5: p.k5, k6: p.k6, p1: p.p1, p2: p.p2 }),
+    OPENCV_FISHEYE: () => ({ fisheye: true, k1: p.k1, k2: p.k2, k3: p.k3, k4: p.k4 }),
+  }[model]?.()
+  if (!lens) return null
+  return lens.fisheye || Object.entries(lens).some(([, v]) => v) ? lens : null
 }
 
 // Extract { fx, fy, cx, cy, dropped } from a camera. `dropped` lists distortion
@@ -606,9 +627,11 @@ export function buildColmapModel({ images, points }) {
 }
 
 // Inverse: ColmapModel → websfm-shaped plain data (names, not uuids; the caller
-// matches names to loaded images). Distortion coefficients are dropped;
-// `dropped` collects the model names that carried any, for a caller warning.
-//   → { images:[{ imageId, name, width, height, K, R, t }],
+// matches names to loaded images). Each image carries its camera's lens (`lens`,
+// lensFromCamera; null for a pinhole one), and its observations stay in COLMAP's
+// pixels: colmapToSparse undistorts them with that lens. `droppedDistortion` names the
+// camera models whose lens WebSfM has no equivalent for (read as pinhole).
+//   → { images:[{ imageId, name, width, height, K, R, t, lens }],
 //       points:[{ xyz, color, error, views:[{ imageId, name, x, y }] }],
 //       droppedDistortion: [modelName] }
 export function readColmapModel(model) {
@@ -619,7 +642,8 @@ export function readColmapModel(model) {
   const images = model.images.map((im) => {
     const cam = camById.get(im.cameraId)
     const K = cam ? intrinsicsFromCamera(cam) : { fx: 0, fy: 0, cx: 0, cy: 0, dropped: [] }
-    if (K.dropped && K.dropped.length) droppedDistortion.add(cam.model)
+    const lens = cam ? lensFromCamera(cam) : null
+    if (K.dropped?.length && !lens && cam.params.slice(4).some((v) => v)) droppedDistortion.add(cam.model)
     return {
       imageId: im.imageId,
       name: im.name,
@@ -628,6 +652,7 @@ export function readColmapModel(model) {
       K: { fx: K.fx, fy: K.fy, cx: K.cx, cy: K.cy },
       R: quatToRotation(im.q),
       t: [...im.t],
+      lens,
     }
   })
 
@@ -673,11 +698,20 @@ export function colmapToSparse({ images, points }, resolveUuid) {
   const matched = []
   const unmatched = []
 
+  // An image with a lens has its observations undistorted into the pinhole frame its
+  // camera K describes (the frame `vx/vy` hold); `lensByUuid` is what the imported cloud
+  // records as its calibration.
+  const lensByUuid = new Map()
+  const toPinholeOf = new Map() // imageId → (x, y) → { x, y }
   for (const im of images) {
     const uuid = resolveUuid(im.name)
     if (!uuid) {
       unmatched.push(im.name)
       continue
+    }
+    if (im.lens) {
+      lensByUuid.set(uuid, im.lens)
+      toPinholeOf.set(im.imageId, (x, y) => undistortPixel(x, y, im.K, im.lens))
     }
     uuidByImageId.set(im.imageId, uuid)
     kpNext.set(uuid, 0)
@@ -705,12 +739,15 @@ export function colmapToSparse({ images, points }, resolveUuid) {
       const uuid = uuidByImageId.get(v.imageId)
       if (!uuid || seen.has(uuid)) continue // unmatched image, or a repeat obs
       seen.add(uuid)
+      const toPinhole = toPinholeOf.get(v.imageId)
+      const q = toPinhole ? toPinhole(v.x, v.y) : v
+      if (!Number.isFinite(q.x) || !Number.isFinite(q.y)) continue // a fisheye ray with no pinhole image
       const idx = kpNext.get(uuid)
       kpNext.set(uuid, idx + 1)
       vcam.push(camIdx.get(uuid))
       vkp.push(idx)
-      vx.push(v.x)
-      vy.push(v.y)
+      vx.push(q.x)
+      vy.push(q.y)
     }
     if (vcam.length === n0) continue // observed only in unmatched images
     vcount.push(vcam.length - n0)
@@ -736,5 +773,5 @@ export function colmapToSparse({ images, points }, resolveUuid) {
     vy: Float32Array.from(vy),
   })
 
-  return { cameras, points: outPoints, matched, unmatched }
+  return { cameras, points: outPoints, matched, unmatched, lensByUuid }
 }

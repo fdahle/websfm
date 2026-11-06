@@ -30,8 +30,23 @@ export function createImporters({
   // name — `cameras.txt`/`images.txt`/`points3D.txt` (string values) or the `.bin`
   // variants (Uint8Array values); the presence of a `.bin` key selects the binary
   // parser. Images are matched to the loaded set by name. Returns true on success.
-  // Distortion coeffs of RADIAL/OPENCV cameras are read for fx/fy/cx/cy only — the
-  // model is treated as pinhole (consistent with the pipeline), dropped terms warned.
+  // Each COLMAP camera's lens is kept: its observations are undistorted with it and
+  // the new cloud records it as its own calibration (importedCalibration).
+  // An imported cloud's calibration: every camera its own group with the lens its file
+  // gave (null: a pinhole camera — never the project sensor's lens, which these cameras
+  // were not solved with).
+  function importedCalibration(cameras, lensByUuid, source) {
+    return {
+      groups: [...cameras.keys()].map((uuid) => ({
+        imageUuid: uuid,
+        dist: lensByUuid.get(uuid) ?? null,
+        selfCal: null,
+      })),
+      fiducialTransforms: [],
+      source,
+    }
+  }
+
   function importColmapModel(files) {
     const isBin = files['cameras.bin'] || files['images.bin'] || files['points3D.bin']
     let colImages, colPoints, droppedDistortion
@@ -48,7 +63,10 @@ export function createImporters({
     }
 
     const resolve = makeNameResolver(images.value.map((im) => ({ uuid: im.uuid, name: im.name })))
-    const { cameras, points, matched, unmatched } = colmapToSparse({ images: colImages, points: colPoints }, resolve)
+    const { cameras, points, matched, unmatched, lensByUuid } = colmapToSparse(
+      { images: colImages, points: colPoints },
+      resolve,
+    )
 
     log(
       `COLMAP import: matched ${matched.length}/${colImages.length} images by name` +
@@ -67,8 +85,8 @@ export function createImporters({
     }
     if (droppedDistortion.length) {
       log(
-        `COLMAP import: dropped distortion of ${nounFor(droppedDistortion.length, 'camera')} ${droppedDistortion.join(', ')} ` +
-          '— intrinsics read as pinhole (fx/fy/cx/cy)',
+        `COLMAP import: ${nounFor(droppedDistortion.length, 'camera')} ${droppedDistortion.join(', ')} ` +
+          'use a lens model WebSfM does not have — read as pinhole (fx/fy/cx/cy)',
         'warn',
         'Reconstruction',
       )
@@ -88,7 +106,14 @@ export function createImporters({
       asMain: !mainSparseCloud.value,
       name: 'Imported (COLMAP)',
       imported: true,
+      calibration: importedCalibration(cameras, lensByUuid, 'colmap'),
     })
+    if (lensByUuid.size)
+      log(
+        `COLMAP import: kept the lens of ${pluralize(lensByUuid.size, 'camera')} (observations undistorted with it)`,
+        'info',
+        'Reconstruction',
+      )
     log(
       `COLMAP import: added sparse cloud (${cameras.size} cameras, ${points.length} points)` +
         `${mainSparseId.value === selectedCloudId.value ? ' — set as main' : ''}`,
@@ -131,7 +156,7 @@ export function createImporters({
         }),
       }))
     }
-    const { cameras, points, matched, unmatched } = colmapToSparse(
+    const { cameras, points, matched, unmatched, lensByUuid } = colmapToSparse(
       { images: normalizedImages, points: modelPoints },
       resolve,
     )
@@ -144,6 +169,7 @@ export function createImporters({
       asMain: !mainSparseCloud.value,
       name: `Imported (${model.format})`,
       imported: true,
+      calibration: importedCalibration(cameras, lensByUuid, String(model.format ?? 'import').toLowerCase()),
     })
     log(
       `${model.format} import: ${matched.length} cameras, ${points.length} points${unmatched.length ? `, ${unmatched.length} unmatched` : ''}`,

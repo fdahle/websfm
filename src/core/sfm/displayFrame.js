@@ -290,7 +290,8 @@ function resolverFromCalibration(calibration, sensors) {
   return (image) => {
     const sensor = image?.sensorId != null ? sensorById.get(image.sensorId) : null
     const fiducial = image?.uuid != null ? (fidByUuid.get(image.uuid) ?? null) : null
-    const g = groupBy.get(groupKeyOf(image))
+    // An imported model records a lens per image; a computed one per camera group.
+    const g = groupBy.get(`image:${image?.uuid}`) ?? groupBy.get(groupKeyOf(image))
     return {
       dist: g ? g.dist : sensor ? distortionOf(sensor) : null,
       selfCal: g ? g.selfCal : null,

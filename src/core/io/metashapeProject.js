@@ -18,6 +18,7 @@
 
 import { parseXml, child, childrenOf } from './xmlLite.js'
 import { readMetashapeChunk, metashapeSensor } from './metashapeXml.js'
+import { distortionOf } from '../sfm/distortion.js'
 
 // ── Assembling a .psx ──────────────────────────────────────────────────────────
 
@@ -232,6 +233,8 @@ export function metashapeTiePoints(chunk, { tracks = null, points = [], projecti
       width: c.width,
       height: c.height,
       K: { fx: c.focal, fy: c.focal, cx: c.cx, cy: c.cy },
+      // The adjusted lens: the tie points are in the pixels it recorded.
+      lens: distortionOf(c),
       R,
       t,
       componentId: cam.componentId,

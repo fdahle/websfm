@@ -13,6 +13,7 @@ import {
   colmapToSparse,
 } from './colmapModel.js'
 import { joinParts } from './parts.js'
+import { undistortPixel } from '../sfm/distortion.js'
 
 // The serializers yield bounded parts per file (core/io/parts.js); join them here.
 const joinFiles = (files) => Object.fromEntries(Object.entries(files).map(([k, v]) => [k, joinParts(v)]))
@@ -191,10 +192,10 @@ describe('serialize → parse round-trip', () => {
   })
 })
 
-describe('COLMAP binary — non-PINHOLE cameras (warn+ignore distortion)', () => {
-  it('reads fx/fy/cx/cy from a RADIAL camera and reports it dropped via readColmapModel', () => {
+describe('COLMAP binary — non-PINHOLE cameras keep their lens', () => {
+  it('reads K and the lens of a RADIAL camera via readColmapModel', () => {
     // Hand-build a binary model with a RADIAL camera (params f, cx, cy, k1, k2) —
-    // readColmapModel must take f→fx/fy and flag the distortion as dropped.
+    // readColmapModel must take f→fx/fy and keep k1, k2 as the image's lens.
     const model = {
       cameras: [{ cameraId: 7, model: 'RADIAL', width: 1000, height: 800, params: [900, 500, 400, 0.01, -0.002] }],
       images: [{ imageId: 1, q: [1, 0, 0, 0], t: [0, 0, 0], cameraId: 7, name: 'r.jpg', points2D: [[1, 2, -1]] }],
@@ -205,7 +206,8 @@ describe('COLMAP binary — non-PINHOLE cameras (warn+ignore distortion)', () =>
     expect(parsed.cameras[0].params).toEqual([900, 500, 400, 0.01, -0.002])
     const { images, droppedDistortion } = readColmapModel(parsed)
     expect(images[0].K).toEqual({ fx: 900, fy: 900, cx: 500, cy: 400 })
-    expect(droppedDistortion).toContain('RADIAL')
+    expect(images[0].lens).toEqual({ k1: 0.01, k2: -0.002, k3: 0, p1: 0, p2: 0 })
+    expect(droppedDistortion).toEqual([])
   })
 })
 
@@ -313,15 +315,42 @@ describe('buildColmapModel / readColmapModel', () => {
     expect(m.points3D[0].track).toEqual([[1, 0]]) // ghost view omitted
   })
 
-  it('flags dropped distortion when importing a RADIAL model', () => {
+  it('imports a RADIAL model with its lens, the observations undistorted with it', () => {
     const model = {
       cameras: [{ cameraId: 1, model: 'RADIAL', width: 640, height: 480, params: [900, 320, 240, 0.01, -0.002] }],
-      images: [{ imageId: 1, q: [1, 0, 0, 0], t: [0, 0, 0], cameraId: 1, name: 'a.jpg', points2D: [[1, 2, 1]] }],
-      points3D: [{ point3dId: 1, xyz: [0, 0, 1], rgb: [0, 0, 0], error: 0, track: [[1, 0]] }],
+      images: [
+        { imageId: 1, q: [1, 0, 0, 0], t: [0, 0, 0], cameraId: 1, name: 'a.jpg', points2D: [[600, 450, 1]] },
+        { imageId: 2, q: [1, 0, 0, 0], t: [1, 0, 0], cameraId: 1, name: 'b.jpg', points2D: [[20, 30, 1]] },
+      ],
+      points3D: [
+        {
+          point3dId: 1,
+          xyz: [0, 0, 1],
+          rgb: [0, 0, 0],
+          error: 0,
+          track: [
+            [1, 0],
+            [2, 0],
+          ],
+        },
+      ],
     }
     const back = readColmapModel(model)
-    expect(back.droppedDistortion).toEqual(['RADIAL'])
+    expect(back.droppedDistortion).toEqual([])
     expect(back.images[0].K).toMatchObject({ fx: 900, fy: 900, cx: 320, cy: 240 })
+    const lens = { k1: 0.01, k2: -0.002, k3: 0, p1: 0, p2: 0 }
+    expect(back.images[0].lens).toEqual(lens)
+    const { points, lensByUuid } = colmapToSparse(back, (name) => ({ 'a.jpg': 'ua', 'b.jpg': 'ub' })[name])
+    expect([...lensByUuid.keys()].sort()).toEqual(['ua', 'ub'])
+    // The pixel COLMAP recorded, undistorted about its K: the frame the model's K describes.
+    const K = { fx: 900, fy: 900, cx: 320, cy: 240 }
+    const want = undistortPixel(600, 450, K, lens)
+    const got = []
+    points.forEachPixel(0, (uuid, x, y) => got.push([uuid, x, y]))
+    const a = got.find((g) => g[0] === 'ua')
+    expect(a[1]).toBeCloseTo(want.x, 3)
+    expect(a[2]).toBeCloseTo(want.y, 3)
+    expect(Math.hypot(a[1] - 600, a[2] - 450)).toBeGreaterThan(0.3) // the lens did move it (0.51 px)
   })
 })
 
