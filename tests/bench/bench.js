@@ -1340,11 +1340,10 @@ window.bench = {
   // Masks ▸ Import folder: files = [{ url, name }].
   async importMasks({ files, existing }) {
     const t0 = performance.now()
-    const objs = []
-    for (const f of files) {
-      const blob = await fetchRetry(f.url)
-      objs.push(new File([blob], f.name, { type: blob.type, lastModified: 0 }))
-    }
+    // The batch in parallel: fetched one by one, PUTI's 444 photos took 126 s of a 146 s
+    // ingest that the app itself does in 20.
+    const blobs = await Promise.all(files.map((f) => fetchRetry(f.url)))
+    const objs = files.map((f, i) => new File([blobs[i]], f.name, { type: blobs[i].type, lastModified: 0 }))
     const { imported, failed, noSize, plan } = await images.importMaskFiles(objs, existing ? { existing } : {})
     return {
       seconds: (performance.now() - t0) / 1000,
@@ -2163,11 +2162,10 @@ window.bench = {
   // files: [{ url, name }] served by the runner from the dataset folder.
   async addImages(files) {
     const before = images.images.length
-    const objs = []
-    for (const f of files) {
-      const blob = await fetchRetry(f.url)
-      objs.push(new File([blob], f.name, { type: blob.type, lastModified: 0 }))
-    }
+    // The batch in parallel: fetched one by one, PUTI's 444 photos took 126 s of a 146 s
+    // ingest that the app itself does in 20.
+    const blobs = await Promise.all(files.map((f) => fetchRetry(f.url)))
+    const objs = files.map((f, i) => new File([blobs[i]], f.name, { type: blobs[i].type, lastModified: 0 }))
     await images.addImages(objs)
     await until(
       () => images.images.length >= before + objs.length && images.images.every((i) => i.meta || i.previewFailed),
@@ -2304,6 +2302,9 @@ window.bench = {
     // so two runs on the same detection can be diffed pair by pair (determinism).
     const nameOf = new Map(images.images.map((i) => [i.uuid, i.name]))
     const perPair = {}
+    // Subset-gate sample counts of the pairs it skipped (the app no longer logs a line
+    // per gated pair), for the gate's recall against a reference.
+    const gateScores = {}
     for (const [id, e] of matches.matchStore) {
       if (e.status === 'done' && !e.weak && (e.nMatches ?? 0) > 0) {
         accepted++
@@ -2315,6 +2316,7 @@ window.bench = {
         .sort()
         .join('|')
       perPair[key] = `${e.status}:${e.nMatches ?? 0}:${e.weak ? 1 : 0}`
+      if (e.gated) gateScores[key] = e.gateScore ?? 0
     }
     let h = 2166136261
     for (const k of Object.keys(perPair).sort())
@@ -2327,6 +2329,7 @@ window.bench = {
       inliers,
       pairDigest: h.toString(16),
       perPair,
+      gateScores,
       // Detect gaps again at full size (stores/matching/matchAll.js redetectGaps), if it ran.
       gapRedetect: matches.matchRun?.gapRedetect ?? null,
     }

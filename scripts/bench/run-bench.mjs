@@ -446,6 +446,14 @@ try {
   // Under the same crash/stall watchdog as the stages: a renderer that dies mid-ingest
   // (Iceland 1980, 125 × 130 MP scans under a memory cap) left the run waiting forever.
   let video = null
+  // `profilePage: "ingest"`: a CPU profile of the page's main thread while the photos are
+  // added (copy into storage, metadata, thumbnails), as for a stage below.
+  const ingestCdp = cfg.profilePage === 'ingest' ? await page.context().newCDPSession(page) : null
+  if (ingestCdp) {
+    await ingestCdp.send('Profiler.enable')
+    await ingestCdp.send('Profiler.setSamplingInterval', { interval: 500 })
+    await ingestCdp.send('Profiler.start')
+  }
   try {
     if (cfg.video && !reuse) {
       video = await Promise.race([
@@ -465,6 +473,10 @@ try {
     }
   } finally {
     for (const t of watchdog.timers.splice(0)) clearInterval(t)
+    if (ingestCdp) {
+      const { profile } = await ingestCdp.send('Profiler.stop')
+      await writeFile(`${outPrefix}.ingest.page.cpuprofile`, JSON.stringify(profile))
+    }
   }
   result.stages.ingest = { images: added, seconds: (Date.now() - t0) / 1000, ...(video ? { video } : {}) }
   // `hist` (scripts/bench/hist/README.md): a historical block's certificate focal +
