@@ -348,6 +348,16 @@ Notable changes to websfm. The format follows
   have (*Densify*, *Depth maps → Densify*, *Mesh ▸ Clean mesh*) now name the real ones.
 
 ### Performance
+- **Faster matching of large photo sets, and fewer overlapping pairs missed.** Match
+  Features' quick check, which skips pairs that do not overlap, now samples each photo
+  once per run instead of once per pair, and a pair that only just missed it gets a
+  second look on a larger sample. On Agisoft's PUTI set (444 photos, 98,346 pairs)
+  matching took 132 s instead of 236 s on the GPU and 287 s instead of 369 s on the CPU;
+  picking and copying the samples per pair and a log line per skipped pair had been 140 s
+  of main-thread work. The second look finds pairs the check had skipped: South Building
+  970 instead of 951 of the 1,067 pairs COLMAP verifies with 100+ inliers, UseGeo 3,329
+  accepted pairs instead of 3,020 (camera heights 6.1 instead of 8.4 cm RMS against the
+  reference, matching +19 % on the CPU). No set of the ten measured got worse.
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps
   still computes one map on the CPU to compare, but now gives up on it as soon as the CPU
   is clearly slower, and goes on with the GPU. It decides after each pyramid level: it
