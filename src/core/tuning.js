@@ -222,6 +222,13 @@ export const SFM_TUNING = {
   // pre-solve on the CA213732V strip (29.9%), leaving fx at the guess (SFM-12).
   selfCalGuessFocalStepFrac: 0.6,
   selfCalGuessFocalNominalFrac: 0.7,
+  // Brown's decentring terms (p1, p2) under the auto schedule are kept only when the
+  // first solve that frees them lowers the reprojection RMS by at least this fraction
+  // against the same solve without them (bundleSession.js). Measured 2026-11-06: quarry
+  // (a decentred senseFly lens) 4 % better, and its GCP-free dome went from 67 to 13 cm
+  // vertical; South Building, ETH3D playground and UseGeo (undistorted photos) 0.0 %,
+  // where freeing them moved the cameras 9–24 % further from the reference.
+  selfCalDecentringMinGain: 0.01,
   // Adding images to a saved model (extendModel.js) rebuilds the old images' keypoints in
   // the model's frame and compares them with the pixels the model saved: above this
   // median gap (px) they are not the keypoints the model was solved from (re-detected

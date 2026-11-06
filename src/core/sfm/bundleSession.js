@@ -265,6 +265,15 @@ export function createBundleSession(ctx) {
   let lastSolve = null // see runBundleAdjust
   // `warm`: the model is already converged (a re-solve after a filter, a
   // retriangulation or with survey constraints added), so the solve may stop earlier.
+  // Brown's decentring terms under the auto schedule are a model-selection decision, made
+  // once a run: null until the first solve that would free them, then 'kept' or 'dropped'.
+  let decentring = null
+  const withoutDecentring = (mode) =>
+    String(mode)
+      .split(',')
+      .filter((t) => t.trim() !== 'p')
+      .join(',') || 'none'
+
   async function runBundleAdjust(
     label,
     iters,
@@ -304,6 +313,13 @@ export function createBundleSession(ctx) {
         return
       }
     }
+    // Decentring (p1, p2) under the auto schedule: freed only where it explains the
+    // observations. The first solve that would free it runs with and without it from the
+    // same start (below); a run that dropped it keeps it off. An explicit refine string
+    // that asks for it is used as given.
+    const hasP = /(^|,)\s*p\s*(,|$)/.test(String(refineMode))
+    if (hasP && cfg.selfCalStaged && decentring === 'dropped') refineMode = withoutDecentring(refineMode)
+    const trialP = hasP && cfg.selfCalStaged && decentring === null
     prepareRollingShutter()
     const camList = uuidList.map((u) => cameras.get(u))
     const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
@@ -379,20 +395,44 @@ export function createBundleSession(ctx) {
       }
     }
 
-    const result = await bundleAdjust(camList, kList, posBefore, observations, {
-      maxIters: iters,
-      refineIntrinsics: refineMode,
-      fullLens,
-      refineReadout: rollingShutter,
-      ...(rig ? { rig: rig.attach(uuidList), refineRig: !fixedCameras?.size } : {}),
-      sensorOfCam,
-      solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver,
-      flatPoints: true,
-      ...(fixedCams?.length ? { fixedCams } : {}),
-      ...(cameraPriors ? { cameraPriors } : {}),
-      ...(gcp ? { gcpAnchors: gcp.anchors } : {}),
-    })
+    const solve = (mode) =>
+      bundleAdjust(camList, kList, posBefore, observations, {
+        maxIters: iters,
+        refineIntrinsics: mode,
+        fullLens,
+        refineReadout: rollingShutter,
+        ...(rig ? { rig: rig.attach(uuidList), refineRig: !fixedCameras?.size } : {}),
+        sensorOfCam,
+        solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver,
+        flatPoints: true,
+        ...(fixedCams?.length ? { fixedCams } : {}),
+        ...(cameraPriors ? { cameraPriors } : {}),
+        ...(gcp ? { gcpAnchors: gcp.anchors } : {}),
+      })
+    let result = await solve(refineMode)
     noteBaSolver(label, result)
+    // The decentring trial: the same solve without p1, p2. They stay only if they lower
+    // the reprojection RMS by selfCalDecentringMinGain: a decentred lens does (quarry,
+    // 4 %); on a centred or already undistorted one they only trade with the poses.
+    if (trialP && result) {
+      const without = await solve(withoutDecentring(refineMode))
+      noteBaSolver(`${label} (without p1, p2)`, without)
+      if (without?.costAfter != null && result.costAfter != null) {
+        const gain = 1 - result.costAfter / without.costAfter
+        decentring = gain >= cfg.selfCalDecentringMinGain ? 'kept' : 'dropped'
+        log(
+          `${label} decentring p1, p2 ${decentring}: RMS ${result.costAfter.toFixed(3)}px with, ` +
+            `${without.costAfter.toFixed(3)}px without (${(100 * gain).toFixed(1)}% better; kept from ` +
+            `${(100 * cfg.selfCalDecentringMinGain).toFixed(0)}%)`,
+          'info',
+          'Reconstruction',
+        )
+        if (decentring === 'dropped') {
+          result = without
+          refineMode = withoutDecentring(refineMode)
+        }
+      }
+    }
     if (!result) {
       log(`${label} returned no result (skipped)`, 'warn', 'Reconstruction')
       return
