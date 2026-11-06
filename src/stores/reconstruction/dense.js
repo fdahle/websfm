@@ -99,10 +99,13 @@ export function createDense({
   // (core/sfm/displayFrame.js), and its film transform from the sparse run. Copied out
   // of the raw rows: the summary is reactive state, and its nested A / frame read
   // through it are Proxies the worker cannot receive.
+  // The main sparse cloud's own calibration where it has one (displayFrame.js
+  // calibrationSnapshot), else the project's run summary (a cloud saved before it).
   function depthFrames() {
-    const frameModel = makeFrameModelResolver({ summary: toRaw(summary.value), sensors: sensors.value })
+    const calibration = mainSparseCloud.value?.calibration ? toRaw(mainSparseCloud.value.calibration) : null
+    const frameModel = makeFrameModelResolver({ calibration, summary: toRaw(summary.value), sensors: sensors.value })
     const fidByUuid = new Map(
-      (toRaw(summary.value)?.fiducialTransforms ?? []).map((t) => [
+      ((calibration ?? toRaw(summary.value))?.fiducialTransforms ?? []).map((t) => [
         t.uuid,
         structuredClone({ A: t.A, transform: t.transform ?? null, frame: t.frame }),
       ]),
@@ -171,7 +174,8 @@ export function createDense({
       // calibrated `dist` — dense's camera K is the BA-refined K the fold used, so it
       // reproduces the same pinhole frame as the sparse cloud. The one lookup that
       // knows both row kinds is the frame-model resolver (core/sfm/displayFrame.js).
-      const selfCalRows = summary.value?.selfCalDistortion ?? []
+      const ownLens = (mainSparseCloud.value?.calibration?.groups ?? []).filter((g) => g.dist || g.selfCal)
+      const selfCalRows = mainSparseCloud.value?.calibration ? [] : (summary.value?.selfCalDistortion ?? [])
       // F4: per-image scan→canonical transform from the sparse run. The dense
       // stage reproduces that exact frame (it must NOT re-fit) — the sparse run
       // defines it. Fail loudly if a film image is in the cloud but its transform
@@ -235,6 +239,23 @@ export function createDense({
         })
       }
       if (disabled) log(`Dense: ${pluralize(disabled, 'disabled image')} left out of the depth maps`, 'info', 'Dense')
+      if (ownLens.length) {
+        const terms = (d) =>
+          ['k1', 'k2', 'k3', 'k4', 'p1', 'p2']
+            .filter((k) => d?.[k])
+            .map((k) => `${k} ${d[k].toFixed(5)}`)
+            .join(', ')
+        const parts = ownLens.map(
+          (g) =>
+            `${
+              g.sensorId != null
+                ? (sensorById.get(g.sensorId)?.label ?? String(g.sensorId).slice(0, 6))
+                : (imgByUuid.get(g.imageUuid)?.name ?? 'image')
+            }${g.dist?.fisheye ? ' fisheye' : ''} ${terms(g.dist) || 'pinhole'}` +
+            (g.selfCal ? ` (+ correction ${terms(g.selfCal)})` : ''),
+        )
+        log(`Dense: undistorting with the sparse model's own lens — ${parts.join('; ')}`, 'info', 'Dense')
+      }
       if (selfCalRows.length) {
         const parts = selfCalRows.map(
           (d) =>

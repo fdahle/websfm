@@ -768,6 +768,9 @@ export const useReconstructionStore = registerProjectStore(
         // The same camera solution with more in it (adding images, extendModel.js): the
         // stamp products and the region were built against stays.
         keepStamp = false,
+        // The cloud's own calibration (displayFrame.js calibrationSnapshot): the lens and
+        // film frame its cameras were solved in. Kept from `prev` when not given.
+        calibration,
       } = opts
       const idx = replaceId ? clouds.value.findIndex((c) => c.id === replaceId && c.kind === 'sparse') : -1
       const prev = idx >= 0 ? clouds.value[idx] : null
@@ -785,6 +788,7 @@ export const useReconstructionStore = registerProjectStore(
         // markRaw: keep the big point/camera data out of Vue's reactivity (see restore).
         cameras: markRaw(cameras),
         points: markRaw(points),
+        ...((calibration ?? prev?.calibration) ? { calibration: markRaw(calibration ?? prev.calibration) } : {}),
       }
       if (idx >= 0) clouds.value.splice(idx, 1, cloud)
       else clouds.value.push(cloud)
@@ -1065,12 +1069,20 @@ export const useReconstructionStore = registerProjectStore(
 
     // ── Georeferencing + products (DEM / orthophoto) ─────────────────────────────
 
-    // Each image's frame model (calibrated bag, composed self-cal bag, film
-    // transform) from the run record — the one join displayFrame.js owns. GCP and
-    // marker triangulation map raw marks through it into the cameras' frame.
-    const frameModelFor = computed(() =>
-      makeFrameModelResolver({ summary: toRaw(summary.value), sensors: sensors.value }),
-    )
+    // Each image's frame model (its lens, an older run's correction on top, its film
+    // transform) from the MAIN sparse cloud's own calibration — the one join
+    // displayFrame.js owns. GCP and marker triangulation map raw marks through it into
+    // the cameras' frame. A cloud without a calibration (none after the format 4
+    // migration) falls back to the project's run summary.
+    const frameModelFor = computed(() => frameModelOfCloud(mainSparseCloud.value))
+    // The same join for any sparse cloud (an export of the selected cloud, a re-solve).
+    function frameModelOfCloud(cloud) {
+      return makeFrameModelResolver({
+        calibration: cloud?.calibration ? toRaw(cloud.calibration) : null,
+        summary: toRaw(summary.value),
+        sensors: sensors.value,
+      })
+    }
 
     const {
       imagesById,
@@ -1494,6 +1506,8 @@ export const useReconstructionStore = registerProjectStore(
       scaleFit,
       coregistration,
       summary,
+      frameModelFor,
+      frameModelOfCloud,
       denseSummary,
       depthSummary,
       summaryHistory,

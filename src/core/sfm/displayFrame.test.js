@@ -9,6 +9,7 @@ import {
   makeFrameModelResolver,
   gcpsInPinholeFrame,
   guideToScan,
+  calibrationSnapshot,
 } from './displayFrame.js'
 import { fitFiducialAffine, canonicalFrame } from './fiducials.js'
 
@@ -183,5 +184,58 @@ describe('makeFrameModelResolver (a whole solved lens)', () => {
     const fm = makeFrameModelResolver({ summary, sensors })({ uuid: 'u', sensorId: 's' })
     expect(fm.dist).toMatchObject({ k1: -0.2 })
     expect(fm.selfCal).toEqual({ k1: 0.01, k2: 0, k3: 0 })
+  })
+})
+
+describe('calibrationSnapshot: a cloud keeps the frame model it was solved in', () => {
+  const sensors = [
+    { id: 'a', distortionModel: 'brown', k1: -0.2, k2: 0.05 },
+    { id: 'b', distortionModel: 'brown', k1: 0.01 },
+    { id: 'c', distortionModel: 'fisheye2', k1: 0.02, k2: -0.004 },
+    { id: 'd', distortionModel: 'brown' },
+  ]
+  const fid = { uuid: 'f1', A: [1, 0, 0, 0, 1, 0], transform: null, frame: { width: 100, height: 100 } }
+  const summary = {
+    selfCalDistortion: [
+      { sensorId: 'a', k1: 0.01, k2: 0, k3: 0, fitRmsPx: 0.01 }, // an old correction on the sensor's lens
+      { sensorId: 'b', full: true, k1: -0.03, k2: 0.004, k3: 0, p1: 0.0012, p2: -0.0004 },
+      { sensorId: 'c', fisheye: true, full: true, k1: 0.03, k2: -0.005, k3: 0, k4: 0 },
+      { sensorId: null, imageUuid: 'loose', full: true, k1: -0.07, k2: 0, k3: 0, p1: 0, p2: 0 },
+    ],
+    fiducialTransforms: [fid],
+  }
+  const images = [
+    { uuid: 'a1', sensorId: 'a' },
+    { uuid: 'a2', sensorId: 'a' },
+    { uuid: 'b1', sensorId: 'b' },
+    { uuid: 'c1', sensorId: 'c' },
+    { uuid: 'loose', sensorId: null },
+    { uuid: 'f1', sensorId: 'd' },
+  ]
+
+  it('resolves every image of the cloud exactly as the run summary did', () => {
+    const fromSummary = makeFrameModelResolver({ summary, sensors })
+    const calibration = calibrationSnapshot({ resolve: fromSummary, images })
+    expect(calibration.groups).toHaveLength(5) // a, b, c, d and the sensorless image
+    const fromCloud = makeFrameModelResolver({ calibration, sensors })
+    for (const im of images) expect(fromCloud(im)).toEqual(fromSummary(im))
+    // Plain data: it survives a save (JSON) unchanged.
+    const reloaded = makeFrameModelResolver({ calibration: JSON.parse(JSON.stringify(calibration)), sensors })
+    for (const im of images) expect(reloaded(im)).toEqual(fromSummary(im))
+  })
+
+  it('is not changed by a later edit of the sensor table', () => {
+    const calibration = calibrationSnapshot({ resolve: makeFrameModelResolver({ summary, sensors }), images })
+    const edited = sensors.map((s) => (s.id === 'a' ? { ...s, k1: 0.5 } : s))
+    expect(makeFrameModelResolver({ calibration, sensors: edited })({ uuid: 'a1', sensorId: 'a' }).dist).toMatchObject({
+      k1: -0.2,
+    })
+  })
+
+  it("gives an image the snapshot has no group for its sensor's lens", () => {
+    const calibration = calibrationSnapshot({ resolve: makeFrameModelResolver({ summary, sensors }), images: [] })
+    const fm = makeFrameModelResolver({ calibration, sensors })({ uuid: 'new', sensorId: 'b' })
+    expect(fm.dist).toMatchObject({ k1: 0.01 })
+    expect(fm.selfCal).toBeNull()
   })
 })

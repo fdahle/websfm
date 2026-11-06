@@ -14,7 +14,12 @@ export function makeSfmOps() {
     // Adding images to a saved model: the model arrives packed (packSparseCloud).
     if (input.base) {
       const model = unpackReconstructionResult(input.base.packed)
-      input.base = { cameras: model.cameras, points: model.points, summary: input.base.summary }
+      input.base = {
+        cameras: model.cameras,
+        points: model.points,
+        summary: input.base.summary,
+        calibration: input.base.calibration ?? null,
+      }
     }
     const result = await sfmReconstruct(input, {
       onLog: (message, level, category) => emit('log', [message, level, category]),

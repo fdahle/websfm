@@ -50,7 +50,8 @@ export function seedFromModel({ imgs, rawKp, base, Kmap, fiducialTransforms, cam
   // (bundleSession.js lensFrame), not in a pinhole frame this seeding can rebuild.
   if (
     imgs.some((im) => isFisheyeModel(im.sensor?.distortionModel)) ||
-    (summary.selfCalDistortion ?? []).some((d) => d.fisheye)
+    (summary.selfCalDistortion ?? []).some((d) => d.fisheye) ||
+    (base.calibration?.groups ?? []).some((g) => g.dist?.fisheye)
   )
     return { ok: false, reason: 'a fisheye camera cannot be added to a model yet' }
 
@@ -79,7 +80,8 @@ export function seedFromModel({ imgs, rawKp, base, Kmap, fiducialTransforms, cam
     seenSensor.add(im.sensorId)
     sensors.push({ id: im.sensorId, ...im.sensor })
   }
-  const frameModel = makeFrameModelResolver({ summary, sensors })
+  // The model's own calibration where it has one (displayFrame.js calibrationSnapshot).
+  const frameModel = makeFrameModelResolver({ calibration: base.calibration ?? null, summary, sensors })
 
   const gaps = []
   let ownLens = 0

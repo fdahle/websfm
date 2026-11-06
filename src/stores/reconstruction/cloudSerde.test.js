@@ -159,6 +159,20 @@ describe('sparse cloud round trip', () => {
     expect(flagged.secondary).toBe(true)
   })
 
+  it("keeps the cloud's own calibration through a save (JSON) and a load", () => {
+    const calibration = {
+      groups: [
+        { sensorId: 's', dist: { k1: -0.1, k2: 0.02, k3: 0, p1: 0.001, p2: -0.0004 }, selfCal: null },
+        { imageUuid: 'u', dist: null, selfCal: { k1: 0.01, k2: 0, k3: 0 } },
+      ],
+      fiducialTransforms: [{ uuid: 'u', A: [1, 0, 0, 0, 1, 0], transform: null, frame: { width: 10, height: 10 } }],
+      source: 'run',
+    }
+    const back = deserializeCloud(JSON.parse(JSON.stringify(serializeCloud(sparseCloud({ calibration })))), makeCloudId)
+    expect(back.calibration).toEqual(calibration)
+    expect('calibration' in roundTrip(sparseCloud())).toBe(false)
+  })
+
   it('drops colour when no point has any', () => {
     const records = sparseRecords()
     for (const p of records) delete p.color

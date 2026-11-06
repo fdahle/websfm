@@ -3,7 +3,7 @@ import { isGroundControl } from '../../core/io/gcp.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { precisionFromGcp } from '../../core/gcpAccuracy.js'
 import { surveyFrameFor, gcpToSurveyFrame, normalizeLeverArm, buildCameraPriors } from '../../core/sfm/cameraPriors.js'
-import { gcpsInPinholeFrame } from '../../core/sfm/displayFrame.js'
+import { gcpsInPinholeFrame, makeFrameModelResolver, calibrationSnapshot } from '../../core/sfm/displayFrame.js'
 import { formatBytes, deviceBudget } from '../../core/dense/memBudget.js'
 import { SFM_TUNING } from '../../core/tuning.js'
 import { applyTuningOverrides } from '../tuningOverrides.js'
@@ -590,6 +590,8 @@ export function createSparseRun({
           ? {
               base: {
                 packed: packSparseCloud(base).result,
+                // The model's own lens and film frame (the frame its cameras were solved in).
+                calibration: base.calibration ? JSON.parse(JSON.stringify(toRaw(base.calibration))) : null,
                 summary: JSON.parse(
                   JSON.stringify({
                     selfCalDistortion: toRaw(summary.value)?.selfCalDistortion ?? [],
@@ -686,6 +688,34 @@ export function createSparseRun({
       if (result.status === 'done') {
         let camMap = result.cameras
         let pts = result.points
+        // The calibration each new cloud keeps (displayFrame.js calibrationSnapshot): the
+        // lens and film frame its cameras were solved in, from the run's own summary. An
+        // extension keeps its base's lens for the camera groups the model already had
+        // (self-calibration is off for it) with the new images' film frames from the run.
+        const imageRef = new Map(
+          (images.value ?? []).map((im) => [im.uuid, { uuid: im.uuid, sensorId: im.sensorId ?? null }]),
+        )
+        const refsOf = (cams) => [...cams.keys()].map((u) => imageRef.get(u) ?? { uuid: u, sensorId: null })
+        const runResolver = (runSummary) =>
+          makeFrameModelResolver({ summary: runSummary ?? null, sensors: sensors.value })
+        const calibrationFor = (cams, runSummary) => {
+          const fromRun = runResolver(runSummary)
+          if (!base) return calibrationSnapshot({ resolve: fromRun, images: refsOf(cams) })
+          const fromBase = makeFrameModelResolver({
+            calibration: base.calibration ? toRaw(base.calibration) : null,
+            summary: toRaw(summary.value),
+            sensors: sensors.value,
+          })
+          const baseGroups = new Set(
+            refsOf(base.cameras).map((r) => (r.sensorId != null ? `s:${r.sensorId}` : `i:${r.uuid}`)),
+          )
+          const resolve = (im) => {
+            if (!baseGroups.has(im.sensorId != null ? `s:${im.sensorId}` : `i:${im.uuid}`)) return fromRun(im)
+            const fm = fromBase(im)
+            return fm.fiducial ? fm : { ...fm, fiducial: fromRun(im).fiducial }
+          }
+          return calibrationSnapshot({ resolve, images: refsOf(cams) })
+        }
 
         // Aerial auto-orient: SfM leaves the model in an arbitrary frame (it can
         // come out upside-down). For aerial surveys the cameras look down, so we
@@ -725,12 +755,13 @@ export function createSparseRun({
             asMain: true,
             name: base.name,
             keepStamp: true,
+            calibration: calibrationFor(camMap, result.summary),
           })
           const grown = mainSparseCloud.value
           if (grown && base.style !== undefined) grown.style = base.style
           if (grown && base.visible !== undefined) grown.visible = base.visible
         } else {
-          upsertSparseCloud(camMap, pts)
+          upsertSparseCloud(camMap, pts, { calibration: calibrationFor(camMap, result.summary) })
           // A secondary component that could not satisfy the conservative shared-camera
           // alignment gates is still a valid reconstruction. Preserve it as a separate
           // sparse cloud rather than discarding it or forcing it into the primary frame.
@@ -754,6 +785,8 @@ export function createSparseRun({
               select: false,
               secondary: true,
               name: model.name || `Secondary sparse ${si + 1}`,
+              // Its own lens: a secondary model self-calibrates on its own.
+              calibration: calibrationFor(secondaryCameras, model.summary ?? result.summary),
             })
           }
         }

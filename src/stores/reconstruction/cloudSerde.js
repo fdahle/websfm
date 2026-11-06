@@ -167,6 +167,9 @@ function serializeCloudData(c, opts) {
     createdAt: c.createdAt,
     imported: !!c.imported,
     secondary: !!c.secondary,
+    // The lens and film frame the cameras were solved in (displayFrame.js
+    // calibrationSnapshot): plain data, saved in the document beside the cameras.
+    ...(c.calibration ? { calibration: c.calibration } : {}),
     cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
     pointCount: pts.length,
     hasColor: pts.hasColor,
@@ -308,6 +311,7 @@ function deserializeCloudData(c, makeCloudId) {
     createdAt: c.createdAt ?? Date.now(),
     ...(c.imported ? { imported: true } : {}),
     ...(c.secondary ? { secondary: true } : {}),
+    ...(c.calibration ? { calibration: markRaw(c.calibration) } : {}),
     cameras: markRaw(cameras),
     points: markRaw(points),
   }

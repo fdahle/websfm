@@ -186,7 +186,15 @@ export function makeScanCentreToPinhole({ K, dist = null, selfCal = null, fiduci
 //   sensors  — the sensor list (plain or reactive)
 // `summary` must be plain (a store passes toRaw of its reactive summary): the
 // fiducial records built here go to workers, and a Proxy cannot be posted.
-export function makeFrameModelResolver({ summary = null, sensors = [] } = {}) {
+//   calibration — a sparse cloud's own calibration (calibrationSnapshot below): when
+//                 given, it is the join, and `summary` is not read. An image whose group
+//                 the snapshot does not hold (added after the run) takes its sensor's lens.
+export function makeFrameModelResolver({ summary = null, sensors = [], calibration = null } = {}) {
+  if (calibration) return resolverFromCalibration(calibration, sensors)
+  return resolverFromSummary(summary, sensors)
+}
+
+function resolverFromSummary(summary, sensors) {
   const sensorById = new Map((sensors || []).map((s) => [s.id, s]))
   // A row is a sensor's, or — `sensorId` null — one sensorless image's (`imageUuid`):
   // such an image self-calibrates as its own group (runRecord.js ▸ selfCalDistortion (rows built by selfCalFold.js)).
@@ -233,6 +241,59 @@ export function makeFrameModelResolver({ summary = null, sensors = [] } = {}) {
     return {
       dist: sensor ? distortionOf(sensor) : null,
       selfCal,
+      fiducial,
+      filmMissing: sensor?.kind === 'film' && !fiducial,
+    }
+  }
+}
+
+// A camera group's key in a calibration snapshot: its sensor, or a sensorless image.
+const groupKeyOf = (image) => (image?.sensorId != null ? `sensor:${image.sensorId}` : `image:${image?.uuid}`)
+
+// A sparse cloud's calibration: for every camera group of `images` ([{ uuid, sensorId }],
+// the cloud's registered images), the frame model the run's join gives it now — the whole
+// lens (`dist`), an older run's radial correction on top of it (`selfCal`, null for a
+// lens solved whole) — and the film transforms of those images. The cloud keeps it, so
+// what draws the cloud no longer depends on the sensor table or on which run wrote the
+// project summary last. Plain data (it is saved with the cloud and posted to workers).
+//   resolve  — the join to snapshot (makeFrameModelResolver over a run's summary)
+//   source   — 'run' | 'colmap' | 'metashape' | 'migrated' | 'not-recorded'
+export function calibrationSnapshot({ resolve, images = [], source = 'run' }) {
+  const groups = new Map()
+  const fiducialTransforms = []
+  for (const image of images) {
+    const fm = resolve(image)
+    const key = groupKeyOf(image)
+    if (!groups.has(key)) {
+      groups.set(key, {
+        ...(image.sensorId != null ? { sensorId: image.sensorId } : { imageUuid: image.uuid }),
+        dist: fm.dist ? { ...fm.dist } : null,
+        selfCal: fm.selfCal ? { ...fm.selfCal } : null,
+      })
+    }
+    if (fm.fiducial) fiducialTransforms.push({ uuid: image.uuid, ...structuredClone(fm.fiducial) })
+  }
+  return { groups: [...groups.values()], fiducialTransforms, source }
+}
+
+function resolverFromCalibration(calibration, sensors) {
+  const sensorById = new Map((sensors || []).map((s) => [s.id, s]))
+  const groupBy = new Map(
+    (calibration.groups ?? []).map((g) => [g.sensorId != null ? `sensor:${g.sensorId}` : `image:${g.imageUuid}`, g]),
+  )
+  const fidByUuid = new Map(
+    (calibration.fiducialTransforms ?? []).map((t) => [
+      t.uuid,
+      { A: t.A ?? null, transform: t.transform ?? null, frame: t.frame },
+    ]),
+  )
+  return (image) => {
+    const sensor = image?.sensorId != null ? sensorById.get(image.sensorId) : null
+    const fiducial = image?.uuid != null ? (fidByUuid.get(image.uuid) ?? null) : null
+    const g = groupBy.get(groupKeyOf(image))
+    return {
+      dist: g ? g.dist : sensor ? distortionOf(sensor) : null,
+      selfCal: g ? g.selfCal : null,
       fiducial,
       filmMissing: sensor?.kind === 'film' && !fiducial,
     }
