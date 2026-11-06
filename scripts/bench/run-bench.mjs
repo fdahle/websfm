@@ -883,9 +883,10 @@ try {
   // <prefix>.<stage>.worker<k>.cpuprofile (DevTools ▸ Performance loads them). A stage
   // that ends sooner ends the profile with it (`stop()`; the stage awaits `done`): one
   // still running when the last stage closed the browser was lost without a word.
+  // A list profiles several stages, each with its own window.
   const profileDuring = (key) => {
-    const pw = cfg.profileWorkers
-    if (!pw || pw.stage !== key || !heap) return null
+    const pw = [cfg.profileWorkers ?? []].flat().find((p) => p.stage === key)
+    if (!pw || !heap) return null
     const NL = String.fromCharCode(10)
     let stop
     const stopped = new Promise((r) => (stop = r))
