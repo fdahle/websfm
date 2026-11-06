@@ -18,7 +18,8 @@ import { nounFor, pluralize } from '../../core/textFormat.js'
 //   • SEND DESCRIPTORS ONCE. The GPU worker caches each image's descriptors for the
 //     run, so a pair carries only uuids once both images were uploaded; a cache miss
 //     (LRU eviction) comes back as `{ needs }` and the pair is resent with buffers.
-//     Subset-gate samples differ per pair and are never cached (`id: null`).
+//     Subset-gate samples are per image too (pairMatch.js gateSample), cached under
+//     `<uuid>@gate<size>`.
 //
 // `client` is injected (computeClient in the app, a fake in tests):
 //   { begin(opts), gpuMatch(args, hooks), end(opts), cpuMatch(descA, descB, opts, hooks) }

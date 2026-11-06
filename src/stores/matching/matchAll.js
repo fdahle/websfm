@@ -795,9 +795,17 @@ export function createMatchAll({
           }
         }
         const low = (u) => (degree.get(u) ?? 0) < rescueDegree
-        const rescue = pairs.filter(
-          ([a, b]) => matchStore.value.get(pairId(a.uuid, b.uuid))?.gated && (low(a.uuid) || low(b.uuid)),
-        )
+        // Near misses: gated pairs whose sample came close to the threshold.
+        const nearMin =
+          (settings.subsetGateNearMiss ?? 0) > 0
+            ? Math.ceil(settings.subsetGateNearMiss * settings.subsetGateThreshold)
+            : Infinity
+        const isNear = (e) => (e?.gateScore ?? 0) >= nearMin
+        const rescue = pairs.filter(([a, b]) => {
+          const e = matchStore.value.get(pairId(a.uuid, b.uuid))
+          return e?.gated && (low(a.uuid) || low(b.uuid) || isNear(e))
+        })
+        const nNear = rescue.filter(([a, b]) => !low(a.uuid) && !low(b.uuid)).length
         if (rescue.length) {
           const nLow = new Set(
             rescue
@@ -809,11 +817,21 @@ export function createMatchAll({
           stats.gated -= rescue.length // re-tallied by the rescue run
           log(
             `Matching: gate rescue — ${pluralize(nLow, 'image')} under ${pluralize(rescueDegree, 'accepted pair')}; re-testing their ` +
-              `${pluralize(rescue.length, 'gated pair')} on a ${settings.subsetGateRescueScale}× larger sample`,
+              `${pluralize(rescue.length - nNear, 'gated pair')} on a ${settings.subsetGateRescueScale}× larger sample` +
+              (nNear
+                ? `, and ${pluralize(nNear, 'near miss', 'near misses')} (≥ ${nearMin} of ${settings.subsetGateThreshold}) on a ` +
+                  `${settings.subsetGateNearMissScale}× larger one`
+                : ''),
             'info',
             'Matching',
           )
           const rescueSettings = { ...settings, _gateScale: settings.subsetGateRescueScale ?? 4 }
+          const nearScale = settings.subsetGateNearMissScale ?? 2
+          const nearSettings = {
+            ...settings,
+            _gateScale: nearScale,
+            _gateThreshold: settings.subsetGateThreshold * nearScale,
+          }
           const rescueCache = createDescriptorCache({
             pairs: rescue,
             budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20,
@@ -826,7 +844,7 @@ export function createMatchAll({
               rescued,
               rescue.length,
               span,
-              'Gate rescue: re-testing the pairs of weakly connected images',
+              'Gate rescue: re-testing pairs the quick check skipped',
               'rescue',
             )
           rescueProgress()
@@ -839,7 +857,8 @@ export function createMatchAll({
               const i = rc++
               if (i >= rescue.length) return
               const [a, b] = rescue[i]
-              await matchPair(a, b, rescueSettings, tally, rescueCache, gpuRun)
+              const weak = low(a.uuid) || low(b.uuid)
+              await matchPair(a, b, weak ? rescueSettings : nearSettings, tally, rescueCache, gpuRun)
               rescueCache.release(a.uuid)
               rescueCache.release(b.uuid)
               done++

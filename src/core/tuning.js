@@ -329,6 +329,14 @@ export const MATCH_TUNING = {
   // (scale² more expected putatives). 0 = off. Iceland 1980 film: 7 images stranded.
   subsetGateRescueDegree: 6,
   subsetGateRescueScale: 4,
+  // Near misses (matchAll's gate rescue): a gated pair whose sample reached at least
+  // subsetGateNearMiss × the threshold is tested again on a subsetGateNearMissScale×
+  // larger sample against a threshold as many times higher (the count a real pair
+  // reaches grows with the sample size squared, a chance count about linearly).
+  // South Building: 102 of the 918 pairs gated at 6–7 of 8 are pairs COLMAP verifies
+  // with ≥ 50 inliers (one with 498). 0 = off.
+  subsetGateNearMiss: 0.5,
+  subsetGateNearMissScale: 2,
   // Bridge repair (MATCH_DEFAULTS.repairSplits; core/features/bridgeRepair.js): a match
   // graph left in pieces of at least bridgeMinComponent images gets up to
   // bridgePerComponent pairs per piece (bridgeMaxPairs in all) between it and the main

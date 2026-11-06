@@ -257,7 +257,15 @@ the graph. Positionally-degenerate pairs stay hard-rejected, never weak.
   small **spatially-uniform** keypoint subset (`pickSpreadIndices` grid-buckets so
   a repetitive façade doesn't collapse the sample onto its few strong blobs);
   skip the full O(Na·Nb) match if too few survive. Keeps exhaustive *coverage*
-  (loop closures still found) at a fraction of the cost.
+  (loop closures still found) at a fraction of the cost. Each image's sample is
+  `fraction × N` of its own keypoints (within a floor and a ceiling), picked once per
+  run and reused for all its pairs (on the GPU, uploaded once): a real pair with M
+  matches then reads `(sA/NA)(sB/NB)·M = fraction²·M` putatives, as a per-pair size of
+  `fraction·√(NA·NB)` gave, without picking and slicing two samples per pair. After the
+  pass, gated pairs get a second look on a larger sample: all of an image left with
+  fewer than six accepted pairs (4× the sample), and near misses that reached half the
+  threshold (2× the sample against a 2× threshold; a real pair's count grows with the
+  square of the sample size, a chance count about linearly).
 
 ---
 

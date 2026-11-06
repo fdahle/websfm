@@ -29,6 +29,22 @@ import * as opfs from '../../utils/opfs.js'
 
 const EMPTY_MATCHES = new Uint32Array(0)
 
+// Each image's subset-gate sample (spread indices + their descriptor rows), per size,
+// kept as long as its descriptor buffer lives: a run tests every image against hundreds
+// of others with the same sample.
+const gateSamples = new WeakMap()
+function gateSample(kps, desc, size, dim) {
+  let bySize = gateSamples.get(desc)
+  if (!bySize) gateSamples.set(desc, (bySize = new Map()))
+  let sample = bySize.get(size)
+  if (!sample) {
+    const idx = pickSpreadIndices(kps, size)
+    sample = { idx, desc: sliceDescriptorRows(desc, idx, dim) }
+    bySize.set(size, sample)
+  }
+  return sample
+}
+
 // Original image dimensions (px) in the same space as keypoint x,y — needed by
 // LightGlue's coord normalization. Prefer EXIF meta; else recover from a keypoint
 // (x = nx·natW, where nx is the detect-normalized coord stored alongside).
@@ -215,66 +231,56 @@ export function createPairMatcher({
       // because both reasons are properties of the *run*, not of this pair.
       const gateEnabled = settings.subsetGate !== false && settings.matcher !== 'lightglue' && !settings._skipSubsetGate
       if (gateEnabled) {
-        // Size the sample from THIS pair's actual keypoint counts, not a fixed
-        // figure: the gate's threshold is applied to a sampled count, so holding
-        // the sample size fixed makes the test ~1/N more severe as keypoint counts
-        // rise — at the Detailed detection preset a fixed 200 would veto nearly
-        // every pair. See core/features/subsetGate.js for the arithmetic.
+        // Size each image's sample from its OWN keypoint count (fraction × N, within the
+        // floor and ceiling): a real pair then reads (sA/NA)(sB/NB)·M = fraction²·M
+        // putatives whatever the counts, as the per-pair size did, but each image's sample
+        // is picked and sliced once per run (gateSample) instead of once per pair: the
+        // per-pair pick and slice were most of PUTI's matching time (444 images, 98k pairs:
+        // 112 of 251 s on the main thread). See core/features/subsetGate.js.
         // `_gateScale` (matchAll's rescue pass): the same test on a k× larger sample —
         // k² more expected putatives on a real pair, still a few % of the full match.
         const k = settings._gateScale > 1 ? settings._gateScale : 1
-        const gateSizing = resolveSubsetGateSize(kpsA.length, kpsB.length, {
-          floorSize: settings.subsetGateSize,
-          ...(k > 1
-            ? {
-                fraction: SUBSET_GATE_SIZE_DEFAULTS.fraction * k,
-                minSize: SUBSET_GATE_SIZE_DEFAULTS.minSize * k,
-                maxSize: SUBSET_GATE_SIZE_DEFAULTS.maxSize * k,
-              }
-            : {}),
-        })
-        const gateSize = gateSizing.size
+        const sizing = (n) =>
+          resolveSubsetGateSize(n, n, {
+            floorSize: settings.subsetGateSize,
+            ...(k > 1
+              ? {
+                  fraction: SUBSET_GATE_SIZE_DEFAULTS.fraction * k,
+                  minSize: SUBSET_GATE_SIZE_DEFAULTS.minSize * k,
+                  maxSize: SUBSET_GATE_SIZE_DEFAULTS.maxSize * k,
+                }
+              : {}),
+          })
+        const sizingA = sizing(kpsA.length)
+        const sizingB = sizing(kpsB.length)
         const dim = srcA.descDim ?? 128
-        if (kpsA.length > gateSize * 1.5 && kpsB.length > gateSize * 1.5) {
-          const idxA = pickSpreadIndices(kpsA, gateSize)
-          const idxB = pickSpreadIndices(kpsB, gateSize)
-          const subA = sliceDescriptorRows(descA, idxA, dim)
-          const subB = sliceDescriptorRows(descB, idxB, dim)
+        if (kpsA.length > sizingA.size * 1.5 && kpsB.length > sizingB.size * 1.5) {
+          const sampleA = gateSample(kpsA, descA, sizingA.size, dim)
+          const sampleB = gateSample(kpsB, descB, sizingB.size, dim)
           const gate = await bruteForce(
-            subA,
-            subB,
+            sampleA.desc,
+            sampleB.desc,
             {
               ratioThreshold: settings.ratioThreshold,
               crossCheck: settings.crossCheck,
               dim,
             },
             'gate',
+            // The GPU keeps each image's sample for the run, as it does full descriptors.
+            [`${srcA.uuid}@gate${sizingA.size}`, `${srcB.uuid}@gate${sizingB.size}`],
           )
-          const gateThreshold = settings.subsetGateThreshold
+          const gateThreshold = settings._gateThreshold ?? settings.subsetGateThreshold
           entry.gateScore = gate.matches.length
           if (gate.matches.length < gateThreshold) {
             entry.rawCount = 0
             entry.status = 'done'
             entry.gated = true
-            log(
-              `Gated: ${imgA.name} ↔ ${imgB.name} — subset gate ${gate.matches.length}/${gateThreshold} ` +
-                `putatives on ${idxA.length}×${idxB.length}-kp subsets ` +
-                `(${(gateSizing.fraction * 100).toFixed(1)}% sample of ${kpsA.length}/${kpsB.length} kp` +
-                `${gateSizing.clamped ? `, at the ${gateSizing.clamped === 'ceil' ? 'cost ceiling' : 'size floor'}` : ''})` +
-                ' — skipping full match',
-              'debug',
-              'Matching',
-            )
+            // No line per gated pair: on PUTI the 96k of them cost 28 s of main thread.
+            // The count goes into the run's summary; the score stays on the entry.
             touchSoon()
             onDone?.(pid, entry)
             return
           }
-          log(
-            `Gate passed: ${imgA.name} ↔ ${imgB.name} — ${gate.matches.length} subset putatives ` +
-              `(≥${gateThreshold}) → full match`,
-            'debug',
-            'Matching',
-          )
         }
       }
 
