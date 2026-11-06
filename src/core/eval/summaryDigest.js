@@ -442,7 +442,10 @@ function diagnosticsLines(d) {
     out.push(
       r.fisheye
         ? `  self-calibrated fisheye: k1 ${fmtNum(r.k1, 5)}, k2 ${fmtNum(r.k2, 5)}, k3 ${fmtNum(r.k3, 5)}, k4 ${fmtNum(r.k4, 5)}`
-        : `  composed radial: k1 ${fmtNum(r.k1, 5)}, k2 ${fmtNum(r.k2, 5)}, k3 ${fmtNum(r.k3, 5)}` +
+        : r.full
+          ? `  self-calibrated lens: k1 ${fmtNum(r.k1, 5)}, k2 ${fmtNum(r.k2, 5)}, k3 ${fmtNum(r.k3, 5)}` +
+            `, p1 ${fmtNum(r.p1, 5)}, p2 ${fmtNum(r.p2, 5)}`
+          : `  composed radial: k1 ${fmtNum(r.k1, 5)}, k2 ${fmtNum(r.k2, 5)}, k3 ${fmtNum(r.k3, 5)}` +
             ` (fit RMS ${fmtNum(r.fitRmsPx, 3)}px` +
             `${r.centreMovedPx != null ? `, principal point moved ${fmtNum(r.centreMovedPx, 1)}px` : ''})`,
     )

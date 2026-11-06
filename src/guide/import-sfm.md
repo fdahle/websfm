@@ -20,7 +20,10 @@ Pick `database.db`, a sparse model (`cameras`, `images`, `points3D`, as `.txt` o
 camera calibration, the keypoints, compatible SIFT descriptors and the matches, either
 the verified inliers or the raw matches. Matches need the keypoints imported with them,
 since they count keypoints by their place in COLMAP's list. A ZIP or folder with an
-`images/` folder can also add the photos the project lacks.
+`images/` folder can also add the photos the project lacks. A sparse model keeps each
+camera's lens (COLMAP's SIMPLE_RADIAL, RADIAL, OPENCV, FULL_OPENCV or OPENCV_FISHEYE):
+the imported model carries it, and depth maps and other products built from it use it,
+whatever lens the project's camera groups have.
 
 ## Other SfM tools
 - **Bundler:** `bundle.out` and the `list.txt` that names its images; pick both, or

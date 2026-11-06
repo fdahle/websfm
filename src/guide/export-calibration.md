@@ -26,10 +26,8 @@ focal length along the image's y axis and `cameras` how many cameras a row avera
 For a film camera, the values are in pixels of the film frame its fiducials define,
 not of the scan.
 
-The lens columns hold the model the run corrected the photos with. That is the group's
-own, unless [self-calibration](help:self-calibration) replaced it with a fisheye model.
-Radial terms that self-calibration fitted *on top* of the group's own model are written
-apart, as `selfcal_k1` to `selfcal_k3`. They act after the group's own distortion has
-been removed, about the estimated focal length and principal point, so they cannot be
-added to its k1 to k3. The import leaves these columns alone, so the file brings back
+The lens columns hold the lens the model was solved with: the group's own, or the one
+[self-calibration](help:self-calibration) solved. A model from an older version of
+WebSfM may instead have radial terms fitted *on top* of the group's own lens; they are
+written apart, as `selfcal_k1` to `selfcal_k3`, and cannot be added to its k1 to k3. The import leaves these columns alone, so the file brings back
 the focal length, principal point and the group's own lens model.

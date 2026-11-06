@@ -17,6 +17,7 @@ const emit = defineEmits([
   'set-fiducial-marks',
   'detect-fiducials',
   'calibrate-fiducials',
+  'use-model-calibration',
 ])
 </script>
 
@@ -40,6 +41,7 @@ const emit = defineEmits([
       @set-fiducial-marks="emit('set-fiducial-marks', $event)"
       @detect-fiducials="emit('detect-fiducials', $event)"
       @calibrate-fiducials="emit('calibrate-fiducials', $event)"
+      @use-model-calibration="emit('use-model-calibration', $event)"
     />
   </ModalShell>
 </template>

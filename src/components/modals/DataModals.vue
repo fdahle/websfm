@@ -6,6 +6,8 @@ import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { useGcpsStore } from '../../stores/useGcpsStore.js'
 import { useSensorsStore } from '../../stores/useSensorsStore.js'
+import { estimatedCalibration } from '../../core/sfm/cameraEstimated.js'
+import { DISTORTION_COEFFS } from '../../core/sfm/distortion.js'
 import { usePosesStore } from '../../stores/usePosesStore.js'
 import { useMatchesStore } from '../../stores/useMatchesStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
@@ -59,8 +61,32 @@ const { importDefaults: gcpImportDefaults, gcps } = storeToRefs(useGcpsStore())
 const { addPoint, setGcpAccuracy, setGcpName, setGcpPosition, setGcpVerticalDatum, setObservationAccuracy } =
   useGcpsStore()
 const { sensors } = storeToRefs(useSensorsStore())
-const { applyFilmFormat, assignSensor, setFiducialMarks, splitSensor, toggleSensorFixed, updateSensor } =
+const { applyFilmFormat, assignSensor, setFiducialMarks, splitSensor, toggleSensorFixed, updateSensor, importSensors } =
   useSensorsStore()
+// Sensor table ▸ Estimated ▸ Use for next run: the main model's solved calibration for one
+// camera group (its focal length, principal point and the lens the model was solved
+// with, cameraEstimated.js) becomes that group's starting values. Never automatic: a
+// run does not rewrite what the user entered.
+async function useModelCalibration(sensorId) {
+  const rows = estimatedCalibration({
+    cameras: sparseCameras.value,
+    images: images.value.filter((im) => im.sensorId === sensorId),
+    sensors: sensors.value,
+    frameModel: reconstructionStore.frameModelFor,
+  })
+  const row = rows[0]
+  if (!row) return
+  const sensor = {
+    focal: row.focal,
+    focalUnit: 'px',
+    cx: row.cx,
+    cy: row.cy,
+    distortionModel: row.distortionModel,
+    // Every term, a missing one as 0: the import keeps a field it is given as null.
+    ...Object.fromEntries(DISTORTION_COEFFS.map((k) => [k, row[k] ?? 0])),
+  }
+  await importSensors([{ sensor, targetId: sensorId }])
+}
 const { poses } = storeToRefs(usePosesStore())
 const { matchStore } = storeToRefs(useMatchesStore())
 const { setPairEnabled } = useMatchesStore()
@@ -422,6 +448,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :cameras="sparseCameras"
       @close="sensorTableOpen = false"
       @update="({ id, field, value }) => updateSensor(id, field, value)"
+      @use-model-calibration="useModelCalibration"
       @apply-film-format="({ id, widthMm, reason }) => applyFilmFormat(id, widthMm, reason)"
       @toggle-fixed="({ id, field }) => toggleSensorFixed(id, field)"
       @set-fiducial-marks="({ id, marks }) => setFiducialMarks(id, marks)"

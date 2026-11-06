@@ -18,6 +18,11 @@ by the values it gives. Two cameras of the same size, or rolls of one survey flo
 different lenses, can end up in one group, and splitting them can improve the model
 considerably.
 
+A group's values are your starting point: a run never changes them. Each sparse model
+keeps the lens it was solved with, so editing a group later does not change a finished
+model or what was built from it. To start the next run from what a model solved, open
+the Sensor table, choose **Estimated** and **Use for next run** on the group.
+
 ## When WebSfM suggests a split
 A group that may hold photos of more than one camera gets a **⑂** in the Sensors list,
 and the Sparse Reconstruction dialog says so at the top. Two things point to another

@@ -8,9 +8,11 @@ import { resolveK } from '../../../core/sfm/reconstruction.js'
 import { radialCurve, focalDelta } from '../../../core/eval/calibration.js'
 import { EVAL_THRESHOLDS } from '../../../core/eval/health.js'
 
-// Quality Report ▸ Calibration: per-sensor BA-refined focal vs nominal, the composed
-// self-cal k-bag + its fit health, and a Δr(r) distortion curve. Thresholds come from
-// the shared EVAL_THRESHOLDS table (WS2.6) — no more ad-hoc constants.
+// Quality Report ▸ Calibration: per camera group the BA-refined focal vs nominal, the lens
+// the main model was solved with (its own calibration, displayFrame.js
+// calibrationSnapshot) and a Δr(r) curve of its radial part. A model from before the lens
+// was solved whole shows its self-cal correction and that correction's fit health.
+// Thresholds come from the shared EVAL_THRESHOLDS table (WS2.6).
 const recon = useReconstructionStore()
 const imagesStore = useImagesStore()
 const sensorsStore = useSensorsStore()
@@ -18,12 +20,24 @@ const sensorsStore = useSensorsStore()
 const FIT_RMS_WARN = EVAL_THRESHOLDS.selfCalFitRmsPx.warn
 const FOCAL_WARN = EVAL_THRESHOLDS.focalDeltaPct.warn
 
+const own = computed(() => recon.mainSparseCloud?.calibration ?? null)
+// Per sensor: { k1…, p1, p2 (or a fisheye's k4), whole, fitRmsPx? }. `whole`: the lens
+// itself; otherwise a correction on top of the sensor's lens (an older model).
 const distBySensor = computed(() => {
   const m = new Map()
-  for (const d of recon.summary?.selfCalDistortion ?? []) m.set(d.sensorId, d)
+  if (own.value) {
+    for (const g of own.value.groups ?? []) {
+      if (g.sensorId == null) continue
+      if (g.selfCal) m.set(g.sensorId, { ...g.selfCal, whole: false })
+      else if (g.dist) m.set(g.sensorId, { ...g.dist, whole: true })
+    }
+    return m
+  }
+  for (const d of recon.summary?.selfCalDistortion ?? []) m.set(d.sensorId, { ...d, whole: !!d.full })
   return m
 })
-const selfCalWasOff = computed(() => (recon.summary?.selfCalDistortion?.length ?? 0) === 0)
+const selfCalWasOff = computed(() => !own.value && (recon.summary?.selfCalDistortion?.length ?? 0) === 0)
+const notRecorded = computed(() => own.value?.source === 'not-recorded')
 
 const rows = computed(() => {
   const cameras = recon.sparseCameras
@@ -68,7 +82,11 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
   <div v-if="!rows.length" class="eval-loading">No reconstructed sensors.</div>
   <template v-else>
     <div v-if="selfCalWasOff" class="warn-box">
-      Self-calibration was off for this run — no composed distortion to report. Focal comparison below still applies.
+      Self-calibration was off for this run — no solved lens to report. Focal comparison below still applies.
+    </div>
+    <div v-if="notRecorded" class="warn-box">
+      This model was saved before WebSfM kept each model's own lens, so the lens shown is the last Sparse Model run's.
+      Run Sparse Model again for this model's own.
     </div>
 
     <div v-for="s in rows" :key="s.id" class="sensor-card">
@@ -112,7 +130,21 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
             <div class="cal-k">k3</div>
             <div class="cal-v">{{ s.dist.k3?.toFixed(4) ?? '—' }}</div>
           </div>
-          <div class="cal-item">
+          <div v-if="s.dist.fisheye" class="cal-item">
+            <div class="cal-k">k4</div>
+            <div class="cal-v">{{ s.dist.k4?.toFixed(4) ?? '—' }}</div>
+          </div>
+          <template v-if="s.dist.p1 || s.dist.p2">
+            <div class="cal-item">
+              <div class="cal-k">p1</div>
+              <div class="cal-v">{{ s.dist.p1?.toFixed(5) ?? '—' }}</div>
+            </div>
+            <div class="cal-item">
+              <div class="cal-k">p2</div>
+              <div class="cal-v">{{ s.dist.p2?.toFixed(5) ?? '—' }}</div>
+            </div>
+          </template>
+          <div v-if="!s.dist.whole && s.dist.fitRmsPx != null" class="cal-item">
             <div class="cal-k">
               Dense warp fit RMS <span class="unit">(warn > {{ FIT_RMS_WARN }})</span>
             </div>
@@ -132,7 +164,7 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
           </div>
         </div>
       </template>
-      <div v-else class="cal-empty">No composed distortion for this sensor.</div>
+      <div v-else class="cal-empty">No lens distortion for this camera group.</div>
     </div>
   </template>
 </template>

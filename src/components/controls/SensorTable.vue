@@ -25,6 +25,7 @@ const emit = defineEmits([
   'set-fiducial-marks',
   'detect-fiducials',
   'calibrate-fiducials',
+  'use-model-calibration',
 ])
 
 const isFixed = (s, field) => !!s.fixed?.[field]
@@ -685,7 +686,21 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
               </template>
 
               <td class="count">{{ imageCount(s.id) }}</td>
-              <td><button class="remove" title="Remove sensor" @click="emit('remove', s.id)">×</button></td>
+              <td v-if="mode === 'estimated'">
+                <button
+                  class="seg-btn"
+                  :disabled="!estimated(s.id)"
+                  :title="
+                    estimated(s.id)
+                      ? 'Copy the focal length, principal point and lens the sparse model solved into this camera group, as the start of the next Sparse Model run'
+                      : 'None of this camera group\'s photos are in the sparse model'
+                  "
+                  @click="emit('use-model-calibration', s.id)"
+                >
+                  Use for next run
+                </button>
+              </td>
+              <td v-else><button class="remove" title="Remove sensor" @click="emit('remove', s.id)">×</button></td>
             </tr>
 
             <!-- Fiducial editor: expandable detail row for a film sensor (Initial mode). -->
