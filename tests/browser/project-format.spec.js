@@ -72,6 +72,10 @@ for (const version of versions) {
         markers: useGcpsStore().gcps.filter((g) => g.role === 'marker').length,
         scaleBars: useScaleBarsStore().bars.length,
         poses: usePosesStore().poses.length,
+        // Format 4: the model keeps its own lens (displayFrame.js calibrationSnapshot).
+        lens: sparse?.calibration
+          ? { source: sparse.calibration.source, groups: sparse.calibration.groups?.length ?? 0 }
+          : null,
       }
     })
     // Opened means brought up to this version.
@@ -90,6 +94,9 @@ for (const version of versions) {
       scaleBars: expected.scaleBars,
       poses: expected.poses,
     })
+    // Every opened project's model carries its own lens: a run's (format 4), or the one
+    // the migration gave it from the run summary and sensors (formats 1–3).
+    expect(got.lens).toEqual({ source: expected.formatVersion >= 4 ? 'run' : 'migrated', groups: 1 })
     if (expected.formatVersion < got.current) {
       await expect(page.locator('body')).toContainText(/./) // the page is up; the log line below says why
       const logged = await page.evaluate(async () => {

@@ -1,0 +1,22 @@
+{
+  "formatVersion": 4,
+  "appVersion": "0.6.1",
+  "crs": "EPSG:32617",
+  "images": 5,
+  "cameras": 5,
+  "sparsePoints": 695,
+  "densePoints": 20684,
+  "depthMaps": 5,
+  "meshTriangles": 7698,
+  "dem": {
+    "width": 155,
+    "height": 135
+  },
+  "ortho": {
+    "width": 155,
+    "height": 135
+  },
+  "markers": 2,
+  "scaleBars": 1,
+  "poses": 5
+}
