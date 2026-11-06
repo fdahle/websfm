@@ -12,10 +12,14 @@
 WebSfM turns overlapping photographs into 3D reconstructions — sparse and dense
 point clouds, meshes, digital elevation models and orthophotos — without
 installing anything and **without uploading your images anywhere**. All the
-computation runs locally: the heavy numerical work (feature detection, matching,
-bundle adjustment, dense multi-view stereo) is written in Rust, compiled to
-WebAssembly, and executed in a background worker thread. Your photos never leave
-your machine.
+computation runs locally, in background workers, and your photos never leave your
+machine. The innermost numerical kernels are written in Rust and compiled to
+WebAssembly: SIFT, descriptor matching and geometric verification, camera pose,
+bundle adjustment, PatchMatch depth maps and Poisson meshing. With WebGPU, matching
+and depth maps run on the graphics card instead, and the learned detectors run as
+ONNX models. The rest of the pipeline is JavaScript: track building, the depth-map
+filter and fusion into a point cloud, DEMs, orthophotos, georeferencing and the
+exporters.
 
 It is built with a focus on **polar / non-WGS84 projects** (e.g. historical
 aerial imagery of Antarctica), so coordinate-reference-system handling and ground

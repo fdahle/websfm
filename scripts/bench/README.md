@@ -308,6 +308,11 @@ Vulkan/NVIDIA: the kernel's accumulator was zeroed only once, so every pair wide
 one 64-column tile came back with 0 matches and each run fell back to WASM after its
 first validation (match.wgsl now zeroes it explicitly).
 
+`node scripts/bench/gpu-depth-check.mjs` runs the PatchMatch kernel on this machine's GPU
+against the synthetic cases both kernels are held to (`tests/bench/patchmatchCases.js`):
+depth against the truth, and its cost against the Rust cost (`--swiftshader` for the
+software adapter the nightly suite uses).
+
 ## Texture lab
 
 `textureLab.mjs` reruns the mesh texture in Node on a real project, about 30 s per run

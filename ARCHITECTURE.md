@@ -9,7 +9,11 @@ in [docs/development.md](docs/development.md).
 ## The big picture
 
 WebSfM is a static web app with no server. A Vue 3 front end drives a pool of web
-workers, and the workers run the numerical work in Rust compiled to WebAssembly.
+workers. The workers run the innermost kernels in Rust compiled to WebAssembly (SIFT,
+matching and verification, pose, bundle adjustment, PatchMatch, Poisson meshing, the
+TIFF and LAZ codecs) or in WGSL on WebGPU, and the rest of the computation in plain
+JavaScript from `src/core/` (track building, the depth-map filter and fusion, DEMs,
+orthophotos, georeferencing, exporters).
 Projects are stored in the browser's Origin Private File System (OPFS) or, in
 Chromium, in a folder on disk that the user picks.
 
