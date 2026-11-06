@@ -25,6 +25,7 @@
 
 import { PROJECT_FORMAT_MIN, PROJECT_FORMAT_VERSION } from './projectFormat.js'
 import { MOVED_DOCUMENTS } from './projectLayout.js'
+import { makeFrameModelResolver, calibrationSnapshot } from './sfm/displayFrame.js'
 
 /** @typedef {{ [path: string]: object | null }} ProjectDocuments */
 /**
@@ -107,6 +108,36 @@ export const FORMAT_MIGRATIONS = [
         if (docs[from] == null) continue
         if (docs[to] == null) docs[to] = docs[from]
         docs[from] = null
+      }
+      return docs
+    },
+  },
+  {
+    from: 3,
+    note: 'each sparse model keeps its own lens (calibration), taken from the last run and the sensors',
+    documents: ['project.json', 'data/sensors.json', 'reconstruction/reconstruction.json'],
+    // Until now one project-wide run summary and the sensor table gave every model its
+    // lens. Each sparse cloud now carries its own (displayFrame.js calibrationSnapshot):
+    // here, exactly what that join gave it, so every product reads the same frame model
+    // as before (depth maps are reused by it, core/dense/depthReuse.js). The main model's
+    // is the run's ('migrated'); another model was drawn with the same join, which was
+    // not necessarily its own run's lens ('not-recorded').
+    migrate(docs) {
+      const recon = docs['reconstruction/reconstruction.json']
+      if (!recon?.clouds) return docs
+      const sensors = docs['data/sensors.json']?.sensors ?? []
+      const sensorOf = new Map((docs['project.json']?.images ?? []).map((im) => [im.uuid, im.sensorId ?? null]))
+      const resolve = makeFrameModelResolver({ summary: recon.summary ?? null, sensors })
+      const sparse = recon.clouds.filter((c) => c.kind === 'sparse')
+      const mainId = sparse.some((c) => c.id === recon.mainSparseId) ? recon.mainSparseId : sparse[0]?.id
+      for (const cloud of sparse) {
+        if (cloud.calibration) continue
+        const images = (cloud.cameras ?? []).map((c) => ({ uuid: c.uuid, sensorId: sensorOf.get(c.uuid) ?? null }))
+        cloud.calibration = calibrationSnapshot({
+          resolve,
+          images,
+          source: cloud.id === mainId ? 'migrated' : 'not-recorded',
+        })
       }
       return docs
     },

@@ -11,6 +11,9 @@ import {
   transposedOpk,
 } from './formatMigrations.js'
 import { PROJECT_FORMAT_MIN, PROJECT_FORMAT_VERSION } from './projectFormat.js'
+import { makeFrameModelResolver } from './sfm/displayFrame.js'
+import { readFileSync } from 'node:fs'
+import { unzipSync, strFromU8 } from 'fflate'
 
 const renameStep = {
   from: 1,
@@ -249,5 +252,66 @@ describe('version 2 → 3: documents into folders', () => {
     const { docs: out } = applyMigrations(docs, plan)
     expect(out['poses.json']).toBeNull()
     expect(out['data/poses.json'].poses[0].omega).toBeCloseTo(-10)
+  })
+})
+
+describe('version 3 → 4: each sparse model keeps its own lens', () => {
+  const step = FORMAT_MIGRATIONS.find((s) => s.from === 3)
+  // The saved v3 fixture project (tests/fixtures/projects/v3): its own documents.
+  const fixtureDocs = () => {
+    const files = unzipSync(
+      readFileSync(new URL('../../tests/fixtures/projects/v3/aukerman-5.websfm', import.meta.url)),
+    )
+    const json = (p) => (files[p] ? JSON.parse(strFromU8(files[p])) : null)
+    return Object.fromEntries(step.documents.map((p) => [p, json(p)]))
+  }
+
+  it('gives every sparse cloud the frame model the run summary gave it, exactly', () => {
+    const docs = fixtureDocs()
+    const recon = docs['reconstruction/reconstruction.json']
+    expect(recon.summary.selfCalDistortion.length).toBeGreaterThan(0) // the fixture self-calibrated
+    const sensors = docs['data/sensors.json'].sensors
+    const images = docs['project.json'].images
+    const before = makeFrameModelResolver({ summary: recon.summary, sensors })
+    const out = step.migrate(structuredClone(docs))
+    const sparse = out['reconstruction/reconstruction.json'].clouds.filter((c) => c.kind === 'sparse')
+    expect(sparse.length).toBeGreaterThan(0)
+    for (const cloud of sparse) {
+      expect(cloud.calibration.source).toBe('migrated')
+      const after = makeFrameModelResolver({ calibration: cloud.calibration, sensors })
+      for (const cam of cloud.cameras) {
+        const im = images.find((i) => i.uuid === cam.uuid)
+        // dist, selfCal and the film frame: what depth-map reuse keys on.
+        expect(after(im)).toEqual(before(im))
+      }
+    }
+    // Dense clouds and meshes are not touched.
+    for (const c of out['reconstruction/reconstruction.json'].clouds.filter((c) => c.kind !== 'sparse'))
+      expect(c.calibration).toBeUndefined()
+  })
+
+  it('marks a model that is not the main one: its lens was not recorded for it', () => {
+    const docs = fixtureDocs()
+    const recon = docs['reconstruction/reconstruction.json']
+    const main = recon.clouds.find((c) => c.kind === 'sparse')
+    recon.clouds.push({ ...structuredClone(main), id: 'other', imported: true })
+    const out = step.migrate(structuredClone(docs))
+    const byId = new Map(out['reconstruction/reconstruction.json'].clouds.map((c) => [c.id, c]))
+    expect(byId.get(main.id).calibration.source).toBe('migrated')
+    expect(byId.get('other').calibration.source).toBe('not-recorded')
+  })
+
+  it('leaves a project without a reconstruction, and a cloud that has a calibration, as they are', () => {
+    const empty = {
+      'project.json': { images: [] },
+      'data/sensors.json': null,
+      'reconstruction/reconstruction.json': null,
+    }
+    expect(step.migrate(structuredClone(empty))).toEqual(empty)
+    const docs = fixtureDocs()
+    const own = { groups: [], fiducialTransforms: [], source: 'colmap' }
+    docs['reconstruction/reconstruction.json'].clouds.find((c) => c.kind === 'sparse').calibration = own
+    const out = step.migrate(structuredClone(docs))
+    expect(out['reconstruction/reconstruction.json'].clouds.find((c) => c.kind === 'sparse').calibration).toEqual(own)
   })
 })
