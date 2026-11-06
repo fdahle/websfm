@@ -16,7 +16,7 @@ import {
   undistortBrownPixels,
   loadReconstructionWasm,
 } from './reconstruction.js'
-import { undistortPixel } from './distortion.js'
+import { undistortPixel, distortPixel } from './distortion.js'
 
 // The wasm glue defaults to fetch()ing its .wasm via a URL, which Node can't do.
 // Load the bytes ourselves and hand them to init(); the module-level `wasm` is a
@@ -698,6 +698,77 @@ describe('bundleAdjust', () => {
     const res = await bundleAdjust(cameras, intrinsics, points3d, observations, { maxIters: 20 })
     expect(res.intrinsics[0].fx).toBeCloseTo(KPIX.fx, 3)
     expect(res.intrinsics[0].k1).toBeCloseTo(0, 6) // pinhole: no radial term
+  })
+
+  // fullLens: observations in the pixels the lens recorded, rendered with the app's own
+  // lens model (distortion.js distortPixel), so the crate and the JS lens must agree on
+  // the Brown convention, decentring terms included.
+  describe('a Brown lens with decentring terms, on recorded pixels (fullLens)', () => {
+    const lens = { k1: -0.12, k2: 0.03, k3: 0, p1: 0.0021, p2: -0.0008 }
+    const scene = () => {
+      const rng = mulberry32(53)
+      const centers = [
+        [0, 0, 0],
+        [2, 0.3, 0],
+        [-1.5, 0.5, 0.4],
+        [0.6, -0.8, 0.3],
+        [-0.4, -0.6, 0.2],
+        [1.1, 0.9, -0.2],
+      ]
+      const rots = [rotY(0), rotY(0.2), rotY(-0.18), rotY(0.1), rotY(-0.08), rotY(0.15)]
+      const poses = rots.map((R, i) => ({ R, t: poseFromCenter(R, centers[i]) }))
+      const world = Array.from({ length: 120 }, () => [(rng() - 0.5) * 5, (rng() - 0.5) * 4, 7 + rng() * 4])
+      const points3d = world.map(([x, y, z]) => ({ x, y, z }))
+      const observations = []
+      points3d.forEach((P, ptIdx) =>
+        poses.forEach(({ R, t }, camIdx) => {
+          const X = [P.x, P.y, P.z]
+          const c = [0, 1, 2].map((i) => R[i][0] * X[0] + R[i][1] * X[1] + R[i][2] * X[2] + t[i])
+          const ideal = { x: KPIX.fx * (c[0] / c[2]) + KPIX.cx, y: KPIX.fy * (c[1] / c[2]) + KPIX.cy }
+          const o = distortPixel(ideal.x, ideal.y, KPIX, lens)
+          observations.push({ camIdx, ptIdx, x: o.x, y: o.y })
+        }),
+      )
+      return { cameras: poses.map(({ R, t }) => ({ R, t })), points3d, observations, n: poses.length }
+    }
+
+    it('fits exactly with the true lens as the seed', async () => {
+      const { cameras, points3d, observations, n } = scene()
+      const intrinsics = cameras.map(() => ({ ...KPIX, ...lens }))
+      const res = await bundleAdjust(cameras, intrinsics, points3d, observations, { maxIters: 5, fullLens: true })
+      expect(res.costBefore).toBeLessThan(1e-3)
+      expect(res.intrinsics).toHaveLength(n)
+      expect(res.intrinsics[0].p1).toBeCloseTo(lens.p1, 7)
+      expect(res.intrinsics[0].p2).toBeCloseTo(lens.p2, 7)
+    })
+
+    it('recovers k1, k2, p1 and p2 from a pinhole seed', async () => {
+      const { cameras, points3d, observations, n } = scene()
+      const intrinsics = cameras.map(() => ({ ...KPIX }))
+      const res = await bundleAdjust(cameras, intrinsics, points3d, observations, {
+        maxIters: 150,
+        fullLens: true,
+        refineIntrinsics: 'f,k1,k2,p',
+        sensorOfCam: Array(n).fill(0),
+      })
+      expect(res.costBefore).toBeGreaterThan(0.5)
+      expect(res.costAfter).toBeLessThan(0.05)
+      for (const k of res.intrinsics) {
+        expect(Math.abs(k.k1 - lens.k1)).toBeLessThan(0.01)
+        expect(Math.abs(k.k2 - lens.k2)).toBeLessThan(0.02)
+        expect(Math.abs(k.p1 - lens.p1)).toBeLessThan(2e-4)
+        expect(Math.abs(k.p2 - lens.p2)).toBeLessThan(2e-4)
+      }
+    })
+
+    it('without fullLens ignores Brown coefficients in the intrinsics, as before', async () => {
+      const { cameras, intrinsics, points3d, observations } = exactScene()
+      const withK = intrinsics.map((k) => ({ ...k, k1: 0.3, p1: 0.01 }))
+      const a = await bundleAdjust(cameras, intrinsics, points3d, observations, { maxIters: 10 })
+      const b = await bundleAdjust(cameras, withK, points3d, observations, { maxIters: 10 })
+      expect(b.costAfter).toBe(a.costAfter)
+      expect(b.intrinsics[0].p1).toBeUndefined()
+    })
   })
 
   // R6 self-calibration through the JS↔WASM boundary: a scene rendered with a known

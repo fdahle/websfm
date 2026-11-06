@@ -451,7 +451,12 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 // bundle_adjust_rig: a capture's cameras share one pose, and with `refineRig` the offsets'
 // rotations are refined. A camera-centre prior then acts on its capture, so one per
 // capture is kept (the reference camera's where it has one).
-const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16, k4: 32 }
+// `opts.fullLens`: the observations are the pixels the lens recorded and each camera's
+// intrinsics carry its whole lens: Brown `k1`–`k3`, `p1`, `p2` (OpenCV's), or a fisheye's
+// `k1`–`k4`. The crate then fits that lens as the seed (refine bit `p` = 256 frees
+// p1, p2) and the result's intrinsics carry `p1`, `p2` too. Without it the call is the
+// pinhole-frame one: Brown coefficients in `intrinsics` are ignored.
+const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16, k4: 32, p: 256 }
 // Parse a refine-terms string into the crate's bitmask. Unknown / 'none' tokens
 // contribute nothing (so 'none', '', undefined → 0).
 export function refineModeMask(spec) {
@@ -529,6 +534,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     fixedCams = null,
     refineReadout = false,
     refineRig = false,
+    fullLens = false,
   } = opts
   let { cameraPriors = [] } = opts
   const refineMode =
@@ -568,14 +574,17 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   intrinsics.forEach(({ fx, fy, cx, cy }, c) => {
     kFlat.set([fx, fy, cx, cy], c * 4)
   })
-  // bundle.rs `fisheye_flat`: [terms, k1, k2, k3, k4] per camera; empty when no camera
-  // is a fisheye (the crate then runs exactly as before).
+  // bundle.rs `fisheye_flat`: [terms, k1, k2, k3, k4] per camera, empty when no camera
+  // is a fisheye (the crate then runs exactly as before); with `fullLens`, 7 a camera,
+  // [terms, k1, k2, k3, k4, p1, p2], a Brown camera's terms 0 and its coefficients the seed.
   const anyFisheye = intrinsics.some((k) => k?.fisheye)
-  const fisheyeFlat = new Float32Array(anyFisheye ? nCam * 5 : 0)
-  if (anyFisheye)
-    intrinsics.forEach((k, c) => {
-      if (k?.fisheye) fisheyeFlat.set([k.fisheyeTerms || 4, k.k1 || 0, k.k2 || 0, k.k3 || 0, k.k4 || 0], c * 5)
-    })
+  const lensStride = fullLens ? 7 : 5
+  const fisheyeFlat = new Float32Array(fullLens || anyFisheye ? nCam * lensStride : 0)
+  intrinsics.forEach((k, c) => {
+    const at = c * lensStride
+    if (k?.fisheye) fisheyeFlat.set([k.fisheyeTerms || 4, k.k1 || 0, k.k2 || 0, k.k3 || 0, k.k4 || 0], at)
+    else if (fullLens) fisheyeFlat.set([0, k?.k1 || 0, k?.k2 || 0, k?.k3 || 0, 0, k?.p1 || 0, k?.p2 || 0], at)
+  })
 
   const ptsFlat = flatIn ? Float32Array.from(points3d) : new Float32Array(nPts * 3)
   if (!flatIn)
@@ -678,11 +687,13 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     ...(rig ? [rsFlat, rig.captureOf, rigOffsetFlat(rig.offsets, nCam)] : rsCams ? [rsFlat] : []),
   )
   const ms = performance.now() - tCall
-  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×8 = fx,fy,cx,cy,k1,k2,k3,k4),
-  // costBefore, costAfter, anchorRmsAfter, cameraPriorRmsAfter, the solver stats
-  // (BA_SOLVER_KEYS), then a variable-length per-iteration RMS convergence trace.
+  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×8 = fx,fy,cx,cy,k1,k2,k3,k4;
+  // ×10 with p1,p2 under `fullLens`), costBefore, costAfter, anchorRmsAfter,
+  // cameraPriorRmsAfter, the solver stats (BA_SOLVER_KEYS), then a variable-length
+  // per-iteration RMS convergence trace.
+  const intrStride = fullLens ? 10 : 8
   const intrBase = nCam * 12 + nPts * 3
-  const base = intrBase + nCam * 8
+  const base = intrBase + nCam * intrStride
   const readoutBase = base + 4 + BA_SOLVER_KEYS.length
   const traceBase = readoutBase + (rsCams ? nCam : 0)
   if (!raw || raw.length < traceBase) return null
@@ -719,7 +730,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
       }))
 
   const outIntrinsics = cameras.map((_, c) => {
-    const b = intrBase + c * 8
+    const b = intrBase + c * intrStride
     const k = {
       fx: raw[b],
       fy: raw[b + 1],
@@ -729,6 +740,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
       k2: raw[b + 5],
       k3: raw[b + 6],
       k4: raw[b + 7],
+      ...(fullLens && !intrinsics[c]?.fisheye ? { p1: raw[b + 8], p2: raw[b + 9] } : {}),
     }
     return intrinsics[c]?.fisheye ? { ...k, fisheye: true, fisheyeTerms: intrinsics[c].fisheyeTerms } : k
   })
