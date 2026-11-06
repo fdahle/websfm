@@ -21,10 +21,10 @@ import { readFile, writeFile, readdir, mkdir, stat } from 'node:fs/promises'
 import { existsSync, openSync, readSync, closeSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import exifr from 'exifr'
 import { loadReference } from './reference.mjs'
 import { parseColmapModel, readColmapModel } from '../../src/core/io/colmapModel.js'
-import { cameraPositionCheck, geodeticToEcef, makeEnuFrame } from '../../src/core/eval/positionCheck.js'
+import { geodeticToEcef, makeEnuFrame } from '../../src/core/eval/positionCheck.js'
+import { scoreCameraPositions, benchModel, stem } from './refScore.mjs'
 import { DatabaseSync } from 'node:sqlite'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -50,7 +50,6 @@ const ws = args.ws ? resolve(args.ws) : join(repo, 'bench-out', `${name}-${stamp
 await mkdir(ws, { recursive: true })
 const images = args.imagePath ?? cfg.images
 if (!images) throw new Error('config needs "images" (or --imagePath)')
-const stem = (n) => n.replace(/\.[^.]+$/, '').toLowerCase()
 
 const timings = {}
 const env = { ...process.env, QT_QPA_PLATFORM: 'offscreen' }
@@ -148,28 +147,7 @@ if (!best) throw new Error('mapper produced no model')
 const { model } = best
 const nFiles = (await readdir(images)).filter((f) => /\.(jpe?g|png|tiff?)$/i.test(f)).length
 
-// Camera centres against the reference positions (a survey file), else EXIF GPS —
-// exactly the bench's choice (tests/bench/bench.js reconstruct()).
-let positions = ref?.positions ? new Map(Object.entries(ref.positions)) : null
-if (!positions) {
-  positions = new Map()
-  for (const im of model.images) {
-    const g = await exifr.gps(join(images, im.name.split('/').pop())).catch(() => null)
-    const alt = await exifr
-      .parse(join(images, im.name.split('/').pop()), ['GPSAltitude', 'GPSAltitudeRef'])
-      .catch(() => null)
-    if (g && Number.isFinite(g.latitude) && alt?.GPSAltitude != null) {
-      positions.set(stem(im.name.split('/').pop()), {
-        lat: g.latitude,
-        lon: g.longitude,
-        alt: (alt.GPSAltitudeRef === 1 ? -1 : 1) * alt.GPSAltitude,
-      })
-    }
-  }
-}
-const cams = new Map(model.images.map((im) => [stem(im.name.split('/').pop()), { R: im.R, t: im.t }]))
-const pc = cameraPositionCheck(cams, positions, { leverArm: ref?.leverArm ?? null })
-const r4 = (v) => (v == null ? null : Math.round(v * 1e4) / 1e4)
+const { pc, positionSource } = await scoreCameraPositions(model, images, ref)
 const ge3 = model.points.filter((p) => (p.track?.length ?? p.views?.length ?? 0) >= 3).length
 
 let dense = null
@@ -216,19 +194,9 @@ const out = {
   points: model.points.length,
   pointsGe3: ge3,
   seconds: { ...timings, sfmTotal: (timings.features ?? 0) + (timings.matching ?? 0) + (timings.mapper ?? 0) },
-  positionCheck: pc && {
-    count: pc.count,
-    scale: r4(pc.scale),
-    rms3d: r4(pc.rms3d),
-    rmsH: r4(pc.rmsH),
-    rmsV: r4(pc.rmsV),
-    medianH: r4(pc.medianH),
-    p95H: r4(pc.p95H),
-    maxH: r4(pc.maxH),
-    medianV: r4(pc.medianV),
-    p95V: r4(pc.p95V),
-  },
-  positionSource: ref?.positions ? 'reference file' : 'EXIF GPS',
+  positionCheck: pc,
+  positionSource,
+  stages: { recon: { model: benchModel(model) } },
   dense,
 }
 await writeFile(join(ws, 'summary.json'), JSON.stringify(out, null, 2))

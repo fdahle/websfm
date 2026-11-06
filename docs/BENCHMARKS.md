@@ -55,13 +55,46 @@ three tools without the positions in the solve. 2026-10-11.
 | quarry | ~530 s | 1,104 s | 624 s |
 | PUTI | ~400 s | 1,511 s | 1,783 s |
 
-Without control a nadir block bends, in every tool. It is the block's geometry, not the
-self-calibration: with Metashape's calibration held fixed, PUTI is still 44 cm out
-vertically. **With the RTK positions inside bundle adjustment**, PUTI's cameras are
-1.59 / 1.33 cm and its 15 GCP checkpoints 3.35 / 7.0 cm.
+Without control, WebSfM and COLMAP bend a nadir block into a dome; Metashape does not on
+quarry (12 cm vertical, next section). On quarry the cause is WebSfM's self-calibration:
+with Metashape's lens held fixed, the same WebSfM solve ends 8.5 cm out vertically
+instead of 67 cm. On PUTI, Metashape's GCP-solved calibration held fixed still left
+44 cm, so the lens may not be the whole story on every block. **With the RTK positions
+inside bundle adjustment**, PUTI's cameras are 1.59 / 1.33 cm and its 15 GCP checkpoints
+3.35 / 7.0 cm.
 
 COLMAP keeps 40–260 % more sparse points on these blocks. WebSfM's tracks are shorter
 because it accepts fewer image pairs (South Building: 1,158 against 2,597).
+
+### WebSfM against Metashape, sparse, same machine
+
+Each tool at its defaults on the same photos, one run at a time: Metashape 2.2.2 Align
+Photos (High, 40,000 / 4,000 points, generic preselection; photo positions switched off
+in the solve) through `scripts/bench/metashape-ref.mjs`, WebSfM through the bench. Camera
+centres after a similarity fit: against ETH3D's ground-truth cameras (median, mm),
+COLMAP's South Building model (median, model units), RTK (quarry) and UseGeo's reference
+orientations (H / V RMS, cm). 2026-11-06.
+
+| set | registered (WebSfM · Metashape) | camera error (WebSfM · Metashape) | time, s (WebSfM · Metashape) | peak memory, GB (WebSfM · Metashape) |
+| --- | --- | --- | --- | --- |
+| South Building (128) | 128 · 128 | 0.0048 · 0.0055 | 347 · 100 | 3.9 · 1.1 |
+| ETH3D courtyard (38) | 38 · 38 | 7.4 · 5.2 | 49 · 36 | 3.4 · 1.5 |
+| ETH3D delivery_area (44) | 44 · 44 | 2.9 · 1.4 | 35 · 31 | 2.9 · 1.5 |
+| ETH3D office (26) | **20** · 26 | 1.6 (1 off) · 2.6 | 11 · 18 | 2.6 · 1.4 |
+| ETH3D pipes (14) | **8** · 14 | 3.9 · 1.0 | 9 · 10 | 2.5 · 1.4 |
+| ETH3D playground (38) | 35 · 35 | 1.3 · 4.2 (3 off, up to 1.06 m) | 45 · 42 | 3.2 · 1.5 |
+| ETH3D terrace (23) | 23 · 23 | 2.5 · 2.1 | 23 · 22 | 2.9 · 1.5 |
+| quarry, no GCPs (347) | 346 · 347 | **30 / 67** · 13 / 12 | 1,175 · 308 | 4.7 · 1.5 |
+| UseGeo dataset 1 (224, 42 MP) | 224 · 224 | 3.7 / 8.2 · 3.3 / 8.5 | 637 · 247 | 3.9 · 2.2 |
+
+- **Accuracy is level except quarry's dome** (above): WebSfM is better on South Building
+  and playground, Metashape on four ETH3D scenes, the two equal on UseGeo. WebSfM was
+  given UseGeo's reference calibration; Metashape calibrated itself.
+- **Registration** still misses 6 of 26 office and 6 of 14 pipes images (low texture).
+- **Time**: WebSfM matched on the CPU here (WebAssembly; the run had no WebGPU adapter),
+  Metashape on the GPU, which is most of the gap on the large sets (quarry: matching
+  996 s of WebSfM's 1,175). WebSfM's memory is the peak of the browser's renderer
+  processes, Metashape's the peak of its process.
 
 ### Fisheye: FIORD MeetingRoom (200° lens)
 

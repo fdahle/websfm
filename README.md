@@ -169,7 +169,9 @@ Every table, with its date, method and the weak results, is in
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 Known gaps: without GCPs or camera priors, nadir blocks bend into a dome of about
-0.5–0.7 m (COLMAP's dome is larger on the same images). COLMAP keeps 40–260 % more
+0.5–0.7 m (COLMAP's dome is larger on the same images, Metashape's much smaller: 12 cm
+on quarry). On quarry WebSfM's self-calibration causes it: with Metashape's lens held
+fixed, WebSfM ends at 8.5 cm, so a better lens model is next. COLMAP keeps 40–260 % more
 sparse points and registers every image of ETH3D's low-texture interiors (WebSfM:
 20 / 26 and 8 / 14), and its dense clouds are more precise at 2 cm, where WebSfM's are
 more complete.
