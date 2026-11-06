@@ -217,6 +217,20 @@ Notable changes to websfm. The format follows
   cloud over the area shows before you fetch it. The preview is the catalogue's own
   343 px quicklook, about 45 KB a scene.
 ### Changed
+- **Each sparse model keeps its own lens.** A model now stores the lens and film frame its
+  cameras were solved in, and depth maps, orthophotos, textures, GCP tools and exports
+  built from it use that lens, not the camera groups' current values or the last run's.
+  Editing a camera group no longer changes a finished model; to start the next run from
+  what a model solved, use Sensor table ▸ Estimated ▸ **Use for next run**. Imported
+  models keep their own lens too: a COLMAP import keeps each camera's distortion
+  (SIMPLE_RADIAL, RADIAL, OPENCV, FULL_OPENCV, OPENCV_FISHEYE; it was dropped) and
+  undistorts its observations with it, and a Metashape model import does the same with
+  the adjusted lens. Secondary models keep their own lens (they took the main model's).
+  Projects are migrated to format 4 on opening: each model gets exactly the lens it was
+  drawn with, so products and saved depth maps stay as they were; a model other than the
+  main one is marked as such in the Quality Report, since its own run's lens was not
+  recorded. The sensors CSV (Estimated) now writes the solved lens; it wrote the camera
+  group's.
 - **A faulty GPU no longer spoils depth maps.** Depth Maps checks the GPU's matching cost
   on the first map against the CPU's; when they disagree, that map, the rest of the run
   and later runs are computed on the CPU, and the log says so. The check now judges the
