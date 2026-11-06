@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { guessMapping, buildPoses, guessPoseCrs } from './pose.js'
+import { guessMapping, buildPoses, guessPoseCrs, normalizePoseHeader } from './pose.js'
 
 describe('guessMapping', () => {
   it('maps standard pose headers', () => {
@@ -60,6 +60,37 @@ describe('guessMapping', () => {
       accuracyPhi: 13,
       accuracyKappa: 14,
     })
+  })
+
+  it('reads a GeoScan / Agisoft camera file header, accuracies included', () => {
+    // Agisoft's PUTI sample (Metadata/Cameras_WGS84.txt), as written: a leading '#',
+    // datum prefixes, units in parentheses, a horizontal σ that is no axis of its own.
+    const head = [
+      '# file',
+      ' WGS84_lat',
+      ' WGS84_lon',
+      ' WGS84_H',
+      ' roll',
+      ' pitch',
+      ' yaw',
+      ' time',
+      'Std Dev n (m)',
+      'Std Dev e (m)',
+      'Std Dev u (m)',
+      'Std Dev Hz (m)',
+    ]
+    const m = guessMapping(head, head.length, true)
+    expect(m).toMatchObject({ image: 0, x: 2, y: 1, z: 3, accuracyX: 9, accuracyY: 8, accuracyZ: 10 })
+    expect(m.accXYZ).toBeNull()
+    expect(guessPoseCrs(head, m)).toBe('EPSG:4326')
+  })
+
+  it('normalises header cells before matching', () => {
+    expect(normalizePoseHeader('# file')).toBe('file')
+    expect(normalizePoseHeader('Std Dev e (m)')).toBe('Std_Dev_e')
+    expect(normalizePoseHeader('WGS84_lon')).toBe('lon')
+    expect(normalizePoseHeader('Z [m]')).toBe('Z')
+    expect(normalizePoseHeader('  easting ')).toBe('easting')
   })
 
   it('falls back to positional columns without a header', () => {

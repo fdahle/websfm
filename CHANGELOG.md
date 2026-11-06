@@ -363,6 +363,12 @@ Notable changes to websfm. The format follows
   (dubrovnik-88), with the same final costs.
 
 ### Fixed
+- **Camera files with accuracy columns named as GeoScan and Agisoft write them.** Import ▸
+  Camera Positions now recognises headers such as `# file`, `WGS84_lat`, `WGS84_H` and
+  `Std Dev e (m)`, so an RTK file's own accuracies are mapped instead of the 5 m default.
+  With the default the positions barely count: on Agisoft's PUTI sample (444 photos, RTK
+  at 1–2 cm) the solve came out the same as without them, and with the file's accuracies
+  its checkpoints are 3.1 cm across and 7.2 cm in height.
 - **Drone blocks without ground control no longer bend into a dome.** Sparse Model's
   self-calibration now solves the whole lens, including decentring (p1, p2) where it
   clearly lowers the reprojection error, and fits it to the keypoints as the photos

@@ -26,9 +26,12 @@ const PATTERNS = {
   phi: /^(phi|ph|pitch|p|ry|rot_y)$/i,
   kappa: /^(kappa|ka|yaw|heading|k|rz|rot_z)$/i,
   accXYZ: /^(acc|accuracy|acc_xyz|sigma|sxyz|posacc)$/i,
-  accuracyX: /^(accuracyx|accuracy_x|accx|acc_x|sigmax|sigma_x|stdx|std_x|xaccuracy|x_accuracy|posaccx|pos_acc_x)$/i,
-  accuracyY: /^(accuracyy|accuracy_y|accy|acc_y|sigmay|sigma_y|stdy|std_y|yaccuracy|y_accuracy|posaccy|pos_acc_y)$/i,
-  accuracyZ: /^(accuracyz|accuracy_z|accz|acc_z|sigmaz|sigma_z|stdz|std_z|zaccuracy|z_accuracy|posaccz|pos_acc_z)$/i,
+  accuracyX:
+    /^(accuracyx|accuracy_x|accx|acc_x|sigmax|sigma_x|stdx|std_x|xaccuracy|x_accuracy|posaccx|pos_acc_x|std_?dev_?(x|e|east)|sigma_?e|std_?e|e_?(std|sigma))$/i,
+  accuracyY:
+    /^(accuracyy|accuracy_y|accy|acc_y|sigmay|sigma_y|stdy|std_y|yaccuracy|y_accuracy|posaccy|pos_acc_y|std_?dev_?(y|n|north)|sigma_?n|std_?n|n_?(std|sigma))$/i,
+  accuracyZ:
+    /^(accuracyz|accuracy_z|accz|acc_z|sigmaz|sigma_z|stdz|std_z|zaccuracy|z_accuracy|posaccz|pos_acc_z|std_?dev_?(z|u|up|h|height)|sigma_?u|std_?u|u_?(std|sigma))$/i,
   accAngle: /^(accangle|acc_angle|sangle|angacc|rotacc)$/i,
   accuracyOmega:
     /^(accuracyomega|accuracy_omega|accomega|acc_omega|sigmaomega|sigma_omega|stdomega|std_omega|omegaaccuracy|omega_accuracy|rollaccuracy|roll_accuracy)$/i,
@@ -75,10 +78,23 @@ export const POSE_ROLE_LABELS = {
   accAngle: 'Angle accuracy (all axes)',
 }
 
+// A header cell as the patterns see it: GeoScan / Agisoft camera files write
+// `# file`, `WGS84_lat`, `Std Dev n (m)`. Drop a leading `#`, a unit in parentheses and a
+// datum prefix, and join words with `_`, so those read as `file`, `lat`, `std_dev_n`.
+export function normalizePoseHeader(cell) {
+  return String(cell ?? '')
+    .trim()
+    .replace(/^#\s*/, '')
+    .replace(/\s*[([][^)\]]*[)\]]\s*$/, '')
+    .replace(/^(wgs_?84|etrs_?89|nad_?83)[_\s]+/i, '')
+    .trim()
+    .replace(/\s+/g, '_')
+}
+
 // The source CRS the mapped position columns name: longitude/latitude headers mean
 // WGS 84 degrees, whatever the project CRS. Null when the headers do not say.
 export function guessPoseCrs(headerCells, mapping) {
-  const head = (role) => String(headerCells?.[mapping?.[role]] ?? '').trim()
+  const head = (role) => normalizePoseHeader(headerCells?.[mapping?.[role]])
   return /^(lon|long|longitude)$/i.test(head('x')) && /^(lat|latitude)$/i.test(head('y')) ? 'EPSG:4326' : null
 }
 
@@ -92,7 +108,7 @@ export function guessMapping(headerCells, columnCount, hasHeader, { positional =
   if (hasHeader) {
     headerCells.forEach((cell, i) => {
       for (const role of POSE_ROLES) {
-        if (mapping[role] == null && PATTERNS[role].test(String(cell ?? '').trim())) {
+        if (mapping[role] == null && PATTERNS[role].test(normalizePoseHeader(cell))) {
           mapping[role] = i
           break
         }
