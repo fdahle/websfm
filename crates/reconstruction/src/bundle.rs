@@ -577,13 +577,45 @@ fn lens_factor(r2: f64, k: &[f64; 4], fisheye: bool) -> (f64, f64, [f64; 4]) {
     (m, q, [t3 / r, t3 * t2 / r, t3 * t2 * t2 / r, t3 * t2 * t2 * t2 / r])
 }
 
-fn project_full(r: &M3, t: &V3, fx: f64, fy: f64, cx: f64, cy: f64, k: &[f64; 4], fisheye: bool, x: &V3) -> (f64, f64) {
+// Brown's decentring (tangential) terms, OpenCV's convention, added to the radially
+// scaled point (a·m, b·m): Δx = 2p1·ab + p2·(r² + 2a²), Δy = p1·(r² + 2b²) + 2p2·ab.
+// A fisheye has none (p = 0). → (xd, yd), the distorted normalised point.
+fn distort_norm(a: f64, b: f64, m: f64, p: &[f64; 2]) -> (f64, f64) {
+    let r2 = a * a + b * b;
+    (a * m + 2.0 * p[0] * a * b + p[1] * (r2 + 2.0 * a * a), b * m + p[0] * (r2 + 2.0 * b * b) + 2.0 * p[1] * a * b)
+}
+
+// The distorted normalised point of (a, b) and its derivatives, for the solver's
+// Jacobians: `j` = ∂(xd, yd)/∂(a, b) as [[∂xd/∂a, ∂xd/∂b], [∂yd/∂a, ∂yd/∂b]], `dk` the
+// radial factor's coefficient partials (∂xd/∂kj = a·dk[j], ∂yd/∂kj = b·dk[j]), `dp`
+// ∂(xd, yd)/∂(p1, p2) as [[∂xd/∂p1, ∂xd/∂p2], [∂yd/∂p1, ∂yd/∂p2]], and m, the radial
+// factor (∂xd/∂s needs xd itself). Radial part with ∂m/∂a = q·a, ∂m/∂b = q·b
+// (lens_factor); the decentring terms add 2p1·b + 6p2·a to ∂xd/∂a, 2p1·a + 2p2·b to
+// ∂xd/∂b and ∂yd/∂a, 6p1·b + 2p2·a to ∂yd/∂b.
+pub(crate) struct DistJac { pub xd: f64, pub yd: f64, pub j: [[f64; 2]; 2], pub dk: [f64; 4], pub dp: [[f64; 2]; 2] }
+pub(crate) fn distort_jac(a: f64, b: f64, k: &[f64; 4], p: &[f64; 2], fisheye: bool) -> DistJac {
+    let r2 = a * a + b * b;
+    let (m, q, dk) = lens_factor(r2, k, fisheye);
+    let (xd, yd) = distort_norm(a, b, m, p);
+    let cross = q * a * b + 2.0 * p[0] * a + 2.0 * p[1] * b;
+    DistJac {
+        xd, yd,
+        j: [[m + q * a * a + 2.0 * p[0] * b + 6.0 * p[1] * a, cross],
+            [cross, m + q * b * b + 6.0 * p[0] * b + 2.0 * p[1] * a]],
+        dk,
+        dp: [[2.0 * a * b, r2 + 2.0 * a * a], [r2 + 2.0 * b * b, 2.0 * a * b]],
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn project_full(r: &M3, t: &V3, fx: f64, fy: f64, cx: f64, cy: f64, k: &[f64; 4], p: &[f64; 2], fisheye: bool, x: &V3) -> (f64, f64) {
     let pc = mat3_vec(r, x);
     let (xc, yc, zc) = (pc[0] + t[0], pc[1] + t[1], pc[2] + t[2]);
     if zc.abs() < 1e-9 { return (f64::NAN, f64::NAN); }
     let a = xc / zc; let b = yc / zc;
     let (m, _, _) = lens_factor(a * a + b * b, k, fisheye);
-    (fx * a * m + cx, fy * b * m + cy)
+    let (xd, yd) = distort_norm(a, b, m, p);
+    (fx * xd + cx, fy * yd + cy)
 }
 
 // Principal rotation vector Log(R), with magnitude in [0, π]. Camera orientation
@@ -622,7 +654,7 @@ pub(crate) fn so3_log(r: &M3) -> V3 {
 
 // Largest reduced block: a camera's 6 rows, or an intrinsic group's
 // [s, dcx, dcy, k1, k2, k3, k4, τ, ωx, ωy, ωz] (≤ 11; ω: bundle_adjust_rig).
-const BLK_MAX: usize = 11;
+const BLK_MAX: usize = 13;
 // SolverOpts::huber 0: the Huber δ that makes the loss plain least squares.
 const NO_LOSS_DELTA: f64 = 1e12;
 
@@ -1050,17 +1082,22 @@ fn bundle_adjust_impl(
         (intrinsics_flat[b] as f64, intrinsics_flat[b+1] as f64,
          intrinsics_flat[b+2] as f64, intrinsics_flat[b+3] as f64)
     }).collect();
-    // Per-camera lens: (refinable fisheye terms, seed coefficients). terms 0 ⇒ pinhole.
-    let lens: Vec<(usize, [f64; 4])> = (0..n_cam).map(|c| {
-        let b = c * 5;
-        let terms = fisheye_flat.get(b).copied().unwrap_or(0.0);
-        let k = [1, 2, 3, 4].map(|j| {
+    // Per-camera lens: (refinable fisheye terms, seed coefficients, Brown p1/p2). terms 0
+    // ⇒ Brown (pinhole when every coefficient is 0). `fisheye_flat` has 5 floats a camera,
+    // or 7 with the decentring pair (`lens_stride`); a 7-float list also returns p1/p2.
+    let lens_stride = if n_cam > 0 && fisheye_flat.len() >= n_cam * 7 { 7 } else { 5 };
+    let lens: Vec<(usize, [f64; 4], [f64; 2])> = (0..n_cam).map(|c| {
+        let b = c * lens_stride;
+        let val = |j: usize| -> f64 {
             let v = fisheye_flat.get(b + j).copied().unwrap_or(0.0) as f64;
             if v.is_finite() { v } else { 0.0 }
-        });
-        // A pinhole camera's slots seed its Brown k1…k3 (the app passes zeros there).
-        if !(terms >= 1.0) { return (0, [k[0], k[1], k[2], 0.0]); }
-        ((terms as usize).min(4), k)
+        };
+        let terms = fisheye_flat.get(b).copied().unwrap_or(0.0);
+        let k = [1, 2, 3, 4].map(val);
+        let p = if lens_stride == 7 { [val(5), val(6)] } else { [0.0; 2] };
+        // A Brown camera's slots seed its k1…k3 and p1/p2.
+        if !(terms >= 1.0) { return (0, [k[0], k[1], k[2], 0.0], p); }
+        ((terms as usize).min(4), k, [0.0; 2])
     }).collect();
     // Rolling shutter per camera: (velocity, frame height, seed readout time), or None.
     let rs: Vec<Option<(V3, f64, f64)>> = (0..n_cam).map(|c| {
@@ -1120,15 +1157,17 @@ fn bundle_adjust_impl(
     };
 
     // ── Intrinsic self-calibration setup ─────────────────────────────────────────
-    // `refine_mask` is a bitmask (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3, 32=k4). The per-group
-    // param vector is the ordered subset [s?, dcx?, dcy?, k1?, k2?, k3?, k4?]; `idx_*` is
-    // each param's slot in that vector (−1 when its bit is clear). kdim ≤ 8 (64 = τ, bundle_adjust_rs).
+    // `refine_mask` is a bitmask (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3, 32=k4, 256=p1,p2). The
+    // per-group param vector is the ordered subset [s?, dcx?, dcy?, k1?, k2?, k3?, k4?,
+    // p1?, p2?, τ?, ω?]; `idx_*` is each param's slot in that vector (−1 when its bit is
+    // clear). kdim ≤ BLK_MAX (64 = τ, bundle_adjust_rs; 128 = ω, bundle_adjust_rig).
     let has_f = refine_mask & 1 != 0;
     let has_cxcy = refine_mask & 2 != 0;
     let has_k1 = refine_mask & 4 != 0;
     let has_k2 = refine_mask & 8 != 0;
     let has_k3 = refine_mask & 16 != 0;
     let has_k4 = refine_mask & 32 != 0;
+    let has_p = refine_mask & 256 != 0;
     let has_rs = refine_mask & 64 != 0 && rs_any;
     let has_rig = refine_mask & 128 != 0 && off.iter().any(|o| o.is_some());
     let mut kdim = 0usize;
@@ -1140,6 +1179,8 @@ fn bundle_adjust_impl(
     let idx_k2  = alloc(has_k2);
     let idx_k3  = alloc(has_k3);
     let idx_k4  = alloc(has_k4);
+    let idx_p1  = alloc(has_p);
+    let idx_p2  = alloc(has_p);
     let idx_rs  = alloc(has_rs);
     // The offset rotation ω: three consecutive slots.
     let idx_rig = alloc(has_rig); alloc(has_rig); alloc(has_rig);
@@ -1148,7 +1189,7 @@ fn bundle_adjust_impl(
     let refine = kdim > 0 && g_count > 0;
     // Each group's lens (its first camera's — a sensor group shares one), and which
     // of its k slots exist: k1–k3 for Brown, the first `terms` for a fisheye.
-    let mut group_lens: Vec<(usize, [f64; 4])> = vec![(0, [0.0; 4]); g_count];
+    let mut group_lens: Vec<(usize, [f64; 4], [f64; 2])> = vec![(0, [0.0; 4], [0.0; 2]); g_count];
     { let mut seen = vec![false; g_count];
       for c in 0..n_cam { if refine && !seen[grp[c]] { seen[grp[c]] = true; group_lens[grp[c]] = lens[c]; } } }
     // Each group's seed readout time (its first rolling-shutter camera's τ0).
@@ -1162,6 +1203,8 @@ fn bundle_adjust_impl(
         let terms = group_lens[g].0;
         if terms == 0 { j < 3 } else { j < terms }
     };
+    // The decentring pair is Brown's: a fisheye group has none.
+    let p_live = |g: usize| -> bool { group_lens[g].0 == 0 };
     // Reduced slot of each free camera (fixed ones have none); with no fixed camera the
     // slot is the camera index, so the system is exactly the all-free one.
     const FIXED: usize = usize::MAX;
@@ -1252,17 +1295,18 @@ fn bundle_adjust_impl(
 
     // Effective K + lens coefficients (k1..k4) and whether the camera is a fisheye,
     // under the current group params. Pinhole: the Brown residual; fisheye: seed + offset.
-    struct Eff { fx: f64, fy: f64, cx: f64, cy: f64, k: [f64; 4], fisheye: bool }
+    struct Eff { fx: f64, fy: f64, cx: f64, cy: f64, k: [f64; 4], p: [f64; 2], fisheye: bool }
     let eff = |ci: usize, gpar: &Vec<[f64; BLK_MAX]>| -> Eff {
         let (fx0, fy0, cx0, cy0) = ks[ci];
-        let (terms, k0) = lens[ci];
+        let (terms, k0, p0) = lens[ci];
         let fisheye = terms > 0;
-        if !refine { return Eff { fx: fx0, fy: fy0, cx: cx0, cy: cy0, k: k0, fisheye }; }
-        let p = gpar[grp[ci]];
-        let get = |idx: isize| -> f64 { if idx >= 0 { p[idx as usize] } else { 0.0 } };
-        let s = if idx_s >= 0 { p[idx_s as usize] } else { 1.0 };
+        if !refine { return Eff { fx: fx0, fy: fy0, cx: cx0, cy: cy0, k: k0, p: p0, fisheye }; }
+        let g = gpar[grp[ci]];
+        let get = |idx: isize| -> f64 { if idx >= 0 { g[idx as usize] } else { 0.0 } };
+        let s = if idx_s >= 0 { g[idx_s as usize] } else { 1.0 };
         let k = [0, 1, 2, 3].map(|j| k0[j] + get(idx_k[j]));
-        Eff { fx: s * fx0, fy: s * fy0, cx: cx0 + get(idx_dcx), cy: cy0 + get(idx_dcy), k, fisheye }
+        let p = if fisheye { [0.0; 2] } else { [p0[0] + get(idx_p1), p0[1] + get(idx_p2)] };
+        Eff { fx: s * fx0, fy: s * fy0, cx: cx0 + get(idx_dcx), cy: cy0 + get(idx_dcy), k, p, fisheye }
     };
     // A camera's readout time under the current group params (0 without rolling shutter).
     let tau_of = |ci: usize, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
@@ -1315,7 +1359,7 @@ fn bundle_adjust_impl(
         let (r, t) = &pose;
         let e = eff(ci, gpar);
         let x = if rs_any { seen_point(o, pts, gpar).0 } else { pts[pi] };
-        let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &x);
+        let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, &e.p, e.fisheye, &x);
         if px.is_nan() { f64::NAN } else { (px - ox).powi(2) + (py - oy).powi(2) }
     };
     let rms = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
@@ -1336,7 +1380,7 @@ fn bundle_adjust_impl(
             let (r, t) = &pose;
             let e = eff(ci, gpar);
             let x = if rs_any { seen_point(o, pts, gpar).0 } else { pts[pi] };
-            let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &x);
+            let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, &e.p, e.fisheye, &x);
             if px.is_nan() { return dh * dh; }
             let dx=px-ox; let dy=py-oy; let e=(dx*dx+dy*dy).sqrt();
             // The Huber loss the IRLS weight r = δ/e actually descends: ρ = q·(2r − r²)
@@ -1381,7 +1425,7 @@ fn bundle_adjust_impl(
     let jac = |o: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| -> Option<Jac> {
         let (ci, pi, ox, oy, obs_wx, obs_wy) = obs[o];
         let (r, t) = &cams[pb[ci]];
-        let Eff { fx, fy, cx, cy, k, fisheye } = eff(ci, gpar);
+        let Eff { fx, fy, cx, cy, k, p: tp, fisheye } = eff(ci, gpar);
         let (xs, sdir) = if rs_any { seen_point(o, pts, gpar) } else { (pts[pi], [0.0; 3]) };
         let pc = mat3_vec(r, &xs); // R·X (the rolling-shutter-shifted X)
         // A lens with an offset sees R_o·q + t_o of the capture-frame point q = R·X + t
@@ -1399,16 +1443,13 @@ fn bundle_adjust_impl(
         // Normalised coords and the lens's radial factor m (lens_factor): m ≡ 1, and
         // every derivative reduces to the pinhole case, for a pinhole with all k = 0.
         let a = xc * inv; let b = yc * inv;
-        let r2 = a * a + b * b;
-        let (d, q, dk) = lens_factor(r2, &k, fisheye);
-        let ru = fx * a * d + cx - ox;
-        let rv = fy * b * d + cy - oy;
-        // ∂proj/∂x_cam (2×3), exact analytic. With ∂m/∂a = q·a, ∂m/∂b = q·b:
-        //   ∂u/∂xc = (fx/zc)(m+q·a²), ∂u/∂yc = (fx/zc)(q·a·b),
-        //   ∂u/∂zc = −(fx·a/zc)(m+q·r²)  (and symmetrically for v).
-        // For Brown q = 2g, g = k1 + 2k2·r² + 3k3·r⁴ (the earlier closed form).
-        let dudc = [fx * inv * (d + q*a*a), fx * inv * (q*a*b), -fx * a * inv * (d + q*r2)];
-        let dvdc = [fy * inv * (q*a*b), fy * inv * (d + q*b*b), -fy * b * inv * (d + q*r2)];
+        let DistJac { xd, yd, j: [[xa, xb], [ya, yb]], dk, dp } = distort_jac(a, b, &k, &tp, fisheye);
+        let ru = fx * xd + cx - ox;
+        let rv = fy * yd + cy - oy;
+        // ∂proj/∂x_cam (2×3), exact analytic: the distorted point's 2×2 Jacobian in (a, b)
+        // (distort_jac) through ∂a/∂(xc,yc,zc) = (1, 0, −a)/zc, ∂b/… = (0, 1, −b)/zc.
+        let dudc = [fx * inv * xa, fx * inv * xb, -fx * inv * (xa*a + xb*b)];
+        let dvdc = [fy * inv * ya, fy * inv * yb, -fy * inv * (ya*a + yb*b)];
         // Through a lens offset ∂x_cam/∂q = R_o: the capture's and the point's Jacobians
         // see ∂proj/∂x_cam · R_o (the same rows when there is none).
         let vm = |v: &[f64; 3], m: &M3| -> [f64; 3] { [0, 1, 2].map(|k| v[0]*m[0][k] + v[1]*m[1][k] + v[2]*m[2][k]) };
@@ -1435,13 +1476,18 @@ fn bundle_adjust_impl(
         let mut jku = [0f64; BLK_MAX]; let mut jkv = [0f64; BLK_MAX];
         if refine {
             let (fx0, fy0, _, _) = ks[ci];
-            if idx_s   >= 0 { jku[idx_s   as usize] = fx0 * a * d; jkv[idx_s   as usize] = fy0 * b * d; }
+            if idx_s   >= 0 { jku[idx_s   as usize] = fx0 * xd; jkv[idx_s   as usize] = fy0 * yd; }
             if idx_dcx >= 0 { jku[idx_dcx as usize] = 1.0; }
             if idx_dcy >= 0 { jkv[idx_dcy as usize] = 1.0; }
             for j in 0..4 {
                 if idx_k[j] >= 0 && k_live(grp[ci], j) {
                     jku[idx_k[j] as usize] = fx * a * dk[j]; jkv[idx_k[j] as usize] = fy * b * dk[j];
                 }
+            }
+            // ∂/∂p1 = (fx·2ab, fy·(r² + 2b²)), ∂/∂p2 = (fx·(r² + 2a²), fy·2ab): Brown only.
+            if idx_p1 >= 0 && p_live(grp[ci]) {
+                jku[idx_p1 as usize] = fx * dp[0][0]; jkv[idx_p1 as usize] = fy * dp[1][0];
+                jku[idx_p2 as usize] = fx * dp[0][1]; jkv[idx_p2 as usize] = fy * dp[1][1];
             }
             // ∂/∂τ: the camera-frame point moves by R·(−s·v) per unit τ.
             if idx_rs >= 0 && rs[ci].is_some() {
@@ -1717,6 +1763,9 @@ fn bundle_adjust_impl(
                 let dg = pattern.diag_at[n_free + g];
                 for j in 0..4 {
                     if idx_k[j] >= 0 && !k_live(g, j) { let a = idx_k[j] as usize; smat[dg + a*kdim + a] += 1.0; }
+                }
+                if idx_p1 >= 0 && !p_live(g) {
+                    for a in [idx_p1 as usize, idx_p2 as usize] { smat[dg + a*kdim + a] += 1.0; }
                 }
                 // Likewise ω for a group with no lens offset (the rig's reference lens).
                 if idx_rig >= 0 && !group_has_off[g] {
@@ -2002,7 +2051,8 @@ fn bundle_adjust_impl(
     // (8 each: fx,fy,cx,cy,k1,k2,k3,k4 — a pinhole camera's Brown residual, 0 for the
     // bits not in refine_mask; a fisheye's full Kannala–Brandt coefficients),
     // [cost_before, cost_after, anchor_rms_after, camera_prior_rms_after], then trace.
-    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 8 + 4 + BA_STATS_LEN + trace.len());
+    let intr_stride = if lens_stride == 7 { 10 } else { 8 };
+    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * intr_stride + 4 + BA_STATS_LEN + trace.len());
     for c in 0..n_cam {
         let (r, t) = pose_of(c, &cams, &gpar);
         for row in &r { for &v in row { out.push(v as f32); } }
@@ -2015,6 +2065,7 @@ fn bundle_adjust_impl(
         let e = eff(c, &gpar);
         out.push(e.fx as f32); out.push(e.fy as f32); out.push(e.cx as f32); out.push(e.cy as f32);
         for j in 0..4 { out.push(e.k[j] as f32); }
+        if intr_stride == 10 { out.push(e.p[0] as f32); out.push(e.p[1] as f32); }
     }
     out.push(cost_before as f32);
     out.push(cost_after as f32);
@@ -2428,6 +2479,48 @@ mod reduced_solve_tests {
     // move the model): one iteration's tries reach LAMBDA_MAX from λ's floor. A fixed 8
     // tries reached ~20 from λ's working level, and left BAL's largest Ladybug problems at
     // ×28 Ceres' cost (docs/METHODS.md ▸ BA vs Ceres).
+    // The lens's derivatives against central differences of the projection itself, for
+    // Brown (radial + decentring) and Kannala–Brandt, over points across a wide frame.
+    #[test]
+    fn the_lens_jacobian_is_the_projections_derivative() {
+        let value = |a: f64, b: f64, k: &[f64; 4], p: &[f64; 2], fe: bool| -> (f64, f64) {
+            let (m, _, _) = lens_factor(a * a + b * b, k, fe);
+            distort_norm(a, b, m, p)
+        };
+        let h = 1e-6;
+        let cases: [([f64; 4], [f64; 2], bool); 3] = [
+            ([-0.12, 0.05, -0.01, 0.0], [0.0021, -0.0008], false),
+            ([0.04, -0.22, 0.33, 0.0], [-0.003, 0.0015], false),
+            ([0.02, -0.01, 0.003, -0.0005], [0.0, 0.0], true),
+        ];
+        for (k, p, fe) in cases {
+            for &(a, b) in &[(0.31, -0.22), (-0.6, 0.45), (0.05, 0.9), (-0.8, -0.7)] {
+                let dj = distort_jac(a, b, &k, &p, fe);
+                let (x0, y0) = value(a, b, &k, &p, fe);
+                assert!((dj.xd - x0).abs() < 1e-15 && (dj.yd - y0).abs() < 1e-15);
+                let near = |num: f64, ana: f64, what: &str| {
+                    assert!((num - ana).abs() < 1e-6 * (1.0 + ana.abs()), "{what} at ({a},{b}) fisheye {fe}: {num} vs {ana}");
+                };
+                let (xp, yp) = value(a + h, b, &k, &p, fe); let (xm, ym) = value(a - h, b, &k, &p, fe);
+                near((xp - xm) / (2.0 * h), dj.j[0][0], "dxd/da"); near((yp - ym) / (2.0 * h), dj.j[1][0], "dyd/da");
+                let (xp, yp) = value(a, b + h, &k, &p, fe); let (xm, ym) = value(a, b - h, &k, &p, fe);
+                near((xp - xm) / (2.0 * h), dj.j[0][1], "dxd/db"); near((yp - ym) / (2.0 * h), dj.j[1][1], "dyd/db");
+                for i in 0..4 {
+                    let (mut kp, mut km) = (k, k); kp[i] += h; km[i] -= h;
+                    let (xp, yp) = value(a, b, &kp, &p, fe); let (xm, ym) = value(a, b, &km, &p, fe);
+                    near((xp - xm) / (2.0 * h), a * dj.dk[i], "dxd/dk"); near((yp - ym) / (2.0 * h), b * dj.dk[i], "dyd/dk");
+                }
+                if !fe {
+                    for i in 0..2 {
+                        let (mut pp, mut pm) = (p, p); pp[i] += h; pm[i] -= h;
+                        let (xp, yp) = value(a, b, &k, &pp, fe); let (xm, ym) = value(a, b, &k, &pm, fe);
+                        near((xp - xm) / (2.0 * h), dj.dp[0][i], "dxd/dp"); near((yp - ym) / (2.0 * h), dj.dp[1][i], "dyd/dp");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn lm_tries_reach_the_largest_damping() {
         let (mut lambda, mut tries) = (LAMBDA_MIN, 1);

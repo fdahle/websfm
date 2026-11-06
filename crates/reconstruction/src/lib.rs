@@ -786,6 +786,100 @@ mod tests {
         assert!(cost_after < 0.2, "BA did not fit the refined k1: {cost_after}px");
     }
 
+    // Brown's decentring terms (OpenCV's p1, p2), on the 4-view rig of the k1 test. The
+    // scene is rendered with OpenCV's published model, written out here on its own:
+    //   x' = x·(1 + k1·r²) + 2p1·xy + p2·(r² + 2x²),  y' = y·(1 + k1·r²) + p1·(r² + 2y²) + 2p2·xy.
+    fn tangential_scene(k1: f64, p1: f64, p2: f64) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, usize, usize) {
+        let (fx, fy, cx, cy) = (800.0_f64, 800.0_f64, 320.0_f64, 240.0_f64);
+        let gt_cams: Vec<(M3, V3)> = vec![
+            (so3_exp(&[0.0, 0.0, 0.0]),      [0.0, 0.0, 6.0]),
+            (so3_exp(&[0.10, -0.14, 0.03]),  [0.8, 0.15, 6.3]),
+            (so3_exp(&[-0.12, 0.10, -0.05]), [-0.7, 0.25, 5.7]),
+            (so3_exp(&[0.05, 0.18, 0.06]),   [0.3, -0.4, 6.2]),
+            (so3_exp(&[-0.08, -0.12, 0.10]), [-0.4, -0.3, 5.9]),
+        ];
+        let mut gt_pts: Vec<V3> = Vec::new();
+        for ix in -3..=3 {
+            for iy in -3..=3 {
+                gt_pts.push([ix as f64 * 0.55, iy as f64 * 0.45, 0.3 * ((ix + 2 * iy) as f64).sin()]);
+            }
+        }
+        let mut obs: Vec<f32> = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            for (pi, x) in gt_pts.iter().enumerate() {
+                let p = mat3_vec(r, x);
+                let (a, b) = ((p[0] + t[0]) / (p[2] + t[2]), (p[1] + t[1]) / (p[2] + t[2]));
+                let r2 = a * a + b * b;
+                let xd = a * (1.0 + k1 * r2) + 2.0 * p1 * a * b + p2 * (r2 + 2.0 * a * a);
+                let yd = b * (1.0 + k1 * r2) + p1 * (r2 + 2.0 * b * b) + 2.0 * p2 * a * b;
+                obs.extend_from_slice(&[ci as f32, pi as f32, (fx * xd + cx) as f32, (fy * yd + cy) as f32]);
+            }
+        }
+        let mut k_flat = Vec::new();
+        let mut cam_flat = Vec::new();
+        for (r, t) in &gt_cams {
+            k_flat.extend_from_slice(&[fx as f32, fy as f32, cx as f32, cy as f32]);
+            for row in r { for &v in row { cam_flat.push(v as f32); } }
+            for &v in t { cam_flat.push(v as f32); }
+        }
+        let mut pt_flat = Vec::new();
+        for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
+        (obs, k_flat, cam_flat, pt_flat, gt_cams.len(), gt_pts.len())
+    }
+
+    #[test]
+    fn bundle_adjust_projects_with_opencv_decentring() {
+        // Seeded with the true lens and refining nothing, the scene fits exactly: the
+        // solver's p1, p2 are OpenCV's, not swapped and not of the other sign.
+        let (k1, p1, p2) = (-0.12, 0.0021, -0.0008);
+        let (obs, k_flat, cam_flat, pt_flat, n_cam, n_pts) = tangential_scene(k1, p1, p2);
+        let lens: Vec<f32> = (0..n_cam).flat_map(|_| [0.0, k1 as f32, 0.0, 0.0, 0.0, p1 as f32, p2 as f32]).collect();
+        let (oi, op) = split_obs(&obs);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &oi, &op, &[], &[], &[], &[], 5, &vec![0; n_cam], 0, &[], &[], &lens);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 10;
+        assert!(out[base] < 1e-3, "true lens does not fit: {}px before", out[base]);
+        // The 7-float lens list returns p1, p2 after k1–k4.
+        assert!((out[n_cam * 12 + n_pts * 3 + 8] as f64 - p1).abs() < 1e-7);
+        assert!((out[n_cam * 12 + n_pts * 3 + 9] as f64 - p2).abs() < 1e-7);
+    }
+
+    #[test]
+    fn bundle_adjust_recovers_decentring_from_a_pinhole_seed() {
+        let (k1, p1, p2) = (-0.12, 0.0021, -0.0008);
+        let (obs, k_flat, cam_flat, pt_flat, n_cam, n_pts) = tangential_scene(k1, p1, p2);
+        let lens: Vec<f32> = vec![0.0; n_cam * 7];
+        let (oi, op) = split_obs(&obs);
+        // refine_mask f | k1 | p1,p2 (1 | 4 | 256).
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &oi, &op, &[], &[], &[], &[], 100, &vec![0; n_cam], 261, &[], &[], &lens);
+        let ib = n_cam * 12 + n_pts * 3;
+        let (before, after) = (out[ib + n_cam * 10], out[ib + n_cam * 10 + 1]);
+        assert!(before > 0.5, "test setup too easy: {before}px");
+        for c in 0..n_cam {
+            let (rk1, rp1, rp2) = (out[ib + c * 10 + 4] as f64, out[ib + c * 10 + 8] as f64, out[ib + c * 10 + 9] as f64);
+            assert!((rk1 - k1).abs() < 0.01, "k1 {rk1} vs {k1}");
+            assert!((rp1 - p1).abs() < 2e-4, "p1 {rp1} vs {p1}");
+            assert!((rp2 - p2).abs() < 2e-4, "p2 {rp2} vs {p2}");
+        }
+        assert!(after < 0.05, "did not fit the decentring: {after}px");
+        // Without the p bit the same seed cannot fit it: the terms are what closes the gap.
+        let radial = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &oi, &op, &[], &[], &[], &[], 100, &vec![0; n_cam], 5, &[], &[], &lens);
+        assert!(radial[ib + n_cam * 10 + 1] > 5.0 * after, "radial alone fits as well: {}px", radial[ib + n_cam * 10 + 1]);
+    }
+
+    #[test]
+    fn a_zero_decentring_list_is_the_five_float_lens_exactly() {
+        // Seven floats a camera with p = 0 and no p bit: the same solve, bit for bit, as
+        // the five-float list (only the output's intrinsics stride differs).
+        let (obs, k_flat, cam_flat, pt_flat, n_cam, n_pts) = tangential_scene(-0.12, 0.0, 0.0);
+        let (oi, op) = split_obs(&obs);
+        let five = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &oi, &op, &[], &[], &[], &[], 50, &vec![0; n_cam], 5, &[], &[], &vec![0.0; n_cam * 5]);
+        let seven = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &oi, &op, &[], &[], &[], &[], 50, &vec![0; n_cam], 5, &[], &[], &vec![0.0; n_cam * 7]);
+        let head = n_cam * 12 + n_pts * 3;
+        assert_eq!(five[..head], seven[..head]);
+        for c in 0..n_cam { assert_eq!(five[head + c * 8..head + c * 8 + 8], seven[head + c * 10..head + c * 10 + 8]); }
+        assert_eq!(five[head + n_cam * 8..], seven[head + n_cam * 10..]);
+    }
+
     // Full radial polynomial: recover k1 AND k2 from a scene rendered with both. Same
     // 4-view rig; refine_mask = f|k1|k2 (1|4|8 = 13). Guards the k2 Jacobian + the
     // nCam×7 output stride.
