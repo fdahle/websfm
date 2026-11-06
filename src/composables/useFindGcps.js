@@ -300,7 +300,11 @@ export async function findGcpCandidates({
         },
         { onLog },
       )
-  const frameModel = makeFrameModelResolver({ summary: toRaw(recon.summary), sensors: sensors.sensors })
+  const frameModel = makeFrameModelResolver({
+    calibration: cloud.calibration ? toRaw(cloud.calibration) : null,
+    summary: toRaw(recon.summary),
+    sensors: sensors.sensors,
+  })
   const sourceImages = images.images.flatMap((image) => {
     const camera = cloud.cameras.get(image.uuid)
     if (!camera) return []

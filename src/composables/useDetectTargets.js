@@ -43,7 +43,11 @@ export function useDetectTargets() {
     if (isTagKind(settings.kind)) return planTags()
     const cams = recon.mainSparseCloud?.cameras
     if (!cams?.size) return { photos: [], counts: { predictions: 0, photos: 0, gcps: 0, unplaced: 0, halfPx: null } }
-    const frameModel = makeFrameModelResolver({ summary: toRaw(recon.summary), sensors: sensors.sensors })
+    const frameModel = makeFrameModelResolver({
+      calibration: recon.mainSparseCloud?.calibration ? toRaw(recon.mainSparseCloud.calibration) : null,
+      summary: toRaw(recon.summary),
+      sensors: sensors.sensors,
+    })
     const images = imagesStore.images.filter((im) => cams.has(im.uuid))
     const camById = new Map(images.map((im) => [im.id, cams.get(im.uuid)]))
     const lens = new Map(images.map((im) => [im.id, frameModel(im)]))

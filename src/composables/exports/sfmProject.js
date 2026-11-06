@@ -248,11 +248,12 @@ export function createSfmProjectExports({
     const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
     const sum = summary?.value ?? null
     // Self-cal bags per sensor or per sensorless image (core/sfm/displayFrame.js).
-    const frameModel = makeFrameModelResolver({ summary: toRaw(sum), sensors: sensors.value })
+    const own = cloud.calibration ? toRaw(cloud.calibration) : null
+    const frameModel = makeFrameModelResolver({ calibration: own, summary: toRaw(sum), sensors: sensors.value })
     // Copied out of the raw rows: read through the reactive summary they are Proxies,
     // which cannot be posted to a worker.
     const fidByUuid = new Map(
-      (toRaw(sum)?.fiducialTransforms ?? []).map((t) => [
+      ((own ?? toRaw(sum))?.fiducialTransforms ?? []).map((t) => [
         t.uuid,
         structuredClone({ A: t.A, transform: t.transform ?? null, frame: t.frame }),
       ]),

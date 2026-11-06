@@ -295,6 +295,7 @@ export function createCloudExports({
       // are NOT that pinhole image: the poses would be right and every pixel wrong.
       // Those projects get transforms.json from Export ▸ Undistorted images instead.
       const frameModel = makeFrameModelResolver({
+        calibration: cloud.calibration ? toRaw(cloud.calibration) : null,
         summary: toRaw(summary?.value ?? null),
         sensors: sensors?.value ?? [],
       })

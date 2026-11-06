@@ -283,7 +283,12 @@ export function createCloudEdits({
     const cams = mainSparseCloud.value?.cameras
     const fisheyeIds = new Set((sensors?.value ?? []).filter((s) => isFisheyeModel(s.distortionModel)).map((s) => s.id))
     if (!cams || !fisheyeIds.size) return {}
-    const frameModel = makeFrameModelResolver({ summary: toRaw(summary.value), sensors: sensors.value })
+    const own = mainSparseCloud.value?.calibration
+    const frameModel = makeFrameModelResolver({
+      calibration: own ? toRaw(own) : null,
+      summary: toRaw(summary.value),
+      sensors: sensors.value,
+    })
     const out = {}
     for (const img of imagesStore.images) {
       if (!fisheyeIds.has(img.sensorId) || !cams.has(img.uuid)) continue

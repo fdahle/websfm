@@ -46,7 +46,12 @@ export function createMetashapeExport({
       log('Metashape export: no registered cameras', 'warn', 'Export')
       return
     }
-    const frameModel = makeFrameModelResolver({ summary: toRaw(summary?.value ?? null), sensors: sensors.value })
+    const own = sparseCloud()?.calibration
+    const frameModel = makeFrameModelResolver({
+      calibration: own ? toRaw(own) : null,
+      summary: toRaw(summary?.value ?? null),
+      sensors: sensors.value,
+    })
     const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
 
     // Cameras and their lens groups.

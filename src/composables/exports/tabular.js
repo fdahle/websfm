@@ -117,7 +117,11 @@ export function createTabularExports({
             cameras: sparseCloud()?.cameras,
             images: images.value,
             sensors: sensors.value,
-            frameModel: makeFrameModelResolver({ summary: toRaw(summary?.value ?? null), sensors: sensors.value }),
+            frameModel: makeFrameModelResolver({
+              calibration: sparseCloud()?.calibration ? toRaw(sparseCloud().calibration) : null,
+              summary: toRaw(summary?.value ?? null),
+              sensors: sensors.value,
+            }),
             perImage: source === 'estimatedPerImage',
           })
     if (!rows.length) {

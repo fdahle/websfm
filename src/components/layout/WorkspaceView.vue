@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, toRaw, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
@@ -196,7 +196,12 @@ const activeImageResiduals = computed(() => {
 // scan→canonical affine. Returns null when the image needs neither — the common
 // EXIF-only digital case, where the overlay is already in the right frame.
 function canonicalToScanFor(img, cam) {
-  const resolve = makeFrameModelResolver({ summary: reconstructionStore.summary, sensors: sensors.value })
+  const own = reconstructionStore.mainSparseCloud?.calibration
+  const resolve = makeFrameModelResolver({
+    calibration: own ? toRaw(own) : null,
+    summary: toRaw(reconstructionStore.summary),
+    sensors: sensors.value,
+  })
   const { dist, selfCal, fiducial } = resolve(img)
   return makeCanonicalToScan({ K: cam.K, dist, selfCal, fiducial })
 }

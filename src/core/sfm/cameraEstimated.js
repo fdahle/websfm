@@ -8,7 +8,7 @@
 
 import { opkFromMatrix, opkMatrix } from '../footprint.js'
 import { applySimilarity } from '../products/georef.js'
-import { DISTORTION_COEFFS, isFisheyeModel } from './distortion.js'
+import { DISTORTION_COEFFS, isFisheyeModel, inferDistortionModel } from './distortion.js'
 
 export function estimatedIntrinsics(cam) {
   if (!cam?.K) return null
@@ -95,9 +95,10 @@ const transpose3 = (A) => A[0].map((_, j) => A.map((r) => r[j]))
 // (utils/exportCsv.js buildSensorsCsv): per camera group the mean focal length and
 // principal point of its registered cameras, or with `perImage` each camera's own, in
 // pixels of the frame the cameras were solved in (a film scan's fiducial frame). The
-// lens is the one the run corrected (displayFrame.js makeFrameModelResolver,
-// `frameModel`): the group's own model, or a self-calibrated fisheye in its place, and
-// any radial terms self-calibration fitted on top of it as selfcalK1…selfcalK3.
+// lens is the one the cameras were solved in (displayFrame.js makeFrameModelResolver,
+// `frameModel`, over the model's own calibration): the whole solved lens, or — for a
+// model solved before the lens was solved whole — the group's own model with the radial
+// terms self-calibration fitted on top of it as selfcalK1…selfcalK3.
 export function estimatedCalibration({ cameras, images, sensors = [], frameModel = null, perImage = false }) {
   const sensorById = new Map(sensors.map((s) => [s.id, s]))
   const groups = new Map()
@@ -115,9 +116,17 @@ export function estimatedCalibration({ cameras, images, sensors = [], frameModel
   return [...groups.values()].map(({ img, sensor, Ks }) => {
     const fm = frameModel?.(img) ?? null
     const fisheye = fm?.dist?.fisheye && !isFisheyeModel(sensor?.distortionModel)
+    // A frame model with no correction on top is the whole lens the model was solved
+    // with: write it, not the sensor's (which may be a guess, or edited since).
+    const whole = fm && !fm.selfCal && !fm.dist?.fisheye
     const lens = fisheye
       ? { distortionModel: 'fisheye', ...Object.fromEntries(['k1', 'k2', 'k3', 'k4'].map((k) => [k, fm.dist[k]])) }
-      : Object.fromEntries(['distortionModel', ...DISTORTION_COEFFS].map((k) => [k, sensor?.[k] ?? null]))
+      : whole
+        ? {
+            distortionModel: inferDistortionModel(fm.dist),
+            ...Object.fromEntries(DISTORTION_COEFFS.map((k) => [k, fm.dist?.[k] || null])),
+          }
+        : Object.fromEntries(['distortionModel', ...DISTORTION_COEFFS].map((k) => [k, sensor?.[k] ?? null]))
     return {
       ...(perImage ? { image: img.name } : {}),
       label: sensor?.label ?? img.name,

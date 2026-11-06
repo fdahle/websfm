@@ -154,6 +154,15 @@ describe('estimatedCalibration', () => {
     expect(rows[0]).toMatchObject({ distortionModel: 'brown', k1: -0.1, selfcalK1: 0.003, selfcalK2: -0.001 })
     expect(rows[1]).toMatchObject({ distortionModel: 'fisheye', k1: 0.01, k2: 0.02, selfcalK1: null })
   })
+
+  it('writes the whole lens a model was solved with, not the sensor table', () => {
+    const solved = { k1: -0.12, k2: 0.03, k3: 0, p1: 0.0021, p2: -0.0008 }
+    const frameModel = (img) => (img.uuid === 'd' ? { dist: null, selfCal: null } : { dist: solved, selfCal: null })
+    const rows = estimatedCalibration({ cameras, images, sensors, frameModel })
+    expect(rows[0]).toMatchObject({ distortionModel: 'brown', ...solved, k3: null, selfcalK1: null })
+    // A lens solved to nothing is a pinhole one, whatever the sensor said.
+    expect(rows[1]).toMatchObject({ distortionModel: 'pinhole', k1: null, p1: null })
+  })
 })
 
 describe('opkAtCameraGrid', () => {
