@@ -161,3 +161,27 @@ describe('makeFrameModelResolver (fisheye)', () => {
     })
   })
 })
+
+describe('makeFrameModelResolver (a whole solved lens)', () => {
+  it('a full row replaces the sensor lens, decentring terms included', () => {
+    const sensors = [{ id: 's', distortionModel: 'brown', k1: -0.2, k2: 0.05, p1: 0.001 }]
+    const lens = { k1: -0.11, k2: 0.02, k3: 0.001, p1: 0.0021, p2: -0.0008 }
+    const summary = { selfCalDistortion: [{ sensorId: 's', full: true, ...lens, fitRmsPx: 0 }] }
+    const fm = makeFrameModelResolver({ summary, sensors })({ uuid: 'u', sensorId: 's' })
+    expect(fm.dist).toEqual(lens)
+    expect(fm.selfCal).toBeNull()
+    // A full row of a lens that solved to nothing is no lens, not the sensor's.
+    const zero = { sensorId: 's', full: true, k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 }
+    expect(
+      makeFrameModelResolver({ summary: { selfCalDistortion: [zero] }, sensors })({ sensorId: 's' }).dist,
+    ).toBeNull()
+  })
+
+  it('a row without `full` (a run before the lens state) still composes on the sensor lens', () => {
+    const sensors = [{ id: 's', distortionModel: 'brown', k1: -0.2 }]
+    const summary = { selfCalDistortion: [{ sensorId: 's', k1: 0.01, k2: 0, k3: 0, fitRmsPx: 0.01 }] }
+    const fm = makeFrameModelResolver({ summary, sensors })({ uuid: 'u', sensorId: 's' })
+    expect(fm.dist).toMatchObject({ k1: -0.2 })
+    expect(fm.selfCal).toEqual({ k1: 0.01, k2: 0, k3: 0 })
+  })
+})

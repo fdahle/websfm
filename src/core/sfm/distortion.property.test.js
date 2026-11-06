@@ -98,8 +98,12 @@ describe('lens model properties', () => {
     ]
     fc.assert(
       fc.property(fc.constantFrom(...zeros), point(1), (d, [x, y]) => {
-        expect(distortNormalized(x, y, d)).toEqual([x, y])
-        expect(undistortNormalized(x, y, d)).toEqual([x, y])
+        // The same point, value for value: −0 and +0 are one position (toEqual would
+        // tell them apart, and fast-check does draw −0).
+        const same = ([u, v]) =>
+          expect([u === x || (u === 0 && x === 0), v === y || (v === 0 && y === 0)]).toEqual([true, true])
+        same(distortNormalized(x, y, d))
+        same(undistortNormalized(x, y, d))
       }),
     )
   })

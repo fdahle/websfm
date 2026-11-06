@@ -127,35 +127,26 @@ export function createBundleSession(ctx) {
     )
   }
 
-  // The frame a solve runs in. A pinhole camera's observations are its (undistorted)
-  // keypoints. A FISHEYE camera's go to the crate in the pixels its lens recorded —
-  // re-distorted with the K and lens they were undistorted about, which recovers them
-  // exactly — with that lens on its K, so bundle.rs fits Kannala–Brandt residuals: an
-  // honest pixel error at any field angle (the pinhole frame stretches the rim by
-  // 1/cos²θ) and a lens self-calibration can refine. Returns the solve's kList and
-  // observations; with no fisheye camera, the inputs unchanged.
+  // The frame a solve runs in: every camera's observations in the pixels its lens
+  // recorded — the view re-distorted with the K and lens it was undistorted about, which
+  // recovers them exactly — with that whole lens on its K (selfCalFold.js baLensOf), so
+  // bundle.rs fits the lens itself: Brown k1–k3, p1, p2 or a fisheye's Kannala–Brandt
+  // k1–k4. An honest pixel error at any field angle, and self-calibration solves the
+  // lens rather than a correction to it. A rational lens's camera stays in the pinhole
+  // view. Returns the solve's kList, observations and whether it needs `fullLens`.
   function lensFrame(uuidList, kList, observations) {
-    const lenses = uuidList.map((u) => selfCal.lensOf(u))
-    if (!lenses.some(Boolean)) return { kList, observations }
+    const lenses = uuidList.map((u) => selfCal.baLensOf(u))
+    const fullLens = lenses.some((l) => l && !l.fisheye)
+    if (!lenses.some(Boolean)) return { kList, observations, fullLens }
+    const distorts = (l) => !!l && (l.fisheye || !!(l.k1 || l.k2 || l.k3 || l.p1 || l.p2))
     return {
-      kList: kList.map((K, ci) =>
-        lenses[ci]
-          ? {
-              ...K,
-              fisheye: true,
-              fisheyeTerms: lenses[ci].terms,
-              k1: lenses[ci].k1,
-              k2: lenses[ci].k2,
-              k3: lenses[ci].k3,
-              k4: lenses[ci].k4,
-            }
-          : K,
-      ),
+      kList: kList.map((K, ci) => (lenses[ci] ? { ...K, ...lenses[ci] } : { ...K, k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 })),
       observations: mapObservations(observations, (ci) => {
         const lens = lenses[ci],
           K = kList[ci]
-        return lens ? (x, y) => distortPixel(x, y, K, lens) : null
+        return distorts(lens) ? (x, y) => distortPixel(x, y, K, lens) : null
       }),
+      fullLens,
     }
   }
 
@@ -196,7 +187,7 @@ export function createBundleSession(ctx) {
     const camList = uuidList.map((u) => cameras.get(u))
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     const ptIds = [...ptSet]
-    const { kList, observations } = lensFrame(
+    const { kList, observations, fullLens } = lensFrame(
       uuidList,
       camList.map((c) => c.K),
       buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt),
@@ -205,6 +196,7 @@ export function createBundleSession(ctx) {
     const result = await bundleAdjust(camList, kList, posBefore, observations, {
       maxIters: iters,
       refineIntrinsics: 'none',
+      fullLens,
       solver: cfg.baSolver,
       flatPoints: true,
       fixedCams: fixed.map((_, k) => free.length + k),
@@ -322,7 +314,7 @@ export function createBundleSession(ctx) {
     // kList / observations in the solve's frame: a fisheye camera's in recorded pixels
     // with its lens on K (lensFrame). Everything below — the diagnostic, the robust
     // acceptance, the validation — judges the solve in that same frame.
-    const { kList, observations } = lensFrame(
+    const { kList, observations, fullLens } = lensFrame(
       uuidList,
       camList.map((c) => c.K),
       gcp ? appendObservations(tieObs, gcp.observations) : tieObs,
@@ -390,6 +382,7 @@ export function createBundleSession(ctx) {
     const result = await bundleAdjust(camList, kList, posBefore, observations, {
       maxIters: iters,
       refineIntrinsics: refineMode,
+      fullLens,
       refineReadout: rollingShutter,
       ...(rig ? { rig: rig.attach(uuidList), refineRig: !fixedCameras?.size } : {}),
       sensorOfCam,
@@ -574,13 +567,13 @@ export function createBundleSession(ctx) {
         const cxcy = wantsCxcy
           ? `, cx ${kList[ci].cx.toFixed(1)}→${rk.cx.toFixed(1)}, cy ${kList[ci].cy.toFixed(1)}→${rk.cy.toFixed(1)}`
           : ''
-        // Refined shared radial coeffs (copy the non-zero ones into the sensor table);
-        // a fisheye's are its whole Kannala–Brandt lens, before → after.
+        // The group's whole solved lens: Brown k1–k3, p1, p2 (the non-zero ones), or a
+        // fisheye's Kannala–Brandt terms, before → after.
         const kterms = rk.fisheye
           ? ['k1', 'k2', 'k3', 'k4']
               .slice(0, rk.fisheyeTerms || 4)
               .map((k) => `${k} ${(kList[ci][k] ?? 0).toFixed(5)}→${(rk[k] ?? 0).toFixed(5)}`)
-          : ['k1', 'k2', 'k3'].filter((k) => rk[k]).map((k) => `${k} ${rk[k].toFixed(5)}`)
+          : ['k1', 'k2', 'k3', 'p1', 'p2'].filter((k) => rk[k]).map((k) => `${k} ${rk[k].toFixed(5)}`)
         const kdist = kterms.length ? `, ${rk.fisheye ? 'fisheye ' : ''}${kterms.join(', ')}` : ''
         // A sensorless camera is a group of its own: one line each, so debug-level
         // (a sensorless set would otherwise print a line per image per pass).
@@ -702,6 +695,7 @@ export function createBundleSession(ctx) {
       const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds), lf.observations, {
         maxIters: baIterations,
         refineIntrinsics: 'none',
+        fullLens: lf.fullLens,
         flatPoints: true,
         sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
         cameraPriors: constrained.priors,
@@ -820,6 +814,7 @@ export function createBundleSession(ctx) {
       const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds, anchorPts), lf.observations, {
         maxIters: baIterations,
         refineIntrinsics: 'none',
+        fullLens: lf.fullLens,
         sensorOfCam,
         gcpAnchors: anchors,
         flatPoints: true,

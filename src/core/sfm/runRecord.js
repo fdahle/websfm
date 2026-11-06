@@ -419,15 +419,15 @@ export function assembleSummary({
     },
     unregisteredComponents: remainingComponents,
     perPairInitReproj,
-    // WS2: composed self-calibrated radial distortion per sensor {k1,k2,k3} (folded
-    // into keypoints for the sparse solve; the dense stage applies it to the sensor's
-    // undistortion so its rasters land in the same pinhole frame), about the final
-    // camera K. An image without a sensor self-calibrates alone: its row carries
-    // `sensorId: null` and its `imageUuid`. Empty when self-calibration was off.
-    // `fitRmsPx` is the composed-fit residual (selfCalFold.js warns above
-    // SFM_TUNING.selfCalComposedWarnPx), `centreMovedPx` how far the principal point
-    // moved after the first fold, its main cause. Rows from selfCalFold.js ▸
-    // distortionSummary.
+    // The solved lens of every self-calibration group whose lens the run changed: the
+    // WHOLE lens (`full: true`; Brown k1–k3, p1, p2, or a fisheye's k1–k4 with `fisheye:
+    // true`), which replaces the sensor's for dense and the exports
+    // (displayFrame.js makeFrameModelResolver), about the final camera K. An image
+    // without a sensor self-calibrates alone: its row carries `sensorId: null` and its
+    // `imageUuid`. Empty when no lens changed. `fitRmsPx` is 0 (the view is derived from
+    // the recorded pixels with exactly this lens). Rows from selfCalFold.js ▸
+    // distortionSummary. A row without `full` (a run before the lens state) is a radial
+    // correction composed on top of the sensor's lens.
     selfCalDistortion,
     // F4: per-image scan→canonical transform for each film image, so the dense
     // stage reproduces the exact same frame (it must NOT re-fit — the sparse run

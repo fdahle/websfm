@@ -19,6 +19,10 @@ export const SELF_CAL_STAGE_DEFAULTS = {
   k2MinCams: 8,
   k2MinObs: 10_000, // add k2 once the model is well populated
   cxcyMinCams: 10, // add principal point once many cameras constrain it
+  // Brown's decentring terms p1, p2 come with the principal point: a decentred lens
+  // shifts the image much as a moved principal point does, so the two are only told
+  // apart together, on the same well-populated model. A fisheye group has none (the
+  // crate pins them there).
   k3MinCams: 20,
   k3MinObs: 30_000, // add k3 only on a large, well-observed model
   // k4 exists only on a four-term (Kannala–Brandt, OPENCV_FISHEYE) lens. It is the θ⁸
@@ -34,14 +38,14 @@ export const SELF_CAL_STAGE_DEFAULTS = {
 export const SELF_CAL_BASE_TERMS = 'f,k1'
 
 // Resolve the refine-terms string for a post-filter BA pass under the `auto` schedule.
-// Order is fixed (f, cxcy, k1, k2, k3, k4) but the crate's bitmask parser is order-free.
+// Order is fixed (f, cxcy, p, k1, k2, k3, k4) but the crate's bitmask parser is order-free.
 //   lensTerms  — the most self-calibratable k terms any camera's lens has (4 for a
 //                four-term fisheye; 0 for the pinhole + Brown residual, which has no k4)
 //   k3Settled  — an earlier pass of this run already refined k3
 export function stagedSelfCalTerms({ nCams, nObs, lensTerms = 0, k3Settled = false }, cfg = SELF_CAL_STAGE_DEFAULTS) {
   const c = { ...SELF_CAL_STAGE_DEFAULTS, ...cfg }
   const terms = ['f']
-  if (nCams >= c.cxcyMinCams) terms.push('cxcy')
+  if (nCams >= c.cxcyMinCams) terms.push('cxcy', 'p')
   terms.push('k1')
   if (nCams >= c.k2MinCams && nObs >= c.k2MinObs) terms.push('k2')
   const k3 = nCams >= c.k3MinCams && nObs >= c.k3MinObs
@@ -98,13 +102,13 @@ export function distortionIdentifiable({ nCams, nTracks, nMultiViewTracks }, cfg
   }
 }
 
-// Drop the radial terms from a refine string, keeping f / cx,cy. Returns 'none' if
-// nothing identifiable is left.
+// Drop the lens terms (radial k1–k4 and decentring p) from a refine string, keeping
+// f / cx,cy. Returns 'none' if nothing identifiable is left.
 export function withoutDistortionTerms(refineMode) {
   const kept = String(refineMode)
     .split(',')
     .map((s) => s.trim())
-    .filter((t) => t && !/^k[1-4]$/.test(t))
+    .filter((t) => t && !/^(k[1-4]|p)$/.test(t))
   return kept.length ? kept.join(',') : 'none'
 }
 
@@ -115,7 +119,7 @@ export function stagedSelfCalDeferred(
 ) {
   const c = { ...SELF_CAL_STAGE_DEFAULTS, ...cfg }
   const out = []
-  if (nCams < c.cxcyMinCams) out.push(`cx,cy (needs ≥${c.cxcyMinCams} cams, have ${nCams})`)
+  if (nCams < c.cxcyMinCams) out.push(`cx,cy and p1,p2 (needs ≥${c.cxcyMinCams} cams, have ${nCams})`)
   if (!(nCams >= c.k2MinCams && nObs >= c.k2MinObs))
     out.push(`k2 (needs ≥${c.k2MinCams} cams & ≥${c.k2MinObs} obs, have ${nCams}/${nObs})`)
   const k3 = nCams >= c.k3MinCams && nObs >= c.k3MinObs

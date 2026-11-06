@@ -632,7 +632,7 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
       { onLog: (m) => logs.push(String(m)) },
     )
     expect(out.status).toBe('done')
-    expect(logs.some((m) => /re-mapped \d+ fisheye image/.test(m))).toBe(true)
+    expect(logs.some((m) => /re-derived \d+ images?. keypoints from the recorded pixels/.test(m))).toBe(true)
     expect(logs.some((m) => /folded self-calibrated distortion/.test(m))).toBe(false)
 
     const camByUuid = new Map(out.cameras.map((c) => [c.uuid, c]))
@@ -673,18 +673,18 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
 
     expect(out.status).toBe('done')
     expect(out.cameras).toHaveLength(3)
-    // The distortion was folded into the keypoints, not left stranded on the model:
-    // every camera K is pinhole (k1 = 0) at the end.
+    // The lens lives in the run's lens state and the keypoints are its pinhole view,
+    // not left stranded on the model: every camera K is pinhole (k1 = 0) at the end.
     for (const c of out.cameras) expect(c.K.k1 || 0).toBe(0)
     // Pinhole reprojection stats are now consistent with BA's own RMS — the point of
     // D1. With a stranded k1 this would stay large and the filter would gut the model.
     expect(out.summary.postBaMedianPx).toBeLessThan(1.0)
     expect(out.points.length).toBeGreaterThan(30)
-    expect(logs.some(([, , m]) => /folded self-calibrated distortion/.test(m))).toBe(true)
+    expect(logs.some(([, , m]) => /re-derived \d+ images?. keypoints from the recorded pixels/.test(m))).toBe(true)
 
-    // D2: the run exports the composed self-calibrated distortion so dense can reproduce
-    // the fold. One sensor group, a k1 near the true −0.05 that BA recovered; k2/k3 = 0
-    // (not refined) and a tiny composed-fit residual.
+    // D2: the run exports the solved lens so dense can reproduce the view: one sensor
+    // group's whole lens, a k1 near the true −0.05 that BA recovered; k2/k3 = 0 (not
+    // refined).
     expect(out.summary.selfCalDistortion).toHaveLength(1)
     const [scd] = out.summary.selfCalDistortion
     expect(scd.sensorId).toBe('sensorA')
@@ -1577,7 +1577,7 @@ describe('reconstruct — self-calibration propagation and bookkeeping', () => {
     expect(quantile(res, 0.5)).toBeLessThan(0.05)
     expect(quantile(res, 0.95)).toBeLessThan(0.15)
     expect(res.at(-1)).toBeLessThan(0.4)
-    expect(logs.some((m) => /folded self-calibrated distortion/.test(m))).toBe(true)
+    expect(logs.some((m) => /re-derived \d+ images?. keypoints from the recorded pixels/.test(m))).toBe(true)
     // One record per sensorless image, keyed by the image.
     const recs = out.summary.selfCalDistortion
     expect(recs.map((d) => d.imageUuid).sort()).toEqual([...uuids].sort())

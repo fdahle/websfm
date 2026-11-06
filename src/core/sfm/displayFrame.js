@@ -210,14 +210,23 @@ export function makeFrameModelResolver({ summary = null, sensors = [] } = {}) {
           ? selfCalByImage.get(image.uuid)
           : null
     const fiducial = image?.uuid != null ? (fidByUuid.get(image.uuid) ?? null) : null
-    // A `fisheye` row is the run's self-calibrated lens (selfCalFold.js): it replaces
-    // the sensor's, it does not compose on top of it.
+    // A `full` row (and every `fisheye` row) is the run's whole solved lens
+    // (selfCalFold.js): it replaces the sensor's, it does not compose on top of it.
     if (sc?.fisheye) {
       return {
         dist: { fisheye: true, k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0, k4: sc.k4 || 0 },
         selfCal: null,
         fiducial,
         filmMissing: false,
+      }
+    }
+    if (sc?.full) {
+      const lens = { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0, p1: sc.p1 || 0, p2: sc.p2 || 0 }
+      return {
+        dist: lens.k1 || lens.k2 || lens.k3 || lens.p1 || lens.p2 ? lens : null,
+        selfCal: null,
+        fiducial,
+        filmMissing: sensor?.kind === 'film' && !fiducial,
       }
     }
     const selfCal = sc && (sc.k1 || sc.k2 || sc.k3) ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null

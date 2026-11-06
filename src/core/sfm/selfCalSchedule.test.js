@@ -18,11 +18,11 @@ describe('stagedSelfCalTerms', () => {
   })
 
   it('adds principal point at cams ≥ 10', () => {
-    expect(stagedSelfCalTerms({ nCams: 10, nObs: 12_000 })).toBe('f,cxcy,k1,k2')
+    expect(stagedSelfCalTerms({ nCams: 10, nObs: 12_000 })).toBe('f,cxcy,p,k1,k2')
   })
 
   it('unlocks the full bag on a large, well-observed model', () => {
-    expect(stagedSelfCalTerms({ nCams: 20, nObs: 30_000 })).toBe('f,cxcy,k1,k2,k3')
+    expect(stagedSelfCalTerms({ nCams: 20, nObs: 30_000 })).toBe('f,cxcy,p,k1,k2,k3')
   })
 
   it('reports what is deferred and why', () => {
@@ -36,19 +36,19 @@ describe('stagedSelfCalTerms', () => {
   it('adds k4 on a four-term fisheye only after a pass that refined k3', () => {
     const big = { nCams: 104, nObs: 36_000 }
     // A pinhole (Brown residual) or two-term lens has no k4: never staged or reported.
-    expect(stagedSelfCalTerms({ ...big, k3Settled: true })).toBe('f,cxcy,k1,k2,k3')
-    expect(stagedSelfCalTerms({ ...big, lensTerms: 2, k3Settled: true })).toBe('f,cxcy,k1,k2,k3')
+    expect(stagedSelfCalTerms({ ...big, k3Settled: true })).toBe('f,cxcy,p,k1,k2,k3')
+    expect(stagedSelfCalTerms({ ...big, lensTerms: 2, k3Settled: true })).toBe('f,cxcy,p,k1,k2,k3')
     expect(stagedSelfCalDeferred({ ...big, lensTerms: 2 })).toHaveLength(0)
     // Four terms: the first pass that unlocks k3 holds k4 back …
-    expect(stagedSelfCalTerms({ ...big, lensTerms: 4 })).toBe('f,cxcy,k1,k2,k3')
+    expect(stagedSelfCalTerms({ ...big, lensTerms: 4 })).toBe('f,cxcy,p,k1,k2,k3')
     expect(stagedSelfCalDeferred({ ...big, lensTerms: 4 }).join(' ')).toMatch(
       /k4 \(waits for a pass that has refined k3\)/,
     )
     // … the next one adds it.
-    expect(stagedSelfCalTerms({ ...big, lensTerms: 4, k3Settled: true })).toBe('f,cxcy,k1,k2,k3,k4')
+    expect(stagedSelfCalTerms({ ...big, lensTerms: 4, k3Settled: true })).toBe('f,cxcy,p,k1,k2,k3,k4')
     expect(stagedSelfCalDeferred({ ...big, lensTerms: 4, k3Settled: true })).toHaveLength(0)
     // Below the gates k4 waits with k3.
-    expect(stagedSelfCalTerms({ nCams: 15, nObs: 40_000, lensTerms: 4, k3Settled: true })).toBe('f,cxcy,k1,k2')
+    expect(stagedSelfCalTerms({ nCams: 15, nObs: 40_000, lensTerms: 4, k3Settled: true })).toBe('f,cxcy,p,k1,k2')
     expect(stagedSelfCalDeferred({ nCams: 15, nObs: 40_000, lensTerms: 4 }).join(' ')).toMatch(/k4 \(needs ≥20 cams/)
   })
 })
@@ -69,6 +69,7 @@ describe('distortionIdentifiable', () => {
     expect(withoutDistortionTerms('f,k1')).toBe('f')
     expect(withoutDistortionTerms('f,cxcy,k1,k2,k3')).toBe('f,cxcy')
     expect(withoutDistortionTerms('f,cxcy,k1,k2,k3,k4')).toBe('f,cxcy')
+    expect(withoutDistortionTerms('f,cxcy,p,k1,k2')).toBe('f,cxcy') // the decentring terms go with the radial ones
     expect(withoutDistortionTerms('k1')).toBe('none')
   })
 

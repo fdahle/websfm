@@ -323,7 +323,12 @@ export async function reconstructSingleModel(input, hooks = {}) {
     const fiducialTransforms = applyFiducialFrames({ imgs, gcps, log })
     const { Kmap, defaultKCount } = resolveIntrinsics({ imgs, intrinsicsRecord, log })
     const moveGcpObs = gcpObservationMover(gcps)
-    const { anyCalibratedDistortion, undistortedUuids } = undistortAtIngest({ imgs, Kmap, moveGcpObs, log })
+    const { anyCalibratedDistortion, undistortedUuids, recordedByUuid } = undistortAtIngest({
+      imgs,
+      Kmap,
+      moveGcpObs,
+      log,
+    })
     refitMovedPairs({
       donePairs,
       bridgePairs: weakPairs,
@@ -584,7 +589,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
     // cleanups during registration.
     const filterModelTracks = (gates) => filterTracks({ tracks, ids, cameras, keypointsAt, ...gates })
 
-    // Self-cal groups + distortion fold (selfCalFold.js) and every bundle adjustment
+    // Self-cal groups + the lens state (selfCalFold.js) and every bundle adjustment
     // (bundleSession.js). Both before registerImages: the interim BA self-calibrates
     // f,k1 mid-registration (D3) and folds during the registration call.
     const selfCal = createSelfCalFold({
@@ -595,8 +600,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       sensorIntByUuid,
       fiducialTransforms,
       log,
-      refoldMovePx: cfg.selfCalRefoldMovePx,
-      composedWarnPx: cfg.selfCalComposedWarnPx,
+      recordedByUuid,
     })
     // A multispectral rig (Sparse Model ▸ Camera rig, rigModel.js): one pose per capture
     // in the global solves. Not for an extension, whose fixed cameras keep their solve.

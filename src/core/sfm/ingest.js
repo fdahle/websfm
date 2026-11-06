@@ -246,10 +246,16 @@ export function gcpObservationMover(gcps) {
 // (matches reference them), only positions move. A fisheye keypoint too far
 // off-axis for a pinhole frame (distortion.js FISHEYE_MAX_RAY_DEG) becomes a
 // missing (NaN) keypoint, which every track/BA consumer already skips (hasKp).
+// `recordedByUuid` keeps what was undistorted: each image's keypoint set as the lens
+// recorded it (sets are immutable, so this costs a reference), its GCP marks, and the
+// K and lens of the undistortion. The run's lens state (selfCalFold.js) re-derives the
+// pinhole view from these whenever the lens or K changes, instead of correcting the
+// view on top of earlier corrections.
 export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
   let undistortedImgs = 0
   let anyCalibratedDistortion = false
   const undistortedUuids = new Set()
+  const recordedByUuid = new Map() // uuid → { kp, marks: [[x, y], …], K, lens }
   let shiftSum = 0,
     shiftMax = 0,
     shiftN = 0,
@@ -264,6 +270,9 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
     if (!dist.fisheye || dist.k1 || dist.k2 || dist.k3 || dist.k4) anyCalibratedDistortion = true
     const K = Kmap.get(img.uuid)
     if (dist.fisheye) fisheyeKps += img.kp.n
+    const marks = []
+    moveGcpObs(img.uuid, (x, y) => (marks.push([x, y]), { x, y }))
+    recordedByUuid.set(img.uuid, { kp: img.kp, marks, K: { fx: K.fx, fy: K.fy, cx: K.cx, cy: K.cy }, lens: dist })
     img.kp = mapPositions(img.kp, (x, y) => {
       const u = undistortKeypoint(x, y, K, dist)
       // eslint-disable-next-line no-self-compare
@@ -298,7 +307,7 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
       'Reconstruction',
     )
   }
-  return { anyCalibratedDistortion, undistortedUuids }
+  return { anyCalibratedDistortion, undistortedUuids, recordedByUuid }
 }
 
 // ── Re-fit pairwise F on the moved keypoints ─────────────────────────────

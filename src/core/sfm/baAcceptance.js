@@ -58,6 +58,14 @@ function projectFullGlobal(cam, K, x, y, z) {
   } else {
     const r4 = r2 * r2
     d = 1 + (K.k1 ?? 0) * r2 + (K.k2 ?? 0) * r4 + (K.k3 ?? 0) * r4 * r2
+    // Brown's decentring terms (OpenCV's p1, p2; bundle.rs distort_norm).
+    const p1 = K.p1 ?? 0,
+      p2 = K.p2 ?? 0
+    if (p1 || p2) {
+      const xd = a * d + 2 * p1 * a * b + p2 * (r2 + 2 * a * a)
+      const yd = b * d + p1 * (r2 + 2 * b * b) + 2 * p2 * a * b
+      return { x: K.fx * xd + K.cx, y: K.fy * yd + K.cy }
+    }
   }
   return { x: K.fx * a * d + K.cx, y: K.fy * b * d + K.cy }
 }
