@@ -1536,6 +1536,37 @@ describe('reconstruct — self-calibration propagation and bookkeeping', () => {
   // every later PnP reads) kept the nominal focal, and the crate's per-group focal
   // SCALE then kept the early and late cameras apart for good (fx spread over
   // 1178.7–1265.2 px on one sensor; true 1221).
+  // Brown's decentring under auto self-calibration is a measured choice
+  // (bundleSession.js, selfCalDecentringMinGain): a block shot through a decentred lens
+  // keeps p1, p2 and recovers them; through a centred one it drops them, and the solved
+  // lens has none (they would only trade with the poses).
+  for (const [what, dist, expectKept] of [
+    ['a decentred lens', { k1: -0.05, k2: 0.008, p1: 0.0025, p2: -0.0015 }, true],
+    ['a centred lens', { k1: -0.05, k2: 0.008 }, false],
+  ]) {
+    it(`auto self-calibration ${expectKept ? 'keeps' : 'drops'} p1, p2 on ${what}`, async () => {
+      const sc = aerialBlock({ seed: 11, rows: 4, cols: 6, nPoints: 2500, dist })
+      const logs = []
+      const out = await reconstruct(
+        { images: sc.images, pairs: sc.pairs, settings: { secondaryModels: false } },
+        { onLog: (m) => logs.push(String(m)) },
+      )
+      expect(out.status).toBe('done')
+      expect(out.cameras.length).toBe(24)
+      expect(logs.some((m) => new RegExp(`decentring p1, p2 ${expectKept ? 'kept' : 'dropped'}`).test(m))).toBe(true)
+      const [row] = out.summary.selfCalDistortion
+      expect(row.full).toBe(true)
+      if (expectKept) {
+        expect(Math.abs(row.p1 - dist.p1)).toBeLessThan(5e-4)
+        expect(Math.abs(row.p2 - dist.p2)).toBeLessThan(5e-4)
+      } else {
+        expect(row.p1).toBe(0)
+        expect(row.p2).toBe(0)
+      }
+      expect(Math.abs(row.k1 - dist.k1)).toBeLessThan(0.01)
+    }, 120_000)
+  }
+
   for (const mode of ['f', 'f,cxcy']) {
     it(`propagates a '${mode}' self-calibration to every image of the sensor`, async () => {
       const sc = aerialBlock({ seed: 3, rows: 4, cols: 6, nPoints: 2500, dist: { k1: 0, k2: 0 }, focalError: 1.06 })
