@@ -40,7 +40,31 @@ npm run test:browser    # browser storage, keyboard, import/export and multi-tab
 npm run test:browser:firefox  # the same suite in Firefox (~20 min); Chromium-only tests skip
 npm run test:browser:webkit   # and in WebKit, Safari's engine (~15 min)
 cargo test --manifest-path crates/Cargo.toml --workspace --release
+npm run test:mutation   # how many deliberate bugs the tests catch (Stryker, by hand)
 ```
+
+### Writing tests that catch bugs
+
+A test written by running the code and pasting its output only proves the code still
+does what it did. Test against what the result must be instead:
+
+- **Known truth**: render a synthetic scene from known cameras and depths and check the
+  result against them (`tests/bench/patchmatchCases.js`, the BA tests in `crates/`).
+- **Properties** (fast-check, `*.property.test.js`): what follows from the maths for
+  any input, drawn at random and shrunk to the smallest failing case: a rotation is
+  orthonormal, an inverse undoes its forward model, a fit moves with the data under a
+  similarity, a CRS transform round-trips. State the function's own preconditions in
+  the test (`fc.pre`), or a documented refusal shows up as a failure.
+- **An outside reference with one right answer**: COLMAP's camera projections
+  (`tests/fixtures/colmap/`, made with pycolmap by `scripts/fixtures/make-colmap-cameras.py`),
+  Metashape's exports (`tests/fixtures/metashape/`), PROJ for CRS values. A whole
+  reconstruction is not one: COLMAP may land in another local minimum, so compare it with
+  ground truth (ETH3D, RTK) in the bench instead.
+- **Then break the code on purpose** and check the test fails. `npm run test:mutation`
+  does that systematically: Stryker makes small edits to the modules in
+  `stryker.config.json` (`--mutate <file>` for others) and lists every edit no test
+  noticed (`reports/mutation/index.html`). A surviving mutant is a bug the tests would let
+  through; it is not run in CI.
 
 Type checking is incremental: executable TypeScript currently includes packed-point
 views and project-index merging, alongside the shared data types and migrated

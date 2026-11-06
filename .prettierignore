@@ -5,6 +5,7 @@ src/wasm/
 public/
 crates/
 package-lock.json
+tests/fixtures/colmap/cameras.json
 # Local output and private notes.
 bench-out/
 test-results/

@@ -59,6 +59,9 @@ npm run typecheck
   event handler with several statements is an arrow function,
   `@click="() => { a = 1; b() }"`: Prettier puts plain `a = 1; b()` on two lines
   without the semicolon, which Vue cannot parse (`npm run typecheck` catches it).
+- **Tests check what the result must be**, not what the code returned when you ran it:
+  known truth, properties of the maths, an outside reference with one right answer.
+  Break the code on purpose and see the test fail ([docs/development.md](docs/development.md#writing-tests-that-catch-bugs)).
 - **Keep pull requests small and focused**: one fix or feature each. They are
   reviewed faster, and a bisect can find what broke.
 - **Rust changes:** run `npm run build:wasm` and commit the regenerated `src/wasm/`

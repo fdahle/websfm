@@ -67,3 +67,7 @@ __pycache__/
 # Claude Code's local state (worktrees, personal settings)
 .claude/worktrees/
 .claude/settings.local.json
+
+# Mutation testing (npm run test:mutation)
+reports/
+.stryker-tmp/

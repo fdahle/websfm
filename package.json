@@ -36,7 +36,8 @@
     "check:wasm": "node scripts/wasm-stamp.mjs",
     "lint": "eslint src scripts tests *.config.js",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:mutation": "stryker run"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
@@ -57,8 +58,11 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
     "@vitejs/plugin-vue": "^5.2.1",
     "eslint": "^10.13.0",
+    "fast-check": "^4.10.2",
     "globals": "^17.13.0",
     "prettier": "3.9.10",
     "typescript": "^5.9.3",

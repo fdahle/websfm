@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Mutation testing (npm run test:mutation): Stryker changes the code one small edit at a time and counts the edits no test notices. A survivor is a bug the tests would let through. Pass other modules with --mutate.",
+  "testRunner": "vitest",
+  "vitest": { "configFile": "vitest.stryker.config.js" },
+  "coverageAnalysis": "perTest",
+  "mutate": [
+    "src/core/sfm/distortion.js",
+    "src/core/products/georef.js",
+    "src/core/footprint.js",
+    "src/core/products/localFrame.js",
+    "src/core/sfm/tracks.js",
+    "src/core/products/dem.js",
+    "src/core/dense/fusion.js"
+  ],
+  "reporters": ["clear-text", "progress", "html", "json"],
+  "htmlReporter": { "fileName": "reports/mutation/index.html" },
+  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "tempDirName": ".stryker-tmp",
+  "concurrency": 8,
+  "timeoutMS": 60000,
+  "dryRunTimeoutMinutes": 30
+}
