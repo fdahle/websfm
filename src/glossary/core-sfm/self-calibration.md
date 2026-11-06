@@ -30,20 +30,17 @@ the "dome" or "bowl" artefact, a flat surface reconstructed as curved.
 
 WebSfM's default is therefore a **staged schedule** rather than all-parameters-at-once:
 refine $f, k_1$ during registration, then escalate to $k_2$, then the principal
-point, then $k_3$ — each unlocked only once the camera and observation counts
-justify it. A four-term fisheye's $k_4$ comes last, on the pass after $k_3$ was
-first refined. When a sensor already carries a calibrated distortion model,
-self-calibration of those terms is switched off instead: the distortion was
-removed at ingest, and refitting it would correct the same effect twice. A
-[fisheye](help:fisheye-lens) sensor is the exception to the folding below: bundle
-adjustment fits its observations in the pixels the lens recorded, so the $k$ terms it
-refines are the fisheye's own polynomial, and each refinement re-derives that sensor's
-keypoints from the recorded pixels with the new lens instead of folding a correction
-into them.
+point and the decentring terms $p_1, p_2$, then $k_3$ — each unlocked only once the
+camera and observation counts justify it. A four-term fisheye's $k_4$ comes last, on
+the pass after $k_3$ was first refined. The decentring terms are also tested: the
+first solve that frees them runs with and without them, and they stay only where they
+clearly lower the reprojection error, as they do for a decentred drone lens. When a
+sensor already carries a calibrated distortion model, self-calibration is switched off
+instead and the calibration is kept.
 
-One invariant underlies all of this: **the pipeline downstream of bundle
-adjustment is strictly pinhole**. So after each self-calibrating pass the newly
-estimated distortion is *folded out of the keypoints* and the model's
-coefficients reset to zero, with the total composed correction recorded per
-sensor. Dense reconstruction reapplies that recorded correction so its rasters
-land in the same frame as the sparse cloud.
+Bundle adjustment fits the observations **in the pixels the lens recorded**, with the
+whole lens as unknowns, as COLMAP and Metashape do. The steps before it work on a
+pinhole view of the keypoints, the recorded pixels undistorted by the current lens,
+which is re-derived each time a solve refines the lens. The solved lens is recorded
+per sensor, and dense reconstruction uses it so its rasters land in the same frame as
+the sparse cloud.

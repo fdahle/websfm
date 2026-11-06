@@ -349,6 +349,19 @@ Notable changes to websfm. The format follows
   (dubrovnik-88), with the same final costs.
 
 ### Fixed
+- **Drone blocks without ground control no longer bend into a dome.** Sparse Model's
+  self-calibration now solves the whole lens, including decentring (p1, p2) where it
+  clearly lowers the reprojection error, and fits it to the keypoints as the photos
+  recorded them. On the 347-image quarry without GCPs or RTK in the solve, the cameras
+  against RTK went from 30 / 67 cm (horizontal / vertical RMS) to 22 / 13 cm; Metashape
+  2.2.2 gives 13 / 12 cm on the same photos. The solved lens matches Metashape's (focal
+  4403.4 against 4403.1 px, principal point within 1.1 px, p1/p2 within 0.00005). Before,
+  each pass's radial estimate was folded into the keypoints and one composed k1–k3 fitted
+  to the sum, which could not express decentring. The decentring terms are kept only when
+  the first solve that frees them lowers the RMS by 1 % against the same solve without
+  them: quarry 3.8 %; South Building, four ETH3D scenes and UseGeo 0.0–0.2 %, where they
+  are dropped and the cameras stay within 1 % of before, except UseGeo's vertical
+  (8.18 → 8.37 cm, +2 %).
 - **Bundle adjustment no longer stops on a hard start.** When its first steps overshoot,
   Sparse Model's bundle adjustment now keeps damping them until one improves the model,
   instead of stopping after eight tries with the model where it was. Checked against Ceres

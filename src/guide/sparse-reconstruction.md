@@ -56,8 +56,8 @@ from too few iterations.
 
 ## Self-calibration
 <!-- param: refineIntrinsics default: Auto -->
-**Auto** solves focal length and lens distortion for cameras known only from EXIF, and
-keeps a calibration you entered. Turn it off (**None**) when the calibration is
+**Auto** solves focal length and lens distortion (including decentring, where it clearly
+helps) for cameras known only from EXIF, and keeps a calibration you entered. Turn it off (**None**) when the calibration is
 trustworthy. Many parameters need many well-spread views: on a weak network, such as a
 short strip of wide-angle frames, Auto can bend the block towards its ends. If
 checkpoint errors grow towards the edges under Auto but not under None, keep None.

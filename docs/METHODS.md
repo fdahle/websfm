@@ -38,10 +38,11 @@ rather than afterthoughts.
   `[[…],[…],[…]]`, translation `t=[x,y,z]`, **camera centre `C = −Rᵀt`**.
   Projection matrices are stored flat, 12 elements `[R|t]`, **without K** (K is
   applied separately / points are normalised first).
-- **Distortion**: Brown–Conrady, rational or Kannala–Brandt fisheye, **removed once at
-  ingest** — the geometric pipeline (init, PnP, triangulation, BA, MVS, ortho) works on
-  pinhole keypoints. Self-calibrated distortion is folded into the keypoints too (§4.6);
-  a fisheye camera alone is solved in BA in the pixels its lens recorded. See §5.
+- **Distortion**: Brown–Conrady (with decentring), rational or Kannala–Brandt fisheye.
+  The geometric pipeline before BA (init, PnP, triangulation, filters) and MVS / ortho
+  work on a pinhole **view** of the keypoints, the recorded pixels undistorted by the
+  current lens; bundle adjustment fits the recorded pixels with the whole lens, so
+  self-calibration solves the lens itself (§4.6). See §5.
 - **Normalised coordinates**: `x = (u − cx)/fx`, `y = (v − cy)/fy`. Distortion
   math and the essential matrix live here.
 - **Units**: reprojection error in **pixels**; parallax/triangulation angles in
@@ -476,7 +477,7 @@ At a 2-camera stall the focal solve is skipped and only retriangulation + the re
 sweep run: *no* intrinsic is identifiable from two views, so a focal fitted there would
 be fitting noise. The relaxed sweep is not a lowering of standards but a bootstrap — the
 cameras it admits carry the model past the self-calibration threshold, at which point
-the distortion is measured and folded out of the keypoints (§5) and every subsequent
+the lens is measured and the keypoints' pinhole view re-derived with it (§4.6) and every subsequent
 sweep runs against pinhole geometry at the strict gates. The absolute inlier floor and
 the first PnP gate still apply throughout, and the final BA + track filter clean any
 loose observations, so this rescues genuinely-linked frames without manufacturing a
@@ -484,8 +485,8 @@ pose. One shot, by design. Off via `rescueStalled: false`.
 
 Corollary: **self-calibration is refused below 3 cameras** in the post-filter passes
 too (§4.6). A 2-camera model returns whatever k1 the noise prefers — observed flipping
-sign between passes on a 5-image set — and the fold that follows is destructive
-(it moves keypoints), so no refinement beats a confident wrong one.
+sign between passes on a 5-image set — and the view every later step reads is derived
+from it, so no refinement beats a confident wrong one.
 
 ### 4.4 Track management
 
@@ -642,97 +643,71 @@ fixed) is available but bought nothing measurable there, so it is off.
 BA can refine a **small, shared** set of intrinsics per **sensor group** (cameras
 sharing a sensor id share the parameters; unassigned cameras are their own group).
 The terms are a **bitmask** (`bundle.rs` `refine_mask`: 1=f, 2=cxcy, 4=k1, 8=k2,
-16=k3; the JS `refineModeMask` parses a comma string like `'f,cxcy,k1,k2,k3'`):
+16=k3, 32=k4 (fisheye), 256=p1,p2; the JS `refineModeMask` parses a comma string like
+`'f,cxcy,p,k1,k2,k3'`):
 - `f` — a focal **scale** `s` (init 1, multiplies fx/fy; fy stays locked to fx).
   Modelling focal as a scale, not an absolute, preserves per-camera seed
   differences while sharing one DOF across the group.
 - `cxcy` — shared principal-point offsets `dcx, dcy`.
-- `k1,k2,k3` — the shared radial polynomial. The BA forward model is
-  `u = fx·a·(1 + k1·r² + k2·r⁴ + k3·r⁶) + cx` with **exact analytic Jacobians**
-  (the pose/point terms generalise the pinhole+k1 case by replacing `k1` with
-  `g ≡ k1 + 2k2·r² + 3k3·r⁴`). Tangential `p1,p2` are out of scope for self-cal.
+- `k1,k2,k3` — the radial polynomial; `p` — Brown's decentring terms p1, p2
+  (OpenCV's convention). The forward model is `x' = x·m + 2p1·xy + p2·(r² + 2x²)`,
+  `y' = y·m + p1·(r² + 2y²) + 2p2·xy` with `m = 1 + k1·r² + k2·r⁴ + k3·r⁶`, then
+  `u = fx·x' + cx`, with **exact analytic Jacobians** (`bundle.rs distort_jac`, tested
+  against central differences); a fisheye group's terms are its Kannala–Brandt k1–k4.
 
 **Self-calibration is on by default.** The shipped default is `refineIntrinsics:
 'auto'`, which `sfm.js` resolves per run: **staged** when **no** sensor carries a
 calibrated distortion model (EXIF-only cameras / film scans — a guessed pinhole is
-the single biggest downstream error source), and `'none'` when a calibrated Brown
-model already removed distortion at ingest (don't double-correct). An explicit
-comma string overrides the resolution and bypasses staging.
+the single biggest downstream error source), and `'none'` when a calibrated lens is
+given (the calibration is kept). An explicit comma string overrides the resolution
+and bypasses staging.
 
 **Staged schedule** (`core/sfm/selfCalSchedule.js`, `auto` only): distortion is
 barely observable on a thin model, so the terms unlock as it grows. Registration
 (interim/rescue BA) solves the base `f,k1`; the **post-filter** passes escalate —
-add `k2` at ≥8 cams & ≥10k obs, principal point at ≥10 cams, `k3` at ≥20 cams &
-≥30k obs. Deferred terms are logged. Self-cal is **only** run on post-filter passes
-(and the in-registration interim BA once `distortionCalMinCams` cameras are in —
+add `k2` at ≥8 cams & ≥10k obs, principal point and decentring at ≥10 cams, `k3` at
+≥20 cams & ≥30k obs. Deferred terms are logged. Self-cal is **only** run on post-filter
+passes (and the in-registration interim BA once `distortionCalMinCams` cameras are in —
 never on the pre-filter mess, which drifted cx/cy ~180 px on a test set), and it is
 **weakly observed** on short/single strips (needs ≥2° tilt variation). Results are
 logged but **never** written back to the sensor table automatically.
 
-**Important invariant — the pinhole fold.** Because the rest of the pipeline is
-pure pinhole, radial coeffs left on the model would be invisible to reprojection
-stats, the track filter, and the dense/ortho warp. So after each self-cal pass we
-**fold the full `{k1,k2,k3}` bag into the keypoints** (`undistortPixel` is the
-exact inverse of BA's forward model) and reset the model coeffs to 0; `cx/cy` stay
-on K (projectPoint reads them). Multi-pass composition is handled by snapshotting
-each image's **pristine** (pre-first-fold) keypoints and, after each pass,
-fitting **one composed `{k1,k2,k3}` bag** that maps pristine → fully-folded via a
-linear least-squares (`core/sfm/selfCalCompose.js`, `fitComposedRadial` — the
-forward radial model is linear in the coeffs given the radius). That single
-composed bag — not a per-pass sum, which is wrong beyond first order — is what
-`summary.selfCalDistortion` carries so the **dense** stage reproduces the same
-undistortion (applied as a second bag after any calibrated `dist`). A monotonicity
-guard warns if a higher-order fit runs away. One single source of truth for
-distortion, ingest → dense.
+**The lens is solved, not folded** (`core/sfm/selfCalFold.js`, the run's lens state,
+2026-11-06). Ingest keeps every image's keypoints and GCP marks as the lens recorded
+them (`ingest.js recordedByUuid`), and each self-calibration group carries one
+complete lens: the sensor's at the start (Brown k1–k3, p1, p2; a fisheye's k1–k4; a
+rational lens, which the solver does not model, stays fixed). The keypoints the
+pipeline reads are a **view**: the recorded pixels undistorted by the group's current
+lens about the image's current K, so registration, triangulation, the filters and the
+statistics stay pinhole. Every bundle adjustment fits the **recorded** pixels with the
+whole lens as its seed (`bundleSession.js lensFrame`, `bundleAdjust` `fullLens`), so
+self-calibration solves the lens itself, as COLMAP and Metashape do. An accepted solve
+replaces the group's lens and re-derives each view from the record. `summary.
+selfCalDistortion` carries the solved lens (`full: true`), which replaces the sensor's
+for dense and the exports (`displayFrame.js makeFrameModelResolver`).
+Until then the pipeline removed each pass's radial estimate from the keypoints in place
+and fitted one composed k1–k3 to the sum. That kept a radial approximation of the lens,
+could not solve decentring, and needed a re-fold whenever the principal point moved.
 
-**Re-folding when the principal point moves** (`selfCalFold.js` `refoldIfMoved`). Each
-fold is centred on the principal point of its pass, and the point is held until the
-model has ten cameras, then may move. A fold about the old centre followed by one about
-the new is no radial map about either. Left as it is, the composed bag (fitted about
-the final centre) misses the folded keypoints, so dense undistorts the rasters
-differently from the sparse model, and the non-radial remainder stays in the keypoints,
-where no later pass can remove it: BA fits a radial bag, and the remainder also pulls
-the principal point and focal estimates off. So once a group's principal point has
-moved more than `selfCalRefoldMovePx` (0.25 px) from the centre its keypoints were
-folded about, the fold fits the composed bag pristine → folded about each image's
-current K and **re-derives the keypoints and GCP marks from the pristine ones** through
-it. Afterwards the keypoints are exactly what the composed bag gives about the current
-centre, and the next pass estimates what is left. A fisheye group never folds (§5), so
-it never re-folds.
+**Decentring is a measured choice.** Under `auto`, the first solve that would free p1,
+p2 runs with and without them from the same start; they stay for the run only when they
+lower the reprojection RMS by `selfCalDecentringMinGain` (1 %; `bundleSession.js`). On
+a centred or already undistorted lens they fit nothing and only trade with the poses.
+Measured 2026-11-06 (GCP-free, camera centres after a similarity fit):
 
-Measured on synthetic 24-camera blocks with a known lens and cameras (seeds 7, 11, 13;
-camera-centre median error after a similarity fit, mm):
-
-| true principal point offset · lens | without re-fold | with re-fold |
-| --- | --- | --- |
-| 4.3 px · k1 −0.05, k2 0.008 | 10.6 / 10.7 / 12.5 | 7.9 / 10.1 / 12.8 |
-| 4.3 px · k1 −0.12, k2 0.03 | 10.9 / 11.6 / 17.0 | 8.1 / 10.1 / 13.1 |
-| 28.8 px · k1 −0.05, k2 0.008 | 17.0 / 23.6 / 33.5 | 9.5 / 10.2 / 12.5 |
-| 28.8 px · k1 −0.12, k2 0.03 | 31.2 / 37.4 / 72.0 | 9.7 / 10.6 / 16.2 |
-
-At the 28.8 px offset the old fold left the principal point 3–9 px and the focal length
-up to 1.3 % off; with the re-fold they come within 0.1–0.7 px and 0.06 %, and the
-composed bag reproduces the keypoints to ≤ 0.002 px (0.7–1.5 px before; ≤ 0.016 px at the
-4.3 px offset, where moves under the threshold wait). The composition
-of radial maps about one centre is itself not exactly a degree-6 polynomial; that
-residual is 0.001–0.011 px. The run log gives the fit RMS, how far the principal point
-moved and the re-folds per sensor (`fitRmsPx`, `centreMovedPx` in `selfCalDistortion`),
-and warns above `selfCalComposedWarnPx` (0.25 px). The alternative would be keeping
-distortion in BA's forward model, as COLMAP does, at the cost of the pinhole invariant.
-
-On real blocks, whose principal points sit close to the image centre, the re-fold
-changes the cameras within run-to-run noise; what it removes is the gap between dense and
-sparse. It ran 1–3 times per run (principal-point moves of 0.7–27 px), took the composed
-residual to 0.000 px (South Building 0.18 px before) and cost 0–7 % in time:
-
-| block | reference | without re-fold | with re-fold |
+| block | RMS with / without p1, p2 | decision | cameras before → after |
 | --- | --- | --- | --- |
-| South Building, 128 images | COLMAP cameras, median | 0.0047 | 0.0048 |
-| ETH3D, six scenes | ground-truth cameras | — | identical |
-| quarry, 347 images, no priors | RTK, 3D RMS | 0.738 m | 0.732 m |
-| quarry, 347 images, RTK priors | RTK, 3D RMS | 0.236 m | 0.233 m |
-| Casa Grande | check points, H / V RMS | 1.246 / 1.170 m | 1.246 / 1.173 m |
-| Iceland 1980s scans, 125 images | check points, H / V RMS | 1.416 / 1.945 m | 1.416 / 1.946 m |
+| quarry, 347 images, against RTK | 1.900 / 1.976 px (3.8 %) | kept | 30.0 / 66.8 → 21.8 / 13.2 cm H / V |
+| South Building, COLMAP cameras | 0.761 / 0.762 px | dropped | 0.00475 → 0.00478 (median) |
+| ETH3D courtyard · delivery · playground · terrace | 0.0–0.2 % | dropped | within 1 % |
+| UseGeo 1, reference orientations | 2.407 / 2.407 px | dropped | 3.73 / 8.18 → 3.79 / 8.37 cm |
+
+On quarry the solved lens matches Metashape's (f 4403.4 against 4403.1 px, principal
+point within 1.1 px, p1 −0.00083 / p2 0.00205 against −0.00079 / 0.00210), and the dome
+of a GCP-free nadir block (§ BENCHMARKS) went from 67 to 13 cm vertical, Metashape 12 cm.
+Freeing p1, p2 everywhere instead cost South Building 9 %, ETH3D playground 24 % and
+UseGeo 13 % vertical; the size of the solved decentring does not tell the cases apart
+(ETH3D's undistorted photos fit 2–9 px of it at the corners), the RMS gain does.
 
 ### 4.6b Rolling shutter (`bundle.rs` `bundle_adjust_rs`, `core/sfm/rollingShutter.js`, 2026-11-03)
 
@@ -841,7 +816,7 @@ image yet. During registration this runs one round after each sweep and interim 
 against the poses of the moment. After registration it runs **to a fixpoint** (an
 observation added through A↔C can enable C↔D) after the retriangulation/merge step and
 again before each track-filter pass — i.e. against the final poses and the
-self-calibrated, folded keypoints, which the registration-time rounds never saw.
+self-calibrated keypoint view, which the registration-time rounds never saw.
 Added observations then go through the same filter and BA as every other observation.
 On a noise-free synthetic strip the final rounds add nothing (registration's rounds
 already completed every track), so their value lies in what registration could not
@@ -907,8 +882,8 @@ registration (4.3), the refinement (4.4–4.7) and the registration check work o
 images it lacks. Two things make that sound.
 
 - **The same pinhole frame.** The pipeline works on keypoints with the lens removed
-  (ingest's calibrated bag, then the self-calibration fold). The saved model keeps what
-  the dense stage needs to reproduce that frame (the composed self-cal bag and the film
+  (the calibrated or self-calibrated lens, §4.6). The saved model keeps what
+  the dense stage needs to reproduce that frame (the solved lens and the film
   transforms, `summary.selfCalDistortion` / `fiducialTransforms`), and every image is
   moved into it through that chain (`displayFrame.js makeScanCentreToPinhole`) about its
   group's solved K. A new image on a lens the model knows lands in the same frame as a
@@ -942,7 +917,7 @@ Forward: `x_d = x·(1 + k1·r² + k2·r⁴ + k3·r⁶) + [2·p1·xy + p2·(r²+2
 symmetric `y_d`), in normalised coords. Inverse by **Newton's method on the exact
 forward model** with backtracking, to a tolerance (not OpenCV's fixed count of
 fixed-point steps, which was 0.46 px off at a 4000×3000/f=3000 corner for k1=−0.18 and
-3.4 px at −0.20 — errors the self-cal fold baked into every keypoint). Where the
+3.4 px at −0.20 — errors that went into every keypoint). Where the
 forward curve r·(1+k1r²+…) turns back before the observed corner radius no inverse
 exists; the self-cal guard rejects such a bag (`radial-fold`) before it is folded.
 
