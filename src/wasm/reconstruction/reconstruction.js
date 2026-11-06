@@ -155,11 +155,13 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  * - `fixed_cam`: n_cam bytes, non-zero ⇒ that camera's pose is held fixed (local BA:
  *   the cameras outside the window keep their observations as constraints but are
  *   not variables). Empty ⇒ every camera is free, the original behaviour exactly.
- * - `solver_flat`: reduced-system policy `[pcg_min_n, rel_tol, max_iter, accept_partial]`;
- *   empty / NaN slots ⇒ `SolverOpts::DEFAULT` (see there).
+ * - `solver_flat`: solver policy `[pcg_min_n, rel_tol, max_iter, accept_partial,
+ *   function_tol, precond, direct, warm, huber]`; empty / NaN slots ⇒
+ *   `SolverOpts::DEFAULT` (see there).
  * - `fisheye_flat`: n_cam × 5 floats `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
  *   camera is pinhole (+ the Brown self-cal residual) and its observations are in the
- *   undistorted frame; `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
+ *   undistorted frame; its k1…k3 slots seed that residual (the app passes zeros; the
+ *   BAL bench, examples/bal.rs, the problems' own k1, k2); `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
  *   coefficients, observed in the pixels the lens recorded, of which the first `terms`
  *   may be self-calibrated (the k bits then refine the fisheye's own polynomial).
  *   Cameras sharing a sensor group must share a lens. Empty ⇒ every camera pinhole,

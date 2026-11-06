@@ -81,6 +81,56 @@ keypoints on this lens).
 
 ---
 
+## Bundle adjustment against Ceres (BAL)
+
+The 98 problems of Bundle Adjustment in the Large (Agarwal et al. 2010): real photo
+collections with their published tie points and starting cameras, 16 to 13,682 cameras.
+WebSfM's solver, with the policy the app uses (the sparse direct solve; each camera its own
+focal length, k1 and k2; no robust loss), against Ceres 2.2 (SPARSE_SCHUR, its defaults).
+Both minimise the same ½Σ‖r‖², both on 20 threads, natively (`scripts/bench/bal/`; the app
+runs the same Rust compiled to WebAssembly). Each run is capped at 2 h. 2026-11-05/06.
+
+Final cost against Ceres' final cost, and time against Ceres' time (medians):
+
+| set | problems | cameras | cost vs Ceres | worst | time vs Ceres |
+| --- | --- | --- | --- | --- | --- |
+| Ladybug | 31 | 49–1,723 | +0.00005 % | +4.0 % | 1.51× |
+| Trafalgar | 14 | 21–257 | +0.00004 % | +0.3 % | 1.15× |
+| Dubrovnik | 16 | 16–356 | +0.008 % | +2.6 % | 0.94× |
+| Venice | 29 | 52–1,778 | −0.07 % | +10 % | 2.31× |
+| Final | 5 of 8 | 93–1,936 | −0.003 % | +0.002 % | 1.19× |
+| **all** | **95 of 98** | | **+0.00004 %** | | **1.40×** (p90 3.6×) |
+
+- **Same minimum on most problems.** 84 of the 95 end within 1 % of Ceres' cost, 69
+  within 0.1 %, and 45 lower than Ceres.
+- **Lower than Ceres on 12** by more than 1 %. Ceres stops early on two: venice-951 at 60×
+  WebSfM's cost, venice-1638 at 1.5×.
+- **Higher than Ceres on 11** by more than 1 %: eight dense Ladybug problems (+1.7 to
+  +4.0 %), dubrovnik-135 (+2.6 %) and venice-1672 (+10 %). Four of the Ladybug gaps come
+  from the start: the app's interface rounds it to f32, and Ceres given the same rounded
+  start ends as high or higher. The others are different paths through a non-convex
+  problem: Ceres tries a few far larger steps, recovers and settles lower, while WebSfM
+  descends steadily into a nearby valley. On venice-1672 Ceres
+  from the f32 start still ends at its own cost, so this is the path, not the start.
+- **Speed depends on size.** Median 1.08× Ceres' time below 100 cameras, 1.07× for
+  100–500, 1.18× for 500–1,000 and 2.29× above 1,000. WebSfM is faster on 23 problems, up
+  to 5.8× (ladybug-539, 6.9 s against 40 s, ending 1.3 % lower). On the dense problems the
+  factorisation dominates: Ceres hands it to an optimised BLAS, which WebAssembly does not
+  have, so WebSfM uses its own.
+- **The largest problems are the weak result.** Above 1 GiB of factor, the solve falls
+  back to a preconditioned iterative one. final-1936 reaches Ceres' cost (+0.002 %) but
+  takes 3,929 s against Ceres' 353 s. final-3068 and final-4585 do not finish in 2 h;
+  Ceres takes 144 s and 1,018 s. On final-13682 (29 M observations) neither finishes:
+  Ceres gives up after one iteration, WebSfM runs out of time.
+
+The run found two bugs in WebSfM's solver, both fixed before these numbers were taken:
+bundle adjustment gave up after eight rejected steps (the three largest Ladybug problems
+ended at 28× Ceres' cost), and a single very distant point could hold back the damping of
+the whole solve (dubrovnik-173: +1.3 % of Ceres' cost in 131 s, now +0.02 % in 16 s).
+[METHODS.md](METHODS.md) §4.5 explains both, and the options that were tried and rejected.
+
+---
+
 ## Dense reconstruction
 
 ### ETH3D high-res, ETH3D's own evaluator

@@ -27,6 +27,9 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 #[allow(unused_imports)] pub(crate) use mvs::*;
 #[allow(unused_imports)] pub(crate) use distort::*;
 
+// For native harnesses over the same code the app runs (examples/bal.rs, the BAL bench).
+pub use bundle::bundle_adjust;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -902,6 +905,37 @@ mod tests {
 
         let pinhole = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &idx, &px, &[], &[], &[], &[], 60, &[], 0, &[], &[], &[]);
         assert!(pinhole[base + 1] > 1.0, "a pinhole fitted fisheye pixels: {}px", pinhole[base + 1]);
+    }
+
+    // A pinhole camera's Brown k1, k2 seeded through `fisheye_flat` with terms 0 (the BAL
+    // bench, examples/bal.rs): observations rendered through a distorting pinhole fit with
+    // the seed and nothing refined, and the seed comes back; without it they cannot.
+    #[test]
+    fn bundle_adjust_seeds_a_pinhole_brown_lens() {
+        let (f, k1, k2, cx, cy) = (300.0f64, 0.08f64, -0.02f64, 320.0f64, 240.0f64);
+        let (cams, pts, _) = fisheye_scene(f, [0.0; 4]);
+        let mut obs: Vec<f32> = Vec::new();
+        for (ci, (r, t)) in cams.iter().enumerate() {
+            for (pi, x) in pts.iter().enumerate() {
+                let p = mat3_vec(r, x);
+                let (a, b) = ((p[0] + t[0]) / (p[2] + t[2]), (p[1] + t[1]) / (p[2] + t[2]));
+                let r2 = a * a + b * b;
+                let m = 1.0 + k1 * r2 + k2 * r2 * r2;
+                obs.extend_from_slice(&[ci as f32, pi as f32, (f * a * m + cx) as f32, (f * b * m + cy) as f32]);
+            }
+        }
+        let (n_cam, n_pts) = (cams.len(), pts.len());
+        let noisy: Vec<V3> = pts.iter().enumerate().map(|(i, p)| [p[0] + 0.02 * ((i % 5) as f64 - 2.0), p[1], p[2] + 0.03]).collect();
+        let (cam_flat, pt_flat, k_flat) = flat_scene(&cams, &noisy, f);
+        let (idx, px) = split_obs(&obs);
+        let seed: Vec<f32> = (0..n_cam).flat_map(|_| [0.0, k1 as f32, k2 as f32, 0.0, 0.0]).collect();
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &idx, &px, &[], &[], &[], &[], 60, &[], 0, &[], &[], &seed);
+        assert!(out[base + 1] < 1e-3, "seeded pinhole BA did not converge: {}px", out[base + 1]);
+        let ib = n_cam * 12 + n_pts * 3;
+        assert!((out[ib + 4] as f64 - k1).abs() < 1e-6 && (out[ib + 5] as f64 - k2).abs() < 1e-6, "seed not returned");
+        let unseeded = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &idx, &px, &[], &[], &[], &[], 60, &[], 0, &[], &[], &[]);
+        assert!(unseeded[base + 1] > 0.1, "an undistorted pinhole fitted distorted pixels: {}px", unseeded[base + 1]);
     }
 
     // Self-calibrating a fisheye: seeded equidistant (all k = 0) with a 3% focal error,

@@ -6,10 +6,24 @@ use crate::par::{for_each_index, map_indexed, SyncPtr, CHUNK};
 
 // ── Dense linear algebra for bundle adjustment ────────────────────────────────
 
-// Inverse of a 3×3 matrix via cofactors; None if (near-)singular.
+// inv3's singularity test: det / (m00·m11·m22) below this is a block too thin to invert
+// in f64 (condition ~10¹⁴ and up).
+const INV3_MIN_RATIO: f64 = 1e-14;
+// chol_solve's: a pivot below this share of its diagonal entry is a matrix not
+// positive-definite to f64 precision.
+const CHOL_MIN_PIVOT_RATIO: f64 = 1e-14;
+
+// Inverse of a symmetric positive-definite 3×3 matrix (a point's block) via cofactors;
+// None if it is (near-)singular. The test is scale-free: det against the product of the
+// diagonal, which bounds it for such a matrix (Hadamard), so the ratio is 1 for a
+// diagonal block and ~1/condition for a thin one. An absolute det < 1e-20 had refused
+// the block of every far point (its entries ~(f/z)², 1e-6 on BAL's Dubrovnik), and one
+// such point failed every LM iteration's first try: the damping never fell, and the
+// whole model crept (dubrovnik-173: +1.3 % of Ceres' cost after 100 iterations).
 pub(crate) fn inv3(m: &M3) -> Option<M3> {
     let det = det3(m);
-    if det.abs() < 1e-20 { return None; }
+    let diag = m[0][0] * m[1][1] * m[2][2];
+    if !(diag > 0.0) || !(det > INV3_MIN_RATIO * diag) { return None; }
     let id = 1.0 / det;
     Some([
         [(m[1][1]*m[2][2]-m[1][2]*m[2][1])*id, (m[0][2]*m[2][1]-m[0][1]*m[2][2])*id, (m[0][1]*m[1][2]-m[0][2]*m[1][1])*id],
@@ -27,7 +41,9 @@ pub(crate) fn chol_solve(n: usize, a: &[f64], b: &[f64]) -> Option<Vec<f64>> {
     for j in 0..n {
         let mut d = a[j*n + j];
         for k in 0..j { d -= l[j*n + k] * l[j*n + k]; }
-        if d <= 1e-18 { return None; }
+        // Scale-free, as inv3: a pivot against its own diagonal entry, not an absolute
+        // floor that the small entries of a far scene fall under.
+        if !(d > CHOL_MIN_PIVOT_RATIO * a[j*n + j]) { return None; }
         let dj = d.sqrt();
         l[j*n + j] = dj;
         for i in (j+1)..n {
@@ -89,14 +105,18 @@ pub(crate) const PCG_MIN_N: usize = 600;
 //   warm            1 = the model is already converged (a re-solve after a filter or
 //                   a retriangulation): with the direct solve, stop at
 //                   WARM_FUNCTION_TOL instead of DIRECT_FUNCTION_TOL.
+//   huber           the robust loss: absent / NaN ⇒ the adaptive Huber threshold (2.5 ×
+//                   the median residual, ≥ 1 px); 0 ⇒ none, plain least squares (to
+//                   compare with another solver on the same objective: the BAL bench,
+//                   examples/bal.rs); > 0 ⇒ Huber at that fixed threshold (px).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SolverOpts {
     pub pcg_min_n: usize, pub rel_tol: f64, pub max_iter: usize, pub accept_partial: bool, pub function_tol: f64,
-    pub precond: u8, pub direct: u8, pub warm: u8,
+    pub precond: u8, pub direct: u8, pub warm: u8, pub huber: Option<f64>,
 }
 
 impl SolverOpts {
-    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0 };
+    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None };
 
     pub(crate) fn from_flat(f: &[f32]) -> SolverOpts {
         let d = SolverOpts::DEFAULT;
@@ -111,6 +131,7 @@ impl SolverOpts {
             precond: slot(5).filter(|v| *v == 1.0).map_or(d.precond, |_| 1),
             direct: slot(6).map_or(d.direct, |v| if v == 1.0 { 1 } else { 0 }),
             warm: slot(7).map_or(d.warm, |v| if v == 1.0 { 1 } else { 0 }),
+            huber: slot(8).or(d.huber),
         }
     }
 }
@@ -154,6 +175,15 @@ pub(crate) const DENSE_MAX_N: usize = 4096;
 
 // The largest sparse Cholesky factor allowed (bytes of L); past it the solve stays PCG.
 pub(crate) const SPARSE_MAX_BYTES: usize = 1 << 30;
+
+// LM damping: its floor and cap, and how many tries one iteration may take to reach
+// the cap (×4 each try, 31 from the floor). A step under PARAM_TOL of the model's size
+// ends the run like a step rejected at the cap: past it nothing measurable changes
+// (Ceres' parameter_tolerance).
+const LAMBDA_MIN: f64 = 1e-9;
+const LAMBDA_MAX: f64 = 1e8;
+const LM_MAX_TRIES: usize = 32;
+const PARAM_TOL: f64 = 1e-8;
 
 // The LM stopping rule's floor when the direct solve runs (see bundle_adjust), and
 // for a re-solve of an already converged model (`warm`).
@@ -593,6 +623,8 @@ pub(crate) fn so3_log(r: &M3) -> V3 {
 // Largest reduced block: a camera's 6 rows, or an intrinsic group's
 // [s, dcx, dcy, k1, k2, k3, k4, τ, ωx, ωy, ωz] (≤ 11; ω: bundle_adjust_rig).
 const BLK_MAX: usize = 11;
+// SolverOpts::huber 0: the Huber δ that makes the loss plain least squares.
+const NO_LOSS_DELTA: f64 = 1e12;
 
 // One point's merged Jvarᵀ·Jp coupling block, keyed by its reduced-variable offset
 // (a camera's 6 rows, or an intrinsic group's 1–8 rows). Fixed BLK_MAX-row storage
@@ -612,16 +644,23 @@ fn add_eblock(list: &mut Vec<EBlock>, blk: usize, off: usize, dim: usize, rows: 
 
 // How the lower-triangle Schur step (and the assembly) is split over threads, so that
 // the result is the same bits whatever the thread count, in both builds. The free
-// cameras are cut into `n` contiguous ranges, a number fixed by the camera count alone.
+// cameras are cut into `n` contiguous ranges, a number fixed by the camera count alone:
+// one per RANGE_MIN_CAMS cameras, at most RANGE_MAX (the app's thread cap). About as many
+// ranges as threads is fastest: fewer leave cores idle, more repeat the work of the points
+// several ranges share. On BAL (20 threads) the step took 1.4 s at 15 ranges against
+// 3.8 s at the former one range per 64 cameras (trafalgar-126, 1 range), 2.3 against
+// 4.1 s (trafalgar-225, 3); at 40+ ranges ladybug-646 and -1340 slowed by a third.
 // Range r owns the block rows of its cameras (and their right-hand side), and the
 // group-row blocks (g, c) of its cameras c: each such element is written by one range,
 // from that range's points in Schur order, the order the single loop added them in.
 // The group × group blocks and the group right-hand side sum over every point: each
 // point's share goes to its owner range (the range of its lowest camera); range 0 writes
 // its share directly, the others into a partial that is added in range order after.
-// Without intrinsics groups (no self-calibration), or with one range (under 128 free
-// cameras), every sum is the single loop's, bit for bit; with them, the group blocks are
+// Without intrinsics groups (no self-calibration), or with one range (under
+// 2·RANGE_MIN_CAMS free cameras), every sum is the single loop's, bit for bit; with them, the group blocks are
 // summed range by range, which rounds differently from one loop.
+const RANGE_MIN_CAMS: usize = 8;
+const RANGE_MAX: usize = 16;
 struct RangePlan {
     n: usize,
     n_free: usize,
@@ -642,7 +681,7 @@ struct RangePlan {
 impl RangePlan {
     fn new(pattern: &BlockPattern, n_free: usize, schur_order: &[usize],
            cams_of: impl Fn(usize, &mut dyn FnMut(usize))) -> RangePlan {
-        let n = (n_free / 64).clamp(1, 32);
+        let n = (n_free / RANGE_MIN_CAMS).clamp(1, RANGE_MAX);
         let range = |b: usize| if n_free == 0 { 0 } else { b * n / n_free };
         let n_pts = schur_order.iter().copied().max().map_or(0, |m| m + 1);
         let mut owner = vec![0u32; n_pts];
@@ -770,11 +809,13 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 /// - `fixed_cam`: n_cam bytes, non-zero ⇒ that camera's pose is held fixed (local BA:
 ///   the cameras outside the window keep their observations as constraints but are
 ///   not variables). Empty ⇒ every camera is free, the original behaviour exactly.
-/// - `solver_flat`: reduced-system policy `[pcg_min_n, rel_tol, max_iter, accept_partial]`;
-///   empty / NaN slots ⇒ `SolverOpts::DEFAULT` (see there).
+/// - `solver_flat`: solver policy `[pcg_min_n, rel_tol, max_iter, accept_partial,
+///   function_tol, precond, direct, warm, huber]`; empty / NaN slots ⇒
+///   `SolverOpts::DEFAULT` (see there).
 /// - `fisheye_flat`: n_cam × 5 floats `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
 ///   camera is pinhole (+ the Brown self-cal residual) and its observations are in the
-///   undistorted frame; `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
+///   undistorted frame; its k1…k3 slots seed that residual (the app passes zeros; the
+///   BAL bench, examples/bal.rs, the problems' own k1, k2); `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
 ///   coefficients, observed in the pixels the lens recorded, of which the first `terms`
 ///   may be self-calibrated (the k bits then refine the fisheye's own polynomial).
 ///   Cameras sharing a sensor group must share a lens. Empty ⇒ every camera pinhole,
@@ -1013,11 +1054,12 @@ fn bundle_adjust_impl(
     let lens: Vec<(usize, [f64; 4])> = (0..n_cam).map(|c| {
         let b = c * 5;
         let terms = fisheye_flat.get(b).copied().unwrap_or(0.0);
-        if !(terms >= 1.0) { return (0, [0.0; 4]); }
         let k = [1, 2, 3, 4].map(|j| {
             let v = fisheye_flat.get(b + j).copied().unwrap_or(0.0) as f64;
             if v.is_finite() { v } else { 0.0 }
         });
+        // A pinhole camera's slots seed its Brown k1…k3 (the app passes zeros there).
+        if !(terms >= 1.0) { return (0, [k[0], k[1], k[2], 0.0]); }
         ((terms as usize).min(4), k)
     }).collect();
     // Rolling shutter per camera: (velocity, frame height, seed readout time), or None.
@@ -1319,6 +1361,15 @@ fn bundle_adjust_impl(
         let mid = es.len() / 2;
         let (_, m, _) = es.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
         (2.5 * *m).max(1.0)
+    };
+    // SolverOpts::huber: a fixed threshold, or none (a δ no residual reaches: an
+    // observation on the camera plane still costs δ², finite).
+    let huber_threshold = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
+        match solver.huber {
+            Some(d) if d > 0.0 => d,
+            Some(_) => NO_LOSS_DELTA,
+            None => huber_threshold(cams, pts, gpar),
+        }
     };
 
     // One observation linearised at the given state: its residual, IRLS weights and
@@ -1676,8 +1727,13 @@ fn bundle_adjust_impl(
 
         prof::mark(1);
         // ── LM step with damping retries ────────────────────────────────────────
+        // A rejected step raises the damping ×4 and tries again, up to its cap: only a
+        // step rejected at the cap (one barely off the gradient, ×10⁻⁸ of it) ends the run.
+        // Giving up after a fixed 8 tries left a model with a bad start where its first
+        // iteration took it (×28 Ceres' cost on the largest BAL Ladybug problems), since
+        // 8 tries raise λ only from its working level to ~20 (docs/METHODS.md ▸ BA vs Ceres).
         let mut accepted = false;
-        for _try in 0..8 {
+        for _try in 0..LM_MAX_TRIES {
             // Damp the reduced diagonal, then Schur-eliminate the (λ-damped) points:
             // S ← (S+λ) − Σ_p E·(C+λ)⁻¹·Eᵀ,  rhs ← −gr + Σ_p E·(C+λ)⁻¹·gp.
             let mut s = smat.clone();
@@ -1843,7 +1899,7 @@ fn bundle_adjust_impl(
                     }
                 }
             }
-            if !ok { lambda = (lambda * 4.0).min(1e8); continue; }
+            if !ok { lambda = (lambda * 4.0).min(LAMBDA_MAX); continue; }
 
             prof::mark(2);
             let dsol = if let Some(sym) = direct.as_ref() {
@@ -1851,14 +1907,14 @@ fn bundle_adjust_impl(
                 solve_stats.cholesky += 1;
                 match sym.factor(&pattern, &s) {
                     Some(f) => f.solve(&pattern, &rhs),
-                    None => { lambda = (lambda * 4.0).min(1e8); continue; }
+                    None => { lambda = (lambda * 4.0).min(LAMBDA_MAX); continue; }
                 }
             } else {
                 let ic = if solver.precond == 1 && (n >= solver.pcg_min_n || n > DENSE_MAX_N) { BlockIc::new(&pattern, &s) } else { None };
                 match solve_reduced_with(n, |x, y| pattern.matvec(&s, x, y), &pattern.diag_blocks(&s), ic.as_ref(),
                                          || pattern.to_dense(&s), n <= DENSE_MAX_N, &rhs, &solver, &mut solve_stats) {
                     Some(x) => x,
-                    None => { lambda = (lambda * 4.0).min(1e8); continue; }
+                    None => { lambda = (lambda * 4.0).min(LAMBDA_MAX); continue; }
                 }
             };
 
@@ -1913,14 +1969,22 @@ fn bundle_adjust_impl(
                 pts = tent_pts;
                 gpar = tent_gpar;
                 cost = new_cost;
-                lambda = (lambda * 0.3).max(1e-9);
+                lambda = (lambda * 0.3).max(LAMBDA_MIN);
                 accepted = true;
                 break;
             } else {
-                lambda = (lambda * 4.0).min(1e8);
+                if lambda >= LAMBDA_MAX { break; }
+                // A rejected step too small to change the model ends it too: a converged
+                // model rejects every step to rounding, and more damping only shrinks them.
+                let step2 = dsol.iter().map(|v| v * v).sum::<f64>() + dp.iter().map(|d| dot3(d, d)).sum::<f64>();
+                let size2 = pts.iter().map(|x| dot3(x, x)).sum::<f64>()
+                    + free_cams.iter().map(|&c| dot3(&cams[c].1, &cams[c].1)).sum::<f64>()
+                    + if refine { gpar.iter().map(|g| g.iter().map(|v| v * v).sum::<f64>()).sum::<f64>() } else { 0.0 };
+                if step2.sqrt() <= PARAM_TOL * (size2.sqrt() + PARAM_TOL) { break; }
+                lambda = (lambda * 4.0).min(LAMBDA_MAX);
             }
         }
-        if !accepted { break; } // converged or stuck at this damping
+        if !accepted { break; } // no step lowers the cost, even at the largest damping
         trace.push(rms(&cams, &pts, &gpar));
         // Compared within one iteration only: the Huber threshold is re-derived from the
         // residuals at the top of each iteration, so costs of different iterations sit on
@@ -2048,6 +2112,12 @@ mod reduced_solve_tests {
         assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 0.0]).direct, 0);
         assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1.0]).warm, 1);
         assert_eq!(SolverOpts::from_flat(&[f32::NAN; 7]).warm, 0);
+        // The robust loss is the ninth slot: absent / NaN / negative ⇒ adaptive (None),
+        // 0 ⇒ none, > 0 ⇒ a fixed threshold.
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN; 8]).huber, None);
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, -1.0]).huber, None);
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 0.0]).huber, Some(0.0));
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 2.0]).huber, Some(2.0));
     }
 
     #[test]
@@ -2352,6 +2422,89 @@ mod reduced_solve_tests {
         let ic = BlockIc::new(&ring, &vals).expect("factorises");
         let (jac, icn) = (iters(None), iters(Some(&ic)));
         assert!(icn < jac, "IC(0) {icn} vs block-Jacobi {jac} iterations");
+    }
+
+    // LM gives up only on a step rejected at the largest damping (or one too small to
+    // move the model): one iteration's tries reach LAMBDA_MAX from λ's floor. A fixed 8
+    // tries reached ~20 from λ's working level, and left BAL's largest Ladybug problems at
+    // ×28 Ceres' cost (docs/METHODS.md ▸ BA vs Ceres).
+    #[test]
+    fn lm_tries_reach_the_largest_damping() {
+        let (mut lambda, mut tries) = (LAMBDA_MIN, 1);
+        while lambda < LAMBDA_MAX { lambda = (lambda * 4.0).min(LAMBDA_MAX); tries += 1; }
+        assert!(tries <= LM_MAX_TRIES, "{tries} tries from {LAMBDA_MIN:e} to {LAMBDA_MAX:e}, {LM_MAX_TRIES} allowed");
+    }
+
+    // Points started at 1 % of their depth, on camera 0's rays: the first steps throw
+    // them far off, and LM has to damp its way back to the exact solution.
+    #[test]
+    fn lm_converges_from_points_started_near_a_camera() {
+        let n_cam = 8;
+        let mut rng = Lcg(5);
+        let (mut cams, mut intr) = (Vec::new(), Vec::new());
+        for c in 0..n_cam {
+            cams.extend_from_slice(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -(c as f32), 0.0, 0.0]);
+            intr.extend_from_slice(&[1000.0, 1000.0, 0.0, 0.0]);
+        }
+        let (mut pts, mut idx, mut px) = (Vec::new(), Vec::new(), Vec::new());
+        let n_pts = 200;
+        for p in 0..n_pts {
+            let truth = [3.5 + 4.0 * rng.next(), 3.0 * rng.next(), 10.0 + 2.0 * rng.next()];
+            for c in 0..n_cam {
+                let x = truth[0] - c as f64;
+                idx.extend_from_slice(&[c as u32, p as u32]);
+                px.extend_from_slice(&[(1000.0 * x / truth[2]) as f32, (1000.0 * truth[1] / truth[2]) as f32]);
+            }
+            // Every 10th point at 1 % of its depth along camera 0's ray; the rest close.
+            let s = if p % 10 == 0 { 0.01 } else { 1.0 + 0.01 * rng.next() };
+            pts.extend(truth.iter().map(|v| (v * s) as f32));
+        }
+        let mut fixed = vec![0u8; n_cam];
+        fixed[0] = 1;
+        fixed[1] = 1; // two fixed cameras hold the gauge, scale included
+        let solver = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-12, f32::NAN, f32::NAN, f32::NAN, 0.0];
+        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &[], 100, &[], 0, &solver, &fixed, &[]);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+        let (before, after) = (out[base], out[base + 1]);
+        assert!(after < 1e-2, "rms {before} → {after} px after {} iterations", out.len() - base - 4 - BA_STATS_LEN);
+    }
+
+    // A far point (its block's entries ~(f/z)² ≈ 1e-8) is as invertible as a near one:
+    // an absolute determinant floor refused it at every iteration's first try, so the
+    // damping never fell and the whole model crept. With the scale-free test LM reaches
+    // the exact solution in the iterations a model without the point needs.
+    #[test]
+    fn a_far_point_does_not_hold_back_the_damping() {
+        let n_cam = 8;
+        let run = |far: bool| {
+            let mut rng = Lcg(11);
+            let (mut cams, mut intr) = (Vec::new(), Vec::new());
+            for c in 0..n_cam {
+                cams.extend_from_slice(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -(c as f32), 0.0, 0.0]);
+                intr.extend_from_slice(&[1000.0, 1000.0, 0.0, 0.0]);
+            }
+            let (mut pts, mut idx, mut px) = (Vec::new(), Vec::new(), Vec::new());
+            let mut truths: Vec<[f64; 3]> = (0..100).map(|_| [3.5 + 4.0 * rng.next(), 3.0 * rng.next(), 10.0 + 2.0 * rng.next()]).collect();
+            if far { truths.push([2e5, 1e5, 1e7]); }
+            for (p, truth) in truths.iter().enumerate() {
+                for c in 0..n_cam {
+                    let x = truth[0] - c as f64;
+                    idx.extend_from_slice(&[c as u32, p as u32]);
+                    px.extend_from_slice(&[(1000.0 * x / truth[2]) as f32, (1000.0 * truth[1] / truth[2]) as f32]);
+                }
+                pts.extend(truth.iter().map(|v| (v * (1.0 + 0.01 * rng.next())) as f32));
+            }
+            let mut fixed = vec![0u8; n_cam];
+            fixed[0] = 1;
+            fixed[1] = 1;
+            let solver = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-12, f32::NAN, f32::NAN, f32::NAN, 0.0];
+            let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &[], 50, &[], 0, &solver, &fixed, &[]);
+            let base = n_cam * 12 + truths.len() * 3 + n_cam * 8;
+            (out[base + 1], out.len() - base - 4 - BA_STATS_LEN)
+        };
+        let ((near_rms, near_it), (far_rms, far_it)) = (run(false), run(true));
+        assert!(near_rms < 1e-2 && far_rms < 1e-2, "rms {near_rms} / {far_rms} px");
+        assert!(far_it <= near_it + 2, "{far_it} iterations with the far point, {near_it} without");
     }
 
     // A camera ring above DENSE_MAX_N (PCG only, no dense matrix ever built) still
@@ -2736,7 +2889,7 @@ mod rig_tests {
 
     #[test]
     fn a_large_rig_takes_the_threaded_schur_path_alike() {
-        // 150 captures, 450 cameras: over 128 free blocks, the range-split Schur step.
+        // 150 captures, 450 cameras: the direct solve's range-split Schur step.
         let g = rig_of(5, 30);
         let (cf, kf, pf, capture, sensor, of) = inputs(&g, 0.0052);
         let (n_cam, n_pts) = (cf.len() / 12, g.pts.len());

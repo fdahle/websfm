@@ -378,3 +378,25 @@ newest project (or the one named by `project`), so ortho or DEM variants rerun w
 detection, matching or dense. Product stages take a settings suffix: `ortho:gm` reads the
 settings object under the `"ortho:gm"` key. `exportOrthoCog: true` also writes each
 ortho's full-resolution COG next to the summary (`<out>.<label>.ortho.tif`), for crops.
+
+## Bundle adjustment against Ceres (`bal/`)
+
+`node scripts/bench/bal/run.mjs` solves the BAL problems (Bundle Adjustment in the Large,
+grail.cs.washington.edu/projects/bal: 98 real photo collections with their tie points and
+starting cameras, 16–13,682 cameras, 11 GB unpacked) with the crate's bundle adjustment
+(`crates/reconstruction/examples/bal.rs`, the app's solver policy) and with Ceres 2.2
+(`bal/ceres_bal.cc`, SPARSE_SCHUR), on the same objective and start, and compares the final
+costs. It builds both, appends one JSON line per run to `<out>/results.jsonl` and resumes
+from it; `--summary` prints the table. The whole set takes a night (the largest "final"
+problems hours each); `--max-obs N` or `--only venice` take a part. Ceres comes from a
+conda env with Ceres, glog, gflags and Eigen (`CERES_PREFIX`, default the colmap_env).
+
+`final_cost` of a websfm run is the solver's own f64 cost; `mapping_ok` says BAL's formula,
+applied to the f32-rounded start, gives the solver's initial cost (the frame mapping
+holds). Don't score the f32 output with BAL's formula: a point close to a camera's plane
+turns the rounding into pixels (×10⁸ on the large Ladybug problems). `cholesky` and
+`pcg_iters` say which linear solve ran: past the 1 GiB sparse factor limit it is PCG.
+
+`BAL_F32_START=1` gives Ceres the f32-rounded start the crate sees (on Ladybug that alone
+moves Ceres' result by several percent), and `BAL_TRACE=1` prints its per-iteration
+progress: `BAL_F32_START=1 BAL_TRACE=1 <out>/ceres_bal <problem.txt> 100 20`.

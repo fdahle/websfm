@@ -341,8 +341,29 @@ Notable changes to websfm. The format follows
   course for twice that. On the Melville glacier scans at High, the comparison map took
   78 minutes against 94 s on the GPU. On the example project at 2,400 px it gave up
   after 42 s, when it was on course for 648 s (GPU 14 s).
+- **Faster bundle adjustment from about 100 photos.** Sparse Model's bundle adjustment now
+  spreads its heaviest step over all the threads it has, where a block of 100–300 photos
+  used one to four. On the 347-image quarry it took 35 s instead of 43 s (Sparse Model
+  73 s instead of 81 s) with the same cameras, points and GNSS fit; on 36 public BAL
+  problems it went from a median 1.46× to 1.06× of Ceres' time, up to 2.6× faster
+  (dubrovnik-88), with the same final costs.
 
 ### Fixed
+- **Bundle adjustment no longer stops on a hard start.** When its first steps overshoot,
+  Sparse Model's bundle adjustment now keeps damping them until one improves the model,
+  instead of stopping after eight tries with the model where it was. Checked against Ceres
+  on the 98 public BAL problems (Bundle Adjustment in the Large): the three largest Ladybug
+  problems had stopped after one iteration at 28× Ceres' final cost and now end within
+  0.2–2.9 % of it, and the other 31 problems re-run came out bit for bit the same. Over the 95
+  problems both solved, the final cost is a median 0.00004 % from Ceres' (84 within 1 %),
+  at a median 1.4× its time; the three largest do not finish within 2 h (docs/BENCHMARKS.md).
+- **Distant points no longer slow bundle adjustment.** A tie point very far from the
+  cameras (background, horizon) could keep Sparse Model's bundle adjustment from taking
+  full steps, so it crept towards the solution and stopped short. It now converges as if
+  the point were not there. On the public BAL problem dubrovnik-173 it took 16 s and 21
+  iterations instead of 131 s and 100 to end within 0.02 % of Ceres' cost (it had stopped
+  1.3 % above); none of the 46 problems re-run ended worse, and the 347-image quarry,
+  which has no such points, came out the same.
 - **One highlighted row in the sidebar.** Clicking an image, GCP, product, reference
   raster or vector layer now moves the highlight there; before, a cloud you had clicked
   (or a run had just added) stayed highlighted next to it. DEM, orthophoto, reference

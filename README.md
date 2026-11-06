@@ -149,7 +149,7 @@ independent reference data, results are scored against it: RTK camera positions,
 surveyed GCPs held out as checkpoints, and ETH3D ground truth. COLMAP 4.0.3 is run on
 the same images on the same machine for comparison.
 
-Latest results (October 2026):
+Latest results (October–November 2026):
 
 | Dataset | Images registered | Result | Compared against |
 | --- | --- | --- | --- |
@@ -157,6 +157,7 @@ Latest results (October 2026):
 | Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 24.8 cm H / 49.6 cm V | COLMAP: 24.0 / 65.0 cm |
 | Quarry, Pix4D example (RTK in EXIF), pure SfM | 347 / 347 | Cameras vs RTK: 28.7 cm H / 70.2 cm V, ~530 s end to end | COLMAP: 49.5 / 84.7 cm, 1,104 s |
 | COLMAP South Building | 128 / 128 | 60,045 sparse points | COLMAP: 84,954 points |
+| Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone) | – | Final cost a median 0.00004 % from Ceres', 84 of 95 within 1 %, at 1.4× its time; the 3 largest not solved in 2 h | Ceres 2.2 |
 | ETH3D high-res, 6 training scenes (dense, from ground-truth cameras, ETH3D's evaluator) | – | Mean F1 66.2 at 2 cm | COLMAP dense: 58.4 |
 | Casa Grande 1978 aerial film (37 scans, 11 GCP checkpoints) | 37 / 37 | DEM vs 1 m reference: RMSE 1.42 m, NMAD 0.73 m | COLMAP: 13.0 / 13.5 m; Metashape defaults: 13 / 37 cameras |
 

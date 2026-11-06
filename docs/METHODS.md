@@ -536,14 +536,30 @@ family as COLMAP's BA; the specifics:
   recomputed from the Jacobians where the elimination and the back-substitution
   need them, rather than kept (160 B per observation). Every matrix entry receives
   the same sums in the same order as the dense assembly did, so a system that fits
-  the dense path solves bit-identically.
+  the dense path solves bit-identically. **The app's default since 2026-10-16 replaces
+  that PCG by a sparse block Cholesky** of the reduced system (`sparse_chol.rs`; ordering
+  computed once per solve call): exact steps where block-Jacobi PCG stalls at its cap on
+  large blocks, with the LM stop floored at 10⁻⁵. Its Schur step is split over contiguous
+  ranges of cameras, one per 8 cameras and at most 16, fixed by the camera count so the
+  result is the same bits on any number of threads (quarry, 347 images: BA 43 → 35 s
+  against one range per 64 cameras, same cameras and GNSS fit). Its factor is limited to 1 GiB
+  (`SPARSE_MAX_BYTES`); past it, the capped PCG above runs instead.
 - **Robust cost**: **Huber**, with an **adaptive threshold** = 2.5 × median
   residual (recomputed each outer iteration, floored at 1 px), applied as an IRLS
   weight `w = min(1, δ/‖r‖)`. Step acceptance evaluates the loss that weight
   descends, ρ = q·(2w − w²) (= 2δ‖r‖ − δ² for unit weights), not w·q. Tracks the noise floor as the model tightens so
   gross mis-triangulations don't drag the solution.
-- **LM damping**: standard multiplicative λ schedule with up to 8 damping retries
-  per iteration; a step is accepted only if it lowers the robust cost, and the
+- **LM damping**: standard multiplicative λ schedule (×0.3 on an accepted step, ×4 on a
+  rejected one, between 10⁻⁹ and 10⁸); a step is accepted only if it lowers the robust
+  cost. A rejected step is retried with more damping until one lowers the cost, the
+  damping reaches its cap, or the step falls below 10⁻⁸ of the model's size (Ceres'
+  `parameter_tolerance`). It used to give up after 8 tries, which raise λ only to ~20 from
+  where it works; on BAL's largest Ladybug problems that ended the solve after one
+  iteration at 28× Ceres' cost (below). Ceres' own rule (damping set by the ratio ρ of
+  actual to predicted decrease, ×2, ×4, ×8 … on rejection; Nielsen) was tried on 36 BAL
+  problems (2026-11-05): 22 % fewer solves, but the hard Ladybug problems ended worse
+  (ladybug-1587 +5.5 % of Ceres' cost against +2.9 %, 316 s against 94 s), also with the
+  increase after a success capped, so the fixed ×0.3 / ×4 stays. The
   whole solve is **guarded** at the orchestration level. The guard judges the
   objective the solver minimised, not plain RMS (`core/sfm/baAcceptance.js`): when
   RMS rises it re-evaluates one Huber cost before and after, with δ fixed from the
@@ -554,7 +570,7 @@ family as COLMAP's BA; the specifics:
   solve keeps its pre-solve estimate, so the next one inherited the same problem.
 - **Stopping rule**: LM stops when an accepted step lowers the robust cost by less than
   `functionTolerance` (1e-6, Ceres' default) of that iteration's cost, when no step is
-  accepted within the damping retries, or at the iteration cap. The comparison stays
+  accepted at any damping (above), or at the iteration cap. The comparison stays
   within one iteration because δ is re-derived from the residuals each iteration, so
   costs from different iterations are not on one scale. Without the tolerance every BA
   ran to its cap: on St Nazaire the late BAs repeated ~4 s iterations (1.45 M
@@ -563,6 +579,49 @@ family as COLMAP's BA; the specifics:
 - **Cost reported**: RMS reprojection error in pixels, before/after, plus a
   per-iteration convergence trace (used to tell "plateaued" from "still
   descending — raise iterations").
+
+**Checked against Ceres on BAL** (`scripts/bench/bal/`). The 98 problems of Bundle
+Adjustment in the Large (Agarwal et al. 2010) are solved by the app's solver policy
+(`crates/reconstruction/examples/bal.rs`: the sparse direct solve, each camera its own
+focal, k1 and k2, no robust loss, so both minimise ½Σ‖r‖²) and by Ceres 2.2 (SPARSE_SCHUR,
+its defaults); BAL's own formula, applied to the f32-rounded start, gives the solver's
+initial cost on every problem, which checks the frame mapping. The results are in
+[BENCHMARKS.md](BENCHMARKS.md#bundle-adjustment-against-ceres-bal): on 95 of 98 the final
+cost is a median +0.00004 % from Ceres', 84 within 1 %, at a median 1.4× its time; the three
+largest "final" problems do not finish in 2 h. What the comparison changed in the method:
+
+- *Two bugs.* LM gave up after 8 rejected steps (LM damping, above), which left the three
+  largest Ladybug problems at 28× Ceres' cost; they now end +0.2 to +2.9 %, and the 31
+  other problems re-run came out bit for bit the same. And a point's 3×3 block was
+  refused as singular below an absolute determinant of 10⁻²⁰: a far point's entries are
+  ~(f/z)², and one such point in dubrovnik-173 (diagonal ~10⁻⁶, determinant 4·10⁻²¹, well
+  conditioned) failed the first try of every iteration, so the damping never fell below
+  ~10⁻² and the whole model crept (+1.3 % of Ceres' cost after 100 iterations, 131 s). The
+  test is now scale-free (the determinant against the diagonal's product; the dense
+  Cholesky's pivots likewise against their diagonal): +0.02 % in 21 iterations, 16 s
+  (Ceres 15.6 s).
+- *Schur ranges.* A profile put most of the time in the per-try Schur elimination, which
+  ran on one range of cameras per 64 (3 to 6 threads on these problems, one under 128
+  cameras). At one range per 8 cameras, at most 16 (`RangePlan`), 36 problems took a
+  median 1.06× Ceres' time instead of 1.46×, with the same costs. More ranges than
+  threads are slower (redundant point work).
+- *Tried and rejected:* Ceres' damping rule (Nielsen, above); Ceres' stopping tolerance
+  10⁻⁶ instead of the direct solve's 10⁻⁵ on the problems that end above Ceres (same
+  costs, more iterations); Ceres' damping floor (`min_lm_diagonal` 10⁻⁶, no effect);
+  `target-cpu=native` (no gain).
+- *What is left.* Where WebSfM ends more than 1 % above, four are the start (the app's
+  interface rounds it to f32, and Ceres from the same rounded start ends as high or
+  higher: ladybug-885, -931, -1469, -1695, `BAL_F32_START=1 ceres_bal`), the rest
+  different paths through a non-convex problem (`BAL_TRACE=1`: on ladybug-1642 and
+  venice-1672 Ceres takes wild steps, recovers and settles lower; LM takes the steady
+  path into a nearby valley). On the dense Ladybug problems the sparse factorisation
+  dominates the time. Past 1 GiB of factor (`SPARSE_MAX_BYTES`) the solve falls back to
+  capped block-Jacobi PCG, which reaches Ceres' cost on final-1936 but at 11× its time:
+  the weak point for projects of thousands of images.
+- *A harness pitfall.* Scoring the f32 output with BAL's formula instead of the solver's
+  own f64 cost inflates a few problems by up to 10⁸, since a point close to a camera's
+  plane turns rounding into pixels. That artefact first looked like divergence of the old
+  PCG path, which in fact ends within 3 % of Ceres on the 47 problems it ran.
 
 **Interleaved BA**: a global BA + track-filter runs every `interimBaEvery` new
 cameras (COLMAP-style), so later PnP registers against a tight model and the final
