@@ -358,11 +358,12 @@ Notable changes to websfm. The format follows
   970 instead of 951 of the 1,067 pairs COLMAP verifies with 100+ inliers, UseGeo 3,329
   accepted pairs instead of 3,020 (camera heights 6.1 instead of 8.4 cm RMS against the
   reference, matching +19 % on the CPU). No set of the ten measured got worse.
-- **Depth maps on the GPU about 30 % faster.** Each PatchMatch sweep now runs only the
-  pixels it updates, so the GPU no longer spends half its threads waiting; the depth
-  maps come out bit for bit the same. On ETH3D's courtyard (38 photos, Medium, Quadro
-  RTX 5000) Depth Maps took 162 s instead of 227 s, on pipes 63 s instead of 80 s, with
-  identical dense clouds.
+- **Depth maps on the GPU about a third faster.** Each PatchMatch sweep now runs only the
+  pixels it updates, so the GPU no longer spends half its threads waiting, and each
+  candidate plane's warp is set up once instead of at every window pixel. On six ETH3D
+  scenes (Medium, Quadro RTX 5000) Depth Maps took 722 s instead of 1,127 s (courtyard
+  141 instead of 227 s), with the same F1 score on every scene. The first change alone
+  gives bit-identical dense clouds; the second moves 0.06 % of the points.
 - **No long wait to compare GPU and CPU depth maps.** When the GPU is slow, Depth Maps
   still computes one map on the CPU to compare, but now gives up on it as soon as the CPU
   is clearly slower, and goes on with the GPU. It decides after each pyramid level: it
