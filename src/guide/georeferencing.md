@@ -59,7 +59,7 @@ rebuilds the sparse model with each tie point over stable ground pulled toward a
 reference DEM's height ([reference DEM hold](help:reference-dem-hold)), so the block
 keeps the ground's shape. The GCPs or camera positions still place it; the DEM only
 keeps it from bending. Use it for blocks without good control and for historical
-photos.
+photos. It is experimental: keep a few GCPs as check points to see what it did.
 
 ## Reference DEM to hold
 <!-- param: holdReference  default: The first imported -->

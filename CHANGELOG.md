@@ -6,6 +6,15 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Experimental features are marked.** An amber **Experimental** badge sits beside
+  rolling shutter, the multispectral rig, the reflectance map, Hold to a reference DEM,
+  AprilTag and ArUco detection, and Add to the model; its hover text says what has not
+  yet been checked on real data. They work, but compare their results with a reference
+  (check points, a calibration panel) before relying on them. A badge goes when its
+  checks pass: rolling shutter needs a DJI block with independent check points, the
+  multispectral rig and reflectance map a real flight with a held-out panel, the DEM
+  hold its benches against withheld check points, the tags real photos of printed
+  tags, and Add to the model a comparison with a full rebuild.
 - **COPC export.** Export ▸ Point Cloud has a **COPC** format (`.copc.laz`): LAZ 1.4
   stored as a level-of-detail octree, which QGIS, Potree and PDAL read a part at a time.
   A streamed cloud is written from its own octree, node for node, without being loaded;

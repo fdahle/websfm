@@ -13,7 +13,8 @@ after Align with **One pose per capture** and a DEM.
 Each cell takes the capture that sees it nearest the middle of its photo, and every band
 reads that capture's photo of it, straight from the camera's raw values, corrected for
 vignetting, exposure and gain as the camera's calibration describes. Cells are not
-checked for occlusion, so it suits open ground, fields and canopy.
+checked for occlusion, so it suits open ground, fields and canopy. The reflectance map
+is experimental: check it against a calibration panel you did not use.
 
 The map is added to **Reference Data**: **Style bands…** shows a single band, a
 false-colour composite, or an index such as NDVI or NDRE, which the bands' names fill in.

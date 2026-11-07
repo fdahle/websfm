@@ -28,7 +28,7 @@ place) and leaves the rest as it is; match them first with
 [Match only new pairs](guide:match-features). Images that can't be placed are named in
 the console; Quality Report ▸ Sparse ▸ **Try again…** retries them. **Rebuild** builds a
 new model from all images. Imported models, images detected again since, and fisheye
-cameras need a rebuild.
+cameras need a rebuild. Adding is experimental: check the added cameras.
 
 ## Existing cameras
 <!-- param: existingCameras  default: Auto -->
@@ -69,7 +69,7 @@ sensor reads the rows one after another while the drone moves, which bends the b
 with little sign in the residuals and shows as check-point errors. **Estimate the
 readout time** solves it per camera group, the motion taken from the photos' capture
 times. Leave it off for a mechanical or global shutter, and for photos without a
-capture time.
+capture time. Experimental: compare the check points with it off.
 
 ## Multispectral rig
 <!-- param: cameraRig default: One pose per capture -->
@@ -79,6 +79,7 @@ is seen from its lens's fixed offset to the reference band, starting from the of
 the camera records and refined from the matches. A band that matches nothing, such as
 thermal, still gets its pose from its capture. **One pose per photo** solves each band
 image on its own; use it only for cameras that are not rigidly mounted together.
+Experimental: not yet checked on a real flight.
 
 ## Check the result
 Cameras should follow the capture path, most images should register, and the points

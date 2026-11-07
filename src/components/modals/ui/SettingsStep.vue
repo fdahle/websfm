@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUpdated, ref, useSlots } from 'vue'
 import { useStepLayout } from '../../../composables/useStepLayout.js'
+import ExperimentalBadge from '../../layout/ExperimentalBadge.vue'
 
 // One numbered stage of a pipeline modal: "① Resize → ② Tile → ③ Detect → ④ Keep".
 // It says *where in the order of operations* its fields act and what they do to this
@@ -16,13 +17,15 @@ import { useStepLayout } from '../../../composables/useStepLayout.js'
 // many are hidden (a note, not a link: the footer switch shows them). A step that is
 // inactive dims only its fact: its fields stay as usable as any other. A step with
 // everyday fields starts open. Without a layout it is drawn as before: always open, the
-// effect line under the title, an inactive step dimmed.
+// effect line under the title, an inactive step dimmed. `experimental` (an id of
+// core/help/experimental.js) puts an Experimental badge after the title.
 const props = defineProps({
   step: { type: [Number, String], required: true },
   title: { type: String, required: true },
   effect: { type: [String, Object], default: '' },
   inactive: { type: Boolean, default: false },
   more: { type: Number, default: null },
+  experimental: { type: String, default: null },
 })
 const slots = useSlots()
 const layout = useStepLayout()
@@ -48,6 +51,7 @@ onUpdated(countAdvanced)
     <div class="step-head">
       <span class="step-num">{{ step }}</span>
       <span class="step-title">{{ title }}</span>
+      <ExperimentalBadge v-if="experimental" :id="experimental" />
     </div>
     <div v-if="long || $slots.effect" class="step-effect">
       <slot name="effect">{{ long }}</slot>
@@ -65,6 +69,7 @@ onUpdated(countAdvanced)
     >
       <span class="step-num">{{ step }}</span>
       <span class="step-title">{{ title }}</span>
+      <ExperimentalBadge v-if="experimental" :id="experimental" />
       <span v-if="short" class="step-fact">{{ short }}</span>
       <span class="step-chevron" aria-hidden="true">{{ open ? '▾' : '▸' }}</span>
     </button>

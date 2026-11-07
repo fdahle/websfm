@@ -30,7 +30,8 @@ highlighted: **A** accepts it, **X** removes it, **S** leaves it for later, and
 **Checker mat**, the black-and-white squares of most drone surveys, is found where the
 model expects each GCP. **AprilTag 36h11** and **ArUco** find printed tags of that
 family anywhere in every enabled photo; print them with their white border, at least
-about 2 photo pixels per cell (a 10-cell tag of 0.3 m at 1.5 cm GSD is 20 px).
+about 2 photo pixels per cell (a 10-cell tag of 0.3 m at 1.5 cm GSD is 20 px). Tag
+detection is experimental: review the detected marks in Edit GCPs.
 
 ## Dictionary
 <!-- param: arucoDict  default: 4X4_50 -->

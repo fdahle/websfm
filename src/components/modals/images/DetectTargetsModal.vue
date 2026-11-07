@@ -60,7 +60,7 @@ function run() {
       Finds the centre of each GCP's target in the photos and places the GCP's mark there, marked as detected. Check
       them in <b>Edit GCPs</b>, then georeference again.
     </p>
-    <SettingsStep step="1" title="Targets" :effect="effects.targets">
+    <SettingsStep step="1" title="Targets" :effect="effects.targets" :experimental="tags ? 'targetTags' : null">
       <SettingsField label-for="dt-kind">
         <template #label><FieldHelp op="detect-targets" param="kind">Target type</FieldHelp></template>
         <select id="dt-kind" v-model="settings.kind" class="field-select">

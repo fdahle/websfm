@@ -7,6 +7,7 @@ import { useDialogSettings } from '../../../composables/useDialogSettings.js'
 import SettingsField from '../ui/SettingsField.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
+import ExperimentalBadge from '../../layout/ExperimentalBadge.vue'
 import { REFLECTANCE_DEFAULTS } from '../../../core/defaults.user.js'
 import { reflectanceEffects } from '../../../core/stepEffects/reflectance.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
@@ -37,7 +38,7 @@ function run() {
 <template>
   <ModalShell title="Reflectance Map" @close="emit('close')">
     <template #header>
-      <span class="modal-title">Reflectance Map</span>
+      <span class="modal-title">Reflectance Map <ExperimentalBadge id="reflectance" /></span>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <WarnBox v-if="!rig">No photo here is a band of a multispectral camera (MicaSense RedEdge or Altum).</WarnBox>
