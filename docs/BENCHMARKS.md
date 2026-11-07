@@ -11,7 +11,7 @@ i9-10900X (20 threads), 64 GB RAM, NVIDIA Quadro RTX 5000. Depth maps run on Web
 where noted, otherwise on the CPU through WebAssembly. COLMAP is 4.0.3 with CUDA,
 Metashape 2.2.2, on the same machine, both at their defaults unless a row says
 otherwise. Each table gives the date of its run; WebSfM was the `main` branch of that
-day. Releases: 0.2.0 on 2026-10-12, 0.3.0 on 10-18, 0.4.0 on 10-21, 0.5.0 on 10-28.
+day. Releases: 0.2.0 on 2026-10-12, 0.3.0 on 10-18, 0.4.0 on 10-21, 0.5.0 on 10-28, 0.6.0 on 10-31.
 
 Camera positions are compared after a similarity fit to the reference (seven
 parameters, so only the shape of the block counts). "Median" is the median camera-centre
@@ -27,41 +27,43 @@ ETH3D's six training scenes with laser-scanned ground truth (eth3d.net). The ima
 carry no EXIF focal length, so the focal length is estimated from the image pairs.
 Registered cameras · median centre error (mm).
 
-| scene | WebSfM (2026-10-25) | COLMAP (2026-10-16) | Metashape (2026-10-16) |
-| --- | --- | --- | --- |
-| courtyard | 38/38 · 7.4 | 38/38 · 32 | 38/38 · 5.3 |
-| delivery_area | 44/44 · 2.9 | 44/44 · 22 | 44/44 · 1.4 |
-| office | **20/26** · 1.7 | 26/26 · 5.8 · 3 off | 26/26 · 5.4 · 1 off |
-| pipes | **8/14** · 3.9 | 14/14 · 5.1 | 14/14 · 1.1 |
-| playground | 35/38 · 1.3 | 37/38 · broken (880 mm) | 38/38 · 1.5 |
-| terrace | 23/23 · 2.5 | 23/23 · 5.9 · 1 off | 23/23 · 2.1 |
+| scene | WebSfM (2026-11-07) | WebSfM, detection at 4,000 px | COLMAP (2026-10-16) | Metashape (2026-10-16) |
+| --- | --- | --- | --- | --- |
+| courtyard | 38/38 · 6.7 | 38/38 · 7.5 | 38/38 · 32 | 38/38 · 5.3 |
+| delivery_area | 44/44 · 2.9 | – | 44/44 · 22 | 44/44 · 1.4 |
+| office | **20/26** · 1.6 · 1 off | 26/26 · 2.6 | 26/26 · 5.8 · 3 off | 26/26 · 5.4 · 1 off |
+| pipes | **8/14** · 3.9 | 14/14 · 1.6 | 14/14 · 5.1 | 14/14 · 1.1 |
+| playground | 35/38 · 1.3 | 38/38 · 1.4 | 37/38 · broken (880 mm) | 38/38 · 1.5 |
+| terrace | 23/23 · 2.2 | – | 23/23 · 5.9 · 1 off | 23/23 · 2.1 |
 
 The gap is **registration on low-texture interiors**: office and pipes yield 500–2,000
 keypoints per image at the default 2,400 px detection size; on pipes the unregistered
-images reach 14–18 of the 20 correspondences that registration requires.
+images reach 14–18 of the 20 correspondences that registration requires. Detecting at
+4,000 px (Detect Features ▸ Detection resolution) registers every image of all three scenes;
+doubling the keypoints at 2,400 px does not.
 
 ### Drone blocks against RTK, and GCP-free bending
 
 Camera centres against the drones' RTK positions (cm, horizontal / vertical RMS), all
-three tools without the positions in the solve. 2026-10-11.
+three tools without the positions in the solve. WebSfM 2026-11-07 (2026-10-11 in
+brackets), COLMAP 2026-10-11.
 
 | block | WebSfM | COLMAP incremental | COLMAP GLOMAP |
 | --- | --- | --- | --- |
-| quarry (Pix4D example, 347 images) | 28.7 / 70.2 | 49.5 / 84.7 | 49.0 / 86.4 |
-| GeoScan PUTI (444 images) | 24.8 / 49.6 | 24.0 / 65.0 | 176.1 / 83.6 |
+| quarry (Pix4D example, 347 images) | 20.3 / 13.4 (28.7 / 70.2) | 49.5 / 84.7 | 49.0 / 86.4 |
+| GeoScan PUTI (444 images) | 26.5 / 14.6 (24.8 / 49.6) | 24.0 / 65.0 | 176.1 / 83.6 |
 
 | block | WebSfM time (detect + match + SfM) | COLMAP incremental | COLMAP GLOMAP |
 | --- | --- | --- | --- |
-| quarry | ~530 s | 1,104 s | 624 s |
-| PUTI | ~400 s | 1,511 s | 1,783 s |
+| quarry | ~530 s (2026-10-11) | 1,104 s | 624 s |
+| PUTI | 332 s (2026-11-07, matching on WebGPU) | 1,511 s | 1,783 s |
 
-Without control, WebSfM and COLMAP bend a nadir block into a dome; Metashape does not on
-quarry (12 cm vertical, next section). On quarry the cause is WebSfM's self-calibration:
-with Metashape's lens held fixed, the same WebSfM solve ends 8.5 cm out vertically
-instead of 67 cm. On PUTI, Metashape's GCP-solved calibration held fixed still left
-44 cm, so the lens may not be the whole story on every block. **With the RTK positions
-inside bundle adjustment**, PUTI's cameras are 1.59 / 1.33 cm and its 15 GCP checkpoints
-3.35 / 7.0 cm.
+Without control, COLMAP bends a nadir block into a dome of 0.65–0.85 m. WebSfM did too
+(0.5–0.7 m) until its self-calibration was reworked: the whole lens is now solved, and
+the decentring terms p1/p2 are kept where they explain the observations. Quarry's
+vertical error went from 67 to 13 cm (Metashape: 12 cm, next section), PUTI's from 50 to
+15 cm. **With the RTK positions inside bundle adjustment**, PUTI's
+cameras are 1.59 / 1.33 cm and its 15 GCP checkpoints 3.35 / 7.0 cm.
 
 COLMAP keeps 40–260 % more sparse points on these blocks. WebSfM's tracks are shorter
 because it accepts fewer image pairs (South Building: 1,158 against 2,597).
@@ -73,27 +75,27 @@ Photos (High, 40,000 / 4,000 points, generic preselection; photo positions switc
 in the solve) through `scripts/bench/metashape-ref.mjs`, WebSfM through the bench. Camera
 centres after a similarity fit: against ETH3D's ground-truth cameras (median, mm),
 COLMAP's South Building model (median, model units), RTK (quarry) and UseGeo's reference
-orientations (H / V RMS, cm). 2026-11-06.
+orientations (H / V RMS, cm). WebSfM 2026-11-07, Metashape 2026-11-06.
 
 | set | registered (WebSfM · Metashape) | camera error (WebSfM · Metashape) | time, s (WebSfM · Metashape) | peak memory, GB (WebSfM · Metashape) |
 | --- | --- | --- | --- | --- |
-| South Building (128) | 128 · 128 | 0.0048 · 0.0055 | 347 · 100 | 3.9 · 1.1 |
-| ETH3D courtyard (38) | 38 · 38 | 7.4 · 5.2 | 49 · 36 | 3.4 · 1.5 |
-| ETH3D delivery_area (44) | 44 · 44 | 2.9 · 1.4 | 35 · 31 | 2.9 · 1.5 |
-| ETH3D office (26) | **20** · 26 | 1.6 (1 off) · 2.6 | 11 · 18 | 2.6 · 1.4 |
-| ETH3D pipes (14) | **8** · 14 | 3.9 · 1.0 | 9 · 10 | 2.5 · 1.4 |
-| ETH3D playground (38) | 35 · 35 | 1.3 · 4.2 (3 off, up to 1.06 m) | 45 · 42 | 3.2 · 1.5 |
-| ETH3D terrace (23) | 23 · 23 | 2.5 · 2.1 | 23 · 22 | 2.9 · 1.5 |
-| quarry, no GCPs (347) | 346 · 347 | **30 / 67** · 13 / 12 | 1,175 · 308 | 4.7 · 1.5 |
-| UseGeo dataset 1 (224, 42 MP) | 224 · 224 | 3.7 / 8.2 · 3.3 / 8.5 | 637 · 247 | 3.9 · 2.2 |
+| South Building (128) | 128 · 128 | 0.0049 · 0.0055 | 378 · 100 | 3.9 · 1.1 |
+| ETH3D courtyard (38) | 38 · 38 | 6.7 · 5.2 | 56 · 36 | 3.2 · 1.5 |
+| ETH3D delivery_area (44) | 44 · 44 | 2.9 · 1.4 | 33 · 31 | 2.9 · 1.5 |
+| ETH3D office (26) | **20** · 26 | 1.6 (1 off) · 2.6 | 11 · 18 | 2.7 · 1.4 |
+| ETH3D pipes (14) | **8** · 14 | 3.9 · 1.0 | 9 · 10 | 2.4 · 1.4 |
+| ETH3D playground (38) | 35 · 35 | 1.3 · 4.2 (3 off, up to 1.06 m) | 45 · 42 | 3.4 · 1.5 |
+| ETH3D terrace (23) | 23 · 23 | 2.2 · 2.1 | 27 · 22 | 3.2 · 1.5 |
+| quarry, no GCPs (347) | 346 · 347 | 20 / 13 · 13 / 12 | 1,233 · 308 | 4.8 · 1.5 |
+| UseGeo dataset 1 (224, 42 MP) | 224 · 224 | 3.8 / 6.1 · 3.3 / 8.5 | 708 · 247 | 3.8 · 2.2 |
 
-- **Accuracy is level except quarry's dome** (above): WebSfM is better on South Building
-  and playground, Metashape on four ETH3D scenes, the two equal on UseGeo. WebSfM was
-  given UseGeo's reference calibration; Metashape calibrated itself.
+- **Accuracy is level**: WebSfM is better on South Building, playground and UseGeo's
+  heights, Metashape on four ETH3D scenes and quarry's horizontal. WebSfM was given
+  UseGeo's reference calibration; Metashape calibrated itself.
 - **Registration** still misses 6 of 26 office and 6 of 14 pipes images (low texture).
 - **Time**: WebSfM matched on the CPU here (WebAssembly; the run had no WebGPU adapter),
   Metashape on the GPU, which is most of the gap on the large sets (quarry: matching
-  996 s of WebSfM's 1,175). WebSfM's memory is the peak of the browser's renderer
+  1,062 s of WebSfM's 1,233). On WebGPU, PUTI's 444 photos match in 132 s. WebSfM's memory is the peak of the browser's renderer
   processes, Metashape's the peak of its process.
 
 ### Fisheye: FIORD MeetingRoom (200° lens)
@@ -187,6 +189,32 @@ The resolutions differ. At the same 2,000 px, with the defaults before Method Fu
 WebSfM scored 59.0 against COLMAP's 58.4. COLMAP is the more precise (accuracy 87–98 %
 against WebSfM's 76–93 % in that run), and WebSfM the more complete. Full takes 2.2–3×
 the depth time of Fast (courtyard 66 → 202 s); Fast scores 62.0.
+
+### ETH3D high-res against Metashape: time and quality
+
+The same six scenes from the ground-truth cameras, each tool at Medium: WebSfM on WebGPU
+(Depth Maps + Dense Cloud), Metashape 2.2.2 (Build Depth Maps + Build Point Cloud, CUDA).
+ETH3D's evaluator could not be run here, so these scores come from
+`scripts/bench/eth3d_score.py`, which follows its method with a model of what each laser
+scan saw; it lands within about ±4 points of the official numbers above, so read the
+differences between tools, not the levels. F1 at 2 cm (%), time in seconds. 2026-11-07.
+
+| scene | WebSfM time | Metashape Medium time | Metashape High time | WebSfM F1 | Metashape Medium F1 | Metashape High F1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| courtyard | 159 | 104 | 393 | 69.7 | **81.8** | 83.7 |
+| delivery_area | 185 | 93 | 353 | 76.5 | **83.5** | 84.1 |
+| office | 114 | 60 | 209 | **63.7** | 56.4 | 54.0 |
+| pipes | 85 | 46 | 171 | **57.7** | 47.2 | 46.6 |
+| playground | 166 | 84 | 324 | 65.0 | **76.9** | 77.8 |
+| terrace | 118 | 60 | 219 | 85.4 | **87.5** | 86.9 |
+| **total / mean** | 827 | 447 | 1,669 | 69.7 | 72.2 | 72.2 |
+
+- **Time:** WebSfM takes 1.85× Metashape Medium's time and half of Metashape High's
+  (before the PatchMatch changes of 2026-11-07: 1,230 s).
+- **Quality:** level at 5 cm (mean F1 80.3 both). At 2 cm Metashape is more accurate
+  (91.5 % against 83.0 %) at the same completeness (62.7 % against 62.2 %). WebSfM is
+  ahead on the low-texture interiors and behind on courtyard and playground, where it
+  is less complete (playground 50 % against 66 %).
 
 ### Aerial: UseGeo dataset 1 against LiDAR
 

@@ -158,23 +158,21 @@ Latest results (October–November 2026):
 | Dataset | Images registered | Result | Compared against |
 | --- | --- | --- | --- |
 | Aerial survey block with RTK and 15 surveyed GCPs | 444 / 444 | Checkpoints: 3.2–3.4 cm horizontal, ~7 cm vertical (RTK camera priors, no GCP used as control) | Surveyed GCPs |
-| Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 24.8 cm H / 49.6 cm V | COLMAP: 24.0 / 65.0 cm |
-| Quarry, Pix4D example (RTK in EXIF), pure SfM | 347 / 347 | Cameras vs RTK: 28.7 cm H / 70.2 cm V, ~530 s end to end | COLMAP: 49.5 / 84.7 cm, 1,104 s |
-| COLMAP South Building | 128 / 128 | 60,045 sparse points | COLMAP: 84,954 points |
+| Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 26.5 cm H / 14.6 cm V, 332 s detection to sparse model | COLMAP: 24.0 / 65.0 cm, 1,511 s |
+| Quarry, Pix4D example (RTK in EXIF), pure SfM | 346 / 347 | Cameras vs RTK: 20.3 cm H / 13.4 cm V | COLMAP: 49.5 / 84.7 cm; Metashape: 13 / 12 cm |
+| COLMAP South Building | 128 / 128 | 64,662 sparse points | COLMAP: 84,954 points |
 | Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone) | – | Final cost a median 0.00004 % from Ceres', 84 of 95 within 1 %, at 1.4× its time; the 3 largest not solved in 2 h | Ceres 2.2 |
-| ETH3D high-res, 6 training scenes (dense, from ground-truth cameras, ETH3D's evaluator) | – | Mean F1 66.2 at 2 cm | COLMAP dense: 58.4 |
+| ETH3D high-res, 6 training scenes (dense, from ground-truth cameras, ETH3D's evaluator) | – | Mean F1 66.2 at 2 cm; 827 s for all six on WebGPU | COLMAP dense: 58.4; Metashape Medium: 447 s, about 2.5 points of F1 higher (approximate scorer) |
 | Casa Grande 1978 aerial film (37 scans, 11 GCP checkpoints) | 37 / 37 | DEM vs 1 m reference: RMSE 1.42 m, NMAD 0.73 m | COLMAP: 13.0 / 13.5 m; Metashape defaults: 13 / 37 cameras |
 
 Every table, with its date, method and the weak results, is in
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-Known gaps: without GCPs or camera priors, nadir blocks bend into a dome of about
-0.5–0.7 m (COLMAP's dome is larger on the same images, Metashape's much smaller: 12 cm
-on quarry). On quarry WebSfM's self-calibration causes it: with Metashape's lens held
-fixed, WebSfM ends at 8.5 cm, so a better lens model is next. COLMAP keeps 40–260 % more
-sparse points and registers every image of ETH3D's low-texture interiors (WebSfM:
-20 / 26 and 8 / 14), and its dense clouds are more precise at 2 cm, where WebSfM's are
-more complete.
+Known gaps: COLMAP and Metashape register every image of ETH3D's low-texture
+interiors at their defaults (WebSfM: 20 / 26 and 8 / 14; all of them when detecting at
+4,000 px). COLMAP keeps 40–260 % more sparse points. Metashape's dense clouds are more
+accurate at 2 cm and more complete on open outdoor scenes, and take about half
+WebSfM's time at the same quality setting.
 
 Not yet verified:
 

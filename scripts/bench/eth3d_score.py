@@ -171,7 +171,8 @@ out = {"label": a.label or a.recon, "scene": a.scene, "recon": a.recon,
        "reconstruction": {"points": recN, "inScanBox": nIn, "thinnedPoints": len(rec),
                           "observedShare": None if obs is None else round(float(obs.mean()), 4)},
        "occlusion": a.occlusion, "binDeg": a.bin,
-       "metric": "approximate ETH3D (no occlusion model; scan-box crop) — python twin of eth3d.mjs", "rows": rows}
+       "metric": "approximate ETH3D (" + ("no occlusion model" if a.occlusion == "none" else
+                 "scanner range-image occlusion") + "; scan-box crop) — python twin of eth3d.mjs", "rows": rows}
 print(out["label"] + ": " + " | ".join(f"{r['tolerance']*100:g}cm acc {r['accuracy']}% comp {r['completeness']}% F1 {r['f1']}" for r in rows), flush=True)
 if a.out:
     json.dump(out, open(a.out, "w"), indent=2)
