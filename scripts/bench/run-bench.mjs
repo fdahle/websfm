@@ -292,6 +292,10 @@ const gpuRequired =
 let heap = null // worker heap sampler (workerHeap.mjs), started with the page
 try {
   const page = browser.pages()[0] ?? (await browser.newPage())
+  // `workers: <n>`: the worker-pool size, as Settings ▸ Compute stores it (capped at the
+  // app's maximum); without it the app takes its automatic size.
+  if (cfg.workers > 0)
+    await page.addInitScript((n) => localStorage.setItem('websfm.compute.workerCount', String(n)), cfg.workers)
   // Worker heap per SfM segment: closed by the solver's `stage "…" took` and
   // `memory mark "…"` debug lines (sfm.js), reported with each recon stage.
   heap = await startWorkerHeapSampler(page)
