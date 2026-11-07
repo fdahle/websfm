@@ -225,6 +225,7 @@ async function depthMapOnDevice(state, own, scopes, refGray, refW, refH, refK, s
   pv.setInt32(80, Math.max(1, windowStep | 0), true)
   pv.setUint32(84, hasSeedN ? 1 : 0, true)
   pv.setUint32(88, hasPrior ? 1 : 0, true)
+  pv.setUint32(92, srcList.some((s) => s.mask) ? 1 : 0, true)
   pv.setFloat32(96, priorAlpha, true)
   pv.setFloat32(100, priorGamma, true)
   pv.setFloat32(104, 0.5 / Math.max(1e-30, priorSigD * priorSigD), true)

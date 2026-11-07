@@ -39,7 +39,9 @@ struct Params {
   acmh : u32,
   // Step between window samples (mvs.rs Patch): 1 = every pixel, 2 = every other row
   // and column; the offsets stay symmetric about the centre.
-  wstep : i32, hasSeedN : u32, hasPrior : u32, _q2 : u32,
+  wstep : i32, hasSeedN : u32, hasPrior : u32,
+  // 1 when any source has an exclusion mask; 0 skips the mask texture's read per tap.
+  hasMask : u32,
   // ACMP planar prior (mvs.rs prior_cost): α, γ, 1/(2σ_d²), 1/(2σ_n²).
   priorAlpha : f32, priorGamma : f32, priorIsd : f32, priorIsn : f32,
   // The geometric pass (mvs.rs Geom): weight 0 = off, cap in px.
@@ -126,6 +128,17 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
   if (abs(d) < 1e-9) { return 2.0; }
 
   let R0 = s.r0.xyz; let R1 = s.r1.xyz; let R2 = s.r2.xyz; let T = s.t.xyz;
+  // The plane-induced homography R + t·nᵀ/d for n·X = d (d = n·P), once per call: the
+  // "+" (not the H&Z "−") is required by this d-sign convention (mvs.rs). Folded with
+  // the reference intrinsics, a tap's source point is xs = A·x + B·y + C, two FMAs a
+  // tap instead of building the ray and both dot products every time.
+  let tn = T / d;
+  let M0 = R0 + tn.x * n; let M1 = R1 + tn.y * n; let M2 = R2 + tn.z * n;
+  // The source intrinsics go in too (row x·fx + z·cx, y·fy + z·cy): su = xs.x / xs.z.
+  let H0 = M0 * s.fx + M2 * s.cx; let H1 = M1 * s.fy + M2 * s.cy;
+  let A = vec3<f32>(H0.x, H1.x, M2.x) / params.rfx;
+  let B = vec3<f32>(H0.y, H1.y, M2.y) / params.rfy;
+  let C = vec3<f32>(H0.z, H1.z, M2.z) - A * params.rcx - B * params.rcy;
   let layer = i32(si);
   let mw = f32(params.maxW); let mh = f32(params.maxH);
   let sw = f32(s.w); let sh = f32(s.h);
@@ -143,21 +156,14 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
       let xi = i32(u) + x;
       let yi = i32(v) + y;
       if (xi < 0 || yi < 0 || xi >= i32(params.refW) || yi >= i32(params.refH)) { continue; }
-      let ray = vec3<f32>((f32(xi) - params.rcx) / params.rfx,
-                          (f32(yi) - params.rcy) / params.rfy, 1.0);
-      let nr  = dot(n, ray);
-      // Plane-induced homography R + t·nᵀ/d for n·X = d (d = n·P). The "+" (not the
-      // H&Z "−") is required by this d-sign convention — see mvs.rs. Lockstep with the
-      // Rust kernel.
-      let xs  = vec3<f32>(dot(R0, ray) + T.x * nr / d,
-                          dot(R1, ray) + T.y * nr / d,
-                          dot(R2, ray) + T.z * nr / d);
+      let xs = A * f32(xi) + B * f32(yi) + C;
       if (abs(xs.z) < 1e-9) { continue; }
-      let su = s.fx * (xs.x / xs.z) + s.cx;
-      let sv = s.fy * (xs.y / xs.z) + s.cy;
+      let iz = 1.0 / xs.z;
+      let su = xs.x * iz;
+      let sv = xs.y * iz;
       if (su < 0.0 || sv < 0.0 || su >= sw || sv >= sh) { return INVALID; } // warp left source → no measurement
       // Masked source texel (frame/fiducial) — reject like an out-of-bounds warp.
-      if (textureLoad(srcMaskArr, vec2<i32>(i32(su), i32(sv)), layer, 0).r > 0.5) { return INVALID; }
+      if (params.hasMask == 1u && textureLoad(srcMaskArr, vec2<i32>(i32(su), i32(sv)), layer, 0).r > 0.5) { return INVALID; }
       // Clamp to the valid region so bilinear never reaches the layer's zero pad.
       let cu = clamp(su, 0.0, sw - 1.0);
       let cv = clamp(sv, 0.0, sh - 1.0);
