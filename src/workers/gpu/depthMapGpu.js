@@ -342,6 +342,7 @@ async function depthMapOnDevice(state, own, scopes, refGray, refW, refH, refK, s
   })
 
   const gx = Math.ceil(refW / 8),
+    gxSweep = Math.ceil(Math.ceil(refW / 2) / 8),
     gy = Math.ceil(refH / 8)
   // A pass goes out in bands of workgroup rows, timed: the next band is sized to take
   // DENSE_TUNING.gpuBandMs, and the queue is waited on once that much work is in it. A
@@ -380,7 +381,8 @@ async function depthMapOnDevice(state, own, scopes, refGray, refW, refH, refK, s
       const pass = enc.beginComputePass()
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bindGroup)
-      pass.dispatchWorkgroups(gx, rows)
+      // A sweep runs one checkerboard colour: half the columns (patchmatch.wgsl main).
+      pass.dispatchWorkgroups(mode === 1 ? gxSweep : gx, rows)
       pass.end()
       if (!batchRows) batchStart = performance.now()
       device.queue.submit([enc.finish()])

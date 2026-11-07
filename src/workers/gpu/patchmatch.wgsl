@@ -427,8 +427,12 @@ fn acmhSweep(u : u32, v : u32, i : u32) {
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-  let u = gid.x;
   let v = gid.y + ctrl.rowOffset;
+  // A sweep (mode 1) updates one checkerboard colour, so it is dispatched over half the
+  // columns and thread x takes the x-th pixel of this row in that colour. One thread per
+  // pixel with the other colour returning at once left every warp half idle.
+  var u = gid.x;
+  if (ctrl.mode == 1u) { u = 2u * gid.x + ((v + ctrl.parity) & 1u); }
   if (u >= params.refW || v >= params.refH) { return; }
   let i = v * params.refW + u;
 
@@ -457,7 +461,6 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     return;
   }
 
-  if (((u + v) & 1u) != ctrl.parity) { return; }
   if (params.acmh == 1u) {
     acmhSweep(u, v, i);
     return;
