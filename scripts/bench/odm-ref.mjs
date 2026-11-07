@@ -10,7 +10,8 @@
 //                             (EXIF GPS, or geo.txt from the config's reference cameras), the
 //                             whole pipeline with a DSM and a COPC cloud.
 //        [--ws <dir>]         workspace (default /data1/websfm_eval/odm-<date>/<name>-<mode>)
-//        [--image <ref>]      Docker image (default opendronemap/odm:latest)
+//        [--gpu]              ODM's GPU image (opendronemap/odm:gpu) with the NVIDIA GPU passed in
+//        [--image <ref>]      Docker image (default opendronemap/odm:latest, or :gpu with --gpu)
 //        [--keep]             keep the photo copies and ODM's intermediate folders
 //        [--score-only]       score a finished workspace again (run.json keeps its time and memory)
 //
@@ -46,7 +47,20 @@ const day = new Date().toISOString().slice(0, 10)
 const ws = resolve(args.ws ?? `/data1/websfm_eval/odm-${day}/${name}`)
 const proj = join(ws, 'project')
 const imgDir = join(proj, 'images')
-const dockerImage = args.image ?? 'opendronemap/odm:latest'
+const dockerImage = args.image ?? (args.gpu ? 'opendronemap/odm:gpu' : 'opendronemap/odm:latest')
+// The GPU without NVIDIA's container toolkit (it needs root): the device files (mode 666 on
+// this machine) and the host driver's libraries, mounted where the image looks for them.
+function gpuFlags() {
+  if (!args.gpu) return []
+  const lib = '/usr/lib/x86_64-linux-gnu'
+  const driver = sh('nvidia-smi', ['--query-gpu=driver_version', '--format=csv,noheader']).trim().split('\n')[0]
+  const devs = ['nvidia0', 'nvidiactl', 'nvidia-uvm', 'nvidia-uvm-tools'].flatMap((d) => ['--device', `/dev/${d}`])
+  const libs = ['libcuda', 'libnvidia-ml', 'libnvidia-ptxjitcompiler'].flatMap((l) => [
+    '-v',
+    `${lib}/${l}.so.${driver}:${lib}/${l}.so.1:ro`,
+  ])
+  return [...devs, ...libs, '-v', '/usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro']
+}
 const scoreOnly = !!args['score-only']
 await mkdir(imgDir, { recursive: true })
 
@@ -118,7 +132,17 @@ async function runOdm() {
   const t0 = Date.now()
   const logLines = []
   let peakMiB = 0
-  const proc = spawn('docker', ['run', '--rm', '--name', cname, '-v', `${ws}:/datasets`, dockerImage, ...odmArgs])
+  const proc = spawn('docker', [
+    'run',
+    '--rm',
+    '--name',
+    cname,
+    ...gpuFlags(),
+    '-v',
+    `${ws}:/datasets`,
+    dockerImage,
+    ...odmArgs,
+  ])
   const onData = (d) => {
     const s = d.toString()
     logLines.push(s)
@@ -150,18 +174,22 @@ const recon = JSON.parse(await readFile(join(proj, 'opensfm/reconstruction.json'
 const model = parseOpenSfm(recon)
 // Scored against the reference file, or the ORIGINAL photos' EXIF GPS (the copies have none).
 const { pc, positionSource } = await scoreCameraPositions(model, images, ref)
-// ODM's log.json: one entry per stage with its wall time.
-const odmLog = JSON.parse(await readFile(join(proj, 'log.json'), 'utf8').catch(() => '{}'))
+// ODM's benchmark.txt: `<stage> runtime: <s> seconds`, one line per stage.
+const bench = await readFile(join(proj, 'benchmark.txt'), 'utf8').catch(() => '')
 const stageSeconds = Object.fromEntries(
-  (odmLog.stages ?? []).map((st) => [
-    st.name,
-    Math.round(st.totalTime ?? (Date.parse(st.endTime) - Date.parse(st.startTime)) / 1000),
-  ]),
+  [...bench.matchAll(/^(\w+) runtime: ([\d.e+-]+) seconds$/gm)].map((m) => [m[1], Math.round(Number(m[2]))]),
 )
 const out = {
   name,
   config: args.config,
-  odm: { version, image: digest, mode, args: odmArgs.join(' '), focalHint: needsFocal ? cfg.sensor.focal : null },
+  odm: {
+    version,
+    image: digest,
+    gpu: !!args.gpu,
+    mode,
+    args: odmArgs.join(' '),
+    focalHint: needsFocal ? cfg.sensor.focal : null,
+  },
   images: files.length,
   registered: model.images.length,
   reconstructions: Array.isArray(recon) ? recon.length : 1,
