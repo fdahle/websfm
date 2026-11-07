@@ -840,13 +840,7 @@ export function createMatchAll({
             rescued = 0
           const span = laterPassSpan(barAt, bridgeRounds === 0, 0.8)
           const rescueProgress = () =>
-            progress(
-              rescued,
-              rescue.length,
-              span,
-              'Gate rescue: re-testing pairs the quick check skipped',
-              'rescue',
-            )
+            progress(rescued, rescue.length, span, 'Gate rescue: re-testing pairs the quick check skipped', 'rescue')
           rescueProgress()
           const drainRescue = async () => {
             while (true) {
