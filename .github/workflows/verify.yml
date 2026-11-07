@@ -82,6 +82,25 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+  # The exports opened by the tools users open them in (scripts/interop/check.mjs): GDAL's
+  # COG validator on the DEM and ortho, PDAL on the LAS / LAZ / COPC, COLMAP's bundle
+  # adjuster on the COLMAP model. GDAL and PDAL run from pinned Docker images.
+  interop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends colmap
+      - run: node scripts/interop/check.mjs interop-out
+        env:
+          COLMAP_BIN: colmap
+          QT_QPA_PLATFORM: offscreen
+
   # The nightly run tests only a main that changed since the night before.
   fresh:
     if: github.event_name == 'schedule'
@@ -166,13 +185,14 @@ jobs:
   # The R2 files (models, ORT's WebGPU wasm) are not uploaded here: run
   # `deploy-cloudflare.mjs --upload` by hand after a model or ORT change.
   deploy:
-    needs: [lint, unit, build, rust, browser]
+    needs: [lint, unit, build, rust, interop, browser]
     # A skipped job would skip this one too, so the results are tested by hand: a tag
     # needs the browser tests to have passed, main only that they did not fail.
     if: >-
       !cancelled() && github.event_name == 'push' &&
       needs.lint.result == 'success' && needs.unit.result == 'success' &&
       needs.build.result == 'success' && needs.rust.result == 'success' &&
+      needs.interop.result == 'success' &&
       ((github.ref == 'refs/heads/main' && needs.browser.result == 'skipped') ||
        (startsWith(github.ref, 'refs/tags/v') && needs.browser.result == 'success'))
     runs-on: ubuntu-latest

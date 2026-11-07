@@ -33,6 +33,7 @@
     "test:browser:firefox": "playwright test --project=firefox",
     "test:browser:webkit": "playwright test --project=webkit",
     "test:wasm": "node scripts/check-laz-wasm.mjs",
+    "check:interop": "node scripts/interop/check.mjs bench-out/interop",
     "check:wasm": "node scripts/wasm-stamp.mjs",
     "lint": "eslint src scripts tests *.config.js",
     "format": "prettier --write .",
