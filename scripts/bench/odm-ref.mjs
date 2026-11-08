@@ -9,6 +9,8 @@
 //                             solve" tables. full: defaults as a user runs it, positions in
 //                             (EXIF GPS, or geo.txt from the config's reference cameras), the
 //                             whole pipeline with a DSM and a COPC cloud.
+//        --mode georef        positions in as for full, stops after OpenSfM: the camera
+//                             check with positions in the solve, without the dense hours.
 //        [--ws <dir>]         workspace (default /data1/websfm_eval/odm-<date>/<name>-<mode>)
 //        [--gpu]              ODM's GPU image (opendronemap/odm:gpu) with the NVIDIA GPU passed in
 //        [--image <ref>]      Docker image (default opendronemap/odm:latest, or :gpu with --gpu)
@@ -40,7 +42,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 const cfg = JSON.parse(await readFile(args.config, 'utf8'))
 const mode = args.mode ?? 'sfm'
-if (!['sfm', 'full'].includes(mode)) throw new Error('--mode sfm|full')
+if (!['sfm', 'georef', 'full'].includes(mode)) throw new Error('--mode sfm|georef|full')
 const images = cfg.images
 const name = args.name ?? `odm-${cfg.name ?? 'run'}-${mode}`
 const day = new Date().toISOString().slice(0, 10)
@@ -99,14 +101,21 @@ if (scoreOnly) {
   for (const f of files) if (!have.has(f)) await link(join(images, f), join(imgDir, f))
 }
 
-// geo.txt for a full run when the positions live in a reference file (PUTI, UseGeo).
+// geo.txt when the positions live in a reference file (PUTI, UseGeo). The reference's
+// per-camera standard deviations go in as ODM's horizontal and vertical accuracy, as a user
+// with RTK data would write them: without them ODM weights every position at its 3 m
+// --gps-accuracy default and an RTK block keeps its bend (PUTI, 2026-11-08: 97 cm vertical).
+// geo.txt's columns: name x y z yaw pitch roll horz vert; nan orientation = none.
 const ref = cfg.reference ? await loadReference(cfg.reference) : null
 const extra = []
-if (mode === 'full' && !exif0.GPSLatitude && ref?.positions) {
+if (mode !== 'sfm' && !exif0.GPSLatitude && ref?.positions) {
   const byStem = new Map(files.map((f) => [stem(f), f]))
   const lines = ['EPSG:4326']
   for (const [s, p] of Object.entries(ref.positions))
-    if (byStem.has(s)) lines.push(`${byStem.get(s)} ${p.lon} ${p.lat} ${p.alt}`)
+    if (byStem.has(s)) {
+      const acc = p.sn ? ` nan nan nan ${Math.hypot(p.sn, p.se) / Math.SQRT2} ${p.su}` : ''
+      lines.push(`${byStem.get(s)} ${p.lon} ${p.lat} ${p.alt}${acc}`)
+    }
   await writeFile(join(proj, 'geo.txt'), lines.join('\n') + '\n')
   extra.push('--geo', '/datasets/project/geo.txt')
   console.log(`== geo.txt: ${lines.length - 1} positions from the reference file`)
@@ -119,7 +128,7 @@ const odmArgs = [
   'project',
   '--max-concurrency',
   String(args.threads ?? 20),
-  ...(mode === 'sfm' ? ['--end-with', 'opensfm'] : ['--dsm', '--pc-copc']),
+  ...(mode === 'full' ? ['--dsm', '--pc-copc'] : ['--end-with', 'opensfm']),
   ...extra,
 ]
 const digest = sh('docker', ['image', 'inspect', '--format', '{{index .RepoDigests 0}}', dockerImage]).trim()

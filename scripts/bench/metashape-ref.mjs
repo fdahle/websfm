@@ -8,6 +8,12 @@
 //        [--python <exe>]      an interpreter with the Metashape module
 //                              (default $METASHAPE_PYTHON, else ~/miniconda3/envs/hist_env3)
 //        [--name <label>]
+//        [--full]              the whole pipeline (metashape_full.py: depth maps, point cloud,
+//                              textured mesh, DEM, orthomosaic) with the positions in the
+//                              solve: the config's reference cameras with their accuracies
+//                              (and, with recon.leverArm, the antenna offset), else EXIF
+//        [--cloud-crs <crs>]   with --full: also export the point cloud as LAS in this CRS
+//                              (e.g. EPSG::32632, for the LiDAR check)
 //
 // As in colmap-ref.mjs, the one choice that mirrors the WebSfM run is pairing: when the
 // config uses position preselection, Metashape's reference preselection pairs by the
@@ -49,11 +55,22 @@ await mkdir(ws, { recursive: true })
 const python = args.python ?? process.env.METASHAPE_PYTHON ?? join(homedir(), 'miniconda3/envs/hist_env3/bin/python')
 const preselect = cfg.match?.strategy === 'preselect'
 const noPriors = cfg.recon?.posePriors === false
+const ref = await loadReference(cfg.reference)
+const full = !!args.full
 
-console.log(`== metashape_align.py on ${images}`)
-const r = spawnSync(
-  python,
-  [
+let pyArgs
+if (full) {
+  pyArgs = [join(here, 'metashape_full.py'), '--images', images, '--ws', ws]
+  if (ref?.positions) {
+    // loadReference turns the antenna offset into the OpenCV camera frame; Metashape wants
+    // its own axes back (x right, y up, z back: flip y and z).
+    const arm = cfg.recon?.leverArm && ref.leverArm ? [ref.leverArm[0], -ref.leverArm[1], -ref.leverArm[2]] : null
+    await writeFile(join(ws, 'reference.json'), JSON.stringify({ positions: ref.positions, leverArm: arm }))
+    pyArgs.push('--reference', join(ws, 'reference.json'))
+  }
+  if (args['cloud-crs']) pyArgs.push('--cloud-crs', args['cloud-crs'])
+} else {
+  pyArgs = [
     join(here, 'metashape_align.py'),
     '--images',
     images,
@@ -61,11 +78,20 @@ const r = spawnSync(
     ws,
     ...(preselect ? ['--preselect-reference'] : []),
     ...(noPriors ? ['--no-pose-priors'] : []),
-  ],
-  { env: { ...process.env, QT_QPA_PLATFORM: 'offscreen' }, encoding: 'utf8', maxBuffer: 1 << 30 },
-)
+  ]
+}
+
+console.log(`== ${full ? 'metashape_full.py' : 'metashape_align.py'} on ${images}`)
+const r = spawnSync(python, pyArgs, {
+  env: { ...process.env, QT_QPA_PLATFORM: 'offscreen' },
+  encoding: 'utf8',
+  maxBuffer: 1 << 30,
+})
 await writeFile(join(ws, 'metashape.log'), (r.stdout ?? '') + (r.stderr ?? ''))
-if (r.status !== 0) throw new Error(`metashape_align.py failed (exit ${r.status}); see ${join(ws, 'metashape.log')}`)
+if (r.status !== 0)
+  throw new Error(
+    `${full ? 'metashape_full.py' : 'metashape_align.py'} failed (exit ${r.status}); see ${join(ws, 'metashape.log')}`,
+  )
 const ms = JSON.parse(await readFile(join(ws, 'metashape.json'), 'utf8'))
 
 const txt = join(ws, 'colmap/sparse/0')
@@ -75,7 +101,6 @@ const files = Object.fromEntries(
   ),
 )
 const model = readColmapModel(parseColmapModel(files))
-const ref = await loadReference(cfg.reference)
 const { pc, positionSource } = await scoreCameraPositions(model, images, ref)
 const nFiles = (await readdir(images)).filter((f) => /\.(jpe?g|png|tiff?)$/i.test(f)).length
 
@@ -85,7 +110,10 @@ const out = {
   metashape: {
     version: ms.metashape,
     gpus: ms.gpus,
-    settings: 'High (downscale 1), 40,000 key / 4,000 tie points, generic preselection',
+    settings: full
+      ? 'API defaults: Align High, generic + reference preselection; depth maps Medium, mild; model high; texture 8192; DEM; ortho on the model'
+      : 'High (downscale 1), 40,000 key / 4,000 tie points, generic preselection',
+    full,
     referencePreselection: ms.referencePreselection,
     posePriors: ms.posePriors,
   },
@@ -94,6 +122,7 @@ const out = {
   points: model.points.length,
   pointsGe3: model.points.filter((p) => (p.views?.length ?? 0) >= 3).length,
   seconds: ms.seconds,
+  ...(full ? { densePoints: ms.densePoints, faces: ms.faces, referenced: ms.referenced } : {}),
   peakRssMiB: ms.peakRssMiB,
   positionCheck: pc,
   positionSource,
