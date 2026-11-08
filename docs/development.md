@@ -35,6 +35,7 @@ npm test                # unit and store regression tests (Vitest, Node)
 npm run typecheck       # TypeScript, Vue template bindings, ESLint
 npm run test:wasm       # real LAZ WASM round-trip across compressor chunks
 npm run check:wasm      # Rust source / committed WASM freshness
+npm run check:interop   # exports read by GDAL, PDAL and COLMAP (Docker, or set GDAL_PYTHON / PDAL_BIN / COLMAP_BIN)
 npx playwright install chromium firefox webkit
 npm run test:browser    # browser storage, keyboard, import/export and multi-tab tests (Chromium)
 npm run test:browser:firefox  # the same suite in Firefox (~20 min); Chromium-only tests skip
@@ -66,21 +67,17 @@ does what it did. Test against what the result must be instead:
   noticed (`reports/mutation/index.html`). A surviving mutant is a bug the tests would let
   through; it is not run in CI.
 
-Type checking is incremental: executable TypeScript currently includes packed-point
-views and project-index merging, alongside the shared data types and migrated
-confirmation/modal-shell components. Every Vue template is checked for undeclared
-bindings; JavaScript implementations are checked for undefined variables and
-unreachable code. This does not yet provide full static typing of every store.
-GitHub Actions runs all of the above plus a production build. To use an installed
-Chrome locally, set `PLAYWRIGHT_CHANNEL=chrome`.
+`npm run typecheck` checks every Vue template's bindings, the shared data types and the
+few modules written in TypeScript, and lints the JavaScript; not every store is statically
+typed yet. GitHub Actions runs all of the above plus a production build. To use an
+installed Chrome locally, set `PLAYWRIGHT_CHANNEL=chrome`.
 
 WebKit on Linux needs a few system libraries: `npx playwright install-deps webkit` installs
 them with root, and `scripts/webkit-libs.sh` puts them beside the browser without it (run it
 again after a Playwright update). Playwright's Linux WebKit stands in for Safari's code
 paths, not its features: it has no WebGPU and no MediaRecorder. It is cross-origin
 isolated like the others (COEP `require-corp`), so shared memory and threads are tested
-there too. Each WebKit test
-runs in a persistent context (`tests/browser/fixtures.js`), since its usual private
+there too. Each WebKit test runs in a persistent context (`tests/browser/fixtures.js`), since its usual private
 context has no browser storage.
 
 ## Running the whole pipeline headless
@@ -153,16 +150,16 @@ of the exported value when reimported.
 ## Releases
 
 What changed between versions is in [CHANGELOG.md](../CHANGELOG.md), which the app
-shows as Help ▸ What's New. Every push to `main` goes to dev.websfm.app; a release goes
+shows as Other ▸ What's New. Every push to `main` goes to dev.websfm.app; a release goes
 to websfm.app, when its tag is pushed ([deployment.md](deployment.md#cloudflare-websfmapp)):
 
 ```bash
 npm run release -- --dry-run   # what would happen
-npm run release                # 0.4.0 → 0.5.0; or `-- patch`, `-- major`, `-- 1.0.0`
-git push && git push origin v0.5.0   # the tag deploys websfm.app
+npm run release                # 0.6.1 → 0.7.0; or `-- patch`, `-- major`, `-- 1.0.0`
+git push && git push origin v0.7.0   # the tag deploys websfm.app
 ```
 
-A push to `main` runs the lint, unit, WASM, build and Rust checks (in parallel, about 4 min)
+A push to `main` runs the lint, unit, WASM, build, Rust and export checks (in parallel, about 4 min)
 and deploys dev.websfm.app; the browser tests (Chromium, Firefox and WebKit, about 20 min) run
 for a version tag, a pull request, by hand, and every night at 02:00 UTC on a `main` with new
 commits, so a regression only they catch shows the next morning (GitHub mails the owner when

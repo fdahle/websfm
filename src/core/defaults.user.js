@@ -466,7 +466,7 @@ export const ORTHO_DEFAULTS = {
   replaceMain: false,
 }
 // Orthophoto quality cards: the mosaic's seamlines and seam blending, its cost lever
-// (deltas; medium ≡ defaults). Quarry-80 (METHODS §8.2.1): nadir + feather 68 s, graph
+// (deltas; medium ≡ defaults). Quarry-80 (METHODS §8.4): nadir + feather 68 s, graph
 // cut + multiband 116 s; graph cut keeps seams off roofs, multiband ~7 % more detail.
 export const ORTHO_PRESETS = {
   low: { seamline: 'nadir', seamBlend: 'feather' },

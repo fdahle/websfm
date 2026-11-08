@@ -415,7 +415,7 @@ export const DENSE_TUNING = {
   // scorer): plain 52.6, 51 53.2, 25 53.5, 12 53.3, 6 52.3 (narrower: more accuracy, less
   // completeness); official evaluator plain 56.4 → 25 57.1. 25 better than
   // plain on every scene. Aukerman 42 unchanged (roughness, points −0.4 %); GPU time
-  // unchanged, CPU +10 % (2026-10-26, docs/METHODS.md ▸ Stage A).
+  // unchanged, CPU +10 % (2026-10-26, docs/METHODS.md §7.1).
   bilateralSigmaColor: 25,
   // Depth maps on the CPU: each map on the threaded build's pool, one worker for the run
   // (mvs.rs sweeps over rows; the same bits as one thread). 640×480, 6 sources, natively:

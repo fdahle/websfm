@@ -4,8 +4,8 @@
 npm ci
 npm run fetch:models     # learned-model weights (see Model files)
 npm run fetch:examples   # example datasets for the project picker
-npm run build:release  # build dist/ and verify all release assets
-npm run preview    # serve the production build locally
+npm run build:release    # build dist/ and verify all release assets
+npm run preview          # serve the production build locally
 ```
 
 `dist/` is a static site and can be hosted on any static file server. Deploy it
@@ -24,7 +24,7 @@ Configure the production host as follows:
 
 - **Model files.** Serve the redistributable `.onnx` weights (see below) at `<site>/models/`,
   or point the app elsewhere at build time with
-  `VITE_MODEL_BASE_URL=https://your-cdn/models/ npm run build`.
+  `VITE_MODEL_BASE_URL=https://your-cdn/models/ npm run build:release`.
 
   A separate model host must allow browser requests from the app origin, for
   example with `Access-Control-Allow-Origin: https://websfm.example`. Serve ONNX
@@ -51,13 +51,11 @@ Configure the production host as follows:
 - **Caching and compression.** The files below `assets/` have content hashes and
   can use `Cache-Control: public, max-age=31536000, immutable`. Keep `index.html`,
   `sw.js` and `manifest.webmanifest` on `no-cache` so a release can point browsers
-  at its new hashes. ORT runtime files
-  live under `ort/<installed-onnxruntime-version>/`; revalidate unversioned `.mjs`,
-  `.wasm` and `.onnx` files. When replacing model weights under the same name, also
-  bump `MODEL_CACHE_NAME` in `src/core/models/registry.js` to invalidate Cache Storage.
-  Enable Brotli or
-  gzip for HTML, JavaScript and CSS; do not recompress `.wasm` or `.onnx` unless the
-  server is configured to do so efficiently.
+  at its new hashes. ONNX Runtime's files live under `ort/<its version>/`; revalidate
+  unversioned `.mjs`, `.wasm` and `.onnx` files. When replacing model weights under the
+  same name, also bump `MODEL_CACHE_NAME` in `src/core/models/registry.js` to invalidate
+  Cache Storage. Enable Brotli or gzip for HTML, JavaScript and CSS; do not recompress
+  `.wasm` or `.onnx` unless the server is configured to do so efficiently.
 
 - **Installable app and offline use.** The build includes a web app manifest and a
   service worker (`sw.js`) that stores the app in the browser, so it can be
@@ -141,18 +139,18 @@ Two sites, from one Worker config ([`wrangler.jsonc`](../deploy/cloudflare/wrang
 
 | Site | Shows | Deployed when |
 | --- | --- | --- |
-| websfm.app | released versions | a version tag (`v0.5.0`) is pushed |
+| websfm.app | released versions | a version tag (`v0.7.0`) is pushed |
 | dev.websfm.app | the latest `main`, behind a login | `main` is pushed |
 
 GitHub Actions deploys both (the `deploy` job in
 [`.github/workflows/verify.yml`](../.github/workflows/verify.yml)), after the tests
-pass: for `main` the lint, unit, WASM, build and Rust checks, for a tag the browser tests
+pass: for `main` the lint, unit, WASM, build, Rust and export checks, for a tag the browser tests
 as well (they also run every night on `main`, without deploying)
 ([development.md ▸ Releases](development.md#releases)). A release is then:
 
 ```bash
-npm run release                       # 0.4.0 → 0.5.0: changelog, package.json, commit + tag
-git push && git push origin v0.5.0    # main → dev.websfm.app, the tag → websfm.app
+npm run release                       # 0.6.1 → 0.7.0: changelog, package.json, commit + tag
+git push && git push origin v0.7.0    # main → dev.websfm.app, the tag → websfm.app
 ```
 
 The production job refuses a tag that is not the version in `package.json`, and after

@@ -68,7 +68,7 @@ npm run typecheck
   files with the source change. CI checks that they match.
 - **User-visible changes:** update the in-app help (below) and add an entry to the
   `[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md), under Added, Changed,
-  Performance or Fixed. The app shows it in Help ▸ What's New, whose short view keeps
+  Performance or Fixed. The app shows it in Other ▸ What's New, whose short view keeps
   only the bold headline and the first sentence, so write it in that order:
   - **a bold headline:** what a user can now do (`**Meshes in tiles.**`);
   - **one sentence:** how it works, in the user's terms and the app's labels;

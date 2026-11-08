@@ -44,8 +44,14 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   | `core/products/` | DEM, orthophoto, mesh, georeferencing, scale, exporters (GeoTIFF/COG, PLY, LAS, 3D Tiles, …) |
   | `core/io/` | importers and format readers (COLMAP, LAS/LAZ, PLY, GeoTIFF, GCP/pose CSV, `.websfm` archives) |
   | `core/lod/` | level-of-detail octrees of big clouds: the build, and the cloud sources the viewer and tools read nodes from (our octree, or a COPC file read in place) |
+  | `core/sensors/`, `core/radiometry/` | camera rigs, multispectral band calibration and reflectance |
+  | `core/stepEffects/` | the effect lines of the processing dialogs' steps, from the same rules the run applies |
+  | `core/models/`, `core/segment/` | the learned-model registry and cache, Smart Select (SAM2) |
   | `core/eval/` | the statistics behind the Quality Report |
-  | `core/help/` | glossary, user guide and the ribbon command tables |
+  | `core/help/` | glossary, user guide, ribbon command tables, shortcuts, references, Experimental features |
+
+  Modules several stages share sit at the top of `core/`: CRS, defaults and tuning, the
+  project format and its migrations.
 
 - **`crates/`**: six Rust crates compiled to WASM: `sift`, `matching`,
   `reconstruction` (PnP, bundle adjustment, PatchMatch), `mesh` (screened Poisson),
@@ -66,8 +72,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    at the start, so everything after works in a pinhole camera model.
 4. **Dense MVS**: per-image PatchMatch depth maps (WASM or WebGPU), a cross-view
    consistency filter, then fusion into a point cloud with a voxel-based dedupe.
-   Depth maps are the one intermediate result stored on disk, because they take
-   minutes per image to compute.
+   Depth maps are stored with the project, so a later run can reuse them.
 5. **Products**: DEM, true orthophoto (onto a DEM, mesh or plane), screened-Poisson
    mesh, and point-cloud editing tools.
 6. **Georeferencing**: ground control points, camera position priors and reference
@@ -113,6 +118,8 @@ to the algorithm; the other steps differ only in file names.
 | add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |
 | add per-project state | a store in `stores/` | register it with `registerProjectStore` (`stores/projectStores.js`) so it saves and reopens with the project |
 | change a WebGPU kernel | `workers/gpu/` | PatchMatch exists twice (WGSL, Rust `mvs.rs`) and changes in both; `tests/bench/patchmatchCases.js` holds both to the same accuracy (`npm test` for Rust, the nightly browser suite and `scripts/bench/gpu-depth-check.mjs` for WGSL) ([`workers/gpu/README.md`](src/workers/gpu/README.md)) |
+| add or change a processing dialog | its `SettingsStep`s in `components/modals/` | the effect lines in `core/stepEffects/<dialog>.js` and their test ([CONTRIBUTING](CONTRIBUTING.md#dialogs-of-a-processing-step)) |
+| mark a feature experimental | an entry in `core/help/experimental.js` | an `ExperimentalBadge` where the feature shows; remove both once it is checked on real data |
 | explain a concept | a new entry in `src/glossary/<category>/` | aliases auto-link it in all help text |
 | add an example dataset | `core/examples.js` | `scripts/examples/make-example.py`, `scripts/fetch-examples.mjs`, a walkthrough in `src/guide/` |
 
@@ -147,7 +154,8 @@ to the algorithm; the other steps differ only in file names.
   why.
 - **Log derived values with their inputs.** Every automatically chosen value gets a
   log line, so a run can be reproduced from its log.
-- **User-visible changes update the user guide** in `src/guide/` in the same change.
+- **User-visible changes update the user guide** in `src/guide/` and get a CHANGELOG
+  entry, in the same change.
 
 ## Tests
 
@@ -155,8 +163,10 @@ to the algorithm; the other steps differ only in file names.
 npm test             # Vitest: src/core, src/utils, src/stores
 npm run typecheck    # TypeScript, Vue template bindings, ESLint
 npm run test:browser # Playwright, Chromium (test:browser:firefox for Firefox)
-cargo test           # Rust crates (crates/mesh needs --release)
+cargo test --manifest-path crates/Cargo.toml --workspace --release
 ```
+
+[docs/development.md](docs/development.md#tests--type-checking) lists every check.
 
 Tests run in Node without a DOM, so Vue components and browser APIs are covered by
 the Playwright suite and by manual checks. End-to-end pipeline quality is measured

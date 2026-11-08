@@ -37,7 +37,7 @@ Rules that are easy to miss:
   "(Ctrl+Z)" by hand ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in
   step*, item 4).
 - A user-visible change gets a CHANGELOG.md entry under `[Unreleased]`: a bold
-  headline, then one sentence in user terms, then any detail and evidence (Help ▸
+  headline, then one sentence in user terms, then any detail and evidence (Other ▸
   What's New shows the first two alone). Never edit a released section or the version
   by hand; `npm run release` cuts a release.
 - A saved project opens in every later version ([docs/project-format.md](docs/project-format.md)).

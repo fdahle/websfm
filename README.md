@@ -30,7 +30,8 @@ your machine and keeps your projects in your browser.
 
 > [!NOTE]
 > **Beta.** WebSfM is at version 0.x: the pipeline is complete, but not every path has
-> been checked on real data yet ([what has been](#how-its-tested)). Please report
+> been checked on real data yet ([what has been](#how-its-tested)); those features carry an
+> **Experimental** badge in the app. Please report
 > anything that breaks or looks wrong with the **🐞 button** in the app, or as an
 > [issue](https://github.com/fdahle/websfm/issues). What changed in each release is
 > under **Other ▸ What's New** in the app and in [CHANGELOG.md](CHANGELOG.md).
@@ -65,8 +66,8 @@ A full photogrammetry pipeline, stage by stage:
    with fundamental-matrix RANSAC verification.
 3. **Sparse SfM** – incremental reconstruction with P3P resection, LM bundle
    adjustment, self-calibration, and track filtering.
-4. **Dense MVS** – PatchMatch depth maps fused into a dense point cloud
-   (CPU/WASM, or an experimental WebGPU backend).
+4. **Dense MVS** – PatchMatch depth maps fused into a dense point cloud, on the GPU
+   (WebGPU) or the CPU (WASM).
 5. **Products** – DEM and bare-earth DTM, true orthophoto, and a screened-Poisson
    mesh, optionally textured.
 6. **Georeferencing** – ground control points, camera poses, and reference DEMs,
@@ -111,7 +112,7 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 | Running and testing from source | [docs/development.md](docs/development.md) |
 | How the code is organised | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | The algorithms and why they were chosen | [docs/METHODS.md](docs/METHODS.md) |
-| How it compares with COLMAP and Metashape | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) |
+| How it compares with COLMAP, Metashape and ODM | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) |
 | Hosting your own copy | [docs/deployment.md](docs/deployment.md) |
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | What changed | [CHANGELOG.md](CHANGELOG.md), or **Other ▸ What's New** in the app |
@@ -150,18 +151,19 @@ A headless bench runs the real pipeline (ingest, detection, matching, SfM, depth
 maps, fusion) in headless Chrome, using the same workers, WASM and WebGPU code as
 the app, with fresh browser storage for every run. Wherever a dataset has
 independent reference data, results are scored against it: RTK camera positions,
-surveyed GCPs held out as checkpoints, and ETH3D ground truth. COLMAP 4.0.3 is run on
-the same images on the same machine for comparison.
+surveyed GCPs held out as checkpoints, ETH3D ground truth and airborne LiDAR. COLMAP,
+Metashape and OpenDroneMap (ODM) run on the same images on the same machine for
+comparison.
 
 Latest results (October–November 2026):
 
 | Dataset | Images registered | Result | Compared against |
 | --- | --- | --- | --- |
 | Aerial survey block with RTK and 15 surveyed GCPs | 444 / 444 | Checkpoints: 3.2–3.4 cm horizontal, ~7 cm vertical (RTK camera priors, no GCP used as control) | Surveyed GCPs |
-| Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 26.5 cm H / 14.6 cm V, 332 s detection to sparse model | COLMAP: 24.0 / 65.0 cm, 1,511 s |
-| Quarry, Pix4D example (RTK in EXIF), pure SfM | 346 / 347 | Cameras vs RTK: 20.3 cm H / 13.4 cm V | COLMAP: 49.5 / 84.7 cm; Metashape: 13 / 12 cm |
+| Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 26.5 cm H / 14.6 cm V; 351 s from detection to sparse model | COLMAP: 24.0 / 65.0 cm, 1,511 s; ODM: 35.8 / 94.7 cm |
+| Quarry, Pix4D example (RTK in EXIF), pure SfM | 346 / 347 | Cameras vs RTK: 20.3 cm H / 13.4 cm V | COLMAP: 49.5 / 84.7 cm; Metashape: 13 / 12 cm; ODM: 58.0 / 11.6 cm |
 | COLMAP South Building | 128 / 128 | 64,662 sparse points | COLMAP: 84,954 points |
-| Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone) | – | Final cost a median 0.00004 % from Ceres', 84 of 95 within 1 %, at 1.4× its time; the 3 largest not solved in 2 h | Ceres 2.2 |
+| Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone) | – | Final cost a median 0.00004 % from Ceres', 84 of 95 within 1 % of it or lower, at 1.4× its time; the 3 largest not solved in 2 h | Ceres 2.2 |
 | ETH3D high-res, 6 training scenes (dense, from ground-truth cameras, ETH3D's evaluator) | – | Mean F1 66.2 at 2 cm; 827 s for all six on WebGPU | COLMAP dense: 58.4; Metashape Medium: 447 s, about 2.5 points of F1 higher (approximate scorer) |
 | Casa Grande 1978 aerial film (37 scans, 11 GCP checkpoints) | 37 / 37 | DEM vs 1 m reference: RMSE 1.42 m, NMAD 0.73 m | COLMAP: 13.0 / 13.5 m; Metashape defaults: 13 / 37 cameras |
 
@@ -179,8 +181,8 @@ Not yet verified:
 - Safari on real data. Firefox and WebKit (Safari's engine) run the browser test
   suite; real datasets have only been run in Chromium.
 - WebGPU on other GPUs. Every GPU number above comes from one NVIDIA GPU.
-- Exported files in external tools: GeoTIFF/COG in QGIS or GDAL, LAZ in
-  CloudCompare, the COLMAP export round trip.
+- Exported meshes and 3D Tiles in external tools. (DEMs and orthophotos as COG, LAS,
+  LAZ, COPC and the COLMAP model are read back by GDAL, PDAL and COLMAP in CI.)
 - Interactive workflows end to end in a browser: GCP marking and georeferencing,
   scale bars, film fiducial calibration, meshing, and the learned detectors.
 - Project portability: reopening a saved `.websfm` in a fresh browser profile, and
@@ -205,7 +207,6 @@ half-frame scans), and multi-threaded bundle adjustment.
   (out-of-core fusion, tiled meshing)
 - Projects past the 4 GB WebAssembly memory limit, once 64-bit WebAssembly is
   available in the toolchain
-- Better georeferenced accuracy without ground control (less dome-shaped distortion)
 - Denser depth maps on weakly textured surfaces (snow, ice, water edges)
 
 **Later**
