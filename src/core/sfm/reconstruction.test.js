@@ -13,6 +13,7 @@ import {
   resolveK,
   refineModeMask,
   baSolverFlat,
+  lensGroupOfCamera,
   undistortBrownPixels,
   loadReconstructionWasm,
 } from './reconstruction.js'
@@ -637,6 +638,52 @@ describe('bundleAdjust', () => {
       expect(Math.abs(k.fx - fTrue) / fTrue).toBeLessThan(0.02)
       expect(Math.abs(k.fy - k.fx)).toBeLessThan(1)
     }
+  })
+
+  // The lens σ (bundle.rs ▸ lens σ) through the JS↔WASM boundary: asking for it changes
+  // nothing about the solve, and each camera gets its own group's σ.
+  it('reports each camera group\'s lens σ without changing the solve', async () => {
+    const rng = mulberry32(37)
+    const centers = [
+      [0, 0, 0],
+      [2, 0.3, 0],
+      [-1.5, 0.5, 0.4],
+      [0.6, -0.8, 0.3],
+    ]
+    const rots = [rotY(0), rotY(0.2), rotY(-0.18), rotY(0.1)]
+    const poses = rots.map((R, i) => ({ R, t: poseFromCenter(R, centers[i]) }))
+    const world = Array.from({ length: 80 }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const cameras = poses.map(({ R, t }) => ({ R, t }))
+    const intrinsics = poses.map(() => ({ ...KPIX }))
+    const points3d = world.map(([x, y, z]) => ({ x, y, z }))
+    const observations = []
+    points3d.forEach((P, ptIdx) =>
+      poses.forEach((p, camIdx) => {
+        const o = projectPix(p.R, p.t, [P.x, P.y, P.z])
+        observations.push({ camIdx, ptIdx, x: o.x + (rng() - 0.5), y: o.y + (rng() - 0.5) })
+      }),
+    )
+    const opts = { maxIters: 40, refineIntrinsics: 'f', sensorOfCam: [3, 3, 7, 7] }
+    const plain = await bundleAdjust(cameras, intrinsics, points3d, observations, opts)
+    const withSigma = await bundleAdjust(cameras, intrinsics, points3d, observations, { ...opts, lensSigma: true })
+    expect(plain.lensSigma).toBeNull()
+    expect(withSigma.cameras).toEqual(plain.cameras)
+    expect(withSigma.intrinsics).toEqual(plain.intrinsics)
+    expect(withSigma.costTrace).toEqual(plain.costTrace)
+    const sig = withSigma.lensSigma
+    expect(sig).toHaveLength(4)
+    for (const s of sig) {
+      expect(s.fx).toBeGreaterThan(0)
+      expect(s.fx).toBeLessThan(0.05 * KPIX.fx)
+      expect(s.cx).toBeUndefined() // not refined
+    }
+    expect(sig[0]).toEqual(sig[1]) // one sensor, one σ
+    expect(sig[2]).toEqual(sig[3])
+    expect(sig[0].fx).not.toBe(sig[2].fx)
+  })
+
+  it('numbers the lens groups as the crate does', () => {
+    expect(lensGroupOfCamera([-1, 5, 5, -1, 2, 5])).toEqual([0, 1, 1, 2, 3, 1])
   })
 
   // WS2 full-bag self-cal: a scene rendered with k1,k2 radial distortion AND a shifted

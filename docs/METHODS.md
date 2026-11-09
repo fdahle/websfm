@@ -390,9 +390,25 @@ calibrated lens is given. An explicit string overrides it and bypasses staging.
 thin model, so terms unlock as it grows. Registration (interim and rescue BA, once
 `distortionCalMinCams` cameras are in) solves `f,k1`; the post-filter passes add `k2` at
 ≥ 8 cameras and 10k observations, principal point and decentring at ≥ 10 cameras, `k3` at
-≥ 20 cameras and 30k observations. Never on the unfiltered model, where cx/cy drift. Weakly
-observed on flat single strips (needs ≥ 2° of tilt variation). Results are logged, never
-written to the sensor table automatically.
+≥ 20 cameras and 30k observations. Never on the unfiltered model, where cx/cy drift. Results
+are logged, never written to the sensor table automatically.
+
+**How well the lens is fixed** (`bundle.rs` lens σ, solver slot 9). The solves that settle
+the lens (the post-filter passes, and those held by camera positions, GCPs or a DEM) also
+return each group's standard deviations: σ² = σ0²·(S⁻¹)ᵢᵢ, S the reduced camera system with
+the points eliminated, assembled once more at the solution without damping (the last
+accepted step's own S can carry a large λ), σ0² the final weighted cost over the
+redundancy. So each σ is marginal over every pose and point. Without control S is singular
+along the seven similarity directions, which move no lens term; the solve holds one camera
+and the scale along one baseline, which leaves the lens marginals as they are. Unit tests
+check the σ against the spread of the solved focal over 40 noise draws, and against a
+dense numerical (JᵀWJ)⁻¹. It holds when each term is weighted by its noise: observations
+carry weight 1 (1 px), camera positions and GCPs 1/σ² of their stated accuracies. With every
+optical axis parallel, a z-stretch of the scene with the focal scaled alike leaves every
+image point in place: a nadir block fixes its focal only through camera positions, GCPs or
+oblique photos, and its σ then says so. The log gives fx ± σ and what it means for heights
+(`focalSigma.js`: σ_f / f of the distance from the cameras to the ground), the model keeps
+it (`calibration.groups[].focalSigmaPx`) and the Quality Report shows it.
 
 **The lens is solved, not folded** (`core/sfm/selfCalFold.js`). Ingest keeps every image's
 keypoints and GCP marks as the lens recorded them (`ingest.js recordedByUuid`), and each
@@ -1545,9 +1561,12 @@ nothing, to show the user *where* a reconstruction is weak.
 - **Doming without control**: with no GCPs or positions, a nadir block's height accuracy
   depends on the self-calibrated lens, decentring included (§4.6). Holding it to a reference
   DEM (§6.5) is the remedy where no control exists.
-- **Self-calibration is weakly observed** on flat single-strip aerial blocks (≥ 2° of tilt
-  variation needed for a trustworthy focal); the result is used for the run, never written
-  to the sensor table without the user.
+- **The focal of a nadir block** is fixed only by camera positions, GCPs or oblique photos
+  (§4.6); without them its σ is several percent and heights scale with it. With RTK
+  positions alone it is fixed to a few pixels, which still moves heights by a few
+  centimetres (PUTI: WebSfM's focal 1.8 px shorter than Metashape's, +5 cm at the
+  checkpoints, [BENCHMARKS](BENCHMARKS.md)). The solved lens is used for the run, never
+  written to the sensor table without the user.
 - **Fisheye**: rays beyond 75° off-axis are dropped at ingest and depth maps use 60° (§5),
   so a 200° lens keeps fewer keypoints than COLMAP and registers a few images fewer.
 - **Panoramic satellite cameras** are split into frame segments; motion during the scan is

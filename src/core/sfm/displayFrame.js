@@ -276,6 +276,21 @@ export function calibrationSnapshot({ resolve, images = [], source = 'run' }) {
   return { groups: [...groups.values()], fiducialTransforms, source }
 }
 
+/**
+ * The calibration with each sensor group's solved focal σ (`focalSigmaPx`, pixels) from
+ * the run that solved it (`summary.intrinsics[].fxSigma`, bundle.rs ▸ lens σ). Groups the
+ * run has no σ for are left as they are. Mutates and returns `calibration`.
+ */
+export function withFocalSigma(calibration, summary) {
+  const bySensor = new Map(
+    (summary?.intrinsics ?? []).filter((r) => r.sensorId != null && r.fxSigma > 0).map((r) => [r.sensorId, r.fxSigma]),
+  )
+  for (const g of calibration?.groups ?? []) {
+    if (g.sensorId != null && bySensor.has(g.sensorId)) g.focalSigmaPx = bySensor.get(g.sensorId)
+  }
+  return calibration
+}
+
 function resolverFromCalibration(calibration, sensors) {
   const sensorById = new Map((sensors || []).map((s) => [s.id, s]))
   const groupBy = new Map(

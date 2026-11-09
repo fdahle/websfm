@@ -5,6 +5,17 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Added
+- **How well the focal is fixed.** The Quality Report's Calibration card shows the
+  refined focal with its ± (how well the photos fixed it), and says when a nadir block
+  without camera positions or GCPs cannot fix it at all, so its heights scale with it.
+  The bundle adjustments that settle the lens report each camera group's standard
+  deviations, marginal over every pose and point (one extra factorisation at the
+  solution); the log gives fx ± σ and the share of the camera-to-ground distance it moves
+  heights by, in place of a note that fired on every set. Unit tests check the σ against
+  the spread of the solved focal over 40 noise draws (with camera positions, and without
+  control on tilted photos) and against a dense numerical covariance.
+
 ## [0.7.0] — 2026-11-09
 
 ### Added

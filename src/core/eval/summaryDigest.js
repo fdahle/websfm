@@ -434,6 +434,7 @@ function diagnosticsLines(d) {
     // set: the same start value reaches 2566 on a good run and 4796 on a runaway.
     out.push(
       `- **fx** ${r.label ?? r.sensorId ?? 'sensor'}: ${fmtNum(r.fxNominal, 1)} → ${fmtNum(r.fxFinal, 1)}` +
+        `${r.fxSigma > 0 ? ` ± ${fmtNum(r.fxSigma, 1)}` : ''}` +
         `${r.deltaPct != null ? ` (${r.deltaPct >= 0 ? '+' : ''}${fmtNum(r.deltaPct, 1)}%)` : ''}` +
         `${r.source ? ` · ${r.source}` : ''}`,
     )

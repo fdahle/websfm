@@ -113,10 +113,12 @@ pub(crate) const PCG_MIN_N: usize = 600;
 pub(crate) struct SolverOpts {
     pub pcg_min_n: usize, pub rel_tol: f64, pub max_iter: usize, pub accept_partial: bool, pub function_tol: f64,
     pub precond: u8, pub direct: u8, pub warm: u8, pub huber: Option<f64>,
+    // Slot 9: also report each lens group's standard deviations (lens_sigmas).
+    pub covariance: bool,
 }
 
 impl SolverOpts {
-    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None };
+    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None, covariance: false };
 
     pub(crate) fn from_flat(f: &[f32]) -> SolverOpts {
         let d = SolverOpts::DEFAULT;
@@ -132,6 +134,7 @@ impl SolverOpts {
             direct: slot(6).map_or(d.direct, |v| if v == 1.0 { 1 } else { 0 }),
             warm: slot(7).map_or(d.warm, |v| if v == 1.0 { 1 } else { 0 }),
             huber: slot(8).or(d.huber),
+            covariance: slot(9).map_or(d.covariance, |v| v == 1.0),
         }
     }
 }
@@ -152,8 +155,13 @@ pub(crate) struct SolveStats {
 
 // Output floats after [cost_before, cost_after, anchor_rms, prior_rms]:
 // [n, solves, cholesky, pcg_converged, pcg_partial, pcg_fallback, pcg_npd,
-//  pcg_iters, pcg_iters_max], then the per-iteration RMS trace.
+//  pcg_iters, pcg_iters_max], then, when the solver's slot 9 asks for it, the lens
+// groups' standard deviations ([groups, then LENS_SIGMA_LEN per group]), then the
+// readout times (bundle_adjust_rs), then the per-iteration RMS trace.
 pub(crate) const BA_STATS_LEN: usize = 9;
+// Per lens group: σ of fx, cx, cy, k1, k2, k3, k4, p1, p2 (pixels for the first three);
+// NaN for a term the call did not refine.
+pub(crate) const LENS_SIGMA_LEN: usize = 9;
 
 // Solve the reduced system: preconditioned CG when it is large, dense Cholesky
 // otherwise or whenever CG does not converge (unless `accept_partial`), so the worst
@@ -1529,6 +1537,13 @@ fn bundle_adjust_impl(
     };
 
     let cost_before = rms(&cams, &pts, &gpar);
+    // For the lens σ (solver slot 9): once the solve has ended, one more pass assembles
+    // the reduced matrix at the solution without damping (`cov_pass`), keeps it and stops.
+    // The last accepted step's own matrix will not do: a converged solve rejects steps to
+    // rounding, raising λ, and may then accept a last tiny one at a large λ.
+    let want_cov = solver.covariance && refine;
+    let mut cov_pass = false;
+    let mut last_s: Option<Vec<f64>> = None;
     let mut lambda = 1e-3f64;              // LM damping
     let mut trace: Vec<f64> = Vec::new();  // RMS after each accepted iteration
     // The full-matrix paths (no RangePlan: the dense and PCG solves, below ~128 cameras)
@@ -1548,7 +1563,12 @@ fn bundle_adjust_impl(
     let mut share_s: Vec<Vec<f64>> = if range_plan.is_some() { Vec::new() } else { (0..point_chunks).map(|_| vec![0f64; pattern.n_vals]).collect() };
     let mut share_r: Vec<Vec<f64>> = if range_plan.is_some() { Vec::new() } else { (0..point_chunks).map(|_| vec![0f64; n]).collect() };
 
-    for _outer in 0..max_iters {
+    for outer in 0.. {
+        if outer >= max_iters && !cov_pass {
+            if !want_cov { break; }
+            cov_pass = true;
+        }
+        if cov_pass { lambda = 0.0; }
         prof::start();
         let dh = huber_threshold(&cams, &pts, &gpar);
         let mut cost = robust_cost(&cams, &pts, &gpar, dh);
@@ -1948,6 +1968,7 @@ fn bundle_adjust_impl(
                     }
                 }
             }
+            if cov_pass { if ok { last_s = Some(s); } break; }
             if !ok { lambda = (lambda * 4.0).min(LAMBDA_MAX); continue; }
 
             prof::mark(2);
@@ -2033,19 +2054,99 @@ fn bundle_adjust_impl(
                 lambda = (lambda * 4.0).min(LAMBDA_MAX);
             }
         }
-        if !accepted { break; } // no step lowers the cost, even at the largest damping
-        trace.push(rms(&cams, &pts, &gpar));
-        // Compared within one iteration only: the Huber threshold is re-derived from the
-        // residuals at the top of each iteration, so costs of different iterations sit on
-        // different scales.
-        if function_tol > 0.0 && cost_at_start - cost <= function_tol * cost_at_start {
-            break;
+        if cov_pass { break; }
+        // No step lowers the cost, even at the largest damping.
+        let done = if !accepted { true } else {
+            trace.push(rms(&cams, &pts, &gpar));
+            // Compared within one iteration only: the Huber threshold is re-derived from
+            // the residuals at the top of each iteration, so costs of different iterations
+            // sit on different scales.
+            function_tol > 0.0 && cost_at_start - cost <= function_tol * cost_at_start
+        };
+        if done {
+            if !want_cov { break; }
+            cov_pass = true;
         }
     }
 
     let cost_after = rms(&cams, &pts, &gpar);
     let anchor_rms_after = anchor_rms(&pts);
     let camera_prior_rms_after = camera_prior_rms(&cams);
+
+    // ── The lens's standard deviations (solver slot 9) ───────────────────────────
+    // σ² = σ0²·(S⁻¹)_ii on the reduced system of the last accepted step (S with the
+    // points eliminated, so each σ is marginal over every pose and point; damped by a
+    // factor 1 + λ that convergence has taken near 1), σ0² = the final cost over the
+    // redundancy. Without control (no camera prior, no anchor, fewer than two fixed
+    // cameras) S is singular along the 7 similarity directions; no lens term moves
+    // under a similarity, so a minimal datum leaves their marginals as they are: hold
+    // one camera and the scale along one baseline.
+    let lens_sigmas: Vec<f64> = if let (true, Some(mut s)) = (want_cov, last_s.take()) {
+        let n_fixed = n_pb - n_free;
+        if camera_priors.is_empty() && anchors.is_empty() && n_fixed < 2 && n_free >= 2 {
+            let hold = |s: &mut Vec<f64>, k: usize, dir: Option<V3>| {
+                let base = pattern.diag_at[k];
+                let big = 1e8 * (0..6).map(|i| s[base + i * 6 + i].abs()).fold(1.0, f64::max);
+                match dir {
+                    None => for i in 0..6 { s[base + i * 6 + i] += big; },
+                    Some(u) => for a in 0..3 { for b in 0..3 { s[base + a * 6 + b] += big * u[a] * u[b]; } },
+                }
+            };
+            // The datum camera: a fixed one if there is one (its slot is gone already),
+            // else the first free one; the scale along the free camera farthest from it.
+            let anchor_pb = (0..n_pb).find(|&b| slot[b] == FIXED).unwrap_or(free_cams[0]);
+            if slot[anchor_pb] != FIXED { hold(&mut s, slot[anchor_pb], None); }
+            let ca = camera_center(&cams[anchor_pb]);
+            let far = free_cams.iter().copied().filter(|&b| b != anchor_pb)
+                .max_by(|&a, &b| {
+                    let d = |x: usize| { let c = camera_center(&cams[x]); (0..3).map(|i| (c[i] - ca[i]).powi(2)).sum::<f64>() };
+                    d(a).partial_cmp(&d(b)).unwrap()
+                });
+            if let Some(b) = far {
+                // dC = −Rᵀ·dt, so the scale's motion (C − C_a) is R·(C − C_a) in −dt.
+                let c = camera_center(&cams[b]);
+                let u = normalize3(&mat3_vec(&cams[b].0, &[c[0] - ca[0], c[1] - ca[1], c[2] - ca[2]]));
+                hold(&mut s, slot[b], Some(u));
+            }
+        }
+        let n_lens = g_count * kdim;
+        let mut var = vec![f64::NAN; n_lens];
+        let unit = |i: usize| { let mut e = vec![0f64; n]; e[group_off + i] = 1.0; e };
+        let mut st = SolveStats::default();
+        if let Some(f) = direct.as_ref().and_then(|sym| sym.factor(&pattern, &s)) {
+            for i in 0..n_lens { var[i] = f.solve(&pattern, &unit(i))[group_off + i]; }
+        } else {
+            let ic = if solver.precond == 1 && (n >= solver.pcg_min_n || n > DENSE_MAX_N) { BlockIc::new(&pattern, &s) } else { None };
+            let exact = SolverOpts { accept_partial: false, rel_tol: 1e-10, max_iter: 2000, ..solver };
+            for i in 0..n_lens {
+                if let Some(x) = solve_reduced_with(n, |x, y| pattern.matvec(&s, x, y), &pattern.diag_blocks(&s), ic.as_ref(),
+                                                    || pattern.to_dense(&s), n <= DENSE_MAX_N, &unit(i), &exact, &mut st) {
+                    var[i] = x[group_off + i];
+                }
+            }
+        }
+        // σ0²: the weighted residual sum over the redundancy (observations, anchor and
+        // prior axes, less the unknowns).
+        let dh = huber_threshold(&cams, &pts, &gpar);
+        let n_valid = map_indexed(obs.len(), |o| sq_err(o, &cams, &pts, &gpar)).iter().filter(|v| !v.is_nan()).count();
+        let m = 2 * n_valid + 3 * anchors.len()
+            + camera_priors.iter().map(|p| if p.3.is_some() { 6 } else { 3 }).sum::<usize>();
+        let unknowns = 6 * n_free + 3 * n_pts + n_lens;
+        let s0 = if m > unknowns { robust_cost(&cams, &pts, &gpar, dh) / (m - unknowns) as f64 } else { f64::NAN };
+        // Per group in the output's order; the focal slot is a scale on fx.
+        let mut out = vec![f64::NAN; g_count * LENS_SIGMA_LEN];
+        let first_cam = |g: usize| (0..n_cam).find(|&c| grp[c] == g).unwrap_or(0);
+        for g in 0..g_count {
+            let sd = |idx: isize| if idx >= 0 { (s0 * var[g * kdim + idx as usize]).max(0.0).sqrt() } else { f64::NAN };
+            let o = &mut out[g * LENS_SIGMA_LEN..(g + 1) * LENS_SIGMA_LEN];
+            o[0] = sd(idx_s) * ks[first_cam(g)].0;
+            o[1] = sd(idx_dcx);
+            o[2] = sd(idx_dcy);
+            for j in 0..4 { o[3 + j] = if k_live(g, j) { sd(idx_k[j]) } else { f64::NAN }; }
+            if p_live(g) { o[7] = sd(idx_p1); o[8] = sd(idx_p2); }
+        }
+        out
+    } else { Vec::new() };
 
     // Pack output: cameras (12 each), points (3 each), refined effective intrinsics
     // (8 each: fx,fy,cx,cy,k1,k2,k3,k4 — a pinhole camera's Brown residual, 0 for the
@@ -2075,6 +2176,11 @@ fn bundle_adjust_impl(
     for v in [n as f64, st.solves as f64, st.cholesky as f64, st.pcg_converged as f64, st.pcg_partial as f64,
               st.pcg_fallback as f64, st.pcg_npd as f64, st.pcg_iters as f64, st.pcg_iters_max as f64] {
         out.push(v as f32);
+    }
+    if solver.covariance {
+        // An empty section (no lens refined, or no accepted step) is [0].
+        out.push((lens_sigmas.len() / LENS_SIGMA_LEN) as f32);
+        for &v in &lens_sigmas { out.push(v as f32); }
     }
     if !rs_flat.is_empty() { for c in 0..n_cam { out.push(tau_of(c, &gpar) as f32); } }
     for &c in &trace { out.push(c as f32); }
@@ -3008,5 +3114,131 @@ mod rig_tests {
         let rig = bundle_adjust_rig(&cf, &kf, &pf, &g.obs_idx, &g.obs_px, &ones, &[], &[], &[], 15, &sensor, 1 | 128, &[], &[], &[], &[],
                                     &own, &none);
         assert_eq!(plain, rig);
+    }
+}
+
+#[cfg(test)]
+mod lens_sigma_tests {
+    use super::*;
+
+    // Three nadir strips 50–62 m over hilly ground (±8 m), f 1000 px on a 1000 × 750 frame:
+    // relief and varied heights fix the focal well enough for first-order propagation.
+    const F: f64 = 1000.0;
+    const W: f64 = 1000.0;
+    const H: f64 = 750.0;
+
+    struct Rng(u64);
+    impl Rng {
+        // SplitMix64: Box–Muller on consecutive LCG outputs gave correlated pairs (the
+        // solved focals alternated low and high from one trial to the next).
+        fn uniform(&mut self) -> f64 {
+            self.0 = self.0.wrapping_add(0x9E3779B97F4A7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+            z ^= z >> 31;
+            ((z >> 11) as f64 + 0.5) / (1u64 << 53) as f64
+        }
+        fn gauss(&mut self) -> f64 { (-2.0 * self.uniform().ln()).sqrt() * (std::f64::consts::TAU * self.uniform()).cos() }
+    }
+
+    // `tilt_deg`: each photo pitched forward or back by this much, alternately. With every
+    // optical axis parallel (0) a z-stretch of the scene with the focal scaled alike
+    // leaves every image point where it was: the focal is then fixed only by control.
+    fn truth(tilt_deg: f64) -> (Vec<(M3, V3)>, Vec<V3>) {
+        let nadir: M3 = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+        let mut cams = Vec::new();
+        for strip in 0..3 {
+            for k in 0..8 {
+                let a = tilt_deg.to_radians() * if (k + strip) % 2 == 0 { 1.0 } else { -1.0 };
+                let r = mat3_mul(&[[1.0, 0.0, 0.0], [0.0, a.cos(), -a.sin()], [0.0, a.sin(), a.cos()]], &nadir);
+                let c = [8.0 * k as f64, 15.0 * strip as f64, 50.0 + 6.0 * ((k + strip) % 3) as f64];
+                let t = mat3_vec(&r, &c);
+                cams.push((r, [-t[0], -t[1], -t[2]]));
+            }
+        }
+        let mut pts = Vec::new();
+        for ix in 0..20 { for iy in 0..14 {
+            let (x, y) = (-12.0 + 4.0 * ix as f64, -14.0 + 4.2 * iy as f64);
+            pts.push([x, y, 8.0 * (0.15 * x).sin() * (0.2 * y).cos()]);
+        }}
+        (cams, pts)
+    }
+
+    // One solve from the truth with σ px noise on every observation (and σ_c m on every
+    // camera prior, when there are priors): the solved fx and the reported σ of fx.
+    fn trial(rng: &mut Rng, sigma_px: f64, prior_sigma: Option<f64>, tilt_deg: f64) -> (f64, f64) {
+        let (cams, pts) = truth(tilt_deg);
+        let (n_cam, n_pts) = (cams.len(), pts.len());
+        let (mut obs_idx, mut obs_px) = (Vec::new(), Vec::new());
+        for (ci, (r, t)) in cams.iter().enumerate() {
+            for (pi, x) in pts.iter().enumerate() {
+                let p = mat3_vec(r, x);
+                let c = [p[0] + t[0], p[1] + t[1], p[2] + t[2]];
+                let (u, v) = (F * c[0] / c[2] + W / 2.0, F * c[1] / c[2] + H / 2.0);
+                if u < 0.0 || u > W || v < 0.0 || v > H { continue; }
+                obs_idx.extend_from_slice(&[ci as u32, pi as u32]);
+                obs_px.extend_from_slice(&[(u + sigma_px * rng.gauss()) as f32, (v + sigma_px * rng.gauss()) as f32]);
+            }
+        }
+        let cam_flat: Vec<f32> = cams.iter().flat_map(|(r, t)| r.iter().flatten().chain(t.iter()).map(|&v| v as f32).collect::<Vec<_>>()).collect();
+        let k_flat: Vec<f32> = (0..n_cam).flat_map(|_| [F as f32, F as f32, (W / 2.0) as f32, (H / 2.0) as f32]).collect();
+        let pt_flat: Vec<f32> = pts.iter().flat_map(|x| x.map(|v| v as f32)).collect();
+        // Each term weighted by its own noise (1/σ²): only then is the solve the
+        // maximum-likelihood one whose spread its Hessian predicts.
+        let obs_w = vec![(1.0 / (sigma_px * sigma_px)) as f32; obs_px.len()];
+        let mut prior_flat = Vec::new();
+        if let Some(sc) = prior_sigma {
+            for (ci, (r, t)) in cams.iter().enumerate() {
+                let c = mat3_vec(&mat3_transpose(r), t);
+                prior_flat.push(ci as f32);
+                for k in 0..3 { prior_flat.push((-c[k] + sc * rng.gauss()) as f32); }
+                for _ in 0..3 { prior_flat.push((1.0 / (sc * sc)) as f32); }
+                prior_flat.extend(std::iter::repeat(0f32).take(18));
+            }
+        }
+        let mut solver = vec![f32::NAN; 10];
+        solver[8] = 0.0; // plain least squares: Gaussian noise has no outliers to bound
+        solver[9] = 1.0;
+        let sensor = vec![0i32; n_cam];
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs_idx, &obs_px, &obs_w, &[], &[], &prior_flat, 50, &sensor,
+                                1, &solver, &[], &[]);
+        let fx = out[n_cam * 12 + n_pts * 3] as f64;
+        let at = n_cam * 12 + n_pts * 3 + n_cam * 8 + 4 + BA_STATS_LEN;
+        assert_eq!(out[at], 1.0, "one lens group");
+        let sigma = out[at + 1] as f64;
+        assert!(out[at + 2].is_nan(), "cx was not refined");
+        (fx, sigma)
+    }
+
+    // The reported σ of the focal is the spread the focal actually has: over 40 noise
+    // draws, the solved focals' standard deviation and the mean reported σ agree.
+    fn check(sigma_px: f64, prior_sigma: Option<f64>, tilt_deg: f64) {
+        let mut rng = Rng(7);
+        let runs: Vec<(f64, f64)> = (0..40).map(|_| trial(&mut rng, sigma_px, prior_sigma, tilt_deg)).collect();
+        let mean = runs.iter().map(|r| r.0).sum::<f64>() / runs.len() as f64;
+        let spread = (runs.iter().map(|r| (r.0 - mean).powi(2)).sum::<f64>() / (runs.len() - 1) as f64).sqrt();
+        let reported = runs.iter().map(|r| r.1).sum::<f64>() / runs.len() as f64;
+        assert!((mean - F).abs() < 3.0 * spread, "unbiased: mean {mean}, spread {spread}");
+        let ratio = reported / spread;
+        // 40 draws pin a standard deviation to about ±11 % (1σ).
+        assert!((0.7..1.4).contains(&ratio), "reported σ {reported:.3} vs observed spread {spread:.3} px (×{ratio:.2})");
+    }
+
+    #[test]
+    fn the_focal_sigma_is_its_spread_with_camera_priors() { check(0.5, Some(0.03), 0.0); }
+
+    // Without control the photos' tilt fixes the focal; the datum the σ needs (one camera
+    // and one baseline's scale held) is the solve's own business.
+    #[test]
+    fn the_focal_sigma_is_its_spread_without_control() { check(0.5, None, 10.0); }
+
+    // A nadir block without control cannot fix its focal at all, and says so: its σ is
+    // larger than the focal is uncertain on any block that has control.
+    #[test]
+    fn a_nadir_block_without_control_reports_its_focal_undetermined() {
+        let (_, free) = trial(&mut Rng(3), 0.5, None, 0.0);
+        let (_, held) = trial(&mut Rng(3), 0.5, Some(0.03), 0.0);
+        assert!(free > 50.0 * held, "nadir, no control: σ {free:.2} px vs {held:.2} px with priors");
     }
 }

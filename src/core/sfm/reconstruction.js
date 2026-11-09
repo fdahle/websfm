@@ -478,8 +478,25 @@ export const BA_SOLVER_KEYS = [
   'pcgItersMax',
 ]
 
-// bundle.rs `solver_flat`; NaN keeps that slot's crate default.
-export function baSolverFlat(solver = {}) {
+// bundle.rs LENS_SIGMA_LEN: per lens group, the standard deviations of these terms
+// (pixels for fx, cx, cy), NaN for a term the call did not refine.
+export const LENS_SIGMA_KEYS = ['fx', 'cx', 'cy', 'k1', 'k2', 'k3', 'k4', 'p1', 'p2']
+
+// bundle.rs `build_groups`: each camera's lens group, numbered by first appearance;
+// a camera without a sensor id (< 0) is a group of its own.
+export function lensGroupOfCamera(sensorIds) {
+  const map = new Map()
+  let next = 0
+  return Array.from(sensorIds, (id) => {
+    if (!(id >= 0)) return next++
+    if (!map.has(id)) map.set(id, next++)
+    return map.get(id)
+  })
+}
+
+// bundle.rs `solver_flat`; NaN keeps that slot's crate default. `lensSigma` (slot 9) asks
+// for the refined lens terms' standard deviations (bundleAdjust ▸ lensSigma).
+export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
   const num = (v) => (v == null || v === '' ? NaN : Number(v))
   const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial, functionTolerance, pcgPreconditioner, direct, warm } =
     solver ?? {}
@@ -495,6 +512,8 @@ export function baSolverFlat(solver = {}) {
     pcgPreconditioner === 'ic0' ? 1 : NaN,
     direct == null ? NaN : direct ? 1 : 0,
     warm ? 1 : NaN,
+    NaN, // huber: the crate's adaptive threshold
+    lensSigma ? 1 : NaN,
   )
 }
 
@@ -535,6 +554,10 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     refineReadout = false,
     refineRig = false,
     fullLens = false,
+    // Also return `lensSigma`: per camera, its lens group's standard deviations (keys
+    // LENS_SIGMA_KEYS) after the solve, marginal over every pose and point (bundle.rs
+    // ▸ lens σ). One extra undamped factorisation; null when nothing was refined.
+    lensSigma = false,
   } = opts
   let { cameraPriors = [] } = opts
   const refineMode =
@@ -681,7 +704,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     maxIters,
     sensorFlat,
     refineMode,
-    baSolverFlat(solver),
+    baSolverFlat(solver, { lensSigma }),
     fixedMask,
     fisheyeFlat,
     ...(rig ? [rsFlat, rig.captureOf, rigOffsetFlat(rig.offsets, nCam)] : rsCams ? [rsFlat] : []),
@@ -689,14 +712,29 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const ms = performance.now() - tCall
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×8 = fx,fy,cx,cy,k1,k2,k3,k4;
   // ×10 with p1,p2 under `fullLens`), costBefore, costAfter, anchorRmsAfter,
-  // cameraPriorRmsAfter, the solver stats (BA_SOLVER_KEYS), then a variable-length
-  // per-iteration RMS convergence trace.
+  // cameraPriorRmsAfter, the solver stats (BA_SOLVER_KEYS), with `lensSigma` the lens
+  // groups' σ ([groups, then LENS_SIGMA_KEYS per group]), the readout times (rolling
+  // shutter), then a variable-length per-iteration RMS convergence trace.
   const intrStride = fullLens ? 10 : 8
   const intrBase = nCam * 12 + nPts * 3
   const base = intrBase + nCam * intrStride
-  const readoutBase = base + 4 + BA_SOLVER_KEYS.length
+  const sigmaBase = base + 4 + BA_SOLVER_KEYS.length
+  const nSigmaGroups = lensSigma && raw && raw.length > sigmaBase ? raw[sigmaBase] : 0
+  const readoutBase = sigmaBase + (lensSigma ? 1 + nSigmaGroups * LENS_SIGMA_KEYS.length : 0)
   const traceBase = readoutBase + (rsCams ? nCam : 0)
   if (!raw || raw.length < traceBase) return null
+  let outLensSigma = null
+  if (nSigmaGroups > 0) {
+    const group = lensGroupOfCamera(sensorFlat)
+    const perGroup = Array.from({ length: nSigmaGroups }, (_, g) =>
+      Object.fromEntries(
+        LENS_SIGMA_KEYS.map((k, i) => [k, raw[sigmaBase + 1 + g * LENS_SIGMA_KEYS.length + i]]).filter(([, v]) =>
+          Number.isFinite(v),
+        ),
+      ),
+    )
+    outLensSigma = group.map((g) => perGroup[g] ?? null)
+  }
   const readout = rsCams ? cameras.map((c, i) => (c?.rs?.h > 0 ? raw[readoutBase + i] : null)) : null
   const costBefore = raw[base]
   const costAfter = raw[base + 1]
@@ -756,6 +794,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     anchorRmsAfter,
     cameraPriorRmsAfter,
     solver: solverStats,
+    lensSigma: outLensSigma,
     ms,
     threads: threaded ? threadedThreads : 1,
     ...(readout ? { readout } : {}),

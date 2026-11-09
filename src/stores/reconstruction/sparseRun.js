@@ -3,7 +3,12 @@ import { isGroundControl } from '../../core/io/gcp.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { precisionFromGcp } from '../../core/gcpAccuracy.js'
 import { surveyFrameFor, gcpToSurveyFrame, normalizeLeverArm, buildCameraPriors } from '../../core/sfm/cameraPriors.js'
-import { gcpsInPinholeFrame, makeFrameModelResolver, calibrationSnapshot } from '../../core/sfm/displayFrame.js'
+import {
+  gcpsInPinholeFrame,
+  makeFrameModelResolver,
+  calibrationSnapshot,
+  withFocalSigma,
+} from '../../core/sfm/displayFrame.js'
 import { formatBytes, deviceBudget } from '../../core/dense/memBudget.js'
 import { SFM_TUNING } from '../../core/tuning.js'
 import { applyTuningOverrides } from '../tuningOverrides.js'
@@ -700,7 +705,7 @@ export function createSparseRun({
           makeFrameModelResolver({ summary: runSummary ?? null, sensors: sensors.value })
         const calibrationFor = (cams, runSummary) => {
           const fromRun = runResolver(runSummary)
-          if (!base) return calibrationSnapshot({ resolve: fromRun, images: refsOf(cams) })
+          if (!base) return withFocalSigma(calibrationSnapshot({ resolve: fromRun, images: refsOf(cams) }), runSummary)
           const fromBase = makeFrameModelResolver({
             calibration: base.calibration ? toRaw(base.calibration) : null,
             summary: toRaw(summary.value),

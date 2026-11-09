@@ -57,7 +57,11 @@ reference orientations), horizontal / vertical RMS in cm. WebSfM 2026-11-07, COL
   given UseGeo's reference calibration, the others calibrated themselves.
 - **With the RTK positions in the solve** (PUTI, 2026-11-08): WebSfM's 15 GCP checkpoints
   are 3.4 / 11.1 cm, its cameras against the RTK 1.8 / 1.2 cm; Metashape's cameras with
-  the same positions 0.5 / 1.0 cm.
+  the same positions 0.5 / 1.0 cm, its checkpoints from the same marks 2.4 / 6.4 cm
+  (`metashape_checkpoints.py`). Both sit high (mean +9.8 and +4.1 cm): the difference is
+  the focal, 5,673.5 against 5,675.3 px with detection at full resolution, which a flat
+  nadir block with RTK alone barely fixes; the lens shape, the lever arm and the tie
+  points (0.69 against 0.61 px at full resolution) were ruled out.
 - COLMAP keeps 40–260 % more sparse points: WebSfM accepts fewer image pairs, so its
   tracks are shorter.
 

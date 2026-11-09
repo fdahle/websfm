@@ -10,6 +10,7 @@ import {
   gcpsInPinholeFrame,
   guideToScan,
   calibrationSnapshot,
+  withFocalSigma,
 } from './displayFrame.js'
 import { fitFiducialAffine, canonicalFrame } from './fiducials.js'
 
@@ -237,5 +238,23 @@ describe('calibrationSnapshot: a cloud keeps the frame model it was solved in', 
     const fm = makeFrameModelResolver({ calibration, sensors })({ uuid: 'new', sensorId: 'b' })
     expect(fm.dist).toMatchObject({ k1: 0.01 })
     expect(fm.selfCal).toBeNull()
+  })
+})
+
+describe('withFocalSigma: a model keeps how well its focal was fixed', () => {
+  it("puts each sensor group's σ from the run that solved it, and only there", () => {
+    const calibration = { groups: [{ sensorId: 'a' }, { sensorId: 'b' }, { imageUuid: 'u1' }] }
+    const summary = {
+      intrinsics: [
+        { sensorId: 'a', fxSigma: 3.2 },
+        { sensorId: 'b', fxSigma: null },
+        { sensorId: null, fxSigma: 9 },
+      ],
+    }
+    withFocalSigma(calibration, summary)
+    expect(calibration.groups[0].focalSigmaPx).toBe(3.2)
+    expect('focalSigmaPx' in calibration.groups[1]).toBe(false)
+    expect('focalSigmaPx' in calibration.groups[2]).toBe(false)
+    expect(withFocalSigma(null, summary)).toBe(null)
   })
 })

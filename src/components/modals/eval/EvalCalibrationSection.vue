@@ -7,6 +7,7 @@ import { estimatedIntrinsics } from '../../../core/sfm/cameraEstimated.js'
 import { resolveK } from '../../../core/sfm/reconstruction.js'
 import { radialCurve, focalDelta } from '../../../core/eval/calibration.js'
 import { EVAL_THRESHOLDS } from '../../../core/eval/health.js'
+import { FOCAL_UNFIXED_SHARE, focalSigmaShare } from '../../../core/sfm/focalSigma.js'
 
 // Quality Report ▸ Calibration: per camera group the BA-refined focal vs nominal, the lens
 // the main model was solved with (its own calibration, displayFrame.js
@@ -56,7 +57,22 @@ const rows = computed(() => {
       const h = sensor.height || rep?.meta?.height || 0
       const rMax = refinedFx && w && h ? Math.hypot(w / 2, h / 2) / refinedFx : 1
       const curve = dist ? radialCurve(dist, rMax, 40) : []
-      return { id: sensor.id, label: sensor.label, nCams: cams.length, refinedFx, nominalFx, delta, dist, curve, rMax }
+      // How well the solve fixed the focal (bundle.rs ▸ lens σ); heights move with it.
+      const focalSigma = own.value?.groups?.find((g) => g.sensorId === sensor.id)?.focalSigmaPx ?? null
+      const sigmaShare = focalSigmaShare(refinedFx, focalSigma)
+      return {
+        id: sensor.id,
+        label: sensor.label,
+        nCams: cams.length,
+        refinedFx,
+        focalSigma,
+        sigmaShare,
+        nominalFx,
+        delta,
+        dist,
+        curve,
+        rMax,
+      }
     })
     .filter((r) => r.nCams > 0 || r.dist)
 })
@@ -98,7 +114,10 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
       <div class="cal-grid">
         <div class="cal-item">
           <div class="cal-k">Refined fx</div>
-          <div class="cal-v">{{ fmt(s.refinedFx) }} <span class="unit">px</span></div>
+          <div class="cal-v">
+            {{ fmt(s.refinedFx) }}<template v-if="s.focalSigma != null"> ± {{ fmt(s.focalSigma) }}</template>
+            <span class="unit">px</span>
+          </div>
         </div>
         <div class="cal-item">
           <div class="cal-k">Nominal fx</div>
@@ -114,6 +133,16 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
             >
           </div>
         </div>
+      </div>
+
+      <div v-if="s.sigmaShare != null && s.sigmaShare >= FOCAL_UNFIXED_SHARE" class="warn-box">
+        These photos do not fix the focal (± {{ (100 * s.sigmaShare).toFixed(0) }} %), and the model's heights scale
+        with it. Camera positions with their accuracies, GCPs or some oblique photos fix it.
+      </div>
+      <div v-else-if="s.sigmaShare != null" class="cal-note">
+        The focal's ± is how far heights can move from it alone: about ±
+        {{ (100 * s.sigmaShare).toFixed(s.sigmaShare >= 0.001 ? 1 : 2) }} % of the distance from the cameras to the
+        ground.
       </div>
 
       <template v-if="s.dist">
@@ -193,6 +222,10 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
+}
+.cal-note {
+  font-size: 11px;
+  color: var(--text-dim);
 }
 .sensor-cams {
   font-size: 11px;

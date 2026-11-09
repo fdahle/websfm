@@ -428,7 +428,7 @@ export async function refineModel(ctx) {
       } else {
         selfCalRecord.passes.push({ pass: round, mode: refineMode, reducedReason })
         const label = `post-filter bundle adjustment ${round}`
-        await runBundleAdjust(label, baIterations, refineMode, { warm: true })
+        await runBundleAdjust(label, baIterations, refineMode, { warm: true, lensSigma: true })
         // The first k4 can bend a wide fisheye's lens curve so that it folds before the
         // image corner (selfCalGuard.js); the guard then refuses the whole pass, k1–k3
         // with it. Solve the pass again without k4, and stage no k4 for the rest of the run.
@@ -445,7 +445,7 @@ export async function refineModel(ctx) {
             'Reconstruction',
           )
           selfCalRecord.passes.push({ pass: round, mode: withoutK4, reducedReason: 'k4 refused by the self-cal guard' })
-          await runBundleAdjust(`${label} (without k4)`, baIterations, withoutK4, { warm: true })
+          await runBundleAdjust(`${label} (without k4)`, baIterations, withoutK4, { warm: true, lensSigma: true })
         }
       }
       memoryMark(`filter + BA ${round}`)

@@ -22,6 +22,7 @@
 
 import { bundleAdjust } from './reconstruction.js'
 import { validateSelfCalUpdate } from './selfCalGuard.js'
+import { focalSigmaNote } from './focalSigma.js'
 import { distortPixel } from './distortion.js'
 import {
   buildCameraPriorConstraints as buildSurveyPriorConstraints,
@@ -278,7 +279,7 @@ export function createBundleSession(ctx) {
     label,
     iters,
     refineMode = refineIntrinsics,
-    { cameraPriors = null, refineOnly = null, gcp = null, warm = false } = {},
+    { cameraPriors = null, refineOnly = null, gcp = null, warm = false, lensSigma = false } = {},
   ) {
     // Any solve replaces the record of the last one; it is set again below only when
     // this one leaves a converged model (refinePipeline.js skips a re-solve of it).
@@ -408,6 +409,9 @@ export function createBundleSession(ctx) {
         ...(fixedCams?.length ? { fixedCams } : {}),
         ...(cameraPriors ? { cameraPriors } : {}),
         ...(gcp ? { gcpAnchors: gcp.anchors } : {}),
+        // The lens terms' σ: only on the solves that settle the lens (post-filter, and
+        // those held by priors, GCPs or a DEM), not the many interim ones.
+        lensSigma: lensSigma && mode !== 'none',
       })
     let result = await solve(refineMode)
     noteBaSolver(label, result)
@@ -547,6 +551,7 @@ export function createBundleSession(ctx) {
           sensorId: img?.sensorId ?? null,
           fxBefore: kList[ci]?.fx ?? null,
           fxProposed: proposed?.fx ?? null,
+          fxSigma: result.lensSigma?.[ci]?.fx ?? null,
           k1: proposed?.k1 ?? 0,
           k2: proposed?.k2 ?? 0,
           k3: proposed?.k3 ?? 0,
@@ -618,19 +623,21 @@ export function createBundleSession(ctx) {
         // A sensorless camera is a group of its own: one line each, so debug-level
         // (a sensorless set would otherwise print a line per image per pass).
         const who = g >= 0 ? `sensor group ${g}` : `camera ${imageByUuid(uuidList[ci])?.name ?? key} (no sensor)`
+        const sigma = result.lensSigma?.[ci]?.fx
+        const pm = sigma > 0 ? ` ± ${sigma.toFixed(1)}` : ''
         log(
           `${label} self-calibration — ${who}: ` +
-            `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
+            `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)}${pm} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
           g >= 0 ? 'info' : 'debug',
           'Reconstruction',
         )
+        if (sigma > 0 && g >= 0) {
+          // The last solve that reports it is the run's (finaliseIntrinsics keeps the row).
+          const rec = intrinsicsRecord.get(imageByUuid(uuidList[ci])?.sensorId ?? `image:${uuidList[ci]}`)
+          if (rec) rec.fxSigma = sigma
+          log(`${label}: ${focalSigmaNote(fx1, sigma)}`, 'info', 'Reconstruction')
+        }
       }
-      log(
-        `${label} self-calibration is weakly observed on short/single strips ` +
-          `(needs ≥2° tilt variation for a trustworthy focal); review before updating the sensor table.`,
-        'debug',
-        'Reconstruction',
-      )
     }
 
     // Propagate the refined calibration to every image of each solved group and fold
