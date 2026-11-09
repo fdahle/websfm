@@ -7,13 +7,15 @@ import { fileURLToPath } from 'node:url'
 // <video>_<timestamp>.jpg, with the frame time in their metadata, one shared sensor,
 // stored in OPFS (and read back from there); Match Features then starts on Sequential.
 //
-// Fixture: four South Building sample images, 0.75 s each (the last 1.5 s), 320×240,
-// 8 fps, VP9 WebM — made with ffmpeg (VP9, because Playwright's Chromium has no H.264):
+// Fixture: four photos of the Aukerman example (OpenDroneMap, CC0), 0.75 s each (the last
+// 1.5 s), 320×240, 8 fps, VP9 WebM — made with ffmpeg (VP9, because Playwright's Chromium
+// has no H.264):
 //   ffmpeg -f concat -safe 0 -i list.txt -vf "scale=320:240,fps=8,format=yuv420p" \
-//          -c:v libvpx-vp9 -b:v 0 -crf 36 -an south-building-4.webm
-// with list.txt naming P1180149, P1180163, P1180173, P1180178 (duration 0.75 each).
-const FIXTURE = fileURLToPath(new URL('./fixtures/south-building-4.webm', import.meta.url))
-const NAME = 'south-building-4.webm'
+//          -c:v libvpx-vp9 -b:v 0 -crf 36 -an aukerman-4.webm
+// with list.txt naming DSC00268, DSC00284, DSC00298, DSC00311 (duration 0.75 each) and
+// DSC00311 once more (the concat demuxer shows the last entry without its duration).
+const FIXTURE = fileURLToPath(new URL('./fixtures/aukerman-4.webm', import.meta.url))
+const NAME = 'aukerman-4.webm'
 
 async function createProject(page) {
   await page.goto('/')
@@ -98,7 +100,7 @@ test('Import ▸ Video plans frames, then extracts them into the project as imag
   expect(s.fileNames).toEqual(s.names)
   expect(s.names).toEqual(
     [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5].map(
-      (t) => `south-building-4_00m0${Math.floor(t)}.${String(Math.round((t % 1) * 1000)).padStart(3, '0')}s.jpg`,
+      (t) => `aukerman-4_00m0${Math.floor(t)}.${String(Math.round((t % 1) * 1000)).padStart(3, '0')}s.jpg`,
     ),
   )
   expect(s.meta.every((m) => m.src === NAME && m.w === 320 && m.h === 240)).toBe(true)
@@ -116,7 +118,7 @@ test('Import ▸ Video plans frames, then extracts them into the project as imag
     .getByRole('button', { name: /Images/ })
     .first()
     .click()
-  await expect(page.locator('.list-item').filter({ hasText: 'south-building-4_00m00.000s.jpg' })).toBeVisible()
+  await expect(page.locator('.list-item').filter({ hasText: 'aukerman-4_00m00.000s.jpg' })).toBeVisible()
   expect(errors).toEqual([])
 })
 
@@ -155,7 +157,7 @@ test('a dropped video opens the dialog, and its frames start Match Features on S
     )
     .toBe(true)
   const s = await imageState(page)
-  expect(s.names.every((name) => /^south-building-4_00m0\d\.\d{3}s\.jpg$/.test(name))).toBe(true)
+  expect(s.names.every((name) => /^aukerman-4_00m0\d\.\d{3}s\.jpg$/.test(name))).toBe(true)
 
   const profile = await page.evaluate(async () => {
     const { useDatasetRecommendations } = await import('/src/composables/useDatasetRecommendations.js')
