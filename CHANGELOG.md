@@ -53,6 +53,11 @@ Notable changes to websfm. The format follows
   shot at one exposure is unchanged.
 
 ### Fixed
+- **Importing camera positions again updates them.** Importing a camera file a second
+  time now replaces each photo's position, even when the file names the photos without
+  the extension or in another case. Before, such a re-import (or one after reopening the
+  project) added a second copy of every position, and bundle adjustment counted each
+  camera's prior once per import, as if the positions were more accurate than stated.
 - **Complete third-party notices.** About ▸ Licenses now lists everything WebSfM includes
   from others, each with its license text, and every copy of the app carries the same list
   as THIRD_PARTY_NOTICES.txt. The list was kept by hand and had fallen behind: it named 15

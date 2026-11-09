@@ -181,7 +181,13 @@ export const usePosesStore = registerProjectStore(
         const [x, y, z] = transform([raw.x, raw.y, raw.z ?? 0], sourceCrs, projCrs)
         const imageId = resolveImageId.value(raw.imageName)
         if (imageId) matched++
-        const existing = poses.value.find((p) => p.imageName === raw.imageName)
+        // The pose of the same photo, else of the same name: a linked pose has taken its
+        // photo's name (relinkImageRecord), so a re-import whose rows name the photos
+        // without the extension or in another case still updates it, instead of adding a
+        // second copy that counts the position twice in bundle adjustment.
+        const existing =
+          (imageId != null && poses.value.find((p) => p.imageId === imageId)) ||
+          poses.value.find((p) => p.imageName === raw.imageName)
         const next = {
           imageId,
           imageName: raw.imageName,

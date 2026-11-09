@@ -171,6 +171,24 @@ describe('EXIF pose synchronization', () => {
     expect(poses.poses.map((p) => p.id)).toEqual([a, b])
   })
 
+  it('updates in place on a re-import whose names differ from the photos only by extension or case', async () => {
+    // A linked pose takes its photo's own name; the next import of the same file still
+    // keys the row on the name as written ("DRONE"). Matched by the photo it resolves to,
+    // it replaces the pose — a second copy would count that position twice in the solve.
+    openTransientProject()
+    const images = useImagesStore()
+    images.images = [{ id: 'image-1', uuid: 'uuid-1', name: 'drone.jpg', meta: {} }]
+    const poses = usePosesStore()
+    await poses.addPoses([{ imageName: 'DRONE', x: 500100, y: 5316400, z: 125 }], 'EPSG:32632')
+    // Any change to the photo list relinks the poses (so does reopening the project).
+    images.images = [...images.images, { id: 'image-2', uuid: 'uuid-2', name: 'other.jpg', meta: {} }]
+    await vi.waitFor(() => expect(poses.poses[0]?.imageName).toBe('drone.jpg'))
+    const id = poses.poses[0].id
+    await poses.addPoses([{ imageName: 'DRONE', x: 500101, y: 5316401, z: 126, accuracyZ: 0.02 }], 'EPSG:32632')
+    expect(poses.poses).toHaveLength(1)
+    expect(poses.poses[0]).toMatchObject({ id, imageId: 'image-1', x: 500101, z: 126, accuracyZ: 0.02 })
+  })
+
   it('lets an imported pose override EXIF for the same image', async () => {
     openTransientProject()
     const images = useImagesStore()
