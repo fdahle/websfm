@@ -70,13 +70,13 @@ describe('what Auto chose for the grid', () => {
       ' Auto: about one point per cell; built in blocks.',
     )
     expect(demAutoNote(auto, { width: 8192, height: 5000, gsd: 0.1, coarsened: true })).toMatch(
-      /held to 8,192 px on the long side; built in blocks\.$/,
+      /held to 8,192 px on the long side \(set a cell size for a finer one\); built in blocks\.$/,
     )
     expect(demAutoNote({ ...auto, gsd: 0.05 }, { width: 4000, height: 3000, gsd: 0.05 })).toBe('')
   })
   it('says an ortho takes two photo pixels a cell, or why not', () => {
     const e = { width: 12600, height: 8800, gsd: 0.004, auto: 'photos', photoGsd: 0.002 }
-    expect(orthoAutoNote(auto, e, 'm')).toBe(' Auto: 2 photo pixels a cell (the photos see 0.002 m a pixel).')
+    expect(orthoAutoNote(auto, e, 'm/px')).toBe(' Auto: 2 photo pixels a cell (the photos see 0.002 m/px).')
     expect(orthoAutoNote(auto, { ...e, gsd: 0.006 }, 'm')).toMatch(/3 photo pixels a cell .*held to 16,384 px/)
     expect(orthoAutoNote(auto, { ...e, auto: 'surface' }, 'm')).toBe(" Auto: the surface's own cells.")
     expect(orthoAutoNote({ ...auto, sizeBy: 'px', longSide: 9000 }, e, 'm')).toBe('')

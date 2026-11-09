@@ -517,7 +517,7 @@ export const useReconstructionStore = registerProjectStore(
           label: 'DEM',
           available: !!dem.value,
           detail: dem.value
-            ? `"${dem.value.name}" · ${dem.value.width}×${dem.value.height} · ${dem.value.crs === 'local' || !dem.value.crs ? 'local frame' : dem.value.crs}` +
+            ? `"${dem.value.name}" · ${dem.value.fullWidth ?? dem.value.width}×${dem.value.fullHeight ?? dem.value.height} · ${dem.value.crs === 'local' || !dem.value.crs ? 'local frame' : dem.value.crs}` +
               (productStatus(dem.value).outdated ? ' · outdated' : '')
             : null,
           hint: dem.value

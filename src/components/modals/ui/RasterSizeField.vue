@@ -5,7 +5,7 @@
 // would coarsen shows before the run instead of in its log.
 //
 // `estimate`: 'loading' | null | { unavailable } | { width, height, gsd, coarsened,
-// blocks, approx } (core/products/rasterSize.js via stores/reconstruction/productRuns.js).
+// blocks, approx, auto } (core/products/rasterSize.js via stores/reconstruction/productRuns.js).
 import { computed } from 'vue'
 import SettingsField from './SettingsField.vue'
 import WarnBox from './WarnBox.vue'
@@ -22,7 +22,6 @@ const props = defineProps({
   invalid: { type: Object, default: () => ({}) }, // checkNumberFields' `bad`
   estimate: { type: [Object, String], default: null },
   bytesPerCell: { type: Number, default: 4 },
-  autoCapped: { type: String, default: '' }, // why Auto stopped at one plane (DEM)
 })
 const sizeBy = defineModel('sizeBy', { type: String, default: 'gsd' })
 const gsd = defineModel('gsd', { type: Number, default: 0 })
@@ -41,8 +40,9 @@ const readout = computed(() => {
 })
 const warning = computed(() => {
   const e = props.estimate
-  if (!e || typeof e !== 'object' || !e.coarsened) return ''
-  if (!e.blocks) return props.autoCapped
+  // Auto's own cap is the step's effect line to say (stepEffects/raster.js); this is for
+  // a size the user chose that the raster cap coarsened.
+  if (!e || typeof e !== 'object' || !e.coarsened || e.auto) return ''
   return (
     `A raster is at most ${MAX_RASTER_SIDE.toLocaleString()} px a side, so the run uses ${fmtGsd(e.gsd)} ` +
     `instead of ${fmtGsd(e.requestedGsd)} ${props.unit}. Limit the area (Tools ▸ Model ▸ Region) for a finer cell.`

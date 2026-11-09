@@ -86,7 +86,7 @@ export function orthoDemSurface(dem, budgetBytes) {
  *  points that go in) holding `count` points, as the DEM worker builds it: auto ≈ one
  *  point per cell, up to `demAutoMaxSide` a side; a chosen cell size or long side up to
  *  MAX_RASTER_SIDE. A grid past one plane of DEM_PLANE_MAX is built in blocks.
- *  → { geom: { width, height, gsd, originX, originY }, blocks, coarsened, requestedGsd } | null */
+ *  → { geom: { width, height, gsd, originX, originY }, blocks, coarsened, requestedGsd, auto } | null */
 export function demGridFor(box, count, settings = {}) {
   if (!box || !(box.maxX > box.minX) || !(box.maxY > box.minY)) return null
   const spanMax = Math.max(box.maxX - box.minX, box.maxY - box.minY)
@@ -103,7 +103,7 @@ export function demGridFor(box, count, settings = {}) {
   )
   if (!geom) return null
   const blocks = Math.max(geom.width, geom.height) > DEM_PLANE_MAX
-  return { geom, blocks, coarsened: geom.gsd > gsd0 * (1 + 1e-9), requestedGsd: gsd0 }
+  return { geom, blocks, coarsened: geom.gsd > gsd0 * (1 + 1e-9), requestedGsd: gsd0, auto: !(chosen > 0) }
 }
 
 /** The longest side an Auto DEM may have (blocks past DEM_PLANE_MAX). */

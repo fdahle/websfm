@@ -102,6 +102,8 @@ describe('the DEM grid the readout shows is the one the run builds', () => {
     expect(big.geom.width).toBe(RASTER_TUNING.demAutoMaxSide)
     expect(big.coarsened).toBe(true)
     expect(big.blocks).toBe(true)
+    expect(big.auto).toBe(true)
+    expect(demGridFor({ minX: 0, maxX: 10000, minY: 0, maxY: 100 }, 1e9, { gsd: 2 }).auto).toBe(false)
   })
 })
 

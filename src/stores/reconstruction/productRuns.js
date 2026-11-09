@@ -750,6 +750,7 @@ export function createProductRuns({
           coarsened: fit.coarsened,
           requestedGsd: fit.requestedGsd,
           approx: true,
+          auto: fit.auto ? 'points' : null,
         }
       )
     }

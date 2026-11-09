@@ -31,6 +31,15 @@ Notable changes to websfm. The format follows
   depth 11 on that block (11 M triangles) solved and then outgrew the 32 GB the tab had.
   The cards used to set depth 6 / 8 / 10 on every project; a depth typed in by hand is
   still used as is, with a warning when it predicts more than 4 M triangles.
+- **DEM and orthophoto size follow the block.** At Auto a DEM keeps about one point per
+  cell up to 8,192 px a side (built in blocks past 4,096), and an orthophoto takes two photo
+  pixels a cell up to 16,384 px, instead of both stopping at 4,096 px; each Grid step says
+  what Auto chose, and for the orthophoto the photos' own GSD. A small block's DEM stays as
+  it was; its orthophoto gets finer, since it no longer follows the DEM's cells. On a
+  347-photo aerial block at Auto: DEM 8,192 px instead of 4,096 (91 s instead of 40 s),
+  orthophoto 11,581 px instead of 4,096 (560 s instead of 253 s, the tab at 13.5 GB
+  instead of 9.1 GB, GeoTIFF 220 MB instead of 31 MB; the photos read at 86 % of native
+  instead of 34 %). Set the photos' GSD for a full-resolution orthophoto.
 
 ## [0.7.0] — 2026-11-09
 

@@ -37,7 +37,9 @@ export function demAutoNote(s, estimate) {
   const side = Math.max(estimate.width, estimate.height)
   return (
     ' Auto: about one point per cell' +
-    (estimate.coarsened ? `, held to ${fmtCount(RASTER_TUNING.demAutoMaxSide)} px on the long side` : '') +
+    (estimate.coarsened
+      ? `, held to ${fmtCount(RASTER_TUNING.demAutoMaxSide)} px on the long side (set a cell size for a finer one)`
+      : '') +
     (side > DEM_PLANE_MAX ? '; built in blocks' : '') +
     '.'
   )
@@ -48,10 +50,7 @@ export function orthoAutoNote(s, estimate, unit) {
   if (!isAuto(s) || !hasSize(estimate)) return ''
   if (estimate.auto === 'photos' && estimate.photoGsd > 0) {
     const px = estimate.gsd / estimate.photoGsd
-    return (
-      ` Auto: ${+px.toPrecision(2)} photo pixels a cell (the photos see ${fmtGsd(estimate.photoGsd)} ${unit}` +
-      ` a pixel)${px > RASTER_TUNING.orthoAutoPhotoPx * 1.05 ? `, held to ${fmtCount(RASTER_TUNING.orthoAutoMaxSide)} px or the surface's cells` : ''}.`
-    )
+    return ` Auto: ${+px.toPrecision(2)} photo pixels a cell (the photos see ${fmtGsd(estimate.photoGsd)} ${unit})${px > RASTER_TUNING.orthoAutoPhotoPx * 1.05 ? `, held to ${fmtCount(RASTER_TUNING.orthoAutoMaxSide)} px or the surface's cells` : ''}.`
   }
   return " Auto: the surface's own cells."
 }
