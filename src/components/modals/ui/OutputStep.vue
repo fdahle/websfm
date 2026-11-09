@@ -14,6 +14,8 @@ const props = defineProps({
   op: { type: String, required: true },
   // The product, lower case ("DEM", "dense cloud").
   noun: { type: String, required: true },
+  // The noun's plural, where adding an s is wrong ("meshes").
+  nouns: { type: String, default: null },
   plan: { type: Object, default: null },
   defaultValue: { type: Boolean, default: false },
 })
@@ -29,7 +31,7 @@ const result = computed(() => outputEffect(replace.value, props.plan, props.noun
     :inactive="result.inactive"
   >
     <SettingsField
-      :hint="`Off: older ${noun}s stay, and the new one becomes the main one (the input of the next step). On: the new one takes the main one's place and name.`"
+      :hint="`Off: older ${nouns ?? noun + 's'} stay, and the new one becomes the main one (the input of the next step). On: the new one takes the main one's place and name.`"
     >
       <template #label>
         <FieldHelp :op="op" param="replaceMain" :value="replace" :default-value="defaultValue"
