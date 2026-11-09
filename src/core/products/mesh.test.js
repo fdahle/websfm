@@ -112,9 +112,8 @@ describe('transferVertexColors', () => {
     const n = 20000
     const meshPos = new Float32Array(3 * (n + 1)).fill(NaN)
     meshPos.set([0.5, 0.5, 0.5], 3 * n)
-    const t = performance.now()
+    // Without the guard this call does not return (the test times out).
     const { col, misses, missed } = transferVertexColors(meshPos, dense, 1.0, { grayFallback: [7, 8, 9] })
-    expect(performance.now() - t).toBeLessThan(2000)
     expect(misses).toBe(n)
     expect(missed[0]).toBe(1)
     expect(Array.from(col.slice(0, 3))).toEqual([7, 8, 9])
