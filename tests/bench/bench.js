@@ -2398,6 +2398,15 @@ window.bench = {
     ...overrides
   } = {}) {
     const settings = { ...withPreset(RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, preset), ...overrides }
+    // `demHold: { referenceId: 'last', sigma }`: Georeference ▸ Hold to a reference DEM,
+    // with the raster an `importraster:<tag>` stage brought in last.
+    if (settings.demHold?.referenceId === 'last') {
+      const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+      const rasters = useExternalStore().rasters ?? []
+      const last = rasters[rasters.length - 1]
+      if (!last) throw new Error("reconstruct: demHold.referenceId 'last' but no raster imported")
+      settings.demHold = { ...settings.demHold, referenceId: last.id }
+    }
     for (const p of poses.poses) p.enabled = posePriors
     const arm = leverArm && reference?.leverArm ? [...reference.leverArm] : null
     for (const s of sensorsStore.sensors) s.gnssLeverArm = arm
