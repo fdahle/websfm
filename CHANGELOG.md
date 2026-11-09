@@ -40,6 +40,17 @@ Notable changes to websfm. The format follows
   orthophoto 11,581 px instead of 4,096 (560 s instead of 253 s, the tab at 13.5 GB
   instead of 9.1 GB, GeoTIFF 220 MB instead of 31 MB; the photos read at 86 % of native
   instead of 34 %). Set the photos' GSD for a full-resolution orthophoto.
+- **Colour balance follows the camera's exposure.** The orthophoto's Colour balance and
+  the texture's colour levelling start each photo's gain from the exposure in its EXIF
+  (time, ISO, aperture), so a flight whose auto-exposure changed comes out even. Before,
+  every gain was pulled towards 1 and held within two stops of it, which gave back part of
+  a real exposure trend: on a simulated 60-photo strip whose exposure drifts fourfold, the
+  levelled photos still differed by 96 % from one end to the other; centred on the EXIF
+  exposure, 0.2 %. On a 347-photo aerial block whose exposure varies 10.2× (f/2.8 at
+  ISO 320 to f/5.6 at ISO 125), no channel gain is clamped any more (10–11 before; four
+  photos need 0.21–0.25), the orthophoto's overall level is unchanged (median gain 1.077
+  against 1.066), and the texture's seams are as before (mean step 12.6 levels). A block
+  shot at one exposure is unchanged.
 
 ### Fixed
 - **A very fine mesh finishes.** Build Mesh at a high octree depth no longer stops after

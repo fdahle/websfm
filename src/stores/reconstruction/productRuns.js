@@ -27,6 +27,7 @@ import { stampOf } from '../../core/products/productSet.js'
 import { demPointClasses, demClassesLabel } from '../../core/products/cloudStyle.js'
 import { DEM_DEFAULTS, ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
+import { exposureOf } from '../../core/products/colourGains.js'
 
 // Generating the computed rasters, split out of useReconstructionStore: the DEM
 // from the densest cloud and the orthophoto over a DEM or mesh surface, each in
@@ -513,6 +514,7 @@ export function createProductRuns({
           selfCal,
           fiducial,
           rs: rsWarps.get(m.uuid) ?? null,
+          exposure: exposureOf(im.meta),
         })
       }
       // The machine's memory gate (Settings ▸ Compute): the worker sizes its map/photo

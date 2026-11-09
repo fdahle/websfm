@@ -65,9 +65,9 @@ large model at full detail. Each 4096 page needs about 64 MB of graphics memory.
 
 ## Level colours
 <!-- param: levelColours default: true -->
-Evens out brightness and white balance between photos, then smooths each chart so the
-two sides of every seam meet ([seam levelling](help:seam-levelling)). Turn it off only
-to see the photos as taken.
+Evens out brightness and white balance between photos, starting from each photo's EXIF
+exposure, then smooths each chart so the two sides of every seam meet
+([seam levelling](help:seam-levelling)). Turn it off only to see the photos as taken.
 
 ## Viewing and export
 The 3D view shows the texture (**Colour by ▸ Texture**). **Export ▸ Mesh** keeps it in

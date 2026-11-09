@@ -1280,13 +1280,25 @@ layout; deterministic. Graph cut moves seams off roofs and tree crowns.
 
 **Gain compensation**, per image and channel, in linear light, from overlap means on a
 lattice of ~65 k cells (clipped samples left out). Unlike Brown & Lowe (2007), the fit is in
-the **log domain**: `Σ_pairs N_ij (x_i − x_j − log(Ī_ji/Ī_ij))²/σ² + κ Σ_i W_i x_i²`,
+the **log domain**: `Σ_pairs N_ij (x_i − x_j − log(Ī_ji/Ī_ij))²/σ² + κ Σ_i W_i (x_i − p_i)²`,
 x = log g, W_i the image's overlap weight, κ = 0.01. Brown & Lowe's linear form
 `Σ N (g_i Ī_ij − g_j Ī_ji)² + prior on (1 − g)` is minimised by shrinking every gain toward
 0 wherever ratios disagree around loops. In logs a common factor costs nothing, so the
-prior only fixes the level (overlap-weighted mean log gain = 0) and limits drift to a
-correlation length of ~1/√κ ≈ 10 images. Gains are clamped to 0.25–4 (±2 stops), since
-auto-exposure can move the aperture by more than a stop over one flight.
+prior only fixes the level and limits drift to a correlation length of ~1/√κ ≈ 10 images.
+
+**The prior is the photo's EXIF exposure** (`exposurePriors`): p_i = log(E_med / E_i),
+E = exposure time × ISO / f-number² (a factor no photo records is left out of all), 0 for a
+photo without it and for a block shot at one exposure. A prior at 0 also damps a *real*
+exposure trend: auto-exposure drifting fourfold along a 60-photo strip stays 96 % (in log)
+across the levelled block, neighbours 2.3 % apart; centred on the EXIF exposure, 0.2 %
+(`colourGains.test.js`). The fit then corrects only what the exposure does not explain
+(the camera's tone curve, light, vignetting), and gains are clamped to ±2 stops around
+e^{p_i}, which catches a fit gone wrong without cutting a real exposure change. After the
+solve the log gains (and the clamp's centres) are shifted so their prior-weighted mean is 0:
+the photos keep their own overall level, and the exposures set only how they compare (the
+median exposure as the level would brighten or darken a whole product with how the
+exposures happen to be spread). The
+texture's per-image gains (§8.6, Texture) use the same fit and prior.
 
 **Blending.**
 - **Feathering** (`seamBlend: 'feather'`): each image contributes to the cells within

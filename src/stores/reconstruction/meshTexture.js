@@ -5,6 +5,7 @@ import { computeSourceOf } from '../../utils/image.js'
 import { relativeQuality } from '../../core/features/imageQuality.js'
 import { pluralize } from '../../core/textFormat.js'
 import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
+import { exposureOf } from '../../core/products/colourGains.js'
 
 // Tools ▸ Mesh ▾ ▸ Texture (dev/planning/plan-texture.md): a NEW mesh with per-vertex
 // UVs and JPEG atlas pages, textured from the registered photos. Like every mesh tool
@@ -69,6 +70,7 @@ export function createMeshTexture({
         selfCal,
         fiducial,
         rs: rsWarps.get(im.uuid) ?? null,
+        exposure: exposureOf(im.meta),
         mask: settings.useMasks !== false ? (im.mask?.blob ?? null) : null,
       })
     }

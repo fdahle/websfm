@@ -30,15 +30,49 @@ export function linearToSrgb(l) {
 }
 
 const GAIN_SIGMA_S = 0.1 // spread of one sample's log colour ratio between two images
-const GAIN_PRIOR = 0.01 // an image's pull to gain 1, as a fraction of its own overlap weight
+const GAIN_PRIOR = 0.01 // an image's pull to its prior gain, as a fraction of its own overlap weight
 const GAIN_CLIP_LO = 4,
   GAIN_CLIP_HI = 250 // sRGB: a sample at either end is clipped, its ratio meaningless
-// The clamp: ±2 stops. On quarry-80 the camera's auto-exposure moved the aperture from
-// f/2.8 to f/5 over the flight, and the fitted gains follow the EXIF exposure
-// (t·ISO/N²) to an rms of 15 % in log; at ±1 stop the last twelve photos sat at the clamp
-// (they need 2.1–3.3), at ±2 stops none do.
+// The clamp: ±2 stops around the gain the photo's EXIF exposure implies (1 without it).
+// Auto-exposure can change the exposure tenfold over one flight (f/2.8 at ISO 320 to
+// f/5.6 at ISO 125 on a 347-photo quarry block); the fitted gains follow the EXIF
+// exposure to an rms of 15 % in log, so the clamp only catches a fit gone wrong.
 export const GAIN_MIN = 0.25,
   GAIN_MAX = 4
+
+// A photo's exposure from EXIF: time × ISO ÷ f-number², the light per output level, up to
+// a factor common to the camera. `meta` { exposureTime, iso, fNumber }; a factor missing
+// from every photo of a block is left out of all of them (exposurePriors), so a fixed
+// lens that writes no f-number still compares by time and ISO.
+const positive = (x) => (typeof x === 'number' && x > 0 && Number.isFinite(x) ? x : null)
+const exposureFactors = (m) => {
+  const N = positive(m?.fNumber)
+  return [positive(m?.exposureTime), positive(m?.iso), N ? 1 / (N * N) : null]
+}
+
+// The EXIF fields a photo's exposure is computed from, off an image's metadata
+// (core/io/metadata.js), for a run's photo record.
+export const exposureOf = (meta) =>
+  meta ? { exposureTime: meta.exposureTime ?? null, iso: meta.iso ?? null, fNumber: meta.fNumber ?? null } : null
+
+// The log gain each photo's exposure implies, relative to the block's median exposure:
+// log(E_median / E_i), so a photo shot at half the exposure of most needs gain 2 to match
+// them. 0 for a photo without a usable exposure, and for all of them when no photo has
+// one or every exposure is the same. `metas`: one { exposureTime, iso, fNumber } (or null)
+// per image. → { prior: Float64Array(n), withExif, spread } (spread: largest / smallest
+// exposure, 1 when none vary).
+export function exposurePriors(metas) {
+  const n = metas.length
+  const prior = new Float64Array(n)
+  const f = metas.map(exposureFactors)
+  const used = [0, 1, 2].filter((k) => f.some((v) => v[k] > 0))
+  const logE = f.map((v) => (used.every((k) => v[k] > 0) ? used.reduce((a, k) => a + Math.log(v[k]), 0) : null))
+  const known = logE.filter((v) => v != null).sort((a, b) => a - b)
+  if (!used.length || known.length < 2) return { prior, withExif: 0, spread: 1 }
+  const mid = known[known.length >> 1]
+  for (let i = 0; i < n; i++) if (logE[i] != null) prior[i] = mid - logE[i]
+  return { prior, withExif: known.length, spread: Math.exp(known[known.length - 1] - known[0]) }
+}
 
 // An sRGB sample with any channel clipped says nothing about gain: a wall at 255 in one
 // photo understates its ratio to the other. Callers leave such samples out.
@@ -83,9 +117,13 @@ export function growable(Type, n = 1024) {
 // systematic per-pair biases (vignetting, view-angle reflectance) cannot add up along a
 // block — the prior couples over ~1/√GAIN_PRIOR images, while two neighbours are still
 // matched to ~½ % (quarry-80, with clipped samples left out by gainSampleClipped).
+// With `prior` (log gains from the photos' EXIF exposure, exposurePriors) the pull and the
+// clamp centre on it instead of on gain 1: the fit then only corrects what the exposure
+// does not explain. The overall level stays the photos' own either way.
 //   nImages, nPoints — sizes; obsPt / obsImg — Int32 per observation; obsRgb — 3 per observation
+//   prior — Float64Array(nImages) of log gains, or null (all 0)
 // → { gains: Float64Array(3·nImages), summary }
-export function fitGains({ nImages: n, nPoints: L, obsPt: opt, obsImg: oimg, obsRgb: orgb }) {
+export function fitGains({ nImages: n, nPoints: L, obsPt: opt, obsImg: oimg, obsRgb: orgb, prior = null }) {
   // Group the observations by sample point (a stable counting sort keeps images ascending).
   const O = opt.length
   const start = new Int32Array(L + 1)
@@ -155,12 +193,31 @@ export function fitGains({ nImages: n, nPoints: L, obsPt: opt, obsImg: oimg, obs
       rhs[pb[e]] -= w * d
     }
     // The prior: a fraction of each image's own overlap weight, plus 1 so an image with
-    // no usable overlap stays at log gain 0.
-    for (let i = 0; i < n; i++) diag[i] = diag[i] * (1 + GAIN_PRIOR) + 1
-    const x = solveGains(diag, off, pa, pb, rhs)
+    // no usable overlap stays at its prior log gain.
+    const pw = new Float64Array(n)
     for (let i = 0; i < n; i++) {
+      pw[i] = diag[i] * GAIN_PRIOR + 1
+      diag[i] += pw[i]
+      if (prior) rhs[i] += pw[i] * prior[i]
+    }
+    const x = solveGains(diag, off, pa, pb, rhs)
+    // The level stays the photos' own, as without a prior (the prior-weighted mean log
+    // gain is 0): the exposures set only how the photos compare. Their median would brighten
+    // or darken the whole product with how the exposures happen to be spread.
+    let shift = 0
+    if (prior) {
+      let sw = 0
+      for (let i = 0; i < n; i++) {
+        shift += pw[i] * x[i]
+        sw += pw[i]
+      }
+      shift /= sw
+    }
+    for (let i = 0; i < n; i++) {
+      x[i] -= shift
+      const centre = prior ? Math.exp(prior[i] - shift) : 1
       const gi = Math.exp(x[i]),
-        v = Math.min(GAIN_MAX, Math.max(GAIN_MIN, gi))
+        v = Math.min(GAIN_MAX * centre, Math.max(GAIN_MIN * centre, gi))
       if (v !== gi && overlapping[i]) clamped++
       gains[3 * i + c] = v
     }

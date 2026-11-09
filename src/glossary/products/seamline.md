@@ -30,9 +30,9 @@ photos agree.
 display gamma:
 
 - **Colour balance** gives each photo one brightness gain per colour channel, fitted
-  by least squares so that overlapping photos agree (after Brown & Lowe, 2007). A
-  gain far from 1 points at a photo with very different exposure; gains are limited
-  to 0.25–4, two stops either way.
+  by least squares so that overlapping photos agree (after Brown & Lowe, 2007). It
+  starts from the exposure each photo's EXIF records, so only what that does not
+  explain is fitted, and each gain stays within two stops of that start.
 - **Seam blending** mixes the two photos at each seam. The default,
   [multiband blending](help:multiband-blending), mixes fine detail over a pixel or
   two and brightness over about a hundred either side, so the seam shows neither a step nor a

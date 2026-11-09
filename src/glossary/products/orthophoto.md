@@ -29,7 +29,8 @@ pixel by pixel keeps buildings and trees from leaning differently from one pixel
 the next, and a [graph cut](help:graph-cut) bends the seams around buildings and
 trees, where neighbouring photos disagree. Two corrections then hide the seams.
 **Colour balance** gives each photo one brightness gain per colour channel, fitted by
-least squares so that overlapping photos agree (after Brown & Lowe, 2007).
+least squares so that overlapping photos agree (after Brown & Lowe, 2007), starting from
+the exposure in each photo's EXIF.
 [Multiband blending](help:multiband-blending) mixes the photos at each seam, fine
 detail over a pixel or two and brightness over a wide band. Both work in linear
 light, the physical intensity before display gamma.

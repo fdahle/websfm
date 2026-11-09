@@ -15,7 +15,7 @@
 import { TEXTURE_DEFAULTS } from '../../defaults.user.js'
 import { TEXTURE_TUNING } from '../../tuning.js'
 import { toScaledPx } from '../../sfm/geometry.js'
-import { fitGains, gainSampleClipped, growable, srgbToLinear } from '../colourGains.js'
+import { exposurePriors, fitGains, gainSampleClipped, growable, srgbToLinear } from '../colourGains.js'
 import { sampleRgbaBilinear } from '../undistort.js'
 import { faceAdjacency } from './meshGraph.js'
 import { weldVertices, coincidentVertices } from '../meshEdit.js'
@@ -74,10 +74,13 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
 
   // Colours from the visibility pass: gains first (photo consistency compares levelled
   // colours), then drop each face's views that saw something else there.
+  // The gains centre on each photo's EXIF exposure (colourGains.js exposurePriors).
+  const exif = exposurePriors(views.map((v) => v.exposure ?? null))
+  const prior = exif.withExif ? exif.prior : null
   let early = null,
     consistency = null
   if (cand.colour && (o.levelColours || o.photoConsistency)) {
-    early = candidateGains(cand, views.length, o.gainSamples)
+    early = candidateGains(cand, views.length, o.gainSamples, prior)
     if (o.photoConsistency) {
       consistency = dropInconsistentViews(cand, early.gains, o.consistencyMinTol)
       if (consistency.dropped) {
@@ -156,7 +159,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
 
   // 5 · Bake, collecting colour-levelling samples from each photo while it is loaded.
   const layout = { pageSize: o.pageSize, pageHeights: pack.pageHeights, scale: s, pieces, place: pack, flat }
-  const levelling = o.levelColours && !early ? gainSampler(geom, idx, cand, views, s, o.gainSamples) : null
+  const levelling = o.levelColours && !early ? gainSampler(geom, idx, cand, views, s, o.gainSamples, prior) : null
   const baked = await bakeAtlas(
     layout,
     {
@@ -179,7 +182,11 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
       summary.images
         ? `Texture: colour levelling over ${summary.images} photos from ${summary.observations.toLocaleString()} samples; ` +
             `gain median ${summary.median.toFixed(3)}, range ${summary.min.toFixed(3)}–${summary.max.toFixed(3)}` +
-            (summary.clamped ? `, ${pluralize(summary.clamped, 'channel')} clamped` : '') +
+            (exif.withExif
+              ? `, centred on ${pluralize(exif.withExif, 'photo')}' EXIF exposure` +
+                (exif.spread > 1.05 ? ` (it varies ${exif.spread.toFixed(1)}× over the block)` : '')
+              : '') +
+            (summary.clamped ? `, ${pluralize(summary.clamped, 'channel')} held at 2 stops` : '') +
             (summary.rejected
               ? `; ${summary.rejected.toLocaleString()} samples left out as inconsistent between photos`
               : '')
@@ -350,7 +357,7 @@ const GAIN_PROBES = [
 const GAIN_ROUNDS = 2
 const GAIN_MIN_TOL = 0.05 // never reject below ±5 % in log colour
 
-function gainSampler(geom, idx, cand, views, s, max) {
+function gainSampler(geom, idx, cand, views, s, max, prior) {
   const { K, count, view } = cand
   const F = count.length
   let multi = 0
@@ -403,14 +410,14 @@ function gainSampler(geom, idx, cand, views, s, max) {
         for (let ch = 0; ch < 3; ch++) obsRgb.push(srgbToLinear(acc[ch] / n))
       }
     },
-    fit: () => robustGains(views.length, sampleFaces.length, obsPt.array, obsImg.array, obsRgb.array),
+    fit: () => robustGains(views.length, sampleFaces.length, obsPt.array, obsImg.array, obsRgb.array, prior),
   }
 }
 
 // fitGains, then drop observations off their face's consensus and fit again (twice).
-function robustGains(nImages, nPoints, pt, img, rgb) {
+function robustGains(nImages, nPoints, pt, img, rgb, prior) {
   const total = pt.length
-  let res = fitGains({ nImages, nPoints, obsPt: pt, obsImg: img, obsRgb: rgb })
+  let res = fitGains({ nImages, nPoints, obsPt: pt, obsImg: img, obsRgb: rgb, prior })
   for (let round = 0; round < GAIN_ROUNDS; round++) {
     const keep = consensusInliers(pt, img, rgb, res.gains, nPoints)
     if (keep.length === pt.length) break
@@ -423,7 +430,7 @@ function robustGains(nImages, nPoints, pt, img, rgb) {
     pt = Int32Array.from(keep, (o) => pt[o])
     img = Int32Array.from(keep, (o) => img[o])
     rgb = rgb2
-    res = fitGains({ nImages, nPoints, obsPt: pt, obsImg: img, obsRgb: rgb })
+    res = fitGains({ nImages, nPoints, obsPt: pt, obsImg: img, obsRgb: rgb, prior })
   }
   res.summary.rejected = total - pt.length
   // Per photo (mean of the three channels), for the run record and the log.
@@ -436,7 +443,7 @@ function robustGains(nImages, nPoints, pt, img, rgb) {
 
 // Gains from the candidates' own colours (sampled in the visibility pass at z-buffer
 // resolution): every face seen by two or more views, strided to `max`.
-function candidateGains(cand, nViews, max) {
+function candidateGains(cand, nViews, max, prior) {
   const { K, count, view, colour } = cand
   const F = count.length
   let multi = 0
@@ -459,7 +466,7 @@ function candidateGains(cand, nViews, max) {
     }
     si++
   }
-  return robustGains(nViews, si, pt.array, img.array, rgb.array)
+  return robustGains(nViews, si, pt.array, img.array, rgb.array, prior)
 }
 
 // Photo consistency (Waechter et al. 2014 §4, simplified): a view whose levelled

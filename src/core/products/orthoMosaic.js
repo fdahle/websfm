@@ -1,7 +1,7 @@
 // The orthophoto mosaic (blend 'mosaic', plan-ortho-mosaic O2–O5): per-cell labels by
 // geometry, majority smoothing, gains, feathering and the seam survey. ortho.js
 // orthorectifyTiled drives these per block. Pure: no Vue/Pinia/OPFS/DOM.
-import { srgbToLinear, linearToSrgb, fitGains, gainSampleClipped, growable } from './colourGains.js'
+import { srgbToLinear, linearToSrgb, fitGains, exposurePriors, gainSampleClipped, growable } from './colourGains.js'
 import { sampleSurfaceWindow } from './surface.js'
 import { seamGrid, seamSampleCol, createSeamSurvey, addSeamCandidate, solveSeams, SEAM_CUT_CELLS } from './seamCut.js'
 import { MULTIBAND_LEVELS, multibandReach } from './multiband.js'
@@ -644,14 +644,28 @@ export async function mosaicSurvey(surface, geom, metas, loadMap, loadImage, toS
   }
   let balance = null
   if (gainsOn) {
+    // Centred on each photo's EXIF exposure (opts.exposures: uuid → { exposureTime, iso,
+    // fNumber }), when the run passes them.
+    const exif = opts.exposures ? exposurePriors(metas.map((m) => opts.exposures[m.uuid] ?? null)) : null
     const { gains, summary } = fitGains({
       nImages: n,
       nPoints: L,
       obsPt: obsPt.array,
       obsImg: obsImg.array,
       obsRgb: obsRgb.array,
+      prior: exif?.withExif ? exif.prior : null,
     })
-    balance = { gains, summary: { latticeStep: k, latticeCells: L, clippedObservations: clippedObs, ...summary } }
+    balance = {
+      gains,
+      summary: {
+        latticeStep: k,
+        latticeCells: L,
+        clippedObservations: clippedObs,
+        exifPhotos: exif?.withExif ?? 0,
+        exifSpread: exif?.spread ?? 1,
+        ...summary,
+      },
+    }
   }
   const t1 = performance.now()
   let seams = null

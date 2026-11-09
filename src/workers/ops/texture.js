@@ -20,7 +20,7 @@ const { gpuAgreeMin: GPU_AGREE_MIN, gpuCheckCoverage: GPU_CHECK_COVERAGE } = TEX
 // frame, the usable-pixel LUT of each view's z-buffer grid (on the photo, not masked),
 // and the JPEG encoding of the finished pages.
 //
-// input.views: [{ uuid, name, url, R, t, K, width, height, dist, selfCal, fiducial, mask }]
+// input.views: [{ uuid, name, url, R, t, K, width, height, dist, selfCal, fiducial, mask, exposure }]
 //   K — the camera's full-resolution pinhole K; width/height — the photo in scan pixels
 //   (a film scan's pinhole frame is its canonical frame, fiducial.frame).
 // → { mesh: { pos, idx, uv, col, nVerts, count }, texture: { data, pages, groups }, summary }
@@ -38,7 +38,7 @@ export function makeTextureOps({ rasterize } = {}) {
         height = frame?.height ?? v.height
       const canvas = !frame && !hasDistortion(v.selfCal) ? fisheyeCanvas(v.K, v.dist, v.width, v.height) : null
       const rect = canvas ? { x0: -canvas.dx, y0: -canvas.dy, width: canvas.width, height: canvas.height } : undefined
-      return { R: v.R, t: v.t, K: v.K, width, height, rect, weight: v.weight ?? 1 }
+      return { R: v.R, t: v.t, K: v.K, width, height, rect, weight: v.weight ?? 1, exposure: v.exposure ?? null }
     })
     // A rolling-shutter photo (`rs`, RSH-4) is read on its principal row's pose too.
     const toPhoto = views.map((v) =>

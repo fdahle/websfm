@@ -84,8 +84,10 @@ roofs and trees. The **Fast** card takes it with feathered seams, about 40 % qui
 
 ## Colour balance
 <!-- param: colourBalance default: on -->
-Mosaic only: one brightness gain per photo and colour, so overlapping photos agree. The
-log lists the gains; one far from 1 points at a photo with very different exposure.
+Mosaic only: one brightness gain per photo and colour, so overlapping photos agree. Each
+gain starts from the photo's exposure in its EXIF (time, ISO, aperture), so a flight whose
+auto-exposure changed comes out even; the overlaps correct the rest. The log lists the
+gains; a gain held at 2 stops points at a photo the overlaps disagree with.
 
 ## Seam blending
 <!-- param: seamBlend default: Multiband -->
