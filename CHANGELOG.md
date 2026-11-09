@@ -393,7 +393,8 @@ Notable changes to websfm. The format follows
   `Std Dev e (m)`, so an RTK file's own accuracies are mapped instead of the 5 m default.
   With the default the positions barely count: on Agisoft's PUTI sample (444 photos, RTK
   at 1–2 cm) the solve came out the same as without them, and with the file's accuracies
-  its checkpoints are 3.1 cm across and 7.2 cm in height.
+  its 15 checkpoints are 3.4 cm across and 11.1 cm in height (with the lens below; 3.1 /
+  7.2 cm with the lens solved as before).
 - **Drone blocks without ground control no longer bend into a dome.** Sparse Model's
   self-calibration now solves the whole lens, including decentring (p1, p2) where it
   clearly lowers the reprojection error, and fits it to the keypoints as the photos
@@ -406,7 +407,10 @@ Notable changes to websfm. The format follows
   the first solve that frees them lowers the RMS by 1 % against the same solve without
   them: quarry 3.8 %; South Building, four ETH3D scenes and UseGeo 0.0–0.2 %, where they
   are dropped and the cameras stay within 1 % of before, except UseGeo's vertical
-  (8.18 → 8.37 cm, +2 %).
+  (8.18 → 8.37 cm, +2 %). Not a gain everywhere: on PUTI (444 photos) with its RTK
+  positions in the solve, the checkpoints' height went from 7.2 to 11.1 cm, and without
+  them its ground sits about 1 m off in height (a focal-length offset), so its lens is
+  still being worked on.
 - **Bundle adjustment no longer stops on a hard start.** When its first steps overshoot,
   Sparse Model's bundle adjustment now keeps damping them until one improves the model,
   instead of stopping after eight tries with the model where it was. Checked against Ceres

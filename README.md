@@ -159,9 +159,10 @@ Latest results (October–November 2026):
 
 | Dataset | Images registered | Result | Compared against |
 | --- | --- | --- | --- |
-| Aerial survey block with RTK and 15 surveyed GCPs | 444 / 444 | Checkpoints: 3.2–3.4 cm horizontal, ~7 cm vertical (RTK camera priors, no GCP used as control) | Surveyed GCPs |
+| Aerial survey block with RTK and 15 surveyed GCPs | 444 / 444 | Checkpoints: 3.4 cm horizontal, 11.1 cm vertical; cameras 1.8 / 1.2 cm (RTK camera priors, no GCP used as control) | Metashape, same priors: cameras 0.5 / 1.0 cm |
 | Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 26.5 cm H / 14.6 cm V; 351 s from detection to sparse model | COLMAP: 24.0 / 65.0 cm, 1,511 s; ODM: 35.8 / 94.7 cm |
 | Quarry, Pix4D example (RTK in EXIF), pure SfM | 346 / 347 | Cameras vs RTK: 20.3 cm H / 13.4 cm V | COLMAP: 49.5 / 84.7 cm; Metashape: 13 / 12 cm; ODM: 58.0 / 11.6 cm |
+| Three drone blocks (224–444 photos), whole pipeline at defaults: dense cloud, DSM, ortho, textured mesh | all | 35–50 min, 13–23 GiB (smaller mesh and ortho than the others make by default) | Metashape: 48–68 min, 10–14 GiB; ODM: 65–102 min, 28–41 GiB |
 | COLMAP South Building | 128 / 128 | 64,662 sparse points | COLMAP: 84,954 points |
 | Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone) | – | Final cost a median 0.00004 % from Ceres', 84 of 95 within 1 % of it or lower, at 1.4× its time; the 3 largest not solved in 2 h | Ceres 2.2 |
 | ETH3D high-res, 6 training scenes (dense, from ground-truth cameras, ETH3D's evaluator) | – | Mean F1 66.2 at 2 cm; 827 s for all six on WebGPU | COLMAP dense: 58.4; Metashape Medium: 447 s, about 2.5 points of F1 higher (approximate scorer) |

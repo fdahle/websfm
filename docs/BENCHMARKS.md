@@ -55,7 +55,9 @@ reference orientations), horizontal / vertical RMS in cm. WebSfM 2026-11-07, COL
   95 cm; WebSfM and Metashape stay within 15 cm.
 - ODM's quarry RMS comes from a few cameras metres off; its median is 13 / 7 cm. WebSfM was
   given UseGeo's reference calibration, the others calibrated themselves.
-- **With the RTK positions in the solve**, PUTI's 15 GCP checkpoints are 3.35 / 7.0 cm.
+- **With the RTK positions in the solve** (PUTI, 2026-11-08): WebSfM's 15 GCP checkpoints
+  are 3.4 / 11.1 cm, its cameras against the RTK 1.8 / 1.2 cm; Metashape's cameras with
+  the same positions 0.5 / 1.0 cm.
 - COLMAP keeps 40–260 % more sparse points: WebSfM accepts fewer image pairs, so its
   tracks are shorter.
 
@@ -87,11 +89,36 @@ more than 75° off-axis.
 
 ## Full pipeline: time and memory
 
-Each tool from photos to dense cloud, DSM, orthophoto and textured mesh, positions in the
-solve, one run at a time on the GPU. Seconds; peak memory. 2026-11-08.
+Each tool from photos to dense cloud, DSM, orthophoto and textured mesh at its defaults,
+positions in the solve, one run at a time on the same machine and GPU. Seconds; peak memory
+in GiB. 2026-11-08/09.
 
-| block | ODM total | SfM | dense | mesh | texture | DSM + ortho | peak |
-| --- | --- | --- | --- | --- | --- | --- | --- |
+| block | tool | total | import + SfM | depth + dense | mesh | texture | DSM + ortho | peak | dense points |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| quarry (347) | WebSfM | **2,094** | 391 | 1,220 | 47 | 194 | 208 | 13 | 73 M |
+| | Metashape | 2,858 | 290 | 1,038 | 717 | 328 | 486 | **10** | 27 M |
+| | ODM | 3,927 | 1,551 | 320 | 497 | 1,058 | 217 | 28 | 22 M |
+| PUTI (444) | WebSfM | **3,011** | 500 | 1,890 | 65 | 242 | 259 | 23 | 142 M |
+| | Metashape | 3,887 | 351 | 1,161 | 1,254 | 348 | 773 | **13** | 77 M |
+| | ODM | 6,097 | 2,733 | 465 | 346 | 1,738 | 254 | 36 | 34 M |
+| UseGeo (224) | WebSfM | **2,943** | 474 | 1,660 | 55 | 289 | 414 | **13** | 102 M |
+| | Metashape | 4,066 | 261 | 1,555 | 1,079 | 403 | 767 | 14 | 50 M |
+| | ODM | 4,737 | 1,541 | 440 | 437 | 2,030 | 100 | 41 | 29 M |
+
+The products are not the same size, so read the stage columns with this:
+
+- **Depth:** WebSfM computes depth at up to 1,500 px, Metashape at 1/4 of the photo size
+  (Medium), ODM at 1/8 (its default `pc-quality` medium).
+- **Mesh:** WebSfM's default mesh has 120–150 k triangles, Metashape's (High, from the depth
+  maps) 4.6–9.2 M, ODM's 330–360 k.
+- **DSM and ortho:** WebSfM's defaults stop at 4,096 px on the long side; Metashape and ODM
+  build them at the full ground resolution.
+- **Peak memory:** WebSfM's is the browser tab's process, without the GPU process;
+  Metashape's the process; ODM's the container.
+- ODM's features, matching and texturing run on the CPU; the GPU only speeds its dense step.
+- WebSfM's total includes copying the photos into browser storage (60–210 s).
+
+--- | --- | --- | --- | --- | --- | --- | --- |
 | quarry | 3,927 | 1,551 | 320 | 497 | 1,058 | 217 | 29 GB |
 | PUTI | 6,097 | 2,733 | 465 | 346 | 1,738 | 254 | 37 GB |
 | UseGeo | 4,737 | 1,541 | 440 | 437 | 2,030 | 100 | 42 GB |
@@ -173,11 +200,23 @@ evaluator, so compare tools, not levels). F1 at 2 cm (%), time in seconds. 2026-
 ### UseGeo dataset 1 against airborne LiDAR
 
 224 nadir 42 MP drone images, ~2 cm GSD (UseGeo, CC BY-NC-SA 4.0), reference positions in
-the solve. Dense cloud against the LiDAR on flat ground, after a horizontal shift and a
-vertical offset. WebSfM 2026-10-28 (WebGPU), ODM 2026-11-08.
+the solve (given without accuracies, so each tool uses its default). Dense cloud against the
+LiDAR on flat ground, after a horizontal shift and a vertical offset. The full-pipeline runs
+above, 2026-11-08/09; WebSfM's Fast row 2026-10-28.
 
-| run | depth time | points | median / within 10 cm | without the bowl |
-| --- | --- | --- | --- | --- |
+| run | depth time | points | median / within 10 cm | without the bowl | bowl at the edge |
+| --- | --- | --- | --- | --- | --- |
+| WebSfM, Method Full (default on a GPU) | 25 min | 102 M | **8.1 cm** / 61 % | 2.9 cm / 92 % | **−0.32 m** |
+| WebSfM, Method Fast | 13 min | 125 M | 10 cm / – | 5.1 cm / 78 % | – |
+| Metashape, Medium | 11 min | 50 M | 13.3 cm / 38 % | **2.1 cm** / 96 % | −0.54 m |
+| ODM, defaults | 7 min | 29 M | 9.2 cm / 55 % | 2.2 cm / 98 % | −0.43 m |
+
+All three clouds bend into a bowl, which points at what they share (the reference positions
+or the LiDAR heights) rather than at any one SfM. Without it, Metashape's and ODM's clouds
+are the closer to the LiDAR on flat ground: their depth maps are coarser and filtered, which
+suits flat ground.
+
+--- | --- | --- | --- | --- |
 | WebSfM, Method Full (default on a GPU) | 41 min | 102 M | 10 cm / – | **2.9 cm** / 91 % |
 | WebSfM, Method Fast | 13 min | 125 M | 10 cm / – | 5.1 cm / 78 % |
 | ODM, defaults | 7 min | 29 M | 9.2 cm / 55 % | **2.2 cm** / 98 % |
