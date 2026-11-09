@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { demEffects, orthoEffects, gridEffect, frameText } from './raster.js'
+import { demEffects, orthoEffects, gridEffect, frameText, demAutoNote, orthoAutoNote } from './raster.js'
 import { DEM_DEFAULTS, ORTHO_DEFAULTS } from '../defaults.user.js'
 
 const estimate = { width: 2000, height: 1000, gsd: 0.05 }
@@ -53,11 +53,32 @@ describe('orthoEffects', () => {
   it('describes visibility, the mosaic and a cost limit the depth maps already applied', () => {
     const e = orthoEffects(ORTHO_DEFAULTS, { surface, estimate, unit: 'm/px', frame: null })
     expect(e.surface).toMatch(/^Every orthophoto cell takes its height from the DEM \(2000×1000/)
-    expect(e.grid).toMatch(/on the DEM's frame\.$/)
+    expect(e.grid).toMatch(/on the DEM's frame\. Auto: the surface's own cells\.$/)
     expect(e.visibility).toMatch(/within 2 % .*every matched pixel/)
     expect(e.blend).toMatch(/seams where neighbouring photos agree.*blended by frequency/)
     const capped = orthoEffects({ ...ORTHO_DEFAULTS, maxCost: 1 }, { surface, costCeiling: 0.9 })
     expect(capped.visibility).toMatch(/changes nothing: the depth maps already dropped every pixel above 0.9/)
     expect(orthoEffects(ORTHO_DEFAULTS, {}).surface).toMatch(/^No surface yet/)
+  })
+})
+
+describe('what Auto chose for the grid', () => {
+  const auto = { sizeBy: 'gsd', gsd: 0, longSide: 0 }
+  it('says a DEM keeps about one point per cell, in blocks past one plane, held at the cap', () => {
+    expect(demAutoNote(auto, { width: 4000, height: 3000, gsd: 0.1 })).toBe(' Auto: about one point per cell.')
+    expect(demAutoNote(auto, { width: 6305, height: 4403, gsd: 0.1 })).toBe(
+      ' Auto: about one point per cell; built in blocks.',
+    )
+    expect(demAutoNote(auto, { width: 8192, height: 5000, gsd: 0.1, coarsened: true })).toMatch(
+      /held to 8,192 px on the long side; built in blocks\.$/,
+    )
+    expect(demAutoNote({ ...auto, gsd: 0.05 }, { width: 4000, height: 3000, gsd: 0.05 })).toBe('')
+  })
+  it('says an ortho takes two photo pixels a cell, or why not', () => {
+    const e = { width: 12600, height: 8800, gsd: 0.004, auto: 'photos', photoGsd: 0.002 }
+    expect(orthoAutoNote(auto, e, 'm')).toBe(' Auto: 2 photo pixels a cell (the photos see 0.002 m a pixel).')
+    expect(orthoAutoNote(auto, { ...e, gsd: 0.006 }, 'm')).toMatch(/3 photo pixels a cell .*held to 16,384 px/)
+    expect(orthoAutoNote(auto, { ...e, auto: 'surface' }, 'm')).toBe(" Auto: the surface's own cells.")
+    expect(orthoAutoNote({ ...auto, sizeBy: 'px', longSide: 9000 }, e, 'm')).toBe('')
   })
 })

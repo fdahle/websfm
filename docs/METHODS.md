@@ -1208,6 +1208,10 @@ when background fills most cells.) Points outside are left out and counted (warn
 `dem.js`. The dense heights are binned into a grid over the dense core, gaps are filled by
 inverse-distance weighting (Shepard 1968), and a hillshade is made for preview.
 
+**Size at Auto** (`rasterSize.js demGridFor`, the dialog's readout and the run alike): a
+cell of √(area / points), about one point per cell, up to `demAutoMaxSide` (8,192) cells a
+side; past one plane of 4,096 the grid is built in blocks into a Cloud-Optimized GeoTIFF.
+
 **Cell aggregation** (`aggregate`): `median` by default, or `max` (top surface), `mean`,
 `min`. `max` biases the DEM upward by the slope across a cell (metres on steep terrain at
 coarse cells), not just noise. A median whose per-point buffer exceeds the memory budget
@@ -1233,7 +1237,11 @@ fills it is a choice (Metashape's *Build Orthomosaic ▸ Surface*, `core/product
 - **Plane** (`fitPlane`, `planeSurface`): a robust least-squares plane, for flat scenes.
 
 `resampleSurface` decouples the ortho's GSD from the surface's (a coarse surface reprojects
-fine detail). An ortho therefore carries its own geotransform (`gsd`, `originX`,
+fine detail). **At Auto** the cell is two photo pixels (`orthoAutoPhotoPx`), up to 16,384
+cells a side and never coarser than the surface: `photoGsd.js` takes, per camera, the
+median distance to the tie points it sees over its focal length, measured in the ortho's
+frame (so in its unit), and the median over cameras. Two pixels a cell is where the photo
+loader, which decodes at about two photo pixels per cell, reaches native resolution. An ortho therefore carries its own geotransform (`gsd`, `originX`,
 `originY`, `frame`, `crs`), and rebuilding a DEM outdates only an ortho whose surface was
 that DEM.
 

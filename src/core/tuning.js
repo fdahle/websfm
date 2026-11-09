@@ -581,6 +581,18 @@ export const MESH_TUNING = {
 
 // Mesh texture internals (core/products/texture/). User-facing knobs are
 // TEXTURE_DEFAULTS in defaults.user.js.
+// DEM and orthophoto size at Auto (core/products/rasterSize.js). A DEM keeps about one
+// point per cell; past one 4,096 plane it is built in blocks, up to `demAutoMaxSide`. An
+// ortho is `orthoAutoPhotoPx` photo pixels a cell, the photos then read at about native
+// resolution, up to `orthoAutoMaxSide` (never coarser than its surface). Quarry, 347
+// photos (2026-11-09): DEM 4,096 → 6,305 px 40 → 78 s; ortho 4,096 → 12,600 px
+// 253 → 469 s, the tab at 9.1 → 13.2 GB, GeoTIFF 31 → 260 MB.
+export const RASTER_TUNING = {
+  demAutoMaxSide: 8192,
+  orthoAutoPhotoPx: 2,
+  orthoAutoMaxSide: 16384,
+}
+
 export const TEXTURE_TUNING = {
   // Visibility z-buffer: the mesh is rasterised per view onto a grid of at most this
   // many pixels on the long side. Visibility needs occlusion, not texel detail.

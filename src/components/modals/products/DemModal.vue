@@ -266,7 +266,7 @@ provideStepLayout('dem')
         v-model:gsd="settings.gsd"
         v-model:long-side="settings.longSide"
         :unit="cellUnit"
-        gsd-hint="Cell size. 0 = auto (≈ one point per cell). Smaller = finer & slower."
+        gsd-hint="Cell size. 0 = auto (≈ one point per cell, up to 8,192 px a side). Smaller = finer & slower."
         :invalid="numbers.bad"
         :estimate="estimate"
         auto-capped="Auto keeps a DEM to 4,096 px a side, so this one is coarser than one point per cell. Set a cell size or a long side for a finer DEM."

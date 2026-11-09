@@ -41,15 +41,15 @@ The line under the field shows the size the run will build.
 ## Ground sample distance
 <!-- param: gsd default: Auto -->
 The pixel size on the ground ([ground sample distance](help:ground-sample-distance)).
-**0** (Auto) takes the surface's cell size. It can be much finer than the surface,
-down to the photos' own resolution, since colour comes from the photos; finer than
-that adds size, not detail. The limit is 65,535 pixels a side; a finer size is
-coarsened to fit, and Region limits the area.
+**0** (Auto) takes two photo pixels a cell, up to 16,384 pixels a side, so the ortho
+follows the photos' resolution, not the surface's. For full detail set the photos'
+own GSD (the step shows it): four times the pixels, and a longer run. Finer
+than that adds size, not detail. The limit is 65,535 pixels a side.
 
 ## Long side
 <!-- param: longSide default: Auto -->
-The number of pixels on the longer side; the cell size follows. **0** (Auto) takes the
-surface's cell size.
+The number of pixels on the longer side; the cell size follows. **0** (Auto) takes two
+photo pixels a cell, as above.
 
 ## Occlusion tolerance
 <!-- param: depthTolRel default: 2 % -->

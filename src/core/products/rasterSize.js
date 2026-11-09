@@ -9,6 +9,7 @@
 
 import { gridGeometry, resampledGeometry } from './surface.js'
 import { planDemWindow, demCogLevels } from './demWindow.js'
+import { RASTER_TUNING } from '../tuning.js'
 
 // An auto DEM fits one plane of this many cells a side; a GSD (or size) the user
 // chose past it is built block by block into a GeoTIFF (SAT-3), whose plane is then
@@ -38,15 +39,29 @@ export function requestedGsd({ gsd = 0, longSide = 0 } = {}, spanMax) {
 }
 
 /** The ortho grid over a surface grid ({ width, height, gsd, originX, originY }) for the
- *  run's `gsd` / `longSide` (0 = the surface's own cells), capped at MAX_RASTER_SIDE.
- *  → { geom (resampledGeometry), want, coarsened } | null; `want` is the cell size asked
- *  for (0 = auto), `coarsened` when the side cap grew it. */
+ *  run's `gsd` / `longSide`, capped at MAX_RASTER_SIDE. Auto (both 0): `orthoAutoPhotoPx`
+ *  photo pixels a cell when `settings.photoGsd` (the photos' GSD in the surface's frame,
+ *  photoGsd.js) is known, up to `orthoAutoMaxSide` a side and never coarser than the
+ *  surface; else the surface's own cells.
+ *  → { geom (resampledGeometry), want, coarsened, auto } | null; `want` is the cell size
+ *  asked for (0 = auto), `coarsened` when the side cap grew it, `auto` the Auto pick
+ *  ('photos' | 'surface') or null. */
 export function orthoGridFor(surface, settings = {}) {
   if (!surface) return null
-  const want = requestedGsd(settings, Math.max(surface.width, surface.height) * surface.gsd)
-  const geom = resampledGeometry(surface, want, MAX_RASTER_SIDE)
+  const span = Math.max(surface.width, surface.height) * surface.gsd
+  const want = requestedGsd(settings, span)
+  let target = want
+  let auto = null
+  if (!(want > 0)) {
+    const { orthoAutoPhotoPx, orthoAutoMaxSide } = RASTER_TUNING
+    if (settings.photoGsd > 0) {
+      target = Math.min(surface.gsd, Math.max(orthoAutoPhotoPx * settings.photoGsd, span / (orthoAutoMaxSide - 1)))
+      auto = 'photos'
+    } else auto = 'surface'
+  }
+  const geom = resampledGeometry(surface, target, MAX_RASTER_SIDE)
   if (!geom) return null
-  return { geom, want, coarsened: want > 0 && geom.gsd > want * (1 + 1e-9) }
+  return { geom, want, coarsened: want > 0 && geom.gsd > want * (1 + 1e-9), auto }
 }
 
 /** The DEM surface an ortho reads: the DEM's own plane, or for a block-built DEM the
@@ -69,8 +84,8 @@ export function orthoDemSurface(dem, budgetBytes) {
 
 /** The DEM grid over a frame box `box` ({ minX, minY, maxX, maxY }, the extent of the
  *  points that go in) holding `count` points, as the DEM worker builds it: auto ≈ one
- *  point per cell in one plane of ≤ DEM_PLANE_MAX; a chosen cell size or long side past
- *  that plane builds blocks, capped at MAX_RASTER_SIDE.
+ *  point per cell, up to `demAutoMaxSide` a side; a chosen cell size or long side up to
+ *  MAX_RASTER_SIDE. A grid past one plane of DEM_PLANE_MAX is built in blocks.
  *  → { geom: { width, height, gsd, originX, originY }, blocks, coarsened, requestedGsd } | null */
 export function demGridFor(box, count, settings = {}) {
   if (!box || !(box.maxX > box.minX) || !(box.maxY > box.minY)) return null
@@ -78,16 +93,21 @@ export function demGridFor(box, count, settings = {}) {
   const chosen = requestedGsd(settings, spanMax)
   const auto = Math.sqrt(((box.maxX - box.minX) * (box.maxY - box.minY)) / Math.max(1, count))
   const gsd0 = chosen > 0 ? chosen : auto
-  const at = (gsd, maxGrid) => gridGeometry(box.minX, box.minY, box.maxX, box.maxY, gsd, maxGrid)
-  if (chosen > 0) {
-    const full = at(gsd0, MAX_RASTER_SIDE)
-    if (full && Math.max(full.width, full.height) > DEM_PLANE_MAX) {
-      return { geom: full, blocks: true, coarsened: full.gsd > gsd0 * (1 + 1e-9), requestedGsd: gsd0 }
-    }
-  }
-  const geom = at(gsd0, DEM_PLANE_MAX)
-  return geom && { geom, blocks: false, coarsened: geom.gsd > gsd0 * (1 + 1e-9), requestedGsd: gsd0 }
+  const geom = gridGeometry(
+    box.minX,
+    box.minY,
+    box.maxX,
+    box.maxY,
+    gsd0,
+    chosen > 0 ? MAX_RASTER_SIDE : demAutoMaxSide(),
+  )
+  if (!geom) return null
+  const blocks = Math.max(geom.width, geom.height) > DEM_PLANE_MAX
+  return { geom, blocks, coarsened: geom.gsd > gsd0 * (1 + 1e-9), requestedGsd: gsd0 }
 }
+
+/** The longest side an Auto DEM may have (blocks past DEM_PLANE_MAX). */
+export const demAutoMaxSide = () => RASTER_TUNING.demAutoMaxSide
 
 /** The stored size of a raster grid, uncompressed. */
 export const rasterBytes = (geom, bytesPerCell) => geom.width * geom.height * bytesPerCell

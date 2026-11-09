@@ -6,7 +6,9 @@ import {
   demGridFor,
   DEM_PLANE_MAX,
   MAX_RASTER_SIDE,
+  demAutoMaxSide,
 } from './rasterSize.js'
+import { RASTER_TUNING } from '../tuning.js'
 import { demGeometry } from './dem.js'
 import { gridGeometry } from './surface.js'
 
@@ -84,9 +86,45 @@ describe('the DEM grid the readout shows is the one the run builds', () => {
     expect(big.geom.width).toBe(9000)
   })
 
-  it('caps an auto DEM at one plane and flags it', () => {
-    const est = demGridFor({ minX: 0, maxX: 10000, minY: 0, maxY: 100 }, 1e9, {})
-    expect(est.geom.width).toBe(DEM_PLANE_MAX)
-    expect(est.coarsened).toBe(true)
+  it('builds an auto DEM past one plane in blocks, up to the Auto cap, as the run does', () => {
+    // 6,000 × 50 cells at one point each: past one plane, within the cap.
+    const mid = demGridFor({ minX: 0, maxX: 6000, minY: 0, maxY: 50 }, 6000 * 50, {})
+    expect(mid.blocks).toBe(true)
+    expect(mid.coarsened).toBe(false)
+    expect(mid.geom.width).toBe(6001)
+    const run = demGeometry(
+      Array.from({ length: 1000 }, (_, i) => ({ x: (i % 2) * 6000, y: (i % 3) * 25, z: 0 })),
+      { gsd: 1, maxGrid: demAutoMaxSide() },
+    )
+    expect(run.width).toBe(mid.geom.width)
+    // One point per cell would need 10,001 cells: held at the cap, and flagged.
+    const big = demGridFor({ minX: 0, maxX: 10000, minY: 0, maxY: 100 }, 1e9, {})
+    expect(big.geom.width).toBe(RASTER_TUNING.demAutoMaxSide)
+    expect(big.coarsened).toBe(true)
+    expect(big.blocks).toBe(true)
+  })
+})
+
+describe('ortho Auto from the photos', () => {
+  const { orthoAutoPhotoPx, orthoAutoMaxSide } = RASTER_TUNING
+  it('takes a cell of orthoAutoPhotoPx photo pixels, finer than the surface', () => {
+    const f = orthoGridFor(surface(2000, 1000, 0.05), { photoGsd: 0.005 })
+    expect(f.auto).toBe('photos')
+    expect(f.geom.gsd).toBeCloseTo(orthoAutoPhotoPx * 0.005, 12)
+    expect(f.want).toBe(0)
+  })
+  it('is never coarser than the surface, and held to its side cap', () => {
+    expect(orthoGridFor(surface(2000, 1000, 0.05), { photoGsd: 0.5 }).geom.gsd).toBeCloseTo(0.05, 12)
+    const capped = orthoGridFor(surface(4000, 1000, 0.05), { photoGsd: 1e-5 })
+    expect(Math.max(capped.geom.width, capped.geom.height)).toBeLessThanOrEqual(orthoAutoMaxSide)
+    expect(capped.coarsened).toBe(false) // Auto asked for nothing
+  })
+  it("keeps the surface's cells without a photo GSD, and a chosen size wins over Auto", () => {
+    const f = orthoGridFor(surface(2000, 1000, 0.05), {})
+    expect(f.auto).toBe('surface')
+    expect(f.geom.gsd).toBeCloseTo(0.05, 12)
+    const chosen = orthoGridFor(surface(2000, 1000, 0.05), { gsd: 0.02, photoGsd: 0.005 })
+    expect(chosen.auto).toBe(null)
+    expect(chosen.geom.gsd).toBeCloseTo(0.02, 12)
   })
 })

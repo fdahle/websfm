@@ -26,7 +26,14 @@ import { packRgb } from '../../core/products/undistort.js'
 import { describeOrthoStats, createOrthoStats } from '../../core/eval/orthoStats.js'
 import { meshSurface, planeSurface } from '../../core/products/surface.js'
 import { createCogBuilder, geoKeysForEpsg, crsTagInfo, planCogFromTiles } from '../../core/products/geotiff.js'
-import { DEM_PLANE_MAX, DEM_TILE, ORTHO_TILE, MAX_RASTER_SIDE, orthoGridFor } from '../../core/products/rasterSize.js'
+import {
+  DEM_PLANE_MAX,
+  DEM_TILE,
+  ORTHO_TILE,
+  MAX_RASTER_SIDE,
+  orthoGridFor,
+  demAutoMaxSide,
+} from '../../core/products/rasterSize.js'
 import { TAB_BUFFER_POOL_BYTES, isBufferAllocationFailure } from '../../core/bufferLimit.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
 import { traceContours, contoursToGeoJSON, contoursToDxf } from '../../core/products/contours.js'
@@ -267,13 +274,25 @@ export function makeProductsOps({ rasterize } = {}) {
     // A DEM of the ground class alone is the bare-earth DTM; say so in the log.
     const label = settings.points === 'ground' ? 'DTM' : 'DEM'
     const bounds = productBounds(pos, view.length, settings.extent, label, unitName, emit)
-    // Past one plane (SAT-3): a GSD the user chose that needs more than DEM_PLANE_MAX
-    // cells a side is built block by block into a Float32 COG, and the record's plane is
-    // its ≤ 4,096 overview. Auto still picks a grid that fits one plane.
+    // Past one plane (SAT-3): a grid of more than DEM_PLANE_MAX cells a side is built
+    // block by block into a Float32 COG, and the record's plane is its ≤ 4,096 overview.
+    // Auto (≈ one point per cell) goes up to demAutoMaxSide, a chosen GSD or long side
+    // up to the raster cap (rasterSize.js demGridFor, as the dialog's readout).
     const chosen = settings.gsd > 0 || settings.longSide > 1 // a cell size or a long side in px
-    const full = chosen ? demGeometry(framed, { ...settings, bounds, maxGrid: MAX_ORTHO_SIDE }) : null
+    const full = demGeometry(framed, { ...settings, bounds, maxGrid: chosen ? MAX_ORTHO_SIDE : demAutoMaxSide() })
     if (full && Math.max(full.width, full.height) > DEM_PLANE_MAX) {
-      return generateDemBlocks({ pos, count: view.length, full, frame, frameSpec, settings, bounds, label, emit })
+      return generateDemBlocks({
+        pos,
+        count: view.length,
+        full,
+        frame,
+        frameSpec,
+        settings,
+        bounds,
+        label,
+        emit,
+        chosen,
+      })
     }
     const grid = rasterizeDem(framed, { ...settings, bounds, memBudgetBytes: budget })
     if (!grid) throw new Error(`${label}: could not rasterise (need a denser cloud or a smaller GSD)`)
@@ -327,16 +346,22 @@ export function makeProductsOps({ rasterize } = {}) {
   // COG (NaN = nodata) block by block, so no full plane exists. The record's `data` /
   // `mask` / `gsd` are the COG's first overview of ≤ DEM_PLANE_MAX, which every plane
   // reader keeps using; `cog` + `fullWidth` / `fullHeight` / `fullGsd` are the DEM.
-  async function generateDemBlocks({ pos, count, full, frame, frameSpec, settings, bounds, label, emit }) {
+  async function generateDemBlocks({ pos, count, full, frame, frameSpec, settings, bounds, label, emit, chosen }) {
     const unit = frameUnitName(frame.unit)
-    // The grid is capped at MAX_ORTHO_SIDE a side (demGeometry grows the cell to fit);
-    // past 4 GiB the stored COG is a BigTIFF. Coarsened never silently.
+    // The grid is capped at MAX_ORTHO_SIDE a side, an Auto one at demAutoMaxSide
+    // (demGeometry grows the cell to fit); past 4 GiB the stored COG is a BigTIFF.
+    // Coarsened never silently.
     const geom = full
     if (geom.gsd > full.requestedGsd * (1 + 1e-6)) {
+      const cap = chosen ? MAX_ORTHO_SIDE : demAutoMaxSide()
       emit('log', [
-        `${label}: ${full.requestedGsd.toPrecision(3)} ${unit}/px would need more than ` +
-          `${MAX_ORTHO_SIDE.toLocaleString()} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px`,
-        'warn',
+        chosen
+          ? `${label}: ${full.requestedGsd.toPrecision(3)} ${unit}/px would need more than ` +
+            `${cap.toLocaleString()} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px`
+          : `${label}: Auto — one point per cell (${full.requestedGsd.toPrecision(3)} ${unit}/px) would need more ` +
+            `than ${cap.toLocaleString()} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px ` +
+            `(set a GSD for a finer one)`,
+        chosen ? 'warn' : 'info',
         'Products',
       ])
     }
@@ -604,11 +629,17 @@ export function makeProductsOps({ rasterize } = {}) {
     // A cell size or a long side in px (`longSide`), else the surface's own cells, capped
     // at MAX_RASTER_SIDE a side (coarsened never silently); past 4 GiB the stored COG is
     // a BigTIFF. rasterSize.js orthoGridFor, as the dialog's readout computes it.
-    const { geom, want } = orthoGridFor(built.grid, settings)
-    if (!geom.identity) {
+    const { geom, want, auto } = orthoGridFor(built.grid, settings)
+    const photos =
+      auto === 'photos'
+        ? ` — Auto: ${(geom.gsd / settings.photoGsd).toPrecision(2)} photo px a cell (the photos ≈ ` +
+          `${settings.photoGsd.toPrecision(3)} ${unit}/px)`
+        : ''
+    if (!geom.identity || photos) {
       say(
         `Ortho: ${geom.width.toLocaleString()}×${geom.height.toLocaleString()} @ ${geom.gsd.toPrecision(3)} ${unit}/px ` +
-          `over the ${label} surface (${built.grid.width}×${built.grid.height} @ ${built.grid.gsd.toPrecision(3)} ${unit}/px)`,
+          `over the ${label} surface (${built.grid.width}×${built.grid.height} @ ${built.grid.gsd.toPrecision(3)} ${unit}/px)` +
+          photos,
       )
     }
     if (want > 0 && geom.gsd > want * (1 + 1e-6)) {

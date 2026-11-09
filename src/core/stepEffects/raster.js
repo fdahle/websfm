@@ -3,6 +3,8 @@
 // the store's size estimate (estimateRasterSize), the same one the run builds.
 import { demPointClasses, demClassesLabel } from '../products/cloudStyle.js'
 import { fmtCount, plural } from './format.js'
+import { RASTER_TUNING } from '../tuning.js'
+import { DEM_PLANE_MAX } from '../products/rasterSize.js'
 
 const fmtGsd = (g) => (g >= 100 ? g.toFixed(0) : String(+g.toPrecision(3)))
 
@@ -24,6 +26,34 @@ export function gridEffect({ estimate, unit, frame, extent }) {
     `${estimate.approx ? '≈ ' : ''}${fmtCount(estimate.width)} × ${fmtCount(estimate.height)} px at ` +
     `${fmtGsd(estimate.gsd)} ${unit}${where}${over}.`
   )
+}
+
+const isAuto = (s) => !(s.sizeBy === 'px' ? s.longSide > 1 : s.gsd > 0)
+const hasSize = (e) => !!e && typeof e === 'object' && e.width > 0
+
+// What Auto chose for a DEM: about one point per cell, in blocks past one plane.
+export function demAutoNote(s, estimate) {
+  if (!isAuto(s) || !hasSize(estimate)) return ''
+  const side = Math.max(estimate.width, estimate.height)
+  return (
+    ' Auto: about one point per cell' +
+    (estimate.coarsened ? `, held to ${fmtCount(RASTER_TUNING.demAutoMaxSide)} px on the long side` : '') +
+    (side > DEM_PLANE_MAX ? '; built in blocks' : '') +
+    '.'
+  )
+}
+
+// What Auto chose for an orthophoto: a cell of a few photo pixels, or the surface's cells.
+export function orthoAutoNote(s, estimate, unit) {
+  if (!isAuto(s) || !hasSize(estimate)) return ''
+  if (estimate.auto === 'photos' && estimate.photoGsd > 0) {
+    const px = estimate.gsd / estimate.photoGsd
+    return (
+      ` Auto: ${+px.toPrecision(2)} photo pixels a cell (the photos see ${fmtGsd(estimate.photoGsd)} ${unit}` +
+      ` a pixel)${px > RASTER_TUNING.orthoAutoPhotoPx * 1.05 ? `, held to ${fmtCount(RASTER_TUNING.orthoAutoMaxSide)} px or the surface's cells` : ''}.`
+    )
+  }
+  return " Auto: the surface's own cells."
 }
 
 const FILL = { idw: 'inverse distance', nearest: 'the nearest measured cell' }
@@ -50,7 +80,7 @@ export function demEffects(s, { source = null, estimate = null, unit, frame } = 
               ? `only ${names}: their top surface (with high vegetation, the canopy; minus the DTM, a canopy height model).`
               : 'every point, so the top surface (a DSM).')
 
-  const grid = gridEffect({ estimate, unit, frame, extent: s.extent })
+  const grid = gridEffect({ estimate, unit, frame, extent: s.extent }) + demAutoNote(s, estimate)
 
   const AGG = {
     max: 'the highest (the top surface)',
@@ -93,7 +123,9 @@ export function orthoEffects(s, { surface = null, estimate = null, unit, frame, 
       `${surface.detail ? ` (${surface.detail})` : ''}, and the photos are projected onto it.` +
       (s.surface === 'plane' ? ' Right only where the ground is flat.' : '')
 
-  const grid = gridEffect({ estimate, unit, frame, extent: s.surface === 'dem' ? null : s.extent })
+  const grid =
+    gridEffect({ estimate, unit, frame, extent: s.surface === 'dem' ? null : s.extent }) +
+    orthoAutoNote(s, estimate, unit)
 
   const cost = !(s.maxCost > 0)
     ? 'colour from every matched pixel is used.'

@@ -290,7 +290,7 @@ provideStepLayout('orthophoto')
         v-model:gsd="settings.gsd"
         v-model:long-side="settings.longSide"
         :unit="outputUnit"
-        gsd-hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine — down to the photos' own GSD."
+        gsd-hint="Ortho cell size. 0 = auto (two photo pixels a cell, up to 16,384 px a side). Set the photos' own GSD for full detail."
         :invalid="numbers.bad"
         :estimate="estimate"
       />

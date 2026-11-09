@@ -5,6 +5,7 @@ import { stageDemPoints, coreExtent, DEM_STAGE_BYTES_PER_POINT } from '../../cor
 import { demGridFor, orthoGridFor, orthoDemSurface } from '../../core/products/rasterSize.js'
 import { gridGeometry } from '../../core/products/surface.js'
 import { frameFromSpec } from '../../core/products/frameSpec.js'
+import { photoGsd } from '../../core/products/photoGsd.js'
 import { pointView } from '../../core/products/pointView.ts'
 import { isStreamed } from '../../core/lod/streamed.js'
 import { regionContains } from '../../core/products/region.js'
@@ -411,6 +412,35 @@ export function createProductRuns({
     }
   }
 
+  // The photos' GSD in the frame of an ortho surface (core/products/photoGsd.js), for
+  // Ortho ▸ Auto: kept per model and frame, so the dialog's readout and the run get the
+  // same number. `surface`: orthoSurfacePayload's (a DEM's grid carries its frame).
+  let photoGsdMemo = { key: null, value: null }
+  function orthoPhotoGsd(surface) {
+    const sparse = mainSparseCloud.value
+    const points = sparse?.points
+    const spec = surface?.kind === 'dem' ? surface.grid?.frame : surface?.frame
+    if (!points?.length || !points.vstart || !spec) return null
+    const key = JSON.stringify([sparse.id ?? null, points.length, spec])
+    if (photoGsdMemo.key === key) return photoGsdMemo.value
+    const frame =
+      surface.kind === 'dem'
+        ? frameFromSpec(spec)
+        : frameFromSpec(
+            spec,
+            surface.cameras ?? [],
+            pointView({ pos: surface.framePoints, count: surface.framePointCount }),
+          )
+    let value = null
+    try {
+      value = photoGsd(sparseCameras.value, points, (p) => frame.fromSfm(p))
+    } catch {
+      value = null
+    }
+    photoGsdMemo = { key, value }
+    return value
+  }
+
   // Orthorectify a surface using the cached depth maps (occlusion via their depth
   // planes, colour from their RGB planes). Needs depth maps and a surface — which
   // is a DEM only when the user picks one (see orthoSurfaces).
@@ -494,7 +524,13 @@ export function createProductRuns({
       log(`Ortho: the open project holds ${formatBytes(pageBytes)} of buffers in this tab`, 'debug', 'Products')
       releaseIdleWorkers() // as for the DEM
       const res = await runOrtho(
-        { surface, maps: mapsPayload, streamed, settings: { ...settings, memBudgetBytes, pageBytes }, images: photos },
+        {
+          surface,
+          maps: mapsPayload,
+          streamed,
+          settings: { ...settings, memBudgetBytes, pageBytes, photoGsd: orthoPhotoGsd(surface) },
+          images: photos,
+        },
         onProgress,
       )
       if (!stillCurrent()) return
@@ -685,7 +721,8 @@ export function createProductRuns({
     if (kind === 'ortho' && (settings.surface ?? 'dem') === 'dem') {
       const d = dem.value
       if (!d) return null
-      const fit = orthoGridFor(orthoDemSurface(d, budgetBytes), settings)
+      const photo = orthoPhotoGsd({ kind: 'dem', grid: { frame: d.frame } })
+      const fit = orthoGridFor(orthoDemSurface(d, budgetBytes), { ...settings, photoGsd: photo })
       return (
         fit && {
           ...sizeOf(fit.geom, d.unit),
@@ -693,6 +730,8 @@ export function createProductRuns({
           requestedGsd: fit.want,
           blocks: true,
           approx: false,
+          auto: fit.auto,
+          photoGsd: photo,
         }
       )
     }
@@ -714,7 +753,7 @@ export function createProductRuns({
         }
       )
     }
-    const fit = orthoGridFor(basis.surface, settings)
+    const fit = orthoGridFor(basis.surface, { ...settings, photoGsd: basis.photoGsd })
     return (
       fit && {
         ...sizeOf(fit.geom, basis.unit),
@@ -722,6 +761,8 @@ export function createProductRuns({
         requestedGsd: fit.want,
         blocks: true,
         approx: true,
+        auto: fit.auto,
+        photoGsd: basis.photoGsd,
       }
     )
   }
@@ -791,7 +832,7 @@ export function createProductRuns({
     const own =
       payload.settings?.gsd > 0 ? payload.settings.gsd : Math.sqrt(((maxX - minX) * (maxY - minY)) / Math.max(2, nAll))
     const surface = gridGeometry(minX, minY, maxX, maxY, own)
-    return surface && { surface, unit: resolved.unit }
+    return surface && { surface, unit: resolved.unit, photoGsd: orthoPhotoGsd(payload) }
   }
 
   const sizeOf = (g, unit) => ({ width: g.width, height: g.height, gsd: g.gsd, unit: unit ?? 'model' })

@@ -46,15 +46,16 @@ follows from the extent. The line under the field shows the size the run will bu
 ## Ground sample distance
 <!-- param: gsd default: Auto -->
 The cell size ([ground sample distance](help:ground-sample-distance)). Auto matches
-the point spacing, up to 4,096 cells a side. A finer cell than the points' spacing
-adds file size, not detail. A larger grid, up to 65,535 cells a side, is built in
-blocks as a [Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) and read at full
-resolution by the exports, the map, profiles, volumes and clips.
+the point spacing, up to 8,192 cells a side, so a large block gets a larger DEM. A
+finer cell than the points' spacing adds file size, not detail. A grid past 4,096 cells
+a side (up to 65,535 when you set it) is built in blocks as a
+[Cloud-Optimized GeoTIFF](help:cloud-optimized-geotiff) and read at full resolution by
+the exports, the map, profiles, volumes and clips.
 
 ## Long side
 <!-- param: longSide default: Auto -->
 The number of cells on the DEM's longer side; the cell size follows. **0** (Auto) puts
-about one point in each cell.
+about one point in each cell, up to 8,192 cells.
 
 ## Surface aggregation
 <!-- param: aggregate default: Median -->
