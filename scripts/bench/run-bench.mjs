@@ -562,6 +562,8 @@ try {
     reduceoverlap: 'reduceOverlap',
     depth: 'depth',
     dense: 'dense',
+    lod: 'lod',
+    pruneclouds: 'pruneclouds',
     dem: 'dem',
     mesh: 'mesh',
     decimate: 'decimate',

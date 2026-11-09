@@ -756,6 +756,29 @@ window.bench = {
     return { settings, seconds: (performance.now() - t0) / 1000, points: recon.mainDenseCloud?.count ?? 0 }
   },
 
+  // Remove every dense cloud and mesh but the main dense cloud (and the meshes when
+  // `meshes`), so a bench project that repeated runs filled with clouds is measured as a
+  // user's would be. → { removed: [names], kept: [names] }
+  async pruneclouds({ meshes = false } = {}) {
+    const main = recon.mainDenseCloud?.id
+    const drop = recon.clouds.filter((c) => (c.kind === 'dense' && c.id !== main) || (c.kind === 'mesh' && !meshes))
+    for (const c of drop) recon.removeCloud(c.id)
+    await new Promise((r) => setTimeout(r, 3000)) // the save it schedules
+    return { removed: drop.map((c) => c.name), kept: recon.clouds.map((c) => `${c.kind}:${c.name}`) }
+  },
+
+  // Wait for the background level-of-detail builds (cloudLod.js buildMissing) of every
+  // dense cloud held in memory, as a user who leaves the tab alone after fusion would:
+  // the memory trace then covers the octree too. Up to `minutes`.
+  async lod({ minutes = 30 } = {}) {
+    const need = () =>
+      recon.clouds.filter((c) => c.kind === 'dense' && c.pos && !c.lod && c.count >= LOD_MIN_POINTS).map((c) => c.name)
+    const t0 = performance.now()
+    const before = need()
+    while (need().length && performance.now() - t0 < minutes * 60e3) await new Promise((r) => setTimeout(r, 2000))
+    return { seconds: (performance.now() - t0) / 1000, waitedFor: before, missing: need() }
+  },
+
   // DEM, settings resolved exactly as DemModal.run() does.
   async dem({ ...overrides } = {}) {
     const { memBudgetBytes } = useComputeSettings()
