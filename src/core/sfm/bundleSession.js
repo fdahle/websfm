@@ -631,11 +631,12 @@ export function createBundleSession(ctx) {
           g >= 0 ? 'info' : 'debug',
           'Reconstruction',
         )
-        if (sigma > 0 && g >= 0) {
-          // The last solve that reports it is the run's (finaliseIntrinsics keeps the row).
+        if (g >= 0) {
+          // The last solve of the focal is the run's σ (finaliseIntrinsics keeps the row);
+          // one that moved it without a σ leaves none rather than an earlier solve's.
           const rec = intrinsicsRecord.get(imageByUuid(uuidList[ci])?.sensorId ?? `image:${uuidList[ci]}`)
-          if (rec) rec.fxSigma = sigma
-          log(`${label}: ${focalSigmaNote(fx1, sigma)}`, 'info', 'Reconstruction')
+          if (rec) rec.fxSigma = sigma > 0 ? sigma : null
+          if (sigma > 0) log(`${label}: ${focalSigmaNote(fx1, sigma)}`, 'info', 'Reconstruction')
         }
       }
     }
@@ -722,7 +723,7 @@ export function createBundleSession(ctx) {
           `camera-prior bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
           baIterations,
           mode,
-          { cameraPriors: constrained.priors, warm: true },
+          { cameraPriors: constrained.priors, warm: true, lensSigma: true },
         )
         if (!r) return
         log(
@@ -841,7 +842,7 @@ export function createBundleSession(ctx) {
           `GCP-anchored bundle adjustment (round ${round + 1}, intrinsics '${gcpMode}')`,
           baIterations,
           gcpMode,
-          { cameraPriors: constrainedCameras?.priors ?? null, gcp: setup },
+          { cameraPriors: constrainedCameras?.priors ?? null, gcp: setup, lensSigma: true },
         )
         if (!r) return
         log(
@@ -1006,7 +1007,7 @@ export function createBundleSession(ctx) {
         `DEM-held bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
         baIterations,
         mode,
-        { cameraPriors: held.priorSet?.priors ?? null, gcp },
+        { cameraPriors: held.priorSet?.priors ?? null, gcp, lensSigma: true },
       )
       if (!r) return record.rounds.length > 1 ? record : null
     }
