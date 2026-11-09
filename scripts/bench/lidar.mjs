@@ -206,7 +206,7 @@ const quantile = (a, q) => {
  * @param {number[][]} pointsEnu   reconstruction points in the positionCheck ENU frame
  * @param {{lat,lon,h}} origin     that frame's geodetic origin
  */
-export function lidarCheck(pointsEnu, origin, grid, { flatRangeM = 0.15 } = {}) {
+export function lidarCheck(pointsEnu, origin, grid, opts = {}) {
   const def = DEFS[grid.crs] ?? grid.crs
   const toGrid = proj4('EPSG:4326', def)
   const pts = pointsEnu.map((q) => {
@@ -214,6 +214,13 @@ export function lidarCheck(pointsEnu, origin, grid, { flatRangeM = 0.15 } = {}) 
     const [x, y] = toGrid.forward([lon, lat])
     return [x, y, h]
   })
+  return lidarCheckGrid(pts, grid, opts)
+}
+
+// The same check on points already in the grid's CRS ([x, y, h], heights in the
+// LiDAR's own system): an outside cloud (Metashape, ODM, a dataset's own MVS) read
+// from its LAS file (lidar-score.mjs).
+export function lidarCheckGrid(pts, grid, { flatRangeM = 0.15 } = {}) {
   const sample = sampler(grid, flatRangeM)
   // Horizontal shift by grid search on a subsample: the robust spread of dz is
   // smallest when the two surfaces line up (slopes and edges carry the signal).
