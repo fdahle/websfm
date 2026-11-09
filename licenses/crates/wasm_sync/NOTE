@@ -1,0 +1,3 @@
+wasm_sync (https://github.com/DouglasDwyer/wasm_sync) publishes no license file; its
+Cargo.toml declares "MIT OR Apache-2.0". WebSfM uses it under the Apache License 2.0,
+whose text is LICENSE-APACHE next to this file.

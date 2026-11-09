@@ -31,6 +31,8 @@ export default defineConfig({
       'src/components/**/*.test.{js,ts}',
       // Worker ops whose browser globals are Node's too (fetch, Blob, CompressionStream).
       'src/workers/**/*.test.{js,ts}',
+      // The build's third-party notices (scripts/licenses/): plain Node helpers.
+      'scripts/licenses/**/*.test.{js,mjs}',
     ],
   },
 })

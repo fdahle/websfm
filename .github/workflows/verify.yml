@@ -125,6 +125,8 @@ jobs:
         with:
           workspaces: crates
       - run: cargo test --manifest-path crates/Cargo.toml --workspace --release --locked
+      # The crates listed in the third-party notices are the ones Cargo.lock builds.
+      - run: node scripts/licenses/cargo.mjs --check
 
   browser:
     needs: [fresh]

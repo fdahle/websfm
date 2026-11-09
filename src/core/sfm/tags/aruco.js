@@ -2,7 +2,7 @@
 // of which DICT_nXn_50, _100 and _250 are the first 50, 100 and 250. Codes from OpenCV's
 // modules/objdetect/src/aruco/predefined_dictionaries.hpp (rotation 0 of each marker):
 //   Copyright (C) 2000-2022, Intel Corporation, all rights reserved; and others.
-//   Apache License 2.0 (core/help/licenses.js); the dictionaries come from the ArUco
+//   Apache License 2.0 (licenses/code/OpenCV.txt); the dictionaries come from the ArUco
 //   library of S. Garrido-Jurado et al. (BSD).
 // A marker of n × n data cells is a black border one cell wide around them, (n + 2) cells
 // across, printed with white around it. Bit i (most significant first) is data cell

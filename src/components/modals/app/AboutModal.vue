@@ -1,14 +1,15 @@
 <script setup>
 // App identity + acknowledgments (courtesy credit for prior art) + third-party
-// license notices (a legal obligation for the code/weights we ship). Hardware /
+// license notices (a legal obligation for the code, models and data we ship). Hardware /
 // storage diagnostics live in SystemInfoModal (its own ribbon entry) — this modal
-// is about the app, not the machine. Both attribution lists come from
-// core/help/licenses.js, the single maintained source of truth.
-import { ref } from 'vue'
+// is about the app, not the machine. The acknowledgments come from
+// core/help/licenses.js; the notices are the build's third-party-licenses.json
+// (scripts/licenses/), loaded when the Licenses tab first opens.
+import { ref, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import Icon from '../../Icon.vue'
 import BetaBadge from '../../layout/BetaBadge.vue'
-import { ACKNOWLEDGMENTS, THIRD_PARTY } from '../../../core/help/licenses.js'
+import { ACKNOWLEDGMENTS } from '../../../core/help/licenses.js'
 import { REFERENCES, formatReference, referenceUrl } from '../../../core/help/references.js'
 import { getAllGlossaryEntries } from '../../../core/help/glossary.js'
 import { followLink, helpLinkFrom } from '../../../composables/useHelpStack.js'
@@ -40,7 +41,34 @@ function onReferencesClick(e) {
   }
 }
 
+// Third-party notices: { groups: [{ group, note?, items }], texts: { id: text } }.
+const noticesTxtUrl = `${import.meta.env.BASE_URL}THIRD_PARTY_NOTICES.txt`
+const notices = ref(null)
+const noticesFailed = ref(false)
+async function loadNotices() {
+  if (notices.value) return
+  noticesFailed.value = false
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}third-party-licenses.json`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    notices.value = await res.json()
+  } catch {
+    noticesFailed.value = true
+  }
+}
+// A license text is rendered only while its fold is open (some run to 300 kB).
+const openTexts = ref(new Set())
+function onTextToggle(key, open) {
+  const next = new Set(openTexts.value)
+  if (open) next.add(key)
+  else next.delete(key)
+  openTexts.value = next
+}
+
 const tab = ref('about')
+watch(tab, (t) => {
+  if (t === 'licenses') loadNotices()
+})
 const tabs = [
   { id: 'about', label: 'About' },
   { id: 'credits', label: 'Acknowledgments' },
@@ -117,10 +145,20 @@ const tabs = [
 
     <!-- Third-party licenses (obligation) -->
     <div v-show="tab === 'licenses'" class="pane">
-      <p class="lede">Bundled third-party software, models and example data, with their licenses:</p>
-      <div v-for="g in THIRD_PARTY" :key="g.group" class="lic-group">
-        <div class="group-head">{{ g.group }}</div>
-        <div v-for="it in g.items" :key="it.name" class="lic-item">
+      <p class="lede">
+        WebSfM is released under the MIT License. It includes the software, models and data below, which others made and
+        which keep their own licenses. All of them in one file:
+        <a :href="noticesTxtUrl" target="_blank" rel="noopener">THIRD_PARTY_NOTICES.txt</a>.
+      </p>
+      <p v-if="noticesFailed" class="lic-note">
+        The list could not be loaded. It ships with the app as THIRD_PARTY_NOTICES.txt.
+        <button class="btn btn-sm" @click="loadNotices">Try again</button>
+      </p>
+      <p v-else-if="!notices" class="lic-note">Loading…</p>
+      <div v-for="g in notices?.groups ?? []" :key="g.group" class="lic-group">
+        <div class="group-head">{{ g.group }} · {{ g.items.length }}</div>
+        <div v-if="g.note" class="lic-note">{{ g.note }}</div>
+        <div v-for="it in g.items" :key="`${it.name}@${it.version}`" class="lic-item">
           <div class="lic-row">
             <a :href="it.url" target="_blank" rel="noopener" class="lic-name">{{ it.name }}</a>
             <span v-if="it.version" class="lic-ver">{{ it.version }}</span>
@@ -128,9 +166,18 @@ const tabs = [
           </div>
           <div v-if="it.use" class="lic-use">{{ it.use }}</div>
           <div v-if="it.notice" class="lic-notice">{{ it.notice }}</div>
-          <details v-if="it.text" class="lic-text">
-            <summary>License text</summary>
-            <pre>{{ it.text }}</pre>
+          <details
+            v-if="it.texts.length"
+            class="lic-text"
+            @toggle="(e) => onTextToggle(`${g.group}/${it.name}@${it.version}`, e.target.open)"
+          >
+            <summary>License text{{ it.texts.length > 1 ? `s (${it.texts.length})` : '' }}</summary>
+            <template v-if="openTexts.has(`${g.group}/${it.name}@${it.version}`)">
+              <template v-for="t in it.texts" :key="t.file">
+                <div v-if="it.texts.length > 1" class="lic-file">{{ t.file }}</div>
+                <pre>{{ notices.texts[t.id] }}</pre>
+              </template>
+            </template>
           </details>
         </div>
       </div>
@@ -232,6 +279,9 @@ const tabs = [
 
 .pane {
   min-height: 190px;
+}
+.lede a {
+  color: var(--accent);
 }
 .lede {
   font-size: 12.5px;
@@ -348,6 +398,16 @@ const tabs = [
   padding: 2px 7px;
   border-radius: 5px;
   white-space: nowrap;
+}
+.lic-note {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin: 0 0 10px;
+}
+.lic-file {
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
 }
 .lic-use,
 .lic-notice {

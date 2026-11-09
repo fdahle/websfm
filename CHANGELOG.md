@@ -53,6 +53,18 @@ Notable changes to websfm. The format follows
   shot at one exposure is unchanged.
 
 ### Fixed
+- **Complete third-party notices.** About ▸ Licenses now lists everything WebSfM includes
+  from others, each with its license text, and every copy of the app carries the same list
+  as THIRD_PARTY_NOTICES.txt. The list was kept by hand and had fallen behind: it named 15
+  of the 48 npm packages the build bundles and 7 of the 75 Rust crates in the WebAssembly
+  modules, and lacked the Rust standard library, the service worker's Workbox, the EPSG
+  dataset's terms (IOGP's ownership must be acknowledged), the geoid grids' source and
+  the full license texts of the models a deploy serves. The build now finds the packages
+  (from the app, its workers and the service worker), `npm run build:wasm` the crates,
+  and THIRD_PARTY.md in the repository says what else is someone else's: the vendored
+  Poisson crate (which now carries its license files), the AprilTag, ArUco and MicaSense
+  code, the models and the data. The video-import test now uses four CC0 example photos
+  in place of South Building images, whose license is not stated.
 - **Fusion keeps to its memory budget.** Build Dense Cloud no longer goes past the memory
   budget (Settings ▸ Compute) once the slabs are fused, and the tab gives the memory back
   as soon as the cloud is built. The fusion workers' merge buffers stayed allocated through

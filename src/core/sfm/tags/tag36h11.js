@@ -1,7 +1,7 @@
 // The AprilTag tag36h11 family: 587 codes of 36 bits, minimum Hamming distance 11.
 // Codes and bit layout from AprilRobotics/apriltag tag36h11.c:
 //   Copyright (C) 2013-2016, The Regents of The University of Michigan. All rights reserved.
-//   BSD 2-Clause License (core/help/licenses.js has the full text).
+//   BSD 2-Clause License (full text: licenses/code/AprilTag.txt).
 // A tag is 10 × 10 cells: a white ring, a black ring (the 8-cell box a detector finds),
 // and 6 × 6 data cells. Bit i (most significant first) is the cell (BIT_X[i], BIT_Y[i]) of
 // the 8-cell box, x to the right and y down; a white cell is 1. Checked against the

@@ -1,7 +1,8 @@
 // Radiometry of MicaSense band images (plan-after-0.7 ▸ MSP-3): raw DN → radiance →
 // reflectance, and the thermal band → °C. A port of MicaSense's MIT-licensed
 // `imageprocessing` model (micasense/image.py radiance, vignette; panel.py; metadata.py),
-// reading the plain values core/io/metadata.js bandMetadata keeps.
+// reading the plain values core/io/metadata.js bandMetadata keeps. Its license:
+// licenses/code/MicaSense.txt.
 //
 //   radiance L = V(x, y) · R(y) · (DN − black) / (gain · exposure) · a1 / 2^bits
 //   R(y)     = 1 / (1 + a2·y/exposure − a3·y)        (row-dependent readout correction)

@@ -143,6 +143,24 @@ adds, removes or renames a setting, operation or user-visible feature:
    [docs/METHODS.md](docs/METHODS.md). The unit tests fail on a key that does not
    resolve, an entry nothing cites, or one missing from METHODS.md.
 
+## Third-party code and data
+
+Every build ships `THIRD_PARTY_NOTICES.txt` and About ▸ Licenses, made by
+`scripts/licenses/` ([THIRD_PARTY.md](THIRD_PARTY.md) says what is in them):
+
+- **An npm package or a Rust crate** needs nothing by hand: the build lists the packages
+  it bundles, and `npm run build:wasm` the crates in the WebAssembly modules
+  (`src/wasm/third-party.json`; CI checks it against `Cargo.lock`). When one publishes no
+  license text, the build warns: put the upstream text in `licenses/packages/<name>/` or
+  `licenses/crates/<name>/`.
+- **Code, a table, a model or data taken in by hand** (ported code, a code table, model
+  weights, a dataset) gets an entry in `src/core/help/licenses.js`, its license text under
+  `licenses/`, a line in [THIRD_PARTY.md](THIRD_PARTY.md), and a comment at the top of the
+  file that holds it naming where it came from. A unit test fails on an entry without its
+  text, or a downloadable model without an entry.
+- A test fixture or screenshot uses data you may share: the example project (CC0) or
+  your own. Check the license of anything else first.
+
 ## Disabled controls say why
 
 A greyed-out control says on hover what it is missing or what to do, in the user's

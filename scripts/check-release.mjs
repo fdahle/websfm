@@ -30,6 +30,8 @@ if (!base.startsWith('/') || !base.endsWith('/')) {
 await Promise.all([
   requireFile('index.html'),
   requireFile('LICENSE', 500),
+  requireFile('THIRD_PARTY_NOTICES.txt', 100_000),
+  requireFile('third-party-licenses.json', 100_000),
   requireFile('favicon.svg', 100),
   requireFile('favicon-32.png', 100),
   requireFile('apple-touch-icon.png', 1_000),
@@ -64,6 +66,24 @@ for (const [, m] of restricted) {
   } catch {
     /* absent, as required */
   }
+}
+
+// The third-party notices (scripts/licenses/) list the bundled packages, the Rust crates
+// and the hand-kept entries.
+try {
+  const notices = JSON.parse(await readFile(new URL('third-party-licenses.json', dist), 'utf8'))
+  const names = new Set(notices.groups.flatMap((g) => g.items.map((it) => it.name)))
+  for (const name of [
+    'vue',
+    'onnxruntime-web',
+    'Rust standard library',
+    'nalgebra',
+    'EPSG Geodetic Parameter Dataset',
+  ]) {
+    if (!names.has(name)) errors.push(`third-party-licenses.json does not list ${name}`)
+  }
+} catch {
+  /* a missing file is already reported above */
 }
 
 try {

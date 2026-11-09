@@ -4,6 +4,7 @@ dist/
 src/wasm/
 public/
 crates/
+licenses/
 package-lock.json
 tests/fixtures/colmap/cameras.json
 # Local output and private notes.

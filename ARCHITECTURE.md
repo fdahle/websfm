@@ -121,6 +121,7 @@ to the algorithm; the other steps differ only in file names.
 | add or change a processing dialog | its `SettingsStep`s in `components/modals/` | the effect lines in `core/stepEffects/<dialog>.js` and their test ([CONTRIBUTING](CONTRIBUTING.md#dialogs-of-a-processing-step)) |
 | mark a feature experimental | an entry in `core/help/experimental.js` | an `ExperimentalBadge` where the feature shows; remove both once it is checked on real data |
 | explain a concept | a new entry in `src/glossary/<category>/` | aliases auto-link it in all help text |
+| take in third-party code, a model or data | an entry in `core/help/licenses.js` | its license text under `licenses/`, a line in [THIRD_PARTY.md](THIRD_PARTY.md) ([CONTRIBUTING](CONTRIBUTING.md#third-party-code-and-data)) |
 | add an example dataset | `core/examples.js` | `scripts/examples/make-example.py`, `scripts/fetch-examples.mjs`, a walkthrough in `src/guide/` |
 
 ## Conventions worth knowing

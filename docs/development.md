@@ -111,7 +111,8 @@ rustup toolchain install nightly
 rustup component add rust-src --toolchain nightly
 rustup target add wasm32-unknown-unknown --toolchain nightly
 
-# build all crates into src/wasm/<crate>/ and update the build stamp:
+# build all crates into src/wasm/<crate>/, list their crates for the third-party
+# notices (src/wasm/third-party.json) and update the build stamp:
 npm run build:wasm
 ```
 

@@ -58,6 +58,7 @@ methods behind each stage.
 ## What it does
 
 ![The example project's orthophoto on the 2D map, with the camera positions](docs/images/orthophoto.webp)
+<sub>Background imagery: Esri World Imagery (Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community).</sub>
 
 A full photogrammetry pipeline, stage by stage:
 
@@ -251,7 +252,8 @@ through [SECURITY.md](SECURITY.md), not public issues.
 
 ## License
 
-WebSfM is released under the [MIT License](LICENSE). Bundled third-party code and
-the downloadable model weights keep their own licenses, listed in the app under
-**About**. Note that the SuperPoint weights are licensed for non-commercial research
-only and are not distributed with websfm.
+WebSfM is released under the [MIT License](LICENSE). The third-party code, models and
+data it includes keep their own licenses: [THIRD_PARTY.md](THIRD_PARTY.md) lists them,
+and every build ships their texts as `THIRD_PARTY_NOTICES.txt`, shown in the app under
+**About ▸ Licenses**. The SuperPoint weights are licensed for non-commercial research
+only and are not distributed with WebSfM.

@@ -7,6 +7,8 @@ import { viteStaticCopy } from 'vite-plugin-static-copy'
 import { VitePWA } from 'vite-plugin-pwa'
 import { GIBS_CAPABILITIES, ORT_RUNTIME, TILE_CACHES } from './src/core/offlineCache.js'
 import { MODELS, isRedistributable } from './src/core/models/registry.js'
+import { NOTICES_JSON, thirdPartyNotices } from './scripts/licenses/vite-plugin.mjs'
+import packageJson from './package.json' with { type: 'json' }
 
 // Vite copies public/ into the build wholesale, including a developer's local
 // copy of weights whose license forbids hosting them (SuperPoint; registry.js
@@ -56,6 +58,8 @@ function cacheRule({ name, pattern, maxEntries, maxAgeSeconds }, handler = 'Cach
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const base = env.VITE_BASE_PATH || '/'
+  // The third-party notices: the app's plugin, and a collector for each worker build.
+  const [notices, noticesCollector] = thirdPartyNotices({ root: process.cwd(), version: packageJson.version })
 
   if (!base.startsWith('/') || !base.endsWith('/')) {
     throw new Error('VITE_BASE_PATH must start and end with "/" (for example, "/websfm/")')
@@ -66,6 +70,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       excludeRestrictedModels(),
+      notices,
       // Serve ORT's wasm runtime at /ort/ (dev middleware + build copy). ORT
       // dynamically imports its wasm-loader .mjs at runtime and feature-detects
       // which variant (asyncify/jsep/jspi) to use — so we ship them all under one
@@ -114,7 +119,9 @@ export default defineConfig(({ mode }) => {
           // never go through here.
           // The geoid grids (core/verticalDatum.js, 1.6 MB each) convert heights offline.
           globPatterns: ['**/*.{html,js,css,wasm,json,svg,png,woff2}', 'geoid/*.i16.z'],
-          globIgnores: ['models/**', 'examples/**', 'ort/**', '**/ort-wasm-*'],
+          // The third-party notices (~3 MB, mostly license texts) load when About ▸
+          // Licenses opens.
+          globIgnores: ['models/**', 'examples/**', 'ort/**', '**/ort-wasm-*', NOTICES_JSON],
           // The entry chunk (~2 MB) and the EPSG catalog (~8 MB) exceed the 2 MB default.
           maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
           cleanupOutdatedCaches: true,
@@ -130,7 +137,8 @@ export default defineConfig(({ mode }) => {
     // which code-splits — unsupported by the default `iife` worker format. The
     // worker is already instantiated as `{ type: 'module' }` (computeClient.js), so
     // emit ES-module worker chunks.
-    worker: { format: 'es' },
+    // Workers are separate Rollup builds: the notices collector records their packages.
+    worker: { format: 'es', plugins: () => [noticesCollector()] },
     // This is an offline-capable compute application rather than a document-sized
     // site. Keep an explicit entry-chunk budget just above the measured shell after
     // the map, 3D viewer, help/report dialogs, help markdown renderer (marked +

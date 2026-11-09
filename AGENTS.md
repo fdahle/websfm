@@ -17,7 +17,11 @@ Rules that are easy to miss:
   share (the WGS84 ellipsoid, the NMAD factor) are defined once in
   `src/core/constants.js`.
 - After a change under `crates/`, run `npm run build:wasm` and commit `src/wasm/`
-  with it.
+  with it (it also rewrites the crate list of the third-party notices).
+- Third-party code, tables, models or data taken in by hand get an entry in
+  `src/core/help/licenses.js`, their license text under `licenses/` and a line in
+  [THIRD_PARTY.md](THIRD_PARTY.md). npm packages and crates are listed by the build
+  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Third-party code and data*).
 - Use every core for heavy CPU work. Spread independent items (images, pairs, maps,
   blocks) over the worker pool (`POOL_SIZE`, `worker:` pins a call; split as in
   `core/dense/depthSplit.js`, each worker with its share of the memory budget), or run
