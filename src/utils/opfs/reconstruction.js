@@ -140,14 +140,15 @@ export async function loadReconstruction(projectId) {
     // the next save writes it into reconstruction/.
     const atTop = new Set()
     const readEither = async (_, name) => {
+      // Shared where isolated: a cloud's arrays then reach a worker as views, not copies.
       if (dir) {
         try {
-          return await readBin(dir, name)
+          return await readBin(dir, name, { shared: true })
         } catch (error) {
           ignoreMissing(error)
         }
       }
-      const buffer = await readBin(root, name)
+      const buffer = await readBin(root, name, { shared: true })
       atTop.add(name)
       return buffer
     }

@@ -43,11 +43,12 @@ import { DEFAULT_BUDGET_BYTES, formatBytes, projectDensePeakBytes, workingPixels
 import { contiguousChunks, depthWorkerCount, mergeDepthSummaries } from '../../core/dense/depthSplit.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
 import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
+import { joinCloudParts } from '../../core/dense/cloudParts.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
 import { canContinue, journalKey, journalSettings, journalWriter, startJournal } from '../../core/runJournal.js'
 import { depthMapsKey, depthRunShape, reusableDepthMaps, depthCameraKey } from '../../core/dense/depthReuse.js'
-import { isSharedArray, postableCopy, shareableArray } from '../../core/bigArray.js'
+import { isSharedArray, postableCopy } from '../../core/bigArray.js'
 import { poissonHeapBytes } from '../../core/products/mesh.js'
 
 // The backend lines of a depth run split over the pool (workers/ops/dense.js), the same
@@ -992,6 +993,10 @@ export function createDense({
       }
     }
     await Promise.all(Array.from({ length: plan.workers }, (_, w) => runner(w)))
+    // The slab workers' accumulators are wasm memories that an idle worker never collects:
+    // they stayed resident through the join and the octree build (+3–5 GB past the plan on
+    // a 73 M-point cloud). Their slabs are in shared memory the page holds, so they survive.
+    releaseIdleWorkers()
     if (!stillCurrent()) return null
     const merged = mergeFusionCounters(counters)
     const sum = (k) => streams.reduce((s, x) => s + (x?.[k] ?? 0), 0)
@@ -1008,24 +1013,10 @@ export function createDense({
       checkMs: sum('checkMs'),
     })
     const { summary } = finishFusion(plan, merged, [], onLog)
-    // Join the slabs (in slab order, so a run is deterministic for a given plan).
-    const n = parts.reduce((s, p) => s + p.count, 0)
-    // Shareable (core/bigArray.js): past 2 GiB, shared wasm memory, outside the tab's pool.
-    const cloud = {
-      count: n,
-      pos: shareableArray(Float32Array, n * 3),
-      col: shareableArray(Uint8Array, n * 3),
-      nrm: shareableArray(Float32Array, n * 3),
-    }
-    let o = 0
-    for (let i = 0; i < nT; i++) {
-      const p = parts[i]
-      cloud.pos.set(p.pos, o * 3)
-      cloud.col.set(p.col, o * 3)
-      cloud.nrm.set(p.nrm, o * 3)
-      o += p.count
-      parts[i] = null
-    }
+    // Join the slabs (in slab order, so a run is deterministic for a given plan), in shared
+    // memory where the page is isolated: later workers then read the cloud uncopied.
+    const cloud = joinCloudParts(parts)
+    const n = cloud.count
     log(
       `Dense cloud: fused ${nM} depth maps → ${n} points in ${((performance.now() - t0) / 1000).toFixed(1)}s ` +
         `(${nT} slabs on ${plan.workers} workers)`,

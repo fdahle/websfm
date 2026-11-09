@@ -342,6 +342,13 @@ describe('bounded map loading', () => {
     expect(held.refused ?? held.summary.slabs > 1).toBeTruthy()
     // … and their plain arrays off the buffer share.
     expect(fuseDepthMaps(ms, { ...opts, pagePoolBytes: 2000 }).refused).toBeTruthy()
+    // Clouds in shared memory leave the buffer share whole, but not the budget: one
+    // budget for both (as Settings ▸ Compute sets them), the page already holding all of
+    // it, leaves no room.
+    const same = { memBudgetBytes: total + 1000, ramBudgetBytes: total + 1000, autoStep: false }
+    expect(fuseDepthMaps(ms, same).summary.slabs).toBe(1)
+    const full = fuseDepthMaps(ms, { ...same, pageBytes: total, pagePoolBytes: 0 })
+    expect(full.refused ?? full.summary.slabs > 1).toBeTruthy()
   })
 
   it('depth-only comparison loads give the identical cloud and a monotonic bar', async () => {

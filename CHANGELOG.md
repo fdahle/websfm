@@ -53,6 +53,17 @@ Notable changes to websfm. The format follows
   shot at one exposure is unchanged.
 
 ### Fixed
+- **Fusion keeps to its memory budget.** Build Dense Cloud no longer goes past the memory
+  budget (Settings ▸ Compute) once the slabs are fused, and the tab gives the memory back
+  as soon as the cloud is built. The fusion workers' merge buffers stayed allocated through
+  the join and the level-of-detail octree; they are now released when the last slab is
+  done. A large dense cloud is also kept in memory the workers share (in a cross-origin
+  isolated tab, as websfm.app is), so the octree build and Build Mesh read it instead of
+  copying it, and a saved cloud loads the same way. On a 347-photo aerial block
+  (73 M points): at a 16 GB budget the tab peaked at 11.9 GB against a plan of 12.9 GB
+  (14.6 GB before) and held 4.9 GB afterwards (14.5 GB before); at 8 GB, 8.1 GB against
+  8.0 GB (10.2 GB before). The fusion plan also no longer counts on room the open project's
+  clouds already take.
 - **A very fine mesh finishes.** Build Mesh at a high octree depth no longer stops after
   the solve with no message; it colours the mesh and saves it. Chrome leaves a
   `Float64Array` of 2^28 elements (2 GiB) or more unfilled when one `fill()` covers it;

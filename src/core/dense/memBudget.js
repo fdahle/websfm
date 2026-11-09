@@ -12,7 +12,7 @@
 
 import { formatBytes } from '../formatBytes.js'
 import { MAX_BUFFER_BYTES, TAB_BUFFER_POOL_BYTES } from '../bufferLimit.js'
-import { maxLocalArrayBytes, maxShareableArrayBytes } from '../bigArray.js'
+import { LOCAL_MIN_BYTES, maxLocalArrayBytes, maxShareableArrayBytes } from '../bigArray.js'
 
 // Default budget: ~2 GB. Conservative for a browser tab on unified-memory Macs
 // (the GPU competes for the same RAM Safari polices).
@@ -276,7 +276,9 @@ export const DENSIFY_CLOUD_BYTES_PER_CELL = 27
 // when they are wasm memory (`accumulatorsInPool: false`, core/bigArray.js localArray);
 // a cloud's array is not when it passes 2 GiB and shared memory takes it
 // (`sharedPastPlain`, shareableArray), and the slabs of a tiled run are not when they are
-// in shared memory whatever their size (`slabsShared`, voxelAccumulator finalizeCloud).
+// in shared memory whatever their size (`slabsShared`, voxelAccumulator finalizeCloud), and
+// the joined cloud is not from LOCAL_MIN_BYTES where the page is isolated (`cloudShared`,
+// core/dense/cloudParts.js).
 // Returns { fusing, assemble, total }.
 export function projectDensifyPoolBytes({
   inputBytes,
@@ -286,11 +288,15 @@ export function projectDensifyPoolBytes({
   accumulatorsInPool = true,
   sharedPastPlain = false,
   slabsShared = false,
+  cloudShared = false,
 }) {
   const p = projectDensifyPeakBytes({ inputBytes, cells, tileCells, workers })
   const t = p.tileCells
   const plain = (bytes) => (sharedPastPlain && bytes > MAX_BUFFER_BYTES ? 0 : bytes)
-  const cloud = (n) => plain(12 * n) + plain(3 * n) + plain(12 * n)
+  const cloud = (n) =>
+    cloudShared && DENSIFY_CLOUD_BYTES_PER_CELL * n >= LOCAL_MIN_BYTES
+      ? 0
+      : plain(12 * n) + plain(3 * n) + plain(12 * n)
   // Finished slabs are clouds of up to `t` cells each.
   const slab = t < cells && slabsShared ? 0 : cloud(t)
   const finished = t > 0 ? (p.finished / (DENSIFY_CLOUD_BYTES_PER_CELL * t)) * slab : 0

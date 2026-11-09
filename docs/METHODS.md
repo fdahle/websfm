@@ -1120,7 +1120,13 @@ The result is independent of cell order, so a large cloud is fused in **slabs** 
 long axis (one slab's accumulator resident, one-cell halo) and gives the identical cloud.
 The accumulator and a cloud past 2 GiB live in WebAssembly memories (`core/bigArray.js`),
 outside Chrome's 2 GiB per-ArrayBuffer cap and 16 GiB per-tab pool: with Memory64 an
-accumulator holds 2³⁰ cells and a cloud ~1.4 G points. **Streamed fusion** over saved maps
+accumulator holds 2³⁰ cells and a cloud ~1.4 G points. The slabs, and the cloud they are
+joined into, are in shared memory where the page is cross-origin isolated (`sharedArrays`,
+`cloudParts.js`), so the octree build and Build Mesh get views, not copies; elsewhere they
+are plain arrays up to 2 GiB. The slab workers are released once the last slab is done: an
+idle worker never collects its wasm memories, and their accumulators stayed resident
+through the join. The plan holds the peak to the RAM budget less what the open project
+holds, and its ArrayBuffers to the pool. **Streamed fusion** over saved maps
 applies the same rules, holding one reference and one comparison map at a time (pair-major,
 source order kept); its pre-passes read only depth and cost. Tests require identical
 points, normals and summaries from both paths.

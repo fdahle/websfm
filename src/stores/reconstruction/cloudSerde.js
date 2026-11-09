@@ -245,8 +245,8 @@ function deserializeCloudData(c, makeCloudId) {
   if (c.kind === 'mesh') {
     const nVerts = c.nVerts ?? N
     const posF = posArray(c, b.pos, nVerts)
-    const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
-    const idx = b.idx ? new Uint32Array(b.idx) : new Uint32Array(0)
+    const col = c.hasColor && b.col ? viewAs(Uint8Array, b.col) : null
+    const idx = b.idx ? viewAs(Uint32Array, b.idx) : new Uint32Array(0)
     return {
       id: c.id ?? makeCloudId(),
       name: c.name ?? 'Mesh',
@@ -267,21 +267,21 @@ function deserializeCloudData(c, makeCloudId) {
       ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
       ...(c.hasUv && b.uv && b.texture
         ? {
-            uv: markRaw(new Float32Array(b.uv)),
-            texture: markRaw({ data: new Uint8Array(b.texture), pages: c.texture.pages, groups: c.texture.groups }),
+            uv: markRaw(viewAs(Float32Array, b.uv)),
+            texture: markRaw({ data: viewAs(Uint8Array, b.texture), pages: c.texture.pages, groups: c.texture.groups }),
             ...(c.textureSummary ? { textureSummary: c.textureSummary } : {}),
           }
         : {}),
     }
   }
   const pos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
-  const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
-  const colorMask = b.colorMask ? new Uint8Array(b.colorMask) : null
-  const vcount = b.vcount ? new Uint32Array(b.vcount) : null
-  const vcam = b.vcam ? new Uint32Array(b.vcam) : null
-  const vkp = b.vkp ? new Uint32Array(b.vkp) : null
-  const vx = b.vx ? new Float32Array(b.vx) : null
-  const vy = b.vy ? new Float32Array(b.vy) : null
+  const col = c.hasColor && b.col ? viewAs(Uint8Array, b.col) : null
+  const colorMask = b.colorMask ? viewAs(Uint8Array, b.colorMask) : null
+  const vcount = b.vcount ? viewAs(Uint32Array, b.vcount) : null
+  const vcam = b.vcam ? viewAs(Uint32Array, b.vcam) : null
+  const vkp = b.vkp ? viewAs(Uint32Array, b.vkp) : null
+  const vx = b.vx ? viewAs(Float32Array, b.vx) : null
+  const vy = b.vy ? viewAs(Float32Array, b.vy) : null
   const viewUuids = c.viewUuids || []
 
   const cameras = new Map()

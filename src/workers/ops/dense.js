@@ -45,7 +45,7 @@ import {
 } from '../../core/dense/memBudget.js'
 import { pluralize } from '../../core/textFormat.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
-import { shareableArray } from '../../core/bigArray.js'
+import { joinCloudParts } from '../../core/dense/cloudParts.js'
 
 // Dense MVS ops (Stage A depth maps + Stage B fusion). `rasterize` (OffscreenCanvas
 // pixel decode) is injected; the raster-space helpers (undistortion, RGB packing,
@@ -1312,7 +1312,7 @@ export function makeDenseOps({ rasterize }) {
       onProgress: (d, t, lbl) => emit('progress', [d, t, lbl, share + (1 - share) * (t > 0 ? d / t : 0), 'fuse']),
       onTile: (p) => parts.push(p),
     })
-    const cloud = joinDenseParts(parts)
+    const cloud = joinCloudParts(parts)
     const nPoints = cloud.count
     // The fusion pre-flight refused (already logged with its numbers): no cloud, but
     // the transferred planes still go home below.
@@ -1343,28 +1343,6 @@ export function makeDenseOps({ rasterize }) {
       if (m.normals) transfer.push(m.normals.buffer)
     }
     return { result: { cloud, summary: flat.summary ?? null, refused: flat.refused ?? null, mapBuffers }, transfer }
-  }
-
-  function joinDenseParts(parts) {
-    if (parts.length === 1) return parts[0]
-    const n = parts.reduce((s, p) => s + p.count, 0)
-    // Shareable (core/bigArray.js): past 2 GiB, shared wasm memory that reaches the page uncopied.
-    const out = {
-      count: n,
-      pos: shareableArray(Float32Array, n * 3),
-      col: shareableArray(Uint8Array, n * 3),
-      nrm: shareableArray(Float32Array, n * 3),
-    }
-    let o = 0
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i]
-      out.pos.set(p.pos, o * 3)
-      out.col.set(p.col, o * 3)
-      out.nrm.set(p.nrm, o * 3)
-      o += p.count
-      parts[i] = null // each slab can be collected once copied
-    }
-    return out
   }
 
   return { depthBackend, computeDepthMaps, depthAck, filterDepthMaps, densify, fusePlanAnswer }

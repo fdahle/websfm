@@ -6,6 +6,7 @@ import { relativeQuality } from '../../core/features/imageQuality.js'
 import { pluralize } from '../../core/textFormat.js'
 import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
 import { exposureOf } from '../../core/products/colourGains.js'
+import { pageBytes } from '../../core/bigArray.js'
 
 // Tools ▸ Mesh ▾ ▸ Texture (dev/planning/plan-texture.md): a NEW mesh with per-vertex
 // UVs and JPEG atlas pages, textured from the registered photos. Like every mesh tool
@@ -133,10 +134,11 @@ export function createMeshTexture({
   return { textureMesh }
 }
 
-// The atlas pages of a textured mesh as Blobs (the viewer and the exporters).
+// The atlas pages of a textured mesh as Blobs (the viewer and the exporters). A Blob
+// refuses a shared view (a texture loaded into shared memory): such a page is copied.
 export function texturePageBlobs(texture) {
   if (!texture?.data || !texture.pages?.length) return []
-  return texture.pages.map((p) => new Blob([texture.data.subarray(p.offset, p.offset + p.length)], { type: p.type }))
+  return texture.pages.map((p) => new Blob([pageBytes(texture.data, p)], { type: p.type }))
 }
 
 // Plain-object form of the texture for in-memory clouds (markRaw: large typed data).

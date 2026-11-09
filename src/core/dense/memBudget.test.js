@@ -244,5 +244,10 @@ describe('limits past ArrayBuffers', () => {
     // Slabs in shared memory: only the joined cloud's plain colour is left.
     const shared = { ...big, tileCells: 1e8, accumulatorsInPool: false, sharedPastPlain: true, slabsShared: true }
     expect(projectDensifyPoolBytes(shared).assemble).toBe(3 * 2e8)
+    // The joined cloud in shared memory too (cross-origin isolated): nothing in the pool.
+    expect(projectDensifyPoolBytes({ ...shared, cloudShared: true }).assemble).toBe(0)
+    // A cloud under 64 MB stays plain either way.
+    const small = { inputBytes: 0, cells: 1e6, tileCells: 5e5, accumulatorsInPool: false, slabsShared: true }
+    expect(projectDensifyPoolBytes({ ...small, cloudShared: true }).assemble).toBe(27 * 1e6)
   })
 })

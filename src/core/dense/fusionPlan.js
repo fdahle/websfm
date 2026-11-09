@@ -680,7 +680,11 @@ function* planSteps(maps, opts, onLog, hooks) {
   const held = Math.max(0, opts.pageBytes ?? 0),
     heldPool = Math.max(0, opts.pagePoolBytes ?? 0)
   const poolCap = opts.memBudgetBytes > 0 ? Math.max(1, Math.min(opts.memBudgetBytes, MAX_BUDGET_BYTES) - heldPool) : 0
-  const budget = poolCap && caps.wasm ? Math.max(poolCap, (opts.ramBudgetBytes ?? 0) - held) : poolCap
+  // With wasm memories, the run's peak is held to the whole budget less what the page
+  // holds — not to the larger of that and the buffer share: the page's clouds in shared
+  // memory leave the share whole while the budget is already spent.
+  const ram = opts.ramBudgetBytes ?? 0
+  const budget = poolCap && caps.wasm && ram > 0 ? Math.max(1, ram - held) : poolCap
   if (held > 0 && budget)
     onLog(
       `Fusion: the open project holds ${formatBytes(held)} in this tab — planning with ${formatBytes(budget)} ` +
@@ -697,6 +701,7 @@ function* planSteps(maps, opts, onLog, hooks) {
       accumulatorsInPool: !caps.wasm,
       sharedPastPlain: caps.shared,
       slabsShared: caps.shared,
+      cloudShared: caps.shared,
     }).total
   const fits = (p) => (!budget || p.total <= budget) && (!poolCap || poolOf(p) <= poolCap)
   onLog(

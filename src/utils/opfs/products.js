@@ -3,6 +3,7 @@ import { trackPersistence, persistenceLock, ignoreMissing } from '../persistence
 import { writeBinaryDocument, readBinaryDocument } from '../binaryDocument.js'
 import { dataUrlToBlob } from '../../core/mask.js'
 import { getProjectDir, getSubDir, readBin, readJson, removeFileIn, writeBin, writeJson } from './base.js'
+import { viewAs } from '../../core/bigArray.js'
 
 // ── Products (DEM / orthophoto rasters) ──────────────────────────────────────
 // Recomputable but expensive, so persisted like other project data. Metadata
@@ -112,9 +113,11 @@ export async function loadProduct(projectId, kind, stem = kind) {
       if (cog) Object.assign(meta, { cog: cog.file, cogSaved: cog.saved })
       const product = {
         ...meta,
-        data: new Float32Array(buffers ? buffers.data : await readBin(dir, 'dem_data.bin')),
-        mask: new Uint8Array(buffers ? buffers.mask : await readBin(dir, 'dem_mask.bin')),
-        ...(buffers?.support ? { support: new Uint8Array(buffers.support) } : {}),
+        // viewAs: past 2 GiB readBin gives a Uint8Array, which `new Float32Array(…)` would
+        // convert byte by byte.
+        data: viewAs(Float32Array, buffers ? buffers.data : await readBin(dir, 'dem_data.bin')),
+        mask: viewAs(Uint8Array, buffers ? buffers.mask : await readBin(dir, 'dem_mask.bin')),
+        ...(buffers?.support ? { support: viewAs(Uint8Array, buffers.support) } : {}),
       }
       validateProduct(kind, product)
       // The store turns `previewBlob` into the record's preview URL. A product saved

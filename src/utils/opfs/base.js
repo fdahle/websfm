@@ -2,7 +2,14 @@
 // project's directory (OPFS or a picked folder), and serialized, quota-aware writes.
 
 import { MAX_BUFFER_BYTES } from '../../core/bufferLimit.js'
-import { chunksOf, isSharedArray, shareableArray } from '../../core/bigArray.js'
+import {
+  LOCAL_MIN_BYTES,
+  bigArrayCaps,
+  chunksOf,
+  isSharedArray,
+  shareableArray,
+  sharedArray,
+} from '../../core/bigArray.js'
 import { blobChunks } from '../blobParts.js'
 import { KP_STRIDE } from '../../core/features/keypoints.js'
 
@@ -157,12 +164,15 @@ export async function removeFileIn(dir, filename) {
 
 // An ArrayBuffer; a file past the browser's largest ArrayBuffer (a cloud of more than
 // 178 M points) comes as a shareable Uint8Array (core/bigArray.js) read in chunks, which
-// readers take with viewAs.
-export async function readBin(dir, filename) {
+// readers take with viewAs. With `shared`, a file from LOCAL_MIN_BYTES comes in shared
+// memory where the page is cross-origin isolated (a saved cloud, which workers then read
+// uncopied), also as a Uint8Array.
+export async function readBin(dir, filename, { shared = false } = {}) {
   const fh = await dir.getFileHandle(filename)
   const file = await fh.getFile()
-  if (file.size <= MAX_BUFFER_BYTES) return file.arrayBuffer()
-  const out = shareableArray(Uint8Array, file.size)
+  const toShared = shared && file.size >= LOCAL_MIN_BYTES && bigArrayCaps().shared
+  if (file.size <= MAX_BUFFER_BYTES && !toShared) return file.arrayBuffer()
+  const out = toShared ? sharedArray(Uint8Array, file.size) : shareableArray(Uint8Array, file.size)
   let off = 0
   for await (const chunk of blobChunks(file, { chunkBytes: 64 * 2 ** 20 })) {
     out.set(chunk, off)

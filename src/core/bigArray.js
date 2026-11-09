@@ -229,3 +229,8 @@ export function fillArray(a, value, start = 0, end = a.length, chunk = FILL_CHUN
   for (let s = start; s < end; s += chunk) a.fill(value, s, Math.min(end, s + chunk))
   return a
 }
+
+/** Bytes [offset, offset + length) of `data` (a { offset, length } page) for a Blob: a view,
+ *  or a copy where `data` is shared, which a Blob refuses. */
+export const pageBytes = (data, { offset, length }) =>
+  isSharedArray(data) ? data.slice(offset, offset + length) : data.subarray(offset, offset + length)

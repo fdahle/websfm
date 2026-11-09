@@ -1,4 +1,5 @@
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
+import { pageBytes } from '../../core/bigArray.js'
 import {
   cropCloud,
   filterCloud,
@@ -49,9 +50,7 @@ export function makeCloudOps() {
   async function decodePages(texture) {
     return Promise.all(
       texture.pages.map(async (p) => {
-        const bmp = await createImageBitmap(
-          new Blob([texture.data.subarray(p.offset, p.offset + p.length)], { type: p.type }),
-        )
+        const bmp = await createImageBitmap(new Blob([pageBytes(texture.data, p)], { type: p.type }))
         const canvas = new OffscreenCanvas(bmp.width, bmp.height)
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
         ctx.drawImage(bmp, 0, 0)
