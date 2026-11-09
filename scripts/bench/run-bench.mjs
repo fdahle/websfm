@@ -883,6 +883,14 @@ try {
           top.map(([k, us]) => `   ${(us / 1000).toFixed(0).padStart(6)}  ${k}`).join(NL),
       )
     }
+    // The reload dropped the page's reference (set before the stages), and poses imported
+    // before the project was open matched no image: set both again on the restored
+    // project, or a `reopen,recon` run has no camera priors and no checkpoint check.
+    if (cfg.reference) {
+      await page.evaluate((x) => window.bench.setReference(x), await loadReference(cfg.reference))
+      if (cfg.reference.importPoses)
+        console.log(`== imported ${await page.evaluate(() => window.bench.importReferencePoses())} reference pose(s)`)
+    }
     const { inventory: inv, ...numbers } = r
     inv.v8 = await v8Heap()
     result.stages.reopen = numbers
