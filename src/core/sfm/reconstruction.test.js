@@ -642,7 +642,7 @@ describe('bundleAdjust', () => {
 
   // The lens σ (bundle.rs ▸ lens σ) through the JS↔WASM boundary: asking for it changes
   // nothing about the solve, and each camera gets its own group's σ.
-  it('reports each camera group\'s lens σ without changing the solve', async () => {
+  it("reports each camera group's lens σ without changing the solve", async () => {
     const rng = mulberry32(37)
     const centers = [
       [0, 0, 0],
