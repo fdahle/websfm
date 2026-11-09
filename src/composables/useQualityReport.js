@@ -1,5 +1,6 @@
 import { linearCrsUnit } from '../core/crs.js'
 import { shiftRange } from '../core/verticalDatum.js'
+import { ordinal } from '../core/textFormat.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 // Shared assembly for the Quality Report hub (PLAN-eval-quality-hub). Marshals the
 // reactive stores into the PLAIN snapshot the pure `core/eval/*` fns consume, so the
@@ -468,7 +469,7 @@ export function useQualityReport() {
             tiles: demReferenceTiles(cmp),
             note: [
               'ΔZ = DEM − reference at each compared DEM cell' +
-                (cmp.step > 1 ? ` (every ${cmp.step}th cell each way)` : '') +
+                (cmp.step > 1 ? ` (every ${ordinal(cmp.step)} cell each way)` : '') +
                 (cmp.filters.stable ? `, on the stable ground of "${cmp.filters.stable}"` : '') +
                 (cmp.filters.area ? `, inside "${cmp.filters.area}"` : '') +
                 `; reference vertical datum: ${cmp.reference.datum}` +

@@ -1,5 +1,6 @@
 <script setup>
 import { shiftRange } from '../../../core/verticalDatum.js'
+import { ordinal } from '../../../core/textFormat.js'
 import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useModalsStore } from '../../../stores/useModalsStore.js'
@@ -229,7 +230,7 @@ const hist = computed(() => {
 
       <p class="eval-note">
         ΔZ = DEM − reference at each DEM cell the reference covers<template v-if="result.step > 1">
-          (every {{ result.step }}th cell each way)</template
+          (every {{ ordinal(result.step) }} cell each way)</template
         >; the reference is sampled bilinearly in its own CRS. Median and NMAD describe the bulk and ignore blunders
         (water, shadow, vegetation edges); RMSE does not. A bias that grows with slope points to a horizontal shift
         between the two DEMs rather than a vertical one.

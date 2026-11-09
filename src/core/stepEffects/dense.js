@@ -3,12 +3,13 @@
 // them (core/dense/fusionPlan.js: minViews = min(2, maps − 1), the default cost gate).
 import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
 import { plural } from './format.js'
+import { ordinal } from '../textFormat.js'
 
 export function denseEffects(s, { maps = 0 } = {}) {
   const sample = !maps
     ? 'Compute depth maps first: the dense cloud is fused from them.'
     : s.step > 1
-      ? `Every ${s.step}th pixel of the ${plural(maps, 'depth map')}, across and down, is a candidate point ` +
+      ? `Every ${ordinal(s.step)} pixel of the ${plural(maps, 'depth map')}, across and down, is a candidate point ` +
         `(about 1 in ${s.step * s.step}).`
       : `Every pixel of the ${plural(maps, 'depth map')} is a candidate point: the densest cloud.`
 
@@ -44,7 +45,7 @@ export function denseEffects(s, { maps = 0 } = {}) {
 export function denseShorts(s, { maps = 0 } = {}) {
   const minViews = s.auto ? Math.max(1, Math.min(2, maps - 1)) : s.minViews
   return {
-    sample: !maps ? 'no depth maps' : s.step > 1 ? `every ${s.step}th pixel` : 'every pixel',
+    sample: !maps ? 'no depth maps' : s.step > 1 ? `every ${ordinal(s.step)} pixel` : 'every pixel',
     agree: `≥ ${plural(minViews, 'view')} · ${s.depthTolPct} %`,
     gates:
       s.minTriAngleDeg > 0 || (s.maxIncidenceDeg > 0 && s.maxIncidenceDeg < 90)

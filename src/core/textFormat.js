@@ -31,3 +31,10 @@ export function pluralize(n, singular, pluralForm = `${singular}s`) {
 export function nounFor(n, singular, pluralForm = `${singular}s`) {
   return n === 1 ? singular : pluralForm
 }
+
+/** An English ordinal: 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st, 22nd, 103rd. */
+export function ordinal(n) {
+  const h = n % 100,
+    t = n % 10
+  return `${n}${h >= 11 && h <= 13 ? 'th' : t === 1 ? 'st' : t === 2 ? 'nd' : t === 3 ? 'rd' : 'th'}`
+}

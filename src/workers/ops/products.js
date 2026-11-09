@@ -41,7 +41,7 @@ import { terrainProducts } from '../../core/products/terrain.js'
 import { clipDem, clipOrtho, polygonPixelWindow, windowGeometry } from '../../core/products/rasterClip.js'
 import { openRaster, readWindowBytes } from '../cogRead.js'
 import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
-import { nounFor, pluralize } from '../../core/textFormat.js'
+import { nounFor, ordinal, pluralize } from '../../core/textFormat.js'
 import { createBlockProgress, createStepProgress, createLogPacer } from '../../utils/blockProgress.js'
 import { deflateTile } from '../deflateTile.js'
 import { planDemWindow, demCogLevels, maskFromNaN } from '../../core/products/demWindow.js'
@@ -923,7 +923,7 @@ export function makeProductsOps({ rasterize } = {}) {
         emit('log', [
           `Ortho: colour balance — gains for ${balance.images} of ${pluralize(maps.length, 'image')} from ` +
             `${pluralize(balance.pairs, 'overlapping pair')} over ${balance.latticeCells.toLocaleString()} lattice cells (every ` +
-            `${balance.latticeStep}th; ${balance.clippedObservations.toLocaleString()} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}` +
+            `${ordinal(balance.latticeStep)}; ${balance.clippedObservations.toLocaleString()} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}` +
             (balance.clamped
               ? `, ${pluralize(balance.clamped, 'channel gain')} clamped to ${GAIN_MIN}–${GAIN_MAX}`
               : '') +
