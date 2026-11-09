@@ -20,6 +20,8 @@ import {
 } from '../../core/dense/mvs.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
+import { meshDepthBasis } from '../../core/products/mesh.js'
+import { regionContains } from '../../core/products/region.js'
 import {
   computeDepthMaps as workerComputeDepthMaps,
   depthAck as workerDepthAck,
@@ -1211,6 +1213,41 @@ export function createDense({
     }
   }
 
+  // Build Mesh ▸ Auto depth's inputs for the dialog (core/products/mesh.js meshDepthBasis):
+  // a strided sample of the source, clipped by the Region as generateMesh clips it, with
+  // the fusion merge cell as spacing (0 for an imported cloud, whose spacing the run
+  // estimates). Kept per cloud, region and spacing; null without a resident source.
+  const DEPTH_SAMPLE = 200_000
+  let depthBasisMemo = { key: null, value: null }
+  function meshDepthInputs(sourceId) {
+    const pick = sourceId != null ? meshSources.value.find((s) => s.id === sourceId) : meshSource.value
+    const dense = pick ? clouds.value.find((c) => c.id === pick.id) : null
+    if (!dense?.pos || !(dense.count > 0)) return null
+    const region = dense.imported ? null : activeRegion()
+    const spacing = dense.imported ? 0 : (denseSummary.value?.mergeCell ?? 0)
+    const key = JSON.stringify([dense.id, dense.count, region, spacing])
+    if (depthBasisMemo.key === key) return depthBasisMemo.value
+    const pos = toRaw(dense.pos)
+    const stride = Math.max(1, Math.ceil(dense.count / DEPTH_SAMPLE))
+    const sample = new Float64Array(Math.ceil(dense.count / stride) * 3)
+    let m = 0
+    let seen = 0
+    for (let i = 0; i < dense.count; i += stride) {
+      seen++
+      const x = pos[i * 3],
+        y = pos[i * 3 + 1],
+        z = pos[i * 3 + 2]
+      if (region && !regionContains(region, x, y, z)) continue
+      sample[m * 3] = x
+      sample[m * 3 + 1] = y
+      sample[m * 3 + 2] = z
+      m++
+    }
+    const value = meshDepthBasis(sample.subarray(0, m * 3), { count: (dense.count * m) / seen, spacing })
+    depthBasisMemo = { key, value }
+    return value
+  }
+
   // Mesh — screened Poisson over a dense cloud with oriented normals: `settings.sourceId`
   // when given (the modal's picker), else `meshSource` — never "the first dense cloud".
   // Sends disposable copies of the dense buffers to the worker. Keeping the
@@ -1365,5 +1402,6 @@ export function createDense({
     densifyParallel,
     densify,
     generateMesh,
+    meshDepthInputs,
   }
 }

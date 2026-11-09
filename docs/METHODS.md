@@ -1313,7 +1313,7 @@ cleanup below is part of the method.
   relative residual; a fixed handful of iterations from `x₀ = b` leaves cell-sized ripples
   that become hundreds of spurious components.
 - **Input conditioning**: the octree spans the input's box, so stragglers outside the
-  1–99 % per-axis box grown by 25 % of its largest side leave the solve. The depth is
+  1–99 % per-axis box grown by 25 % of its largest side leave the solve. A depth is
   lowered when its leaves would be finer than the sample spacing (the fusion merge cell,
   or the median nearest-neighbour distance of an imported cloud). Lone stray points go;
   the cloud is voxel-thinned to ≈ one sample per leaf, each keeping how many raw points it
@@ -1345,7 +1345,16 @@ cleanup below is part of the method.
   its core, and seam vertices are welded by lattice edge. Tiles trim against the scene's
   median support; floating pieces are judged on the stitched mesh. Hole refill is decided
   per tile, so a hole crossing a seam can stay open there.
-- **Knobs**: `depth` (auto-capped by the spacing), `screening` (fit tightness; **not**
+- **Depth Auto** (`depth: 0`, `autoMeshDepth`): the depth whose leaf `E / 2^d` (E the
+  longest extent) is nearest `leafSpacings` sample spacings in octaves, then lowered while
+  the predicted mesh passes `maxTriangles`. The prediction counts the leaves the surface
+  covers: a fused cloud holds about one point per merge cell, so N points at spacing s
+  cover ≈ N·s², or N·(s·2^d / E)² leaves, and a leaf yields ≈ 1.6 triangles
+  (fitted on six meshes, 0.9–1.4× the real count; never more leaves than points). With
+  the cards (16 / 8 / 4 spacings, ≤ 0.25 / 1 / 4 M triangles), a small block's depth is
+  set by its spacing and a large block's by the limit, which follows what a tab holds
+  (a 347-photo block: depth 9 at 10 GB, depth 10 at 19 GB, depth 11 past 32 GB).
+- **Knobs**: `depth` (Auto, or set; capped by the spacing), `leafSpacings`, `maxTriangles`, `screening` (fit tightness; **not**
   PoissonRecon's samples-per-node), and the cleanup settings above.
 - **Implementation**: a vendored, rayon-free copy of Dimforge's `poisson_reconstruction`
   (`crates/mesh/vendor/`; rayon's threads panic on threadless wasm). Its assembly is

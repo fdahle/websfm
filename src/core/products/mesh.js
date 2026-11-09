@@ -467,14 +467,72 @@ export function parseMeshStats(v) {
   }
 }
 
-// A sensible max octree depth for a cloud of `pointCount` points. Surface points fill
-// ≈ (2^depth)² occupied leaf cells (a surface is a 2-manifold), so useful depth ≈
-// ½·log₂(N). Clamped to [6, 12]. The modal warns when the chosen depth exceeds this (a
-// too-high depth mostly builds empty octree cells — slow and RAM-hungry with no detail
-// gain); core only logs the recommendation, never overrides the user's choice.
-export function recommendMeshDepth(pointCount) {
-  if (!(pointCount > 0)) return 8
-  return Math.min(12, Math.max(6, Math.round(0.5 * Math.log2(pointCount))))
+// The triangles a depth-`depth` solve makes from a cloud of `count` points at input
+// spacing `spacing` over the longest extent `extent`. A fused cloud holds about one point
+// per merge cell of surface, so the surface covers ≈ count·spacing², and the solve one
+// leaf of it (extent / 2^depth) per sample; MESH_TUNING.trianglesPerLeaf of them each.
+// Never more leaves than points. 0 when an input is unknown.
+export function predictMeshTriangles(depth, { count, spacing, extent }, perLeaf = MESH_TUNING.trianglesPerLeaf) {
+  if (!(count > 0) || !(spacing > 0) || !(extent > 0)) return 0
+  const leaf = extent / 2 ** depth
+  return Math.round(perLeaf * Math.min(count, count * (spacing / leaf) ** 2))
+}
+
+// Octree depth Auto (MESH_DEFAULTS.depth 0): the depth whose leaves are nearest
+// `leafSpacings` input spacings (in octaves), then lowered while the mesh it predicts
+// passes `maxTriangles`, within MESH_TUNING.autoDepthRange. So a small block keeps the
+// detail its cloud carries and a large one stops at a mesh the browser holds.
+// → { depth, leaf, triangles, limit: 'spacing' | 'triangles' | 'range' | 'unknown' }
+export function autoMeshDepth(
+  { count, spacing, extent },
+  { leafSpacings = MESH_DEFAULTS.leafSpacings, maxTriangles = MESH_DEFAULTS.maxTriangles } = {},
+) {
+  const [lo, hi] = MESH_TUNING.autoDepthRange
+  if (!(count > 0) || !(spacing > 0) || !(extent > 0) || !(leafSpacings > 0)) {
+    return { depth: MESH_TUNING.autoDepthFallback, leaf: 0, triangles: 0, limit: 'unknown' }
+  }
+  const at = (d) => predictMeshTriangles(d, { count, spacing, extent })
+  const want = Math.round(Math.log2(extent / (leafSpacings * spacing)))
+  let depth = Math.min(hi, Math.max(lo, want))
+  let limit = depth === want ? 'spacing' : 'range'
+  while (depth > lo && maxTriangles > 0 && at(depth) > maxTriangles) {
+    depth--
+    limit = 'triangles'
+  }
+  return { depth, leaf: extent / 2 ** depth, triangles: at(depth), limit }
+}
+
+// autoMeshDepth's inputs as prepareMesh will see them, for the dialog: `sample` is a
+// strided sample of the points the run meshes (Region applied) standing for `count`
+// points. Like the run it keeps what lies inside robustBox, and takes the longest extent
+// of that. → { count, spacing, extent } (extent 0 for an empty sample)
+export function meshDepthBasis(sample, { count, spacing = 0 } = {}) {
+  const n = Math.floor(sample.length / 3)
+  if (!n || !(count > 0)) return { count: 0, spacing, extent: 0 }
+  const box = robustBox(sample, {
+    quantiles: MESH_TUNING.robustQuantiles,
+    margin: MESH_TUNING.robustMargin,
+    sampleMax: MESH_TUNING.robustSampleMax,
+  })
+  const lo = [Infinity, Infinity, Infinity]
+  const hi = [-Infinity, -Infinity, -Infinity]
+  let kept = 0
+  for (let i = 0; i < n; i++) {
+    let inside = true
+    for (let d = 0; d < 3; d++) {
+      const v = sample[i * 3 + d]
+      if (!(v >= box.min[d] && v <= box.max[d])) inside = false
+    }
+    if (!inside) continue
+    kept++
+    for (let d = 0; d < 3; d++) {
+      const v = sample[i * 3 + d]
+      if (v < lo[d]) lo[d] = v
+      if (v > hi[d]) hi[d] = v
+    }
+  }
+  const extent = kept ? Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) : 0
+  return { count: Math.round((count * kept) / n), spacing, extent }
 }
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -699,21 +757,40 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
   }
   const extent = maxExtent(src.pos)
 
-  // 3. Depth.
-  const { depth, needed } = resolveMeshDepth(cfg.depth, extent, spacing, cfg)
-  if (depth < cfg.depth >>> 0) {
+  // 3. Depth: Auto from the cloud (autoMeshDepth), or the one set.
+  const fixed = cfg.depth > 0 ? cfg.depth >>> 0 : 0
+  const auto = fixed ? null : autoMeshDepth({ count: src.count, spacing, extent }, cfg)
+  const requested = fixed || auto.depth
+  const { depth, needed } = resolveMeshDepth(requested, extent, spacing, cfg)
+  if (auto) {
+    const why =
+      auto.limit === 'triangles'
+        ? `held to ≤ ${Math.round(cfg.maxTriangles).toLocaleString()} triangles`
+        : auto.limit === 'unknown'
+          ? 'the spacing or extent is unknown'
+          : auto.limit === 'range'
+            ? `within depths ${MESH_TUNING.autoDepthRange.join('–')}`
+            : `leaves of about ${cfg.leafSpacings} point spacings`
     onLog(
-      `Mesh: octree depth ${cfg.depth} → ${depth} — leaves at depth ${cfg.depth} would be finer than the ` +
+      `Mesh: Auto octree depth ${auto.depth} — leaves ${fmt(auto.leaf)} (${(auto.leaf / spacing).toFixed(1)} ` +
+        `point spacings), ≈ ${auto.triangles.toLocaleString()} triangles; ${why}`,
+      'info',
+      'Products',
+    )
+  }
+  if (depth < requested) {
+    onLog(
+      `Mesh: octree depth ${requested} → ${depth} — leaves at depth ${requested} would be finer than the ` +
         `input spacing (${fmt(extent)} extent / ${fmt(spacing)} spacing supports depth ${needed})`,
       'info',
       'Products',
     )
   }
-  const recDepth = recommendMeshDepth(n0)
-  if (depth > recDepth) {
+  const predicted = predictMeshTriangles(depth, { count: src.count, spacing, extent })
+  if (fixed && predicted > MESH_TUNING.warnTriangles) {
     onLog(
-      `Mesh: depth ${depth} is high for ${n0.toLocaleString()} points ` +
-        `(recommended ≤ ${recDepth}) — the solve may be slow with little detail gain`,
+      `Mesh: depth ${depth} makes ≈ ${predicted.toLocaleString()} triangles from this cloud — more than a ` +
+        `browser tab holds comfortably; the run may stop out of memory`,
       'warn',
       'Products',
     )
@@ -797,6 +874,7 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
     n0,
     spacing,
     spacingSource,
+    requestedDepth: fixed || 'auto',
     depth,
     leaf,
     origin,
@@ -850,7 +928,7 @@ export function completeMesh(dense, ctx, solved, solveMs, onLog = () => {}) {
     inputCount: inCount,
     spacing,
     spacingSource,
-    requestedDepth: cfg.depth >>> 0,
+    requestedDepth: ctx.requestedDepth,
     depth,
     leaf,
     screening: cfg.screening,

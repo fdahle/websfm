@@ -27,7 +27,7 @@ const setup = (defaults, presets, cards, extra = {}) => {
 describe('presetOwnedKeys / sameSettingValue', () => {
   it('unions the keys every preset patches', () => {
     expect(presetOwnedKeys(MATCH_PRESETS).sort()).toEqual(['maxIters', 'minInlierRatio', 'ratioThreshold'])
-    expect(presetOwnedKeys(MESH_PRESETS)).toEqual(['depth'])
+    expect(presetOwnedKeys(MESH_PRESETS)).toEqual(['depth', 'leafSpacings', 'maxTriangles'])
     expect(presetOwnedKeys({})).toEqual([])
   })
   it('compares arrays by element', () => {
@@ -90,13 +90,22 @@ describe('usePresetSettings', () => {
     expect(p.activePreset.value).toBe('medium')
   })
 
-  it('a mesh preset changes only the depth', () => {
+  it('a mesh preset changes only the detail, and puts a hand-set depth back on Auto', () => {
     const p = setup(MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META)
-    Object.assign(p.settings.value, { trim: 'off', fillHoles: false, removeFloaters: false, colorize: false })
+    Object.assign(p.settings.value, {
+      depth: 11,
+      trim: 'off',
+      fillHoles: false,
+      removeFloaters: false,
+      colorize: false,
+    })
+    expect(p.activePreset.value).not.toBe('medium')
     p.selectPreset('high')
     expect(p.settings.value).toEqual({
       ...MESH_DEFAULTS,
-      depth: 10,
+      depth: 0,
+      leafSpacings: 4,
+      maxTriangles: 4_000_000,
       trim: 'off',
       fillHoles: false,
       removeFloaters: false,

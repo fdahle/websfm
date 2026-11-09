@@ -42,6 +42,8 @@ speck of fusion noise in its own shell. Four details keep the result honest:
   their area, because Poisson inflates a tiny speck into a sizeable ball.
 
 The main tunable is **octree depth**: each extra level halves the cell size,
-capturing finer detail at roughly four times the work on a surface. It is lowered
-automatically when the cloud is too sparse to use it. Vertex colour is transferred
+capturing finer detail at roughly four times the triangles and work on a surface.
+By default WebSfM picks it from the cloud, for leaves a few point spacings wide and
+within a triangle limit, so the mesh grows with the block up to a size the browser
+holds; a depth set by hand is lowered only when the cloud is too sparse to use it. Vertex colour is transferred
 from the nearest dense voxel cell, and the result exports as PLY or GLB.

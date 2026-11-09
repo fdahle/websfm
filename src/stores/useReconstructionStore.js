@@ -994,7 +994,7 @@ export const useReconstructionStore = registerProjectStore(
     }
 
     // Depth maps, fusion and meshing (reconstruction/dense.js).
-    const { computeDepthMaps, depthCameraKeys, densify, generateMesh } = createDense({
+    const { computeDepthMaps, depthCameraKeys, densify, generateMesh, meshDepthInputs } = createDense({
       beginStreamedDepthMaps,
       clipToRegion,
       clouds,
@@ -1545,6 +1545,7 @@ export const useReconstructionStore = registerProjectStore(
       generateReflectanceMap,
       estimateRasterSize,
       generateMesh,
+      meshDepthInputs,
       reconstruct,
       hasSparseProducts,
       importColmapModel,

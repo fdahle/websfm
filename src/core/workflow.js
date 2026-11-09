@@ -165,7 +165,8 @@ export const WORKFLOW_BLOCKS = [
   ]),
   automated('gen-mesh', 'Build Mesh', 'Products', ['dense'], ['mesh'], { preset: 'medium', ...MESH_DEFAULTS }, [
     { key: 'preset', label: 'Preset', type: 'select', options: PRESETS },
-    { key: 'depth', label: 'Octree depth', type: 'number', min: 4, max: 12 },
+    { key: 'depth', label: 'Octree depth (0 = auto)', type: 'number', min: 0, max: 12 },
+    { key: 'maxTriangles', label: 'Triangle limit (auto depth)', type: 'number', min: 10000 },
     { key: 'trim', label: 'Surface trimming', type: 'select', options: ['off', 'gentle', 'strong'] },
     { key: 'fillHoles', label: 'Fill small holes', type: 'boolean' },
     { key: 'removeFloaters', label: 'Remove floating pieces', type: 'boolean' },

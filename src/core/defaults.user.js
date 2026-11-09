@@ -564,7 +564,12 @@ export const VIDEO_IMPORT_DEFAULTS = {
 // samples. `distanceTrim` is the older proximity trim (× the input sample spacing;
 // 0 = off), kept as an advanced option.
 export const MESH_DEFAULTS = {
-  depth: 8, // octree max depth (detail vs cost/RAM); auto-lowered when the cloud can't use it
+  // Octree depth (detail vs time and memory); 0 = Auto (products/mesh.js autoMeshDepth):
+  // leaves of about `leafSpacings` point spacings, lowered until the mesh has at most
+  // about `maxTriangles`. A depth set by hand is still lowered when the cloud can't use it.
+  depth: 0,
+  leafSpacings: 8,
+  maxTriangles: 1_000_000,
   screening: 4, // Poisson point-fitting weight; 0 disables screening
   trim: 'gentle', // 'off' | 'gentle' | 'strong' — support-density trim (MESH_TUNING.trimRatio)
   fillHoles: true, // re-add small closed holes the trim opened
@@ -577,16 +582,19 @@ export const MESH_DEFAULTS = {
   // in place of the main one (true). Off, so a rebuild never loses a result by default.
   replaceMain: false,
 }
-// Mesh quality presets — octree depth is the detail/cost lever (deltas; medium ≡ defaults).
+// Mesh quality presets (deltas; medium ≡ defaults): how fine Auto goes and the mesh size
+// it stops at. Each also puts the depth back on Auto. On a 347-photo aerial block they
+// give depth 8 / 9 / 10 (≈ 0.15 / 0.65 / 2.8 M triangles, the tab at 8 / 10 / 19 GB);
+// a small block's cloud stops them sooner (CHANGELOG ▸ Mesh size follows the block).
 export const MESH_PRESETS = {
-  low: { depth: 6 },
+  low: { depth: 0, leafSpacings: 16, maxTriangles: 250_000 },
   medium: {},
-  high: { depth: 10 },
+  high: { depth: 0, leafSpacings: 4, maxTriangles: 4_000_000 },
 }
 export const MESH_PRESET_META = [
-  { id: 'low', label: 'Coarse', blurb: 'Octree depth 6 · quick preview' },
-  { id: 'medium', label: 'Balanced', blurb: 'Octree depth 8 · default' },
-  { id: 'high', label: 'Fine', blurb: 'Octree depth 10 · detailed, slow' },
+  { id: 'low', label: 'Coarse', blurb: 'Up to 250 k triangles · quick preview' },
+  { id: 'medium', label: 'Balanced', blurb: 'Up to 1 M triangles · default' },
+  { id: 'high', label: 'Fine', blurb: 'Up to 4 M triangles · slow, needs much memory' },
 ]
 
 // Mesh texture (core/products/texture/). `maxScale` is the finest texel size as a share

@@ -16,6 +16,18 @@ Notable changes to websfm. The format follows
   the spread of the solved focal over 40 noise draws (with camera positions, and without
   control on tilted photos) and against a dense numerical covariance.
 
+### Changed
+- **Mesh size follows the block.** Build Mesh ▸ Octree depth is Auto by default: it picks
+  the depth for leaves of about 8 point spacings of the dense cloud, lowered until the mesh
+  stays within the card's triangle limit (Coarse 250 k, Balanced 1 M, Fine 4 M), and the
+  step names the depth and size before you run. A small block keeps depth 8 as before; a
+  347-photo aerial block now gets depth 9 at Balanced (0.65 M triangles instead of 0.15 M,
+  mesh 140 s instead of 46 s, the tab at 9.8 GB instead of 8.0 GB; texturing 3.5 min either
+  way) and depth 10 at Fine (2.8 M triangles, 171 s, 19 GB). The limit is there because
+  depth 11 on that block (11 M triangles) solved and then outgrew the 32 GB the tab had.
+  The cards used to set depth 6 / 8 / 10 on every project; a depth typed in by hand is
+  still used as is, with a warning when it predicts more than 4 M triangles.
+
 ## [0.7.0] — 2026-11-09
 
 ### Added

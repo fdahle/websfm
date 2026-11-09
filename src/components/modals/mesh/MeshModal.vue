@@ -15,7 +15,6 @@ import { useSourcePick, statusTags } from '../../../composables/useSourcePick.js
 import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import FieldHelp from '../../guide/FieldHelp.vue'
 import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../../core/defaults.user.js'
-import { recommendMeshDepth } from '../../../core/products/mesh.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { meshEffects, meshShorts } from '../../../core/stepEffects/mesh.js'
 import { withShorts } from '../../../core/stepEffects/format.js'
@@ -34,6 +33,9 @@ const props = defineProps({
   hasDense: { type: Boolean, default: false },
   // The store's outputPlan('mesh'): what step 6 (Output) adds or replaces.
   output: { type: Object, default: null },
+  // (sourceId) → Auto depth's inputs { count, spacing, extent } | null (the store's
+  // meshDepthInputs), so the effect line names the depth the run will pick.
+  depthBasisOf: { type: Function, default: null },
 })
 const emit = defineEmits(['close', 'run'])
 
@@ -57,12 +59,14 @@ const { baseId, activePreset, selectPreset } = usePresetSettings({
 })
 
 // What each step does to this project (core/stepEffects/mesh.js).
-const effects = computed(() =>
-  withShorts(
-    meshEffects(settings.value, { source: source.value && { name: source.value.name, count: source.value.count } }),
-    meshShorts(settings.value, { source: source.value && { name: source.value.name, count: source.value.count } }),
-  ),
-)
+const basis = computed(() => (source.value && props.depthBasisOf?.(sourceId.value)) ?? null)
+const effects = computed(() => {
+  const project = {
+    source: source.value && { name: source.value.name, count: source.value.count },
+    basis: basis.value,
+  }
+  return withShorts(meshEffects(settings.value, project), meshShorts(settings.value, project))
+})
 
 const TILE_OPTIONS = [
   { id: 'auto', label: 'Auto' },
@@ -75,17 +79,19 @@ const TRIM_OPTIONS = [
   { id: 'strong', label: 'Strong' },
 ]
 
-// Flag an octree depth that's high for this cloud's point count: too high mostly builds
-// empty octree cells — slow and RAM-hungry with no real detail gain (see mesh.js).
-const pointCount = computed(() => source.value?.count ?? 0)
-const recommendedDepth = computed(() => recommendMeshDepth(pointCount.value))
-const depthTooHigh = computed(() => pointCount.value > 0 && settings.value.depth > recommendedDepth.value)
-
 // Run stays disabled while a field is blank or out of range (rules = the inputs'
 // own min/max/step); the floater size is only checked while that cleanup is on.
 const numbers = computed(() =>
   checkNumberFields(settings.value, {
-    depth: { label: 'Octree depth', min: 4, max: 12, integer: true },
+    depth: { label: 'Octree depth', min: 0, max: 12, integer: true },
+    leafSpacings: { label: 'Leaf size', min: 1, max: 64, when: !(settings.value.depth > 0) },
+    maxTriangles: {
+      label: 'Triangle limit',
+      min: 10000,
+      max: 20000000,
+      integer: true,
+      when: !(settings.value.depth > 0),
+    },
     screening: { label: 'Screening weight', min: 0, max: 16 },
     minPiecePct: { label: 'Floating piece size', min: 0, max: 50, when: settings.value.removeFloaters },
     distanceTrim: { label: 'Distance trim', min: 0, max: 32 },
@@ -133,12 +139,12 @@ provideStepLayout('mesh')
 
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="MESH_PRESET_META" @select="selectPreset" />
 
-    <SettingsStep step="1" title="Solve the surface" :effect="effects.solve" :more="3">
+    <SettingsStep step="1" title="Solve the surface" :effect="effects.solve" :more="settings.depth > 0 ? 3 : 5">
       <template #tuning>
         <SettingsField
           label-for="mesh-depth"
           unit="levels"
-          hint="Detail limit. Lowered automatically when the cloud is too sparse to use it."
+          hint="0 = Auto: picked from the cloud by the leaf size and triangle limit below."
         >
           <template #label>
             <FieldHelp op="mesh" param="depth" :value="settings.depth" :default-value="MESH_DEFAULTS.depth"
@@ -150,17 +156,64 @@ provideStepLayout('mesh')
             v-model.number="settings.depth"
             :aria-invalid="numbers.bad.depth"
             type="number"
-            min="4"
+            min="0"
             max="12"
             step="1"
             class="field-input"
           />
         </SettingsField>
-        <WarnBox v-if="depthTooHigh">
-          Depth {{ settings.depth }} is high for {{ pointCount.toLocaleString() }} points (recommended ≤
-          {{ recommendedDepth }}). The Poisson solve may be slow and memory-hungry with little extra detail — consider
-          lowering it.
-        </WarnBox>
+        <template v-if="!(settings.depth > 0)">
+          <SettingsField
+            label-for="mesh-leaf"
+            unit="× point spacing"
+            hint="How fine Auto goes: the octree leaf it aims for, in the cloud's point spacings."
+          >
+            <template #label>
+              <FieldHelp
+                op="mesh"
+                param="leafSpacings"
+                :value="settings.leafSpacings"
+                :default-value="MESH_DEFAULTS.leafSpacings"
+                >Leaf size</FieldHelp
+              >
+            </template>
+            <input
+              id="mesh-leaf"
+              v-model.number="settings.leafSpacings"
+              :aria-invalid="numbers.bad.leafSpacings"
+              type="number"
+              min="1"
+              max="64"
+              step="1"
+              class="field-input"
+            />
+          </SettingsField>
+          <SettingsField
+            label-for="mesh-maxtri"
+            unit="triangles"
+            hint="Auto lowers the depth until the mesh stays within this size."
+          >
+            <template #label>
+              <FieldHelp
+                op="mesh"
+                param="maxTriangles"
+                :value="settings.maxTriangles"
+                :default-value="MESH_DEFAULTS.maxTriangles"
+                >Triangle limit</FieldHelp
+              >
+            </template>
+            <input
+              id="mesh-maxtri"
+              v-model.number="settings.maxTriangles"
+              :aria-invalid="numbers.bad.maxTriangles"
+              type="number"
+              min="10000"
+              max="20000000"
+              step="10000"
+              class="field-input"
+            />
+          </SettingsField>
+        </template>
         <SettingsField
           label-for="mesh-screen"
           hint="How tightly the surface fits the points. 0 = smoothest/fastest; higher hugs the data."

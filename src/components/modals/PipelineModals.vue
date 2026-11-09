@@ -542,6 +542,7 @@ const exportingFootprints = computed(
       :sources="meshSources"
       :default-source-id="meshSource?.id ?? null"
       :output="reconstructionStore.outputPlan('mesh')"
+      :depth-basis-of="reconstructionStore.meshDepthInputs"
       @close="meshOpen = false"
       @run="onMeshRun"
     />

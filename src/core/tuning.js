@@ -518,6 +518,16 @@ export const DENSE_TUNING = {
 // MeshModal — the user-facing knobs (depth/screening/trim/fillHoles/removeFloaters/
 // colorize) live in defaults.user.js (MESH_DEFAULTS). `settings` from the caller override.
 export const MESH_TUNING = {
+  // Octree depth Auto (products/mesh.js autoMeshDepth): the depths it picks from, and the
+  // one it uses when the cloud's spacing or extent is unknown.
+  autoDepthRange: [6, 11],
+  autoDepthFallback: 8,
+  // Triangles per covered leaf in predictMeshTriangles, fitted on six meshes (aerial
+  // blocks, subsets, a close-range object): the prediction is 0.9–1.4× the real count.
+  trianglesPerLeaf: 1.6,
+  // A depth set by hand that predicts more triangles than this gets a warning: an 11 M
+  // triangle mesh outgrew the 32 GB a tab had after its solve (2026-11-09).
+  warnTriangles: 4_000_000,
   colorSearchRadius: 1, // vertex-colour transfer: search ±N voxel cells (3³ nhood)
   // Tiled Poisson (meshTiles.js, MESH_DEFAULTS.tiles 'auto'): a scene whose solve would
   // pass what one solve holds (the worker's `oneSolveBytes`: ~12 GiB with Memory64, the

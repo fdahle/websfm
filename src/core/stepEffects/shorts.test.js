@@ -42,7 +42,10 @@ const SHORTS = {
   dense: denseShorts(DENSE_FUSE_DEFAULTS, { maps: 347 }),
   dem: demShorts(DEM_DEFAULTS, { source: { count: 1e6 }, estimate, unit: 'm' }),
   ortho: orthoShorts(ORTHO_DEFAULTS, { surface: { available: true, label: 'DEM' }, estimate, unit: 'm' }),
-  mesh: meshShorts(MESH_DEFAULTS, { source: { name: 'Dense', count: 1e6 } }),
+  mesh: meshShorts(MESH_DEFAULTS, {
+    source: { name: 'Dense', count: 1e6 },
+    basis: { count: 1e6, spacing: 0.01, extent: 10 },
+  }),
   texture: textureShorts(TEXTURE_DEFAULTS, { cameras: 347 }),
   filter: filterCloudShorts(
     { ...FILTER_CLOUD_DEFAULTS, methods: ['range', 'voxel', 'isolated', 'sor'], zMin: 12.5, zMax: 380 },
@@ -79,7 +82,8 @@ describe('step chain facts', () => {
     expect(SHORTS.dense.sample).toBe('every pixel')
     expect(SHORTS.dem.grid).toBe('≈ 8,452 × 6,120 px · 0.0312 m')
     expect(SHORTS.ortho.blend).toBe('mosaic · graph cut · multiband')
-    expect(SHORTS.mesh.solve).toBe('depth 8 · screening 4')
+    // 10 / (8 · 0.01) = 125 ≈ 2^7 leaves a side; 1.6 · 128² ≈ 26 k triangles
+    expect(SHORTS.mesh.solve).toBe('depth 7 (auto) · ≈ 26 k triangles')
     expect(SHORTS.contours.levels).toBe('48 levels · every 2 m')
     expect(denseShorts({ ...DENSE_FUSE_DEFAULTS, removeIsolated: false }, { maps: 2 }).isolated).toBe('off')
     expect(sparseShorts({ ...RECONSTRUCT_DEFAULTS, addToModel: true }, { newImages: 12 }).register).toBe(

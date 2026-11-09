@@ -6,7 +6,9 @@ import {
   generateMesh,
   meshInputCell,
   subsampleForMesh,
-  recommendMeshDepth,
+  predictMeshTriangles,
+  autoMeshDepth,
+  meshDepthBasis,
   resolveMeshDepth,
   robustBox,
   estimatePointSpacing,
@@ -462,12 +464,88 @@ describe('subsampleForMesh', () => {
   })
 })
 
-describe('recommendMeshDepth', () => {
-  it('grows ~½·log2(N) and clamps to [6, 12]', () => {
-    expect(recommendMeshDepth(0)).toBe(8) // fallback
-    expect(recommendMeshDepth(100)).toBe(6) // clamp low
-    expect(recommendMeshDepth(1_000_000)).toBe(10) // round(0.5·~19.9)
-    expect(recommendMeshDepth(1e12)).toBe(12) // clamp high
+// A flat square of side L sampled at spacing s holds (L/s)² points, and a depth-d octree
+// over it covers exactly (2^d)² leaves while a leaf is wider than s.
+const square = (side, spacing) => ({ count: (side / spacing) ** 2, spacing, extent: side })
+
+describe('predictMeshTriangles', () => {
+  const per = MESH_TUNING.trianglesPerLeaf
+  it('counts the covered leaves of a flat square, at most one per point', () => {
+    const sq = square(1024, 1) // 1,048,576 points
+    expect(predictMeshTriangles(6, sq)).toBe(Math.round(per * 4 ** 6))
+    expect(predictMeshTriangles(10, sq)).toBe(Math.round(per * 4 ** 10)) // leaf = spacing
+    expect(predictMeshTriangles(12, sq)).toBe(Math.round(per * sq.count)) // finer than the points
+    expect(predictMeshTriangles(8, { count: 0, spacing: 1, extent: 1 })).toBe(0)
+  })
+  it('grows four times a level', () => {
+    const sq = square(3000, 0.37)
+    for (let d = 6; d < 12; d++) {
+      expect(predictMeshTriangles(d + 1, sq) / predictMeshTriangles(d, sq)).toBeCloseTo(4, 2)
+    }
+  })
+})
+
+describe('autoMeshDepth', () => {
+  const sq = square(1024, 1)
+  it('aims at leaves of `leafSpacings` point spacings', () => {
+    // 1024 / (8·1) = 128 = 2^7
+    expect(autoMeshDepth(sq, { leafSpacings: 8, maxTriangles: 1e9 })).toMatchObject({
+      depth: 7,
+      leaf: 8,
+      limit: 'spacing',
+    })
+    expect(autoMeshDepth(sq, { leafSpacings: 4, maxTriangles: 1e9 }).depth).toBe(8)
+    expect(autoMeshDepth(sq, { leafSpacings: 16, maxTriangles: 1e9 }).depth).toBe(6)
+    // Rounds in octaves: 1024 / 11 = 93 is nearer 2^7 than 2^6.
+    expect(autoMeshDepth(sq, { leafSpacings: 11, maxTriangles: 1e9 }).depth).toBe(7)
+  })
+  it('lowers the depth until the predicted mesh is within the triangle limit', () => {
+    const big = square(16384, 1) // wants depth 11 at leafSpacings 8
+    const a = autoMeshDepth(big, { leafSpacings: 8, maxTriangles: 1e6 })
+    expect(a.limit).toBe('triangles')
+    expect(a.triangles).toBeLessThanOrEqual(1e6)
+    expect(predictMeshTriangles(a.depth + 1, big)).toBeGreaterThan(1e6)
+  })
+  it('stays within its depth range, and falls back when it cannot see the cloud', () => {
+    const [lo, hi] = MESH_TUNING.autoDepthRange
+    expect(autoMeshDepth(square(64, 1), { leafSpacings: 8, maxTriangles: 1e9 })).toMatchObject({
+      depth: lo,
+      limit: 'range',
+    })
+    expect(autoMeshDepth(square(1e6, 1), { leafSpacings: 1, maxTriangles: 1e15 })).toMatchObject({
+      depth: hi,
+      limit: 'range',
+    })
+    expect(autoMeshDepth({ count: 1e6, spacing: 0, extent: 10 })).toMatchObject({
+      depth: MESH_TUNING.autoDepthFallback,
+      limit: 'unknown',
+    })
+  })
+  it('scales with the block: a larger cloud at the same spacing never gets a shallower depth', () => {
+    let prev = 0
+    for (const side of [200, 800, 3200, 12800, 51200]) {
+      const d = autoMeshDepth(square(side, 1), MESH_DEFAULTS).depth
+      expect(d).toBeGreaterThanOrEqual(prev)
+      prev = d
+    }
+  })
+})
+
+describe('meshDepthBasis', () => {
+  it('measures what the run keeps: the robust core, not far stragglers', () => {
+    const n = 10000
+    const pts = new Float64Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      pts[i * 3] = (i % 100) * 0.1 // 0 … 9.9
+      pts[i * 3 + 1] = Math.floor(i / 100) * 0.05 // 0 … 4.95
+      pts[i * 3 + 2] = 0
+    }
+    pts[0] = 1e6 // one straggler far away
+    const b = meshDepthBasis(pts, { count: 1e6, spacing: 0.1 })
+    expect(b.extent).toBeCloseTo(9.9, 6)
+    expect(b.count).toBe(Math.round((1e6 * (n - 1)) / n))
+    expect(b.spacing).toBe(0.1)
+    expect(meshDepthBasis(new Float64Array(0), { count: 5 }).extent).toBe(0)
   })
 })
 
