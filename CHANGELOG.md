@@ -5,6 +5,8 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-09
+
 ### Added
 - **Experimental features are marked.** An amber **Experimental** badge sits beside
   rolling shutter, the multispectral rig, the reflectance map, Hold to a reference DEM,
