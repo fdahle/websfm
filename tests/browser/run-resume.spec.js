@@ -125,10 +125,14 @@ for (const [method, phase, quality] of [
     step = 'run to be killed'
     await startDepth(page, method, quality, { phase, done: 2 })
     await expect
-      .poll(async () => (await journal(page, id))?.phase === phase && (await journal(page, id)).done.length, {
-        timeout: 240_000,
-        intervals: [100],
-      })
+      .poll(
+        async () => {
+          // One read per poll: a second can land while the journal is being rewritten.
+          const j = await journal(page, id)
+          return j?.phase === phase ? j.done.length : -1
+        },
+        { timeout: 240_000, intervals: [100] },
+      )
       .toBe(2)
     const stoppedAt = 2
     await page.close()
