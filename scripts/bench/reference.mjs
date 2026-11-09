@@ -89,7 +89,9 @@ export async function loadReference(ref) {
       if (!(Number.isFinite(+lat) && Number.isFinite(+lon) && Number.isFinite(+h))) continue
       const pos = { lat: +lat, lon: +lon, alt: +h }
       if (sc) {
-        const [sn, se, su] = sc.map((i) => Number(r[i]))
+        // `sigmaScale`: multiply them (an experiment's lever on how the positions weigh
+        // against the tie points, whose σ is 1 px).
+        const [sn, se, su] = sc.map((i) => Number(r[i]) * (ref.sigmaScale ?? 1))
         if ([sn, se, su].every((v) => Number.isFinite(v) && v > 0)) Object.assign(pos, { sn, se, su })
       }
       out.positions[stem(file)] = pos
