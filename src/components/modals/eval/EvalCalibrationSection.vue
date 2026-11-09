@@ -7,7 +7,7 @@ import { estimatedIntrinsics } from '../../../core/sfm/cameraEstimated.js'
 import { resolveK } from '../../../core/sfm/reconstruction.js'
 import { radialCurve, focalDelta } from '../../../core/eval/calibration.js'
 import { EVAL_THRESHOLDS } from '../../../core/eval/health.js'
-import { FOCAL_UNFIXED_SHARE, focalSigmaShare } from '../../../core/sfm/focalSigma.js'
+import { FOCAL_UNFIXED_SHARE, focalSigmaShare, focalSigmaPct } from '../../../core/sfm/focalSigma.js'
 
 // Quality Report ▸ Calibration: per camera group the BA-refined focal vs nominal, the lens
 // the main model was solved with (its own calibration, displayFrame.js
@@ -136,13 +136,12 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
       </div>
 
       <div v-if="s.sigmaShare != null && s.sigmaShare >= FOCAL_UNFIXED_SHARE" class="warn-box">
-        These photos do not fix the focal (± {{ (100 * s.sigmaShare).toFixed(0) }} %), and the model's heights scale
-        with it. Camera positions with their accuracies, GCPs or some oblique photos fix it.
+        These photos do not fix the focal (± {{ focalSigmaPct(s.sigmaShare) }} %), and the model's heights scale with
+        it. Camera positions with their accuracies, GCPs or some oblique photos fix it.
       </div>
       <div v-else-if="s.sigmaShare != null" class="cal-note">
         The focal's ± is how far heights can move from it alone: about ±
-        {{ (100 * s.sigmaShare).toFixed(s.sigmaShare >= 0.001 ? 1 : 2) }} % of the distance from the cameras to the
-        ground.
+        {{ focalSigmaPct(s.sigmaShare) }} % of the distance from the cameras to the ground.
       </div>
 
       <template v-if="s.dist">

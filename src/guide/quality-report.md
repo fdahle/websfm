@@ -33,8 +33,10 @@ wider reprojection threshold); check what they place before relying on them.
 Inspect focal-length change, principal point, and radial distortion. Large drift or
 implausible curves can mean weak camera geometry, mixed sensors, bad matches, or too
 many free calibration parameters. The ± after the refined focal is how well the photos
-fixed it: heights move by that share of the camera-to-ground distance. A nadir block
-without camera positions or GCPs cannot fix it at all; add either, or oblique photos.
+fixed it: heights move by that share of the camera-to-ground distance. It is the
+precision the solve gives with its lens model and the accuracies you entered, not a
+bound on the error: check points tell you that. A nadir block without camera positions
+or GCPs cannot fix the focal at all; add either, or oblique photos.
 
 ## Accuracy
 Residuals for GCPs, camera positions, scale evidence, and reference DEM checks are only

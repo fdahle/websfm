@@ -14,7 +14,11 @@ Notable changes to websfm. The format follows
   solution); the log gives fx ± σ and the share of the camera-to-ground distance it moves
   heights by, in place of a note that fired on every set. Unit tests check the σ against
   the spread of the solved focal over 40 noise draws (with camera positions, and without
-  control on tilted photos) and against a dense numerical covariance.
+  control on tilted photos) and against a dense numerical covariance. On a 444-photo RTK block
+  the focal is 5,671.1 ± 0.3 px with the positions in the solve (5,638.8 ± 1.4 from the
+  photos alone, 5,675.3 in Metashape): the ± is the precision under the lens model and the
+  entered accuracies, not the error, which the check points measure. The extra
+  factorisation added no measurable time (Reconstruct 80 s either way).
 
 ### Changed
 - **Mesh size follows the block.** Build Mesh ▸ Octree depth is Auto by default: it picks
