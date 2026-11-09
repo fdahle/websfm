@@ -3,6 +3,7 @@
 // the window's tiles of linearised cells, and the conservative map/box cull.
 // Pure: no Vue/Pinia/OPFS/DOM.
 import { sampleRgbaBilinear, sampleRgbBilinear } from './undistort.js'
+import { fillArray } from '../bigArray.js'
 
 // Project a world point into a map, requiring it in front of the camera.
 // Returns { u, v, depth } (u,v continuous px) or null.
@@ -69,8 +70,8 @@ export function winTiles(win, grid = null, gp = null) {
   const { w, h, data, mask } = win,
     nx = Math.ceil(w / WIN_TILE),
     ny = Math.ceil(h / WIN_TILE)
-  const lo = new Float64Array(nx * ny).fill(Infinity),
-    hi = new Float64Array(nx * ny).fill(-Infinity)
+  const lo = fillArray(new Float64Array(nx * ny), Infinity),
+    hi = fillArray(new Float64Array(nx * ny), -Infinity)
   for (let r = 0; r < h; r++) {
     const tr = Math.floor(r / WIN_TILE) * nx
     for (let c = 0; c < w; c++) {

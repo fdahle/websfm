@@ -24,7 +24,7 @@ import { cameraCenter } from '../sfm/geometry.js'
 import { mix32, clampCellForBounds } from './voxelAccumulator.js'
 import { numOpt, boolOpt } from './denseOptions.js'
 import { pluralize } from '../textFormat.js'
-import { bigArrayCaps } from '../bigArray.js'
+import { bigArrayCaps, fillArray } from '../bigArray.js'
 
 // The valid-pixel cost distribution across all depth maps: its median (the run
 // summary) and p70 (the weak-signal warning: a genuine ZNCC match is ≥ ~0.55, cost
@@ -183,8 +183,8 @@ function* fusionCellEstimateSteps(
     candidates = 0
   const seen = new Map() // sampled cell hash → its cell index along the tile axis
   const k = tile ? 'xyz'[tile.axis] : null
-  const mapLo = new Float64Array(refs.length).fill(Infinity),
-    mapHi = new Float64Array(refs.length).fill(-Infinity)
+  const mapLo = fillArray(new Float64Array(refs.length), Infinity),
+    mapHi = fillArray(new Float64Array(refs.length), -Infinity)
   const corners = withCorners ? new Array(refs.length).fill(null) : null
   for (let r = 0; r < refs.length; r++) {
     const m = yield { light: refs[r], pass: 'estimate' }
@@ -259,8 +259,8 @@ export function mergeCellEstimates(parts, nMaps, { sampleCap, tile = null, withC
     mask = (2 ** level - 1) | 0
     for (const sk of seen.keys()) if ((Math.floor(sk / 2097152) & mask) !== 0) seen.delete(sk)
   }
-  const mapLo = new Float64Array(nMaps).fill(Infinity),
-    mapHi = new Float64Array(nMaps).fill(-Infinity)
+  const mapLo = fillArray(new Float64Array(nMaps), Infinity),
+    mapHi = fillArray(new Float64Array(nMaps), -Infinity)
   const corners = withCorners ? new Array(nMaps).fill(null) : null
   for (const p of parts)
     p.refs.forEach((mi, r) => {

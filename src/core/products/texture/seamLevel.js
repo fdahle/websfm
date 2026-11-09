@@ -24,6 +24,7 @@ import { toScaledPx } from '../../sfm/geometry.js'
 import { sampleRgbaBilinear } from '../undistort.js'
 import { TEXTURE_TUNING } from '../../tuning.js'
 import { faceAdjacency } from './meshGraph.js'
+import { fillArray } from '../../bigArray.js'
 
 // labels, idx: per face; cut: chartPieces output; px: cornerPixels; layout + pages:
 // the baked atlas (modified in place). → { seamVertices, unknowns, iterations, maxOffset }
@@ -183,7 +184,7 @@ export function levelSeams(labels, idx, nVerts, cut, px, layout, pages, opts = {
   for (let c = 0; c < (chromaWeight > 0 ? 3 : 1); c++) {
     const scale = c === 0 ? 1 : chromaWeight
     const Wt = Float64Array.from(ew, (w, e) => (e < nSmooth ? w : w * scale))
-    const diag = new Float64Array(n).fill(TEXTURE_TUNING.seamEpsilon)
+    const diag = fillArray(new Float64Array(n), TEXTURE_TUNING.seamEpsilon)
     for (let e = 0; e < E; e++) {
       diag[A[e]] += Wt[e]
       diag[B[e]] += Wt[e]

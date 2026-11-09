@@ -1,6 +1,8 @@
 // Metric interpretation of anonymous fiducial detections. Detection is a strict
 // upstream input; this module never changes detected pixel centres.
 
+import { fillArray } from '../bigArray.js'
+
 function solveLinear(A, b) {
   const n = b.length,
     M = A.map((r, i) => [...r, b[i]])
@@ -117,8 +119,8 @@ function reseauResidual(pairs, h, stepMm, outlierMm) {
   }
   const nx = Math.round((x1 - x0) / stepMm) + 1,
     ny = Math.round((y1 - y0) / stepMm) + 1
-  const dx = new Float64Array(nx * ny).fill(NaN),
-    dy = new Float64Array(nx * ny).fill(NaN)
+  const dx = fillArray(new Float64Array(nx * ny), NaN),
+    dy = fillArray(new Float64Array(nx * ny), NaN)
   for (const p of pairs) {
     const i = Math.round((p.xMm - x0) / stepMm),
       j = Math.round((p.yMm - y0) / stepMm)

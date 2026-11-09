@@ -25,6 +25,7 @@
 // shares only a line with the polygon, zero area).
 
 import { polygonSpans } from './polygonSpans.js'
+import { fillArray } from '../bigArray.js'
 
 const SNAP = 1e-9
 
@@ -289,7 +290,7 @@ export function clipDem(grid, polygons, { crop = true, allTouched = false, onLog
   const ow = win.width,
     oh = win.height
   const outData = data instanceof Float64Array ? new Float64Array(ow * oh) : new Float32Array(ow * oh)
-  outData.fill(NaN)
+  fillArray(outData, NaN)
   const outMask = new Uint8Array(ow * oh)
   let insideCells = 0,
     validCells = 0,

@@ -6,6 +6,8 @@
 // sRGB ↔ linear light. Blending and gains act on light, not on gamma-encoded bytes.
 // The decode interpolates a 257-entry table (bilinear photo samples are fractional);
 // the encode is a 2¹⁶-step table, exact to the byte for every 8-bit value.
+import { fillArray } from '../bigArray.js'
+
 const SRGB_LIN = new Float64Array(257)
 for (let v = 0; v <= 256; v++) {
   const c = Math.min(v, 255) / 255
@@ -128,7 +130,7 @@ export function fitGains({ nImages: n, nPoints: L, obsPt: opt, obsImg: oimg, obs
       }
     }
   }
-  const gains = new Float64Array(3 * n).fill(1)
+  const gains = fillArray(new Float64Array(3 * n), 1)
   const overlapping = new Uint8Array(n)
   for (let e = 0; e < pa.length; e++) {
     overlapping[pa[e]] = 1

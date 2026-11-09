@@ -16,6 +16,8 @@
 // chunks by lifting a subsample of their roots' points up (`liftLevels`), removing the
 // lifted points from the nodes they came from.
 
+import { mixKey } from '../products/cellIndex.js'
+
 export const GRID = 128 // cells per axis in a node's subsample grid
 export const LEAF_MAX = 32768 // a node with at most this many points is a leaf
 export const MAX_LEVEL = 24 // guard: never split below this
@@ -76,7 +78,7 @@ export function subsample(pts, idx, cube, grid = GRID) {
       dy = fy - cy - 0.5,
       dz = fz - cz - 0.5
     const d = dx * dx + dy * dy + dz * dz
-    let h = Math.imul(cell, 0x9e3779b1) & mask
+    let h = mixKey(cell) & mask
     while (t.keys[h] !== -1 && t.keys[h] !== cell) h = (h + 1) & mask
     if (t.keys[h] === -1) {
       t.keys[h] = cell

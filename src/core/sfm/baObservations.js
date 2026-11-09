@@ -12,6 +12,7 @@
 // Weights are null when every observation has weight 1 (the SIFT tracks).
 
 import { hasKp } from './keypointSet.js'
+import { fillArray } from '../bigArray.js'
 
 export function isObservationList(o) {
   return !!o && !Array.isArray(o) && o.cam instanceof Int32Array
@@ -80,8 +81,8 @@ export function appendObservations(list, extra) {
     pt = new Int32Array(n)
   const x = new Float64Array(n),
     y = new Float64Array(n)
-  const wx = new Float64Array(n).fill(1),
-    wy = new Float64Array(n).fill(1)
+  const wx = fillArray(new Float64Array(n), 1),
+    wy = fillArray(new Float64Array(n), 1)
   cam.set(list.cam.subarray(0, list.n))
   pt.set(list.pt.subarray(0, list.n))
   x.set(list.x.subarray(0, list.n))

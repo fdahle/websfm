@@ -143,10 +143,14 @@ export function transferVertexColors(meshPos, dense, cell, opts = {}) {
   // Poisson extrapolates past the cloud, so a mesh vertex can sit outside the packed
   // range: skip rather than let the key alias onto an unrelated cell — out of range
   // genuinely means "no dense point here".
+  // A vertex without a finite position has no cells: a NaN passes every range test below
+  // and, never equal to itself, would go into the index as a new key each time, all on one
+  // slot (a run that grows by 27 per such vertex, so the colouring never ends).
   const eachCell = (v, visit) => {
     const cx = Math.floor(meshPos[v * 3] * inv),
       cy = Math.floor(meshPos[v * 3 + 1] * inv),
       cz = Math.floor(meshPos[v * 3 + 2] * inv)
+    if (!(Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(cz))) return
     for (let dz = -searchRadius; dz <= searchRadius; dz++) {
       const diz = cz + dz - bz
       if (diz < 0 || diz >= nz) continue

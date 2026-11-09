@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createCellIndex } from './cellIndex.js'
+import { createCellIndex, mixKey } from './cellIndex.js'
 
 describe('createCellIndex', () => {
   it('stores, overwrites and misses like a Map, through growth', () => {
@@ -24,5 +24,28 @@ describe('createCellIndex', () => {
     expect(idx.get(42)).toBe(9)
     expect(idx.get(43, -1)).toBe(-1)
     expect(idx.size).toBe(1)
+  })
+
+  // Packed cells (x·ny + y)·nz + z with ny·nz a multiple of 2^k sit 2^k apart along x.
+  // A hash that keeps the key's own low bits puts them in a few slots of a power-of-two
+  // table (each insert then probes one long run); every key bit must reach the slot.
+  it('spreads keys a power of two apart over the slots', () => {
+    for (const k of [10, 16, 20, 32]) {
+      const mask = 2 ** 18 - 1,
+        n = 2 ** 16
+      const used = new Set()
+      for (let i = 0; i < n; i++) used.add(mixKey(i * 2 ** k + 7) & mask)
+      // n random keys over 2^18 slots fill ≈ 2^18·(1 − e^(−1/4)) ≈ 0.885 n of them.
+      expect(used.size).toBeGreaterThan(0.85 * n)
+    }
+  })
+
+  it('keeps probing short on such keys', () => {
+    const idx = createCellIndex(1024)
+    const t = performance.now()
+    for (let i = 0; i < 2 ** 17; i++) idx.set(i * 2 ** 16, i)
+    for (let i = 0; i < 2 ** 17; i++) expect(idx.get(i * 2 ** 16)).toBe(i)
+    // Linear in the keys: well under a second (the low-bits hash took minutes here).
+    expect(performance.now() - t).toBeLessThan(3000)
   })
 })

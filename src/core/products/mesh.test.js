@@ -104,6 +104,23 @@ describe('transferVertexColors', () => {
     expect(Array.from(col)).toEqual([7, 8, 9])
   })
 
+  it('leaves vertices without a position gray, and does not stall on many of them', () => {
+    // A NaN passes every range test and never equals itself, so each one went into the
+    // cell index as a new key on one slot: quadratic, and a solve with NaN vertices never
+    // finished colouring.
+    const dense = { pos: Float32Array.from([0.5, 0.5, 0.5]), col: Uint8Array.from([255, 0, 0]) }
+    const n = 20000
+    const meshPos = new Float32Array(3 * (n + 1)).fill(NaN)
+    meshPos.set([0.5, 0.5, 0.5], 3 * n)
+    const t = performance.now()
+    const { col, misses, missed } = transferVertexColors(meshPos, dense, 1.0, { grayFallback: [7, 8, 9] })
+    expect(performance.now() - t).toBeLessThan(2000)
+    expect(misses).toBe(n)
+    expect(missed[0]).toBe(1)
+    expect(Array.from(col.slice(0, 3))).toEqual([7, 8, 9])
+    expect(Array.from(col.slice(3 * n))).toEqual([255, 0, 0])
+  })
+
   it('matches the whole-cloud Map rule: last point in a cell represents it', () => {
     // The transfer indexes only the cells the vertices read; it must pick exactly what
     // a Map over every dense point (Map.set in index order, last writer wins) picked.

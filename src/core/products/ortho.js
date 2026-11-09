@@ -55,6 +55,7 @@ import {
   smoothLabels,
 } from './orthoMosaic.js'
 import { blockGroups, chooseGroupSize, ownersFromCut, unionMaps, viewBytes, visitSequence } from './orthoPlan.js'
+import { fillArray } from '../bigArray.js'
 
 // The highest matching cost left in the depth maps, given the settings of the run that
 // built them (the Stage A summary's `settings`). The cross-view filter's Minimum NCC
@@ -306,7 +307,7 @@ export async function orthorectifyStreamed(
   const average = opts.blend === 'average'
   // Per-cell state is a real cost at MAX_GRID (16.8 M cells): allocate only what
   // the chosen blend reads — 8 B/cell for 'best', 32 B/cell for 'average'.
-  const scores = average ? null : new Float64Array(n).fill(Infinity)
+  const scores = average ? null : fillArray(new Float64Array(n), Infinity)
   const sums = average ? new Float64Array(n * 4) : null
   const labels = newLabels(n, opts, metas.length)
   let zLo = Infinity,
@@ -633,8 +634,8 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
 
   // Pre-pass: the grid's height range and mean (row-major, as the single pass reads
   // them), the surface cell count, and each block core's height range for the cull.
-  const blockLo = new Float64Array(nBlocks).fill(Infinity),
-    blockHi = new Float64Array(nBlocks).fill(-Infinity)
+  const blockLo = fillArray(new Float64Array(nBlocks), Infinity),
+    blockHi = fillArray(new Float64Array(nBlocks), -Infinity)
   const rowData = new Float32Array(W),
     rowMask = new Uint8Array(W)
   let zLo = Infinity,

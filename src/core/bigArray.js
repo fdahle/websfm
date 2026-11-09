@@ -216,3 +216,16 @@ export function viewAs(T, src) {
   if (src instanceof ArrayBuffer || isShared(src)) return new T(src)
   return new T(src.buffer, src.byteOffset, src.byteLength / T.BYTES_PER_ELEMENT)
 }
+
+// Chrome 156 leaves a Float64Array untouched when one fill() covers 2^28 elements or more
+// (2 GiB), whatever the value or offset; every other type, and Node, fill correctly
+// (probed 2026-11-09). A cell index growing to 2^28 slots then held no empty slot and its
+// probe loop never ended. Fill a Float64Array that can get that large through this.
+const FILL_CHUNK = 2 ** 26
+
+/** `a.fill(value, start, end)` in pieces of at most `chunk` elements; returns `a`. */
+export function fillArray(a, value, start = 0, end = a.length, chunk = FILL_CHUNK) {
+  if (end - start <= chunk) return a.fill(value, start, end)
+  for (let s = start; s < end; s += chunk) a.fill(value, s, Math.min(end, s + chunk))
+  return a
+}

@@ -9,6 +9,7 @@
 
 import { localCamera } from './visibility.js'
 import { TEXTURE_TUNING } from '../../tuning.js'
+import { fillArray } from '../../bigArray.js'
 
 // Union-find over same-label neighbours. → { nCharts, chartView, start, faces }: the
 // faces of chart c are faces[start[c] .. start[c+1]). Faces with label −1 are in no chart.
@@ -60,7 +61,7 @@ export function buildCharts(labels, adj) {
 export function cornerPixels(geom, idx, labels, views) {
   const F = labels.length,
     P = geom.P
-  const out = new Float64Array(6 * F).fill(NaN)
+  const out = fillArray(new Float64Array(6 * F), NaN)
   const cams = new Array(views.length)
   for (let f = 0; f < F; f++) {
     const vi = labels[f]

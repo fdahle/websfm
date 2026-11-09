@@ -4,6 +4,7 @@ import {
   localArrays,
   sharedArrays,
   chunksOf,
+  fillArray,
   isSharedArray,
   localArray,
   postableCopy,
@@ -13,6 +14,8 @@ import {
   viewAs,
 } from './bigArray.js'
 import { MAX_BUFFER_BYTES, isBufferAllocationFailure } from './bufferLimit.js'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 
 afterEach(() => setBigArrayCaps(null))
 
@@ -183,5 +186,36 @@ describe('groups', () => {
     const a = localArray(Float32Array, 4, { minBytes: 0 })
     const p = new Float32Array(4)
     expect(transferList([a, p])).toEqual([p.buffer])
+  })
+})
+
+describe('fillArray', () => {
+  it('fills the range in pieces across chunk edges, and only the range', () => {
+    const a = new Float64Array(37)
+    expect(fillArray(a, -1, 3, 34, 8)).toBe(a)
+    expect(Array.from(a.subarray(0, 3))).toEqual([0, 0, 0])
+    expect(a.subarray(3, 34).every((v) => v === -1)).toBe(true)
+    expect(Array.from(a.subarray(34))).toEqual([0, 0, 0])
+    expect(Array.from(fillArray(new Float64Array(5), NaN))).toEqual([NaN, NaN, NaN, NaN, NaN])
+  })
+
+  // Chrome 156 leaves a Float64Array unfilled when one fill() covers 2^28 elements; Node
+  // cannot show it, so no Float64Array in src/ may be filled straight from `new`.
+  it('is how every new Float64Array in src/ gets a non-zero value', () => {
+    const root = new URL('..', import.meta.url).pathname
+    const files = (dir, out = []) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name)
+        if (e.isDirectory()) {
+          if (e.name !== 'wasm') files(p, out)
+        } else if (/\.(js|vue)$/.test(e.name) && !e.name.endsWith('.test.js')) out.push(p)
+      }
+      return out
+    }
+    const direct = /new Float64Array\((?:[^()]|\([^()]*\))*\)\.fill\((?!0\))/g
+    const found = []
+    for (const f of files(root))
+      for (const m of readFileSync(f, 'utf8').matchAll(direct)) found.push(`${f.slice(root.length)}: ${m[0]}`)
+    expect(found).toEqual([])
   })
 })

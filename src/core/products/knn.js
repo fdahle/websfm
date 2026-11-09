@@ -17,6 +17,8 @@
 // Distances are computed in double precision relative to the query, so survey
 // coordinates (~1e6) lose nothing even from a Float32 position buffer.
 
+import { fillArray } from '../bigArray.js'
+
 const LEAF = 12
 
 /**
@@ -196,7 +198,7 @@ export function knnQuery(index, x, y, z, k, outIdx, outD2, exclude = -1, maxD2 =
 export function nearestNeighbors(index, query, { maxDist = Infinity, onProgress } = {}) {
   const n = query.count ?? Math.floor(query.pos.length / 3)
   const outIdx = new Int32Array(n).fill(-1)
-  const dist = new Float64Array(n).fill(NaN)
+  const dist = fillArray(new Float64Array(n), NaN)
   if (!index.count) return { index: outIdx, dist }
   const maxD2 = Number.isFinite(maxDist) ? maxDist * maxDist : Infinity
   const qi = new Int32Array(1),

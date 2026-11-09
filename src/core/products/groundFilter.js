@@ -47,6 +47,7 @@ import { coreExtent } from './dem.js'
 import { classifyAboveGround } from './pointClasses.js'
 import { CLASSIFY_DEFAULTS } from '../defaults.user.js'
 import { CLASSIFY_TUNING } from '../tuning.js'
+import { fillArray } from '../bigArray.js'
 
 export const CLASS_NEVER = 0
 export const CLASS_UNCLASSIFIED = 1
@@ -75,7 +76,7 @@ export const GROUND_FILTER_LIMITS = {
 // Heights of the lowest point per cell, NaN where none fell. Returns Float64Array.
 function lowestPerCell(pos, count, grid, inside) {
   const { width, height, x0, y0, res } = grid
-  const H = new Float64Array(width * height).fill(NaN)
+  const H = fillArray(new Float64Array(width * height), NaN)
   for (let i = 0; i < count; i++) {
     if (inside && !inside[i]) continue
     const x = pos[i * 3],
@@ -195,7 +196,7 @@ function simulateCloth(H, width, height, opts, onProgress) {
   const n = width * height
   let hMin = Infinity
   for (let k = 0; k < n; k++) if (H[k] < hMin) hMin = H[k]
-  const z = new Float64Array(n).fill(hMin - START_DEPTH / metresPerUnit)
+  const z = fillArray(new Float64Array(n), hMin - START_DEPTH / metresPerUnit)
   const zOld = Float64Array.from(z)
   const pinned = new Uint8Array(n)
   const offsets = Int32Array.from({ length: 16 }, (_, k) => SPRING_DR[k] * width + SPRING_DC[k])

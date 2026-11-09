@@ -36,6 +36,7 @@
 // MAX_CYCLES) and the capacities are integers, so the result is deterministic.
 import { createGridGraph, gridNode, gridMaxflow, inSinkSet, resetGridGraph } from './gridMaxflow.js'
 import { srgbToLinear, linearToSrgb } from './colourGains.js'
+import { fillArray } from '../bigArray.js'
 
 export const SEAM_CUT_CELLS = 1 << 20 // target size of the coarse label grid
 export const SEAM_CANDIDATES = 8 // views kept per coarse cell (the most nadir)
@@ -154,7 +155,7 @@ export function solveSeams(sv, gains = null, weights = {}) {
   // are integers, so taking them from here changes no sum.
   const curSlot = new Int32Array(n).fill(-1)
   for (let p = 0; p < n; p++) if (count[p]) curSlot[p] = p * K
-  const edgeV = new Float64Array(2 * n).fill(NaN) // 2p: p ↔ p + 1, 2p + 1: p ↔ p + cw
+  const edgeV = fillArray(new Float64Array(2 * n), NaN) // 2p: p ↔ p + 1, 2p + 1: p ↔ p + cw
   const edgeOf = (p, q) => (q === p + 1 ? 2 * p : q === p - 1 ? 2 * q : q > p ? 2 * p + 1 : 2 * q + 1)
   // `fp`, `fq`: the labels the edge is priced under — the current ones, which during a
   // tentative move (below) are the ones from before it, as are curSlot's.

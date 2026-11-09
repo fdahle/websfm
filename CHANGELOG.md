@@ -41,6 +41,18 @@ Notable changes to websfm. The format follows
   instead of 9.1 GB, GeoTIFF 220 MB instead of 31 MB; the photos read at 86 % of native
   instead of 34 %). Set the photos' GSD for a full-resolution orthophoto.
 
+### Fixed
+- **A very fine mesh finishes.** Build Mesh at a high octree depth no longer stops after
+  the solve with no message; it colours the mesh and saves it. Chrome leaves a
+  `Float64Array` of 2^28 elements (2 GiB) or more unfilled when one `fill()` covers it;
+  the vertex-colour index of a 5.6 M-vertex mesh grew to that size, held no empty slot,
+  and its search never ended. Every such array is now filled in pieces. The index's hash
+  also mixes the whole key now: cells a power of two apart in the packed grid had landed
+  in a few slots (a quadratic slow-down), and colouring is about 20 % faster (67 M points
+  onto 4.2 M vertices: 64 + 31 s instead of 79 + 40 s). On a 347-photo aerial block,
+  depth 11: 11.1 M triangles in 551 s, colouring and joining the 48 tiles 86 s, the tab
+  at 35.7 GB.
+
 ## [0.7.0] — 2026-11-09
 
 ### Added
