@@ -799,9 +799,11 @@ window.bench = {
       ...overrides,
       sourceId: overrides.sourceId ?? recon.meshSource?.id ?? null,
     }
+    const before = new Set(recon.clouds.map((c) => c.id))
     const t0 = performance.now()
     await recon.generateMesh(settings, report)
-    const m = recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived)
+    // The mesh this run added (a reopened project already holds earlier ones).
+    const m = recon.clouds.find((c) => c.kind === 'mesh' && !before.has(c.id))
     return { settings, seconds: (performance.now() - t0) / 1000, triangles: m?.count ?? 0, vertices: m?.nVerts ?? 0 }
   },
 
