@@ -80,6 +80,28 @@ let sfmCaptureArmed = false,
 // The last reconstruction's camera-GPS fit (SfM → local ENU): later stages put their
 // points in that frame for the node-side LiDAR comparison (densePointsEnu).
 let lastPositionCheck = null
+// The camera-GPS fit of a sparse cloud's cameras. Independent shape check when the
+// images carry GNSS the solve never used (EXIF; the bench imports no poses, so there are
+// no camera priors): see positionCheck.js. Reference positions (a survey file) win over
+// EXIF when the config supplies them.
+function positionCheckOf(cloud) {
+  if (!cloud?.cameras) return null
+  const positions = reference?.positions
+    ? new Map(
+        images.images
+          .filter((i) => reference.positions[stem(i.name)])
+          .map((i) => [i.uuid, reference.positions[stem(i.name)]]),
+      )
+    : new Map(
+        images.images
+          .filter(
+            (i) =>
+              Number.isFinite(i.meta?.gpsLat) && Number.isFinite(i.meta?.gpsLon) && Number.isFinite(i.meta?.gpsAlt),
+          )
+          .map((i) => [i.uuid, { lat: i.meta.gpsLat, lon: i.meta.gpsLon, alt: i.meta.gpsAlt }]),
+      )
+  return cameraPositionCheck(cloud.cameras, positions, { leverArm: reference?.leverArm ?? null })
+}
 const postMessage = Worker.prototype.postMessage
 Worker.prototype.postMessage = function (message, ...rest) {
   if (sfmCaptureArmed && message?.op === 'reconstruct') {
@@ -1136,7 +1158,9 @@ window.bench = {
   // node-side LiDAR check (scripts/bench/lidar.mjs). Null without a GPS fit.
   densePointsEnu(maxPoints = 1_000_000) {
     const c = recon.mainDenseCloud
-    const pc = lastPositionCheck
+    // A run that reopened a project and only fused has no reconstruction of its own: fit
+    // the restored model's cameras.
+    const pc = (lastPositionCheck ??= positionCheckOf(recon.mainSparseCloud))
     if (!c || !pc) return null
     const stride = Math.max(1, Math.ceil(c.count / maxPoints))
     const out = new Float32Array(3 * Math.ceil(c.count / stride))
@@ -2427,26 +2451,7 @@ window.bench = {
       if (n >= 3) ge3++
     }
     const s = recon.summary
-    // Independent shape check when the images carry GNSS the solve never used (EXIF;
-    // the bench imports no poses, so there are no camera priors): see positionCheck.js.
-    // Reference positions (a survey file) win over EXIF when the config supplies them.
-    const positions = reference?.positions
-      ? new Map(
-          images.images
-            .filter((i) => reference.positions[stem(i.name)])
-            .map((i) => [i.uuid, reference.positions[stem(i.name)]]),
-        )
-      : new Map(
-          images.images
-            .filter(
-              (i) =>
-                Number.isFinite(i.meta?.gpsLat) && Number.isFinite(i.meta?.gpsLon) && Number.isFinite(i.meta?.gpsAlt),
-            )
-            .map((i) => [i.uuid, { lat: i.meta.gpsLat, lon: i.meta.gpsLon, alt: i.meta.gpsAlt }]),
-        )
-    const pc = cloud?.cameras
-      ? cameraPositionCheck(cloud.cameras, positions, { leverArm: reference?.leverArm ?? null })
-      : null
+    const pc = positionCheckOf(cloud)
     lastPositionCheck = pc
     const checkpointCheck =
       pc && reference?.gcps ? await checkpoints(cloud, pc).catch((e) => ({ error: String(e?.stack ?? e) })) : null
