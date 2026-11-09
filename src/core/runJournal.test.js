@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { canContinue, journalKey, journalSummary, journalWriter, stableStringify, startJournal } from './runJournal.js'
+import {
+  canContinue,
+  holdingWrites,
+  journalKey,
+  journalSettings,
+  journalSummary,
+  journalWriter,
+  stableStringify,
+  startJournal,
+} from './runJournal.js'
 
 describe('journalKey', () => {
   it('ignores key order and undefined fields, and sees any changed value', () => {
@@ -97,5 +106,51 @@ describe('journalWriter', () => {
     await writer.flush(j)
     j.done.push(2)
     expect(saved.done).toEqual([1])
+  })
+})
+
+describe('holding a run for a test (_holdAt)', () => {
+  const settle = (p) => Promise.race([p.then(() => 'settled'), new Promise((r) => setTimeout(() => r('pending'), 20))])
+
+  it('writes up to the hold point, then nothing more, and never settles', async () => {
+    const written = []
+    const write = holdingWrites(async (j) => written.push(`${j.phase}:${j.done.length}`), { phase: 'pass2', done: 2 })
+    expect(await settle(write({ phase: 'pass1', done: [1, 2, 3] }))).toBe('settled') // another phase
+    expect(await settle(write({ phase: 'pass2', done: [1] }))).toBe('settled')
+    expect(await settle(write({ phase: 'pass2', done: [1, 2] }))).toBe('pending') // the hold point
+    expect(await settle(write({ phase: 'pass2', done: [1, 2, 3] }))).toBe('pending')
+    expect(await settle(write({ phase: 'filter', done: [] }))).toBe('pending')
+    expect(written).toEqual(['pass1:3', 'pass2:1', 'pass2:2'])
+  })
+
+  it('is the plain write without a hold', () => {
+    const write = async () => {}
+    expect(holdingWrites(write, undefined)).toBe(write)
+  })
+
+  it('stops a journal writer: the journal stays at the hold, the run waits at its next save', async () => {
+    const saved = []
+    const writer = journalWriter(async (j) => saved.push(j.done.length), {
+      intervalMs: 0,
+      holdAt: { phase: 'pass1', done: 2 },
+    })
+    const j = { phase: 'pass1', done: [] }
+    for (const u of [1, 2, 3, 4]) {
+      j.done.push(u)
+      writer.touch(j)
+    }
+    j.phase = 'filter'
+    j.done = []
+    expect(await settle(writer.flush(j))).toBe('pending')
+    expect(saved).toEqual([1, 2])
+  })
+
+  it('is left out of what the journal keeps, so a continued run is the same run and does not hold', () => {
+    const s = { quality: 'high', _journalMs: 0, _holdAt: { phase: 'pass1', done: 1 } }
+    expect(journalSettings(s)).toEqual({ quality: 'high', _journalMs: 0 })
+    expect(s._holdAt).toBeDefined() // the caller's settings untouched
+    expect(journalKey({ settings: journalSettings(s) })).toBe(
+      journalKey({ settings: { quality: 'high', _journalMs: 0 } }),
+    )
   })
 })

@@ -40,9 +40,11 @@ async function openFixture(page) {
 }
 
 // The CPU path, one map after another on one worker, at a size where each takes a while.
-const startDepth = (page, method, quality) =>
+// `holdAt` (core/runJournal.js holdingWrites) stops the run's journal at that point, as
+// a tab killed there would leave it, so the test closes the page where it chose.
+const startDepth = (page, method, quality, holdAt = null) =>
   page.evaluate(
-    ({ method, quality }) => {
+    ({ method, quality, holdAt }) => {
       const app = document.querySelector('#app').__vue_app__._instance.setupState
       return import('/src/core/defaults.user.js').then(({ DEPTHMAP_DEFAULTS }) => {
         window.__depthRun = app.runComputeDepthMaps({
@@ -52,10 +54,11 @@ const startDepth = (page, method, quality) =>
           useGpu: false,
           _journalMs: 0, // every saved map in the journal at once, so the test sees each
           keepMaps: false, // a full run each time: the kept maps would leave nothing to kill
+          ...(holdAt ? { _holdAt: holdAt } : {}),
         })
       })
     },
-    { method, quality },
+    { method, quality, holdAt },
   )
 
 const journal = (page, id) =>
@@ -84,8 +87,9 @@ const savedMaps = (page, id) =>
     return out
   }, id)
 
-// Each case at a size where every map takes a moment on the CPU, so the kill lands
-// between two of them.
+// Each case at a size where every map takes a moment on the CPU. The run is held once two
+// maps of the phase are in its journal (the maps after them may still be computed and
+// saved, as after a real kill between two journal saves), and the page closed there.
 for (const [method, phase, quality] of [
   ['fast', 'pass1', 'high'],
   ['full', 'pass2', 'medium'],
@@ -95,7 +99,7 @@ for (const [method, phase, quality] of [
     browserName,
   }) => {
     test.skip(browserName !== 'chromium', 'one browser is enough for the run logic')
-    test.setTimeout(480_000)
+    test.setTimeout(600_000)
     const context = await browser.newContext()
     let page = await context.newPage()
     // Each page error says which step raised it (one WASM trap was seen once, in a full
@@ -117,19 +121,16 @@ for (const [method, phase, quality] of [
     expect(Object.keys(reference)).toHaveLength(5)
     expect(await journal(page, id)).toBeNull() // a finished run leaves no journal
 
-    // The same run again, and the tab dies once some maps of `phase` are saved.
+    // The same run again, held once two maps of `phase` are saved, and the tab dies there.
     step = 'run to be killed'
-    await startDepth(page, method, quality)
+    await startDepth(page, method, quality, { phase, done: 2 })
     await expect
-      .poll(
-        async () => {
-          const j = await journal(page, id)
-          return j?.phase === phase && j.done.length >= 1 && j.done.length < 5
-        },
-        { timeout: 120_000, intervals: [100] },
-      )
-      .toBe(true)
-    const stoppedAt = (await journal(page, id)).done.length
+      .poll(async () => (await journal(page, id))?.phase === phase && (await journal(page, id)).done.length, {
+        timeout: 240_000,
+        intervals: [100],
+      })
+      .toBe(2)
+    const stoppedAt = 2
     await page.close()
     step = 'continued run'
 
@@ -184,11 +185,11 @@ test('a matching run killed in the pair loop continues where it stopped', async 
   const watch = (p) => p.on('pageerror', (e) => errors.push(e.message))
   watch(page)
   const id = await openFixture(page)
-  const startMatch = () =>
-    page.evaluate(() => {
+  const startMatch = (holdAt = null) =>
+    page.evaluate((holdAt) => {
       const app = document.querySelector('#app').__vue_app__._instance.setupState
-      window.__matchRun = app.runMatch({ _journalMs: 0 })
-    })
+      window.__matchRun = app.runMatch({ _journalMs: 0, ...(holdAt ? { _holdAt: holdAt } : {}) })
+    }, holdAt)
   const matchJournal = () =>
     page.evaluate(async (id) => (await import('/src/utils/opfs.js')).loadRunJournal(id, 'match'), id)
 
@@ -205,17 +206,19 @@ test('a matching run killed in the pair loop continues where it stopped', async 
   expect(Object.keys(reference)).toHaveLength(10)
   expect(await matchJournal()).toBeNull()
 
-  await startMatch()
+  // Held once its journal lists three pairs (a save may cover a few more), then killed.
+  await startMatch({ phase: 'pairs', done: 3 })
+  let seen = null
   await expect
     .poll(
       async () => {
-        const j = await matchJournal()
-        return j?.phase === 'pairs' && j.done.length >= 1 && j.done.length < 10
+        seen = await matchJournal()
+        return seen?.phase === 'pairs' && seen.done.length >= 3 && seen.done.length < 10
       },
       { timeout: 60_000, intervals: [25] },
     )
     .toBe(true)
-  const stoppedAt = (await matchJournal()).done.length
+  const stoppedAt = seen.done.length
   await page.close()
 
   page = await context.newPage()
@@ -265,12 +268,17 @@ test('a detection run killed partway continues where it stopped', async ({ brows
   const watch = (p) => p.on('pageerror', (e) => errors.push(e.message))
   watch(page)
   const id = await openFixture(page)
-  const startDetect = () =>
-    page.evaluate(async () => {
+  const startDetect = (holdAt = null) =>
+    page.evaluate(async (holdAt) => {
       const app = document.querySelector('#app').__vue_app__._instance.setupState
       const { DETECT_DEFAULTS_BY_DETECTOR } = await import('/src/core/defaults.user.js')
-      window.__detectRun = app.runDetect({ ...DETECT_DEFAULTS_BY_DETECTOR.sift, overwrite: true, _journalMs: 0 })
-    })
+      window.__detectRun = app.runDetect({
+        ...DETECT_DEFAULTS_BY_DETECTOR.sift,
+        overwrite: true,
+        _journalMs: 0,
+        ...(holdAt ? { _holdAt: holdAt } : {}),
+      })
+    }, holdAt)
   const detectJournal = () =>
     page.evaluate(async (id) => (await import('/src/utils/opfs.js')).loadRunJournal(id, 'detect'), id)
 
@@ -280,17 +288,10 @@ test('a detection run killed partway continues where it stopped', async ({ brows
   expect(Object.values(reference).every((r) => r.status === 'done' && r.count > 0)).toBe(true)
   expect(await detectJournal()).toBeNull()
 
-  await startDetect()
-  await expect
-    .poll(
-      async () => {
-        const j = await detectJournal()
-        return !!j && j.done.length >= 1 && j.done.length < 5
-      },
-      { timeout: 60_000, intervals: [25] },
-    )
-    .toBe(true)
-  const stoppedAt = (await detectJournal()).done.length
+  // Held once its journal lists two images, then killed.
+  await startDetect({ phase: 'images', done: 2 })
+  await expect.poll(async () => (await detectJournal())?.done.length, { timeout: 60_000, intervals: [25] }).toBe(2)
+  const stoppedAt = 2
   await page.close()
 
   page = await context.newPage()

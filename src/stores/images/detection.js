@@ -7,7 +7,7 @@ import { detectKeypoints, POOL_SIZE } from '../../workers/computeClient.js'
 import { Keypoints, fillNormalized, asKeypoints } from '../../core/features/keypoints.js'
 import * as opfs from '../../utils/opfs.js'
 import { markRaw, toRaw } from 'vue'
-import { canContinue, journalKey, journalWriter, startJournal } from '../../core/runJournal.js'
+import { canContinue, journalKey, journalSettings, journalWriter, startJournal } from '../../core/runJournal.js'
 import { useMatchesStore } from '../useMatchesStore.js'
 import { detectionConcurrency } from '../../core/features/detectConcurrency.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -234,7 +234,7 @@ export function createDetection({
   // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt on
   // open). The images it lists keep their features; only the rest are detected.
   async function detectAll(settings = {}, onDetected, onProgress, shouldCancel, { resume = null } = {}) {
-    const requested = structuredClone(toRaw(settings))
+    const requested = journalSettings(structuredClone(toRaw(settings)))
     const key = journalKey({ images: images.value.map((im) => im.uuid), settings: requested })
     let journal = null
     if (resume && isPersisting()) {
@@ -266,6 +266,7 @@ export function createDetection({
       journal.done = [...kept]
       writer = journalWriter((j) => opfs.saveRunJournal(pid, j), {
         intervalMs: settings._journalMs ?? DETECT_TUNING.journalIntervalMs,
+        holdAt: settings._holdAt,
       })
       await writer.flush(journal)
       if (kept.size) {

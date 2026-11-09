@@ -4,7 +4,7 @@
 // and helpers, and `beginBatch` / `endBatch` / `bumpGeneration` its counters.
 import { computed, toRaw } from 'vue'
 import * as opfs from '../../utils/opfs.js'
-import { canContinue, journalKey, startJournal } from '../../core/runJournal.js'
+import { canContinue, holdingWrites, journalKey, journalSettings, startJournal } from '../../core/runJournal.js'
 import {
   matchDescriptors,
   POOL_SIZE,
@@ -327,7 +327,7 @@ export function createMatchAll({
   // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt on
   // open). The pairs it lists are kept as saved; only the rest are matched.
   async function matchAll(images, settings = {}, onProgress, shouldCancel, { resume = null } = {}) {
-    const requested = structuredClone(toRaw(settings))
+    const requested = journalSettings(structuredClone(toRaw(settings)))
     bumpGeneration()
     // Same merge as matchPair so this function's own settings reads (and its
     // matchPair calls) all draw from the single source of truth.
@@ -651,6 +651,7 @@ export function createMatchAll({
     // holds, so a tab that dies loses at most that much. Keyed by the images and their
     // features, the dialog's settings and the pairs they selected.
     const projectId = projects.currentProjectId
+    const saveJournal = holdingWrites((j) => opfs.saveRunJournal(projectId, j), settings._holdAt)
     const key = journalKey({
       images: ready.map((im) => [im.uuid, im.kpCount, im.detector ?? 'sift']),
       settings: requested,
@@ -683,7 +684,7 @@ export function createMatchAll({
     }
     if (projects.isPersisting) {
       journal ??= startJournal({ stage: 'match', key, settings: requested, total: pairs.length, phase: 'pairs' })
-      await opfs.saveRunJournal(projectId, journal).catch(() => {})
+      await saveJournal(journal).catch(() => {})
     }
     if (kept.size) {
       if (kept.size > keptAsMatched)
@@ -724,7 +725,7 @@ export function createMatchAll({
             'Matching',
           )
           journal.done = held
-          return opfs.saveRunJournal(projectId, { ...journal, updatedAt: new Date().toISOString() })
+          return saveJournal({ ...journal, updatedAt: new Date().toISOString() })
         })
         .catch(() => {})
         .finally(() => (checkpointing = null))
@@ -773,7 +774,7 @@ export function createMatchAll({
         await save()
         journal.phase = 'post'
         journal.done = []
-        await opfs.saveRunJournal(projectId, { ...journal, updatedAt: new Date().toISOString() }).catch(() => {})
+        await saveJournal({ ...journal, updatedAt: new Date().toISOString() }).catch(() => {})
       }
       // Gate rescue. The subset gate's sample count scales with the pair's TRUE match
       // count, so a real pair with a few hundred matches reads as ~0–2 sampled

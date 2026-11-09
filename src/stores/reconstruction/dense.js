@@ -43,7 +43,7 @@ import { DENSE_TUNING } from '../../core/tuning.js'
 import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
-import { canContinue, journalKey, journalWriter, startJournal } from '../../core/runJournal.js'
+import { canContinue, journalKey, journalSettings, journalWriter, startJournal } from '../../core/runJournal.js'
 import { depthMapsKey, depthRunShape, reusableDepthMaps, depthCameraKey } from '../../core/dense/depthReuse.js'
 import { isSharedArray, postableCopy, shareableArray } from '../../core/bigArray.js'
 import { poissonHeapBytes } from '../../core/products/mesh.js'
@@ -291,7 +291,7 @@ export function createDense({
       // be kept either, and the worker would spend minutes computing them.
       // The run journal's key: the model, the images and the settings the dialog asked
       // for. A stopped run continues only on the same three (core/runJournal.js).
-      const requested = structuredClone(toRaw(settings))
+      const requested = journalSettings(structuredClone(toRaw(settings)))
       const key = journalKey({
         sparse: [cloud.id, cloud.createdAt ?? null],
         images: inputImages.map((im) => im.uuid),
@@ -452,6 +452,7 @@ export function createDense({
         }
         writer = journalWriter((j) => opfs.saveRunJournal(run.projectId, j), {
           intervalMs: settings._journalMs ?? DENSE_TUNING.journalIntervalMs,
+          holdAt: settings._holdAt,
         })
         await writer.flush(journal)
       }

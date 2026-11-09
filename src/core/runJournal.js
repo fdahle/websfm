@@ -104,11 +104,46 @@ function agoText(ms) {
 }
 
 /**
+ * A run's settings as its journal keeps them (and as its key sees them): without the
+ * test hook `_holdAt`, so a continued run neither holds again nor reads as a different run.
+ * @param {object} settings plain data (a clone)
+ */
+export function journalSettings(settings) {
+  const out = { ...(settings ?? {}) }
+  delete out._holdAt
+  return out
+}
+
+/**
+ * Tests only (a run's `_holdAt: { phase, done }`): journal writes that stop where a
+ * killed tab would. The first journal of `phase` listing at least `done` units is
+ * written; that write and every later one never settle, so the run waits at its next
+ * awaited save (a phase change, the end of the run) with its journal left as it was,
+ * and a test closes the page at a point it chose instead of racing the run. Without
+ * `holdAt`, `write` itself.
+ * @param {(journal: object) => Promise<unknown>} write
+ * @param {{ phase: string, done: number }|null|undefined} holdAt
+ */
+export function holdingWrites(write, holdAt) {
+  if (!holdAt) return write
+  let held = null
+  return (journal) => {
+    if (held) return held
+    const out = write(journal)
+    if (journal.phase === holdAt.phase && (journal.done?.length ?? 0) >= holdAt.done)
+      held = Promise.resolve(out).then(() => new Promise(() => {}))
+    return held ?? out
+  }
+}
+
+/**
  * Saves a journal at most once per `intervalMs` while units finish, and at once when
  * asked (`flush`): a run of thousands of short units must not rewrite it thousands of
- * times. `write(journal)` returns a promise; writes never overlap.
+ * times. `write(journal)` returns a promise; writes never overlap. `holdAt`: see
+ * holdingWrites (tests only).
  */
-export function journalWriter(write, { intervalMs = 15_000, now = () => Date.now() } = {}) {
+export function journalWriter(write, { intervalMs = 15_000, now = () => Date.now(), holdAt = null } = {}) {
+  write = holdingWrites(write, holdAt)
   let last = 0
   let pending = null
   let inFlight = Promise.resolve()

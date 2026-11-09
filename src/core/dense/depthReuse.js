@@ -13,7 +13,7 @@ import { resolveDepthMethod, qualityToMaxDim } from './depthMap.js'
 import { isDepthIndexStale } from './depthMapCodec.js'
 
 // Settings that only say where and how fast the maps are computed, not what they are.
-const MACHINE = new Set(['memBudgetBytes', 'useGpu', 'keepMaps', '_journalMs'])
+const MACHINE = new Set(['memBudgetBytes', 'useGpu', 'keepMaps', '_journalMs', '_holdAt'])
 
 // What a run with the dialog's settings `s` computes, as the store resolves it
 // (stores/reconstruction/dense.js): Auto to the method it runs (`onGpu`: a GPU backend
