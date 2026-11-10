@@ -9,6 +9,7 @@
 import { cameraCenter } from './geometry.js'
 import { fitSimilarity, applySimilarity } from '../products/georef.js'
 import { SparsePoints } from './sparsePoints.js'
+import { transformCamera } from './modelMerge.js'
 
 const transpose = (R) => [
   [R[0][0], R[1][0], R[2][0]],
@@ -166,15 +167,7 @@ export function alignSecondary(primary, secondary, componentIds, opts = {}) {
       ...diagnostics,
     }
 
-  const transformedCameras = (secondary.cameras || []).map((cam) => {
-    const R = mul(cam.R, Qt)
-    const Rd = [
-      R[0][0] * sim.t[0] + R[0][1] * sim.t[1] + R[0][2] * sim.t[2],
-      R[1][0] * sim.t[0] + R[1][1] * sim.t[1] + R[1][2] * sim.t[2],
-      R[2][0] * sim.t[0] + R[2][1] * sim.t[1] + R[2][2] * sim.t[2],
-    ]
-    return { ...cam, R, t: cam.t.map((v, i) => sim.scale * v - Rd[i]) }
-  })
+  const transformedCameras = (secondary.cameras || []).map((cam) => transformCamera(cam, sim))
   const component = new Set(componentIds)
   const src = secondary.points ?? SparsePoints.empty()
   const keep = src.indicesWhere((i) => {

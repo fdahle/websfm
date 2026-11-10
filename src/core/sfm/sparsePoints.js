@@ -220,6 +220,55 @@ export class SparsePoints {
     return new SparsePoints({ pos: outPos, col, colorMask, viewUuids: this.viewUuids, vcount, vcam, vkp, vx, vy })
   }
 
+  /**
+   * The same points without their views in `drop` (a Set of uuids); a point left with
+   * fewer than `minViews` views goes. → { points, kept: Uint32Array of source indices }.
+   */
+  withoutViews(drop, minViews = 2) {
+    if (!drop.size) return { points: this, kept: this.indicesWhere(() => true) }
+    const dropCam = Uint8Array.from(this.viewUuids, (u) => (drop.has(u) ? 1 : 0))
+    const kept = [],
+      counts = []
+    let total = 0
+    for (let i = 0, n = this.length; i < n; i++) {
+      let c = 0
+      for (let k = this.vstart[i]; k < this.vstart[i + 1]; k++) if (!dropCam[this.vcam[k]]) c++
+      if (c >= minViews) {
+        kept.push(i)
+        counts.push(c)
+        total += c
+      }
+    }
+    const m = kept.length
+    const pos = new Float64Array(3 * m)
+    const col = this.col ? new Uint8Array(3 * m) : null
+    const colorMask = this.col && this.colorMask ? new Uint8Array(m) : null
+    const vcount = Uint32Array.from(counts)
+    const vcam = new Uint32Array(total),
+      vkp = new Uint32Array(total)
+    const vx = this.vx ? new Float32Array(total) : null,
+      vy = this.vy ? new Float32Array(total) : null
+    let o = 0
+    for (let j = 0; j < m; j++) {
+      const i = kept[j]
+      pos.set(this.pos.subarray(3 * i, 3 * i + 3), 3 * j)
+      if (col) col.set(this.col.subarray(3 * i, 3 * i + 3), 3 * j)
+      if (colorMask) colorMask[j] = this.colorMask[i]
+      for (let k = this.vstart[i]; k < this.vstart[i + 1]; k++) {
+        if (dropCam[this.vcam[k]]) continue
+        vcam[o] = this.vcam[k]
+        vkp[o] = this.vkp[k]
+        if (vx) {
+          vx[o] = this.vx[k]
+          vy[o] = this.vy[k]
+        }
+        o++
+      }
+    }
+    const points = new SparsePoints({ pos, col, colorMask, viewUuids: this.viewUuids, vcount, vcam, vkp, vx, vy })
+    return { points, kept: Uint32Array.from(kept) }
+  }
+
   /** Indices of the points `keep(i)` accepts. */
   indicesWhere(keep) {
     const out = []
