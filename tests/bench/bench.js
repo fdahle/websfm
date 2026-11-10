@@ -195,6 +195,48 @@ async function appCameraCheckOf(cloud, truth) {
   }
 }
 
+// The sparse points seen in ≥ 3 photos, through the app's own georeference, against a
+// reference DEM (`raster`: name or its start) inside a polygon layer (`layer`: name),
+// e.g. rock left out of a Hold to a reference DEM: median, NMAD and RMS of point − DEM.
+async function demCheckOf(cloud, { raster, layer = null }) {
+  const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+  const { demLayerTest } = await import('/src/composables/demLayerTest.js')
+  const { isGeographic } = await import('/src/core/crs.js')
+  const ext = useExternalStore()
+  const crs = projects.currentCrs
+  const g = cloud && !isGeographic(crs) ? await recon.georeference() : null
+  if (!g) return { error: 'no georeference in a projected CRS' }
+  const meta = ext.rasters.find((r) => r.kind === 'dem' && (r.name === raster || r.name.startsWith(raster)))
+  if (!meta) return { error: `no reference DEM "${raster}"` }
+  const set = layer ? useFootprintsStore().sets.find((l) => l.name === layer) : null
+  if (layer && !set) return { error: `no layer "${layer}"` }
+  const include = set ? await demLayerTest({ crs }, [set], crs) : null
+  const sampler = await ext.referenceDemSampler(meta.id, crs, { strict: true, datum: g.verticalDatum ?? 'unknown' })
+  const pts = cloud.points
+  const dz = []
+  for (let i = 0; i < pts.length; i++) {
+    if (pts.viewCount(i) < 3) continue
+    const q = applySimilarity(g.sim, pts.xyz(i))
+    if (include && !include(q[0], q[1])) continue
+    const h = sampler.sample(q[0], q[1])
+    if (h == null || !Number.isFinite(h)) continue
+    dz.push(q[2] - h)
+  }
+  if (!dz.length) return { method: g.method, count: 0 }
+  const sorted = [...dz].sort((a, b) => a - b)
+  const median = sorted[sorted.length >> 1]
+  const dev = dz.map((v) => Math.abs(v - median)).sort((a, b) => a - b)
+  return {
+    method: g.method,
+    count: dz.length,
+    median,
+    nmad: 1.4826 * dev[dev.length >> 1],
+    rms: Math.sqrt(dz.reduce((a, v) => a + v * v, 0) / dz.length),
+    datum: g.verticalDatum ?? 'unknown',
+    conversion: sampler.conversion ?? null,
+  }
+}
+
 async function checkpoints(cloud, pc, offsetPx = 0) {
   const imgByStem = new Map(images.images.map((i) => [stem(i.name), i]))
   const imagesById = new Map(images.images.map((i) => [i.id, i]))
@@ -2573,6 +2615,7 @@ window.bench = {
     priorShift = null,
     priorSigma = null,
     priorDatum = null,
+    demCheck = null,
     ...overrides
   } = {}) {
     const settings = { ...withPreset(RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, preset), ...overrides }
@@ -2588,8 +2631,14 @@ window.bench = {
       if (!id) throw new Error("reconstruct: demHold.referenceId 'last' but no raster imported")
       const { DEM_HOLD_DEFAULTS } = await import('/src/core/defaults.user.js')
       const declared = ext.rasterById(id)?.verticalAccuracy
+      // `stable`: a polygon layer by name (a `layers` stage brought it in).
+      const stable = settings.demHold.stable
+        ? useFootprintsStore().sets.find((l) => l.name === settings.demHold.stable)
+        : null
+      if (settings.demHold.stable && !stable) throw new Error(`reconstruct: no layer "${settings.demHold.stable}"`)
       settings.demHold = {
         ...settings.demHold,
+        ...(stable ? { stableSetId: stable.id } : {}),
         referenceId: id,
         sigma: settings.demHold.sigma ?? (declared > 0 ? declared : DEM_HOLD_DEFAULTS.sigma),
       }
@@ -2618,12 +2667,14 @@ window.bench = {
         if (priorSigma) Object.assign(t.p, { accuracyX: priorSigma, accuracyY: priorSigma, accuracyZ: priorSigma })
         if (priorDatum) t.p.verticalDatum = priorDatum
       }
-    let appCameraCheck = null
+    let appCameraCheck = null,
+      demCheckResult = null
     try {
       await recon.reconstruct(settings, report)
       // Camera centres through the app's georeference (pose fit, GCP fit or DEM-held
       // frame), fitted while the run's positions are in place, against the true ones.
       appCameraCheck = await appCameraCheckOf(recon.mainSparseCloud, truePoses)
+      if (demCheck) demCheckResult = await demCheckOf(recon.mainSparseCloud, demCheck)
     } finally {
       if (tamper)
         for (const t of truePoses)
@@ -2705,6 +2756,7 @@ window.bench = {
       timings: s?.timings ?? null,
       positionCheck,
       appCameraCheck,
+      demCheck: demCheckResult,
       checkpointCheck,
       checkpointOffsets,
       gcpResiduals,

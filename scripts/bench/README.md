@@ -134,7 +134,11 @@ project:
   adjustment as camera priors.
 - `recon.priorShift: [dx, dy, dz]` (project units), `recon.priorSigma` (m) and
   `recon.priorDatum` (a vertical datum id): every camera position shifted, given that
-  accuracy and height datum for the run, then restored: drone GPS made from RTK positions. The result's `appCameraCheck` scores the camera centres through the app's
+  accuracy and height datum for the run, then restored: drone GPS made from RTK positions.
+- `recon.demHold: { referenceId: 'last', sigma, stable }`: Georeference ▸ Hold to a reference
+  DEM, `stable` a polygon layer by name (from a `layers` stage). `recon.demCheck: { raster,
+  layer }` scores the ≥ 3-view sparse points, through the app's georeference, against that
+  reference DEM inside the layer (median, NMAD, RMS of point − DEM): rock left out of the hold. The result's `appCameraCheck` scores the camera centres through the app's
   own georeference (pose fit, GCP fit or a DEM-held frame) against the true positions.
 
 ## Accuracy: `positionCheck`
