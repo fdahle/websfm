@@ -78,7 +78,7 @@ less than 1 mm, so it gets no row of its own.
 
 | block | run | checkpoints | mean height error | cameras vs RTK | time |
 | --- | --- | --- | --- | --- | --- |
-| quarry (347, 9 checkpoints) | WebSfM | 6.4 / 30.2 | +29.5 | 10.4 / 5.4 | 328 |
+| quarry (347, 9 checkpoints) | WebSfM | 6.4 / 30.2 | +29.5 | 10.4 / 5.4 | 327 |
 | | Metashape | **3.8 / 17.8** | +17.6 | **4.5 / 3.2** | 295 |
 | GeoScan PUTI (444, 15 checkpoints) | WebSfM | 3.4 / 11.1 | +9.8 | 1.8 / 1.2 | 351 |
 | | Metashape | **2.4 / 6.4** | +4.1 | **0.5 / 1.0** | 418 |

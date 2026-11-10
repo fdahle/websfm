@@ -343,6 +343,27 @@ in levels, the figure the T4 work was measured with); `--pages` writes the atlas
 and `--glb` the textured mesh. The `meshexport` stage exports the browser's own textured
 mesh as GLB and OBJ.
 
+## The scoreboard (`scoreboard.mjs`)
+
+The comparison tables of [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md) come from one
+manifest, `scoreboard.json`. It lists each table's jobs: a tool (`websfm`, `metashape`,
+`metashape-hist`, `colmap`, `odm`), the bench config by name, and any extra arguments.
+`scoreboard.mjs` runs every job, one after another, into a dated folder. It scores each
+tool's summary in the same terms and writes the tables to `scoreboard.md`, with the config
+named in each row:
+
+```sh
+node scripts/bench/scoreboard.mjs --only film --dry-run       # the commands it would run
+node scripts/bench/scoreboard.mjs --out /data1/websfm_eval/scoreboard-2026-11-12 --pack
+node scripts/bench/scoreboard.mjs --out <dir> --tabulate      # tables again, no runs
+```
+
+A job whose summary is already in its folder is skipped, so a run that stopped resumes
+where it left off. The configs used are copied to `<out>/configs/`. `--pack` bundles them
+with the logs and summaries into `<out>.tar.gz`, without the photos, models or rasters.
+That archive is the release asset for that benchmark date. The ETH3D tables are scored by
+`camera-check.mjs` and `eth3d_score.py` and are not in the manifest yet.
+
 ## Historical blocks (`hist`)
 
 `hist/` scores film and satellite frame blocks (the Grenoble benchmark layout:

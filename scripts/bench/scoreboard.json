@@ -1,0 +1,155 @@
+{
+  "about": "Tables of docs/BENCHMARKS.md that scoreboard.mjs runs and writes. Configs are scripts/bench/configs/<config>.json (local, gitignored); a run copies them to <out>/configs/.",
+  "tables": [
+    {
+      "id": "drone-free",
+      "title": "Drone blocks, no positions in the solve",
+      "unit": "cm",
+      "columns": ["cameras", "position", "time"],
+      "jobs": [
+        { "id": "quarry-websfm", "block": "quarry", "label": "WebSfM", "tool": "websfm", "config": "nm-quarry347" },
+        { "id": "quarry-colmap", "block": "quarry", "label": "COLMAP", "tool": "colmap", "config": "nm-quarry347" },
+        {
+          "id": "quarry-glomap",
+          "block": "quarry",
+          "label": "COLMAP GLOMAP",
+          "tool": "colmap",
+          "config": "nm-quarry347",
+          "args": ["--mapper", "global_mapper"]
+        },
+        {
+          "id": "quarry-metashape",
+          "block": "quarry",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "nm-quarry347"
+        },
+        {
+          "id": "quarry-odm",
+          "block": "quarry",
+          "label": "ODM",
+          "tool": "odm",
+          "config": "nm-quarry347",
+          "args": ["--mode", "sfm", "--gpu"]
+        },
+        { "id": "puti-websfm", "block": "GeoScan PUTI", "label": "WebSfM", "tool": "websfm", "config": "nm-puti444" },
+        { "id": "puti-colmap", "block": "GeoScan PUTI", "label": "COLMAP", "tool": "colmap", "config": "nm-puti444" },
+        {
+          "id": "puti-glomap",
+          "block": "GeoScan PUTI",
+          "label": "COLMAP GLOMAP",
+          "tool": "colmap",
+          "config": "nm-puti444",
+          "args": ["--mapper", "global_mapper"]
+        },
+        {
+          "id": "puti-metashape",
+          "block": "GeoScan PUTI",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "nm-puti444"
+        },
+        {
+          "id": "puti-odm",
+          "block": "GeoScan PUTI",
+          "label": "ODM",
+          "tool": "odm",
+          "config": "nm-puti444",
+          "args": ["--mode", "sfm", "--gpu"]
+        },
+        {
+          "id": "usegeo-websfm",
+          "block": "UseGeo dataset 1",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "nm-usegeo1"
+        },
+        {
+          "id": "usegeo-metashape",
+          "block": "UseGeo dataset 1",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "nm-usegeo1"
+        },
+        {
+          "id": "usegeo-odm",
+          "block": "UseGeo dataset 1",
+          "label": "ODM",
+          "tool": "odm",
+          "config": "nm-usegeo1",
+          "args": ["--mode", "sfm", "--gpu"]
+        }
+      ]
+    },
+    {
+      "id": "drone-rtk",
+      "title": "Drone blocks, RTK positions in the solve",
+      "unit": "cm",
+      "columns": ["checkpoints", "meanHeight", "position", "time"],
+      "jobs": [
+        {
+          "id": "rtk-quarry-websfm",
+          "block": "quarry",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "r3-rtk-quarry"
+        },
+        {
+          "id": "rtk-quarry-metashape",
+          "block": "quarry",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "r3-rtk-quarry",
+          "checkpoints": true
+        },
+        {
+          "id": "rtk-puti-websfm",
+          "block": "GeoScan PUTI",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "main-rtk-puti444"
+        },
+        {
+          "id": "rtk-puti-metashape",
+          "block": "GeoScan PUTI",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "main-rtk-puti444",
+          "checkpoints": true
+        }
+      ]
+    },
+    {
+      "id": "film",
+      "title": "Historical aerial film, the same GCPs in both bundle adjustments",
+      "unit": "m",
+      "columns": ["cameras", "checkpoints", "dem", "coverage"],
+      "jobs": [
+        { "id": "cg-websfm", "block": "Casa Grande 1978", "label": "WebSfM", "tool": "websfm", "config": "r3-cg" },
+        {
+          "id": "cg-metashape",
+          "block": "Casa Grande 1978",
+          "label": "Metashape defaults",
+          "tool": "metashape-hist",
+          "config": "r3-cg"
+        },
+        {
+          "id": "cg-metashape-more",
+          "block": "Casa Grande 1978",
+          "label": "Metashape, 80,000 points + guided",
+          "tool": "metashape-hist",
+          "config": "r3-cg",
+          "args": ["--keypoints", "80000", "--tiepoints", "0", "--guided"]
+        },
+        { "id": "il-websfm", "block": "Iceland 1980", "label": "WebSfM", "tool": "websfm", "config": "r3-il" },
+        {
+          "id": "il-metashape",
+          "block": "Iceland 1980",
+          "label": "Metashape defaults",
+          "tool": "metashape-hist",
+          "config": "r3-il"
+        }
+      ]
+    }
+  ]
+}
