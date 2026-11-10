@@ -211,10 +211,34 @@ async function checkpoints(cloud, pc, offsetPx = 0) {
     tri.filter((t) => !excluded.has(String(t.label))),
   )
   const r4 = (v) => (v == null ? null : Math.round(v * 1e4) / 1e4)
+  // The same points through the app's own georeference (what a user's products are
+  // built in: a pose fit, a GCP fit or a DEM-held frame) into the project CRS, against
+  // each GCP's survey converted to it; heights as declared (both ellipsoidal here).
+  let app = null
+  const { isGeographic, transform } = await import('/src/core/crs.js')
+  const g = offsetPx === 0 && !isGeographic(projects.currentCrs) ? await recon.georeference() : null
+  if (g) {
+    const d = tri
+      .filter((t) => t.sfm && !excluded.has(String(t.label)))
+      .map((t) => {
+        const q = applySimilarity(g.sim, t.sfm)
+        const [x, y] = transform([t.lon, t.lat], 'EPSG:4326', g.crs)
+        return [q[0] - x, q[1] - y, q[2] - t.h]
+      })
+    const rmsOf = (v) => (v.length ? Math.sqrt(v.reduce((a, b) => a + b * b, 0) / v.length) : null)
+    app = {
+      method: g.method,
+      count: d.length,
+      rmsH: r4(rmsOf(d.map((v) => Math.hypot(v[0], v[1])))),
+      rmsV: r4(rmsOf(d.map((v) => v[2]))),
+      meanU: r4(d.length ? d.reduce((a, v) => a + v[2], 0) / d.length : null),
+    }
+  }
   return {
     count: r.count,
     of: r.of,
     excluded: [...excluded],
+    app,
     rmsH: r4(r.rmsH),
     rmsV: r4(r.rmsV),
     meanE: r4(r.meanE),

@@ -64,8 +64,9 @@ A block held only by drone GPS, or by a few GCPs, can bend: it domes or dishes b
 metres at its edges while every residual looks fine. **Hold to a reference DEM**
 rebuilds the sparse model with each tie point over stable ground pulled toward a
 reference DEM's height ([reference DEM hold](help:reference-dem-hold)), so the block
-keeps the ground's shape. The GCPs or camera positions still place it; the DEM only
-keeps it from bending. Use it for blocks without good control and for historical
+keeps the ground's shape. GCPs still place it. Placed by camera positions alone, its
+height is set between them and the DEM by their accuracies, so loose drone GPS
+heights give way to the DEM. Use it for blocks without good control and for historical
 photos. It is experimental: keep a few GCPs as check points to see what it did.
 
 ## Reference DEM to hold

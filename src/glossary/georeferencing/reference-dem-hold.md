@@ -22,8 +22,10 @@ few metres.
 The pull is along the vertical only, as a coarse DEM says nothing reliable about
 horizontal position. Points far from the DEM's height (a new building, moved ice, a
 blunder) are left out, and the hold is rebuilt over two rounds, as a point that moves
-sideways meets the DEM elsewhere. The GCPs or camera positions still place the model;
-the DEM only keeps its shape.
+sideways meets the DEM elsewhere. GCPs still place the model and the DEM only keeps
+its shape. Placed by camera positions alone, the model's height is set between them
+and the DEM, each by its accuracy: drone GPS heights a metre off give way to thousands
+of held tie points.
 
 It is not [DEM co-registration](help:dem-coregistration), which moves a finished DEM
 as a whole and cannot take a bend out. Nor does it fix a wrong camera model: the

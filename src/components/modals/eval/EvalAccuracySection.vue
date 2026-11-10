@@ -184,9 +184,14 @@ const gcpTiles = computed(() => {
   if (method.value)
     t.push({
       label: 'Georef source',
-      value: method.value === 'gcps' ? 'GCPs' : 'poses',
-      tone: method.value === 'gcps' ? undefined : 'warn',
-      hint: method.value === 'poses' ? 'pose fit — <3 GCPs' : undefined,
+      value: method.value === 'gcps' ? 'GCPs' : method.value === 'dem-hold' ? 'reference DEM' : 'poses',
+      tone: method.value === 'poses' ? 'warn' : undefined,
+      hint:
+        method.value === 'poses'
+          ? 'pose fit — <3 GCPs'
+          : method.value === 'dem-hold'
+            ? 'heights from the reference DEM, placed by the camera positions'
+            : undefined,
     })
   return t
 })

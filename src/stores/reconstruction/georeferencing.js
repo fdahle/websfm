@@ -46,6 +46,9 @@ const inverseVariance3d = (p) => {
 //
 //  • GCPs beat poses. When ≥3 GCPs triangulate they define the fit; imported camera
 //    poses are the fallback. GCPs are the accuracy-defining source.
+//  • A model held to a reference DEM by its camera positions (F13) is placed in the
+//    frame it was solved in (`heldFrame`, method 'dem-hold'), not refitted to the
+//    cameras: the DEM set its heights. GCPs still beat it.
 //  • The reports are NOT robust, deliberately. `triangulateAllGcps` is called
 //    without outlier rejection here, and `poseResidualReport` drops nothing —
 //    discarding a bad mark or a drifting camera would hide exactly the
@@ -69,6 +72,8 @@ export function createGeoreferencing({
   save,
   log,
   modelStamp = () => null,
+  // The main model's heldFrame (sparseRun.js heldFrameOf), or null.
+  heldFrame = () => null,
   // image → { dist, selfCal, fiducial } from the run record (displayFrame.js). Marks
   // are clicked on the raw scan; the cameras project into the pinhole/canonical
   // frame, so every triangulation here maps them first. Null ⇒ identity.
@@ -276,6 +281,35 @@ export function createGeoreferencing({
     const gcpPairs = await gcpGeorefPairs()
     if (evidenceKey.value !== evidenceAtStart) return null
     const usingGcps = gcpPairs.length >= 3
+    const held = usingGcps ? null : heldFrame()
+    if (held && held.crs === currentCrs()) {
+      // How far the camera positions sit from where the DEM-held solve put them.
+      const posePairs = georefPairs()
+      const sq = posePairs.map((p) => {
+        const q = applySimilarity(held.sim, p.src)
+        return (q[0] - p.dst[0]) ** 2 + (q[1] - p.dst[1]) ** 2 + (q[2] - p.dst[2]) ** 2
+      })
+      const rms = sq.length ? Math.sqrt(sq.reduce((a, b) => a + b, 0) / sq.length) : null
+      georef.value = withCoregistration({
+        evidenceKey: evidenceAtStart,
+        sim: { ...held.sim, R: held.sim.R.map((row) => [...row]), t: [...held.sim.t] },
+        crs: currentCrs(),
+        rms,
+        count: posePairs.length,
+        method: 'dem-hold',
+        verticalDatum: held.verticalDatum ?? 'unknown',
+      })
+      log(
+        `Georeference: placed as the solve held it to the reference DEM (${currentCrs()}, ` +
+          `scale ${held.sim.scale.toPrecision(4)}); the camera positions sit ` +
+          `${rms == null ? '–' : rms.toPrecision(3)} from it (RMS of ${posePairs.length})`,
+        'success',
+        'Products',
+      )
+      healthDirty.value++
+      save()
+      return georef.value
+    }
     // The vertical datum the fitted heights are in, recorded on the fit and so on
     // every product built in it (a DEM compared with a reference DEM converts the
     // reference to it): the one datum all control shares, else unknown.
@@ -446,17 +480,21 @@ export function createGeoreferencing({
     // How well the fit itself is known (core/products/georef.js similarityPrecision),
     // from the pairs it was fitted to: the control GCPs, or the camera poses.
     const controls = results.filter(({ gcp, tri }) => tri && groundControl(gcp))
+    // A DEM-held frame was not fitted to any of these pairs: no fit precision.
+    const method = validGeoref.value?.method
     const fitPairs =
-      validGeoref.value?.method === 'poses'
+      method === 'poses'
         ? georefPairs()
-        : controls.map(({ gcp, tri }) => ({
-            src: [tri.x, tri.y, tri.z],
-            dst: [gcp.x, gcp.y, gcp.z],
-            weight: inverseVariance3d(gcp),
-            precision: precisionFromGcp(gcp),
-          }))
+        : method === 'gcps'
+          ? controls.map(({ gcp, tri }) => ({
+              src: [tri.x, tri.y, tri.z],
+              dst: [gcp.x, gcp.y, gcp.z],
+              weight: inverseVariance3d(gcp),
+              precision: precisionFromGcp(gcp),
+            }))
+          : []
     const fitPrecision = sim && fitPairs.length >= 3 ? similarityPrecision(fitPairs, sim) : null
-    const inFit = (gcp) => validGeoref.value?.method !== 'poses' && groundControl(gcp)
+    const inFit = (gcp) => method === 'gcps' && groundControl(gcp)
     // A residual's normalisation: a point the fit was made to sits closer to the fit
     // than its own σ says (Σ − Σŷ, Baarda's redundancy); an independent point carries
     // the fit's uncertainty on top of its own (Σ + Σŷ). Falls back to Σ alone when the
@@ -553,7 +591,7 @@ export function createGeoreferencing({
         const residual = predicted.map((v, i) => v - [withheld.gcp.x, withheld.gcp.y, withheld.gcp.z][i])
         // The prediction carries the uncertainty of a fit made without this point.
         const src = [withheld.tri.x, withheld.tri.y, withheld.tri.z]
-        const k = validGeoref.value?.method === 'poses' ? -1 : controls.indexOf(withheld)
+        const k = validGeoref.value?.method === 'gcps' ? controls.indexOf(withheld) : -1
         const without = fitPrecision && k >= 0 ? fitPrecision.predictedWithout(k, src) : null
         const nr = normalizeResidual(withheld.gcp, src, residual, without ? { cov: without, inFit: false } : null)
         const row = rows.find((r) => r.gcpId === withheld.gcp.id)

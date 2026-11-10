@@ -173,6 +173,27 @@ export function createSparseRun({
     return { gcps, cameraPriors, surveyFrame }
   }
 
+  // F13: the frame a model held to a reference DEM by its camera positions was solved
+  // in (bundleSession.js runDemAnchoredBundleAdjust → record.sim, SfM → survey frame),
+  // turned with the model when it was oriented Z-up (X' = U·X, so R' = R·Uᵀ). The
+  // georeference places the model in it instead of refitting it to the cameras, which
+  // would lift a block held onto the DEM back onto the GPS heights.
+  // → { sim: { scale, R, t, local }, crs, verticalDatum } or null.
+  function heldFrameOf(record, survey, upTurn) {
+    const sim = record?.sim
+    if (!sim || !survey?.surveyFrame) return null
+    const U = upTurn
+    const R = U
+      ? sim.R.map((row) => [0, 1, 2].map((j) => row[0] * U[j][0] + row[1] * U[j][1] + row[2] * U[j][2]))
+      : sim.R
+    const datums = new Set(posesStore.poses.filter((p) => p.enabled !== false).map((p) => p.verticalDatum ?? 'unknown'))
+    return {
+      sim: { scale: sim.scale, R, t: [...sim.t], local: { ...survey.surveyFrame } },
+      crs: projects.currentCrs,
+      verticalDatum: datums.size === 1 ? [...datums][0] : 'unknown',
+    }
+  }
+
   // F13 — Georeference ▸ Hold to a reference DEM: the reference sampled once over the
   // block, in the run's survey frame (surveyConstraintInput) and in the vertical datum
   // of the control that places the model, with what is not stable ground left out
@@ -727,9 +748,11 @@ export function createSparseRun({
         // come out upside-down). For aerial surveys the cameras look down, so we
         // rotate the whole model Z-up — cameras above the ground — before storing.
         // An extension is in the model's frame already.
+        let upTurn = null
         if (!base && projects.currentSceneType === 'aerial') {
           const R = aerialUpRotation(camMap)
           if (R) {
+            upTurn = R
             const oriented = rotateReconstruction(camMap, pts, R, { inPlace: true })
             camMap = oriented.cameras
             pts = oriented.points
@@ -767,7 +790,10 @@ export function createSparseRun({
           if (grown && base.style !== undefined) grown.style = base.style
           if (grown && base.visible !== undefined) grown.visible = base.visible
         } else {
-          upsertSparseCloud(camMap, pts, { calibration: calibrationFor(camMap, result.summary) })
+          upsertSparseCloud(camMap, pts, {
+            calibration: calibrationFor(camMap, result.summary),
+            heldFrame: heldFrameOf(result.summary?.demHold, survey, upTurn),
+          })
           // A secondary component that could not satisfy the conservative shared-camera
           // alignment gates is still a valid reconstruction. Preserve it as a separate
           // sparse cloud rather than discarding it or forcing it into the primary frame.

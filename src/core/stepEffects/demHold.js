@@ -33,7 +33,10 @@ export function demHoldEffects(
     `Each tie point seen in three or more photos is held to the height of ${ref} there, ±\u00a0${s.sigma}\u00a0m${why}, ` +
     'along the vertical only: the photos keep where it lies. ' +
     `Up to ${fmtCount(SFM_TUNING.demHoldMaxAnchors)} tie points spread over the block, in ` +
-    `${SFM_TUNING.demHoldRounds} rounds, with the focal length and distortion re-estimated; the ${frame} place the model on it.`
+    `${SFM_TUNING.demHoldRounds} rounds, with the focal length and distortion re-estimated; ` +
+    (gcps >= 3
+      ? `the ${frame} place the model on it.`
+      : `the ${frame} place the model on it, its height set between them and the DEM by their accuracies.`)
   const stable = stableName
     ? `Only tie points inside "${stableName}" are held: ground that changed stays free.`
     : `Tie points anywhere on ${ref} are held, except those far from its height. Ground that changed since ` +

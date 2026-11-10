@@ -771,6 +771,10 @@ export const useReconstructionStore = registerProjectStore(
         // The cloud's own calibration (displayFrame.js calibrationSnapshot): the lens and
         // film frame its cameras were solved in. Kept from `prev` when not given.
         calibration,
+        // The frame a reconstruction held to a reference DEM was solved in
+        // (sparseRun.js heldFrameOf); the georeference places the model in it. Never
+        // kept from `prev`: any other solve of the cameras must earn its own.
+        heldFrame = null,
       } = opts
       const idx = replaceId ? clouds.value.findIndex((c) => c.id === replaceId && c.kind === 'sparse') : -1
       const prev = idx >= 0 ? clouds.value[idx] : null
@@ -789,6 +793,7 @@ export const useReconstructionStore = registerProjectStore(
         cameras: markRaw(cameras),
         points: markRaw(points),
         ...((calibration ?? prev?.calibration) ? { calibration: markRaw(calibration ?? prev.calibration) } : {}),
+        ...(heldFrame ? { heldFrame: markRaw(heldFrame) } : {}),
       }
       if (idx >= 0) clouds.value.splice(idx, 1, cloud)
       else clouds.value.push(cloud)
@@ -1104,6 +1109,7 @@ export const useReconstructionStore = registerProjectStore(
       coregistration,
       healthDirty,
       modelStamp: () => (mainSparseCloud.value ? [mainSparseCloud.value.id, mainSparseCloud.value.createdAt] : null),
+      heldFrame: () => mainSparseCloud.value?.heldFrame ?? null,
       poses: () => posesStore.poses,
       gcps: () => gcpsStore.gcps,
       currentCrs: () => projects.currentCrs,

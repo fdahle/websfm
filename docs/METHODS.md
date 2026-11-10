@@ -732,6 +732,8 @@ Mahalanobis objective.
 
 Correspondences are **triangulated GCPs ↔ surveyed coordinates** when ≥ 3 GCPs
 triangulate (preferred: GCPs define accuracy), else **camera centres ↔ camera positions**.
+A model held to a reference DEM by its camera positions is not fitted: it is placed in the
+frame of the hold's last round, moved in height between the cameras and the DEM (§6.5).
 `gcpAccuracyReport()` gives the per-GCP CRS residual and per-mark reprojection error.
 
 **Camera positions** come from imported pose files (preferred) or EXIF GPS, transformed
@@ -822,6 +824,20 @@ weak height observations from it constrain exactly that low-frequency mode.
 - **Sampling**: the worker receives the reference once as a height grid in the survey frame
   (`core/sfm/demHoldGrid.js`, ≤ 400 × 400 over the cameras and GCPs grown by half the
   block, NaN off stable ground), in the vertical datum of the control, sampled bilinearly.
+- **Placement**: with ≥ 3 GCPs the model is refitted to them afterwards (§6.3), as they
+  are accurate. With camera positions alone a refit would undo the hold's height: the
+  cheapest way for the solve to meet the DEM is often to move the whole block against
+  loose positions (drone GPS), and a fit to those positions lifts it back. So each round
+  fits the frame to the cameras (an outer iteration that also pulls a badly guessed focal
+  in), and the model is placed in the last round's frame (`summary.demHold.sim`, kept on
+  the cloud as `heldFrame`, georeference method `dem-hold`). A rigid vertical shift of the
+  block changes no image residual, and at a DEM's σ of metres the anchors and positions
+  are ~10⁻⁴ of the cost, so the iterative solve leaves that direction where it starts;
+  the frame is moved by its least-squares value instead,
+  `d = W_dem·median(dz) / (W_dem + W_cams)`, W the summed inverse vertical variances.
+  Measured on a 444-photo RTK block with its positions loosened to ±1.3/1.8 m and the
+  Copernicus GLO-30 tile (σ 2 m): checkpoint heights in the app's georeference
+  101.6 → 17.3 cm RMS (mean +100 → −11 cm); σ 0.5 m bends the shape more (29 cm).
 
 ### 6.6 Guided marking
 

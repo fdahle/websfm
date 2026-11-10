@@ -14,7 +14,8 @@ import {
 } from './sfm.js'
 import { resolveK } from './reconstruction.js'
 import { distortPixel, undistortPixel } from './distortion.js'
-import { projectPoint } from './geometry.js'
+import { projectPoint, cameraCenter } from './geometry.js'
+import { applySimilarity } from '../products/georef.js'
 import { aerialBlock } from './syntheticScene.testutil.js'
 import { Uint32PairList } from './matchCodec.js'
 import { buildDemHoldGrid } from './demHoldGrid.js'
@@ -911,7 +912,8 @@ describe('reconstruct — held to a reference DEM (F13)', () => {
   // itself, demHoldGrid.js) describes: the pass runs both rounds in the GCPs' frame,
   // holds the points to it, and records what it did in the summary.
   const ground = (x, y) => 10 + 0.2 * x - 0.1 * y
-  function scene(withGcps) {
+  // `offLine`: c0 moved 1 off the line of the others, so camera positions place it.
+  function scene(withGcps, { offLine = false } = {}) {
     const rng = mulberry32(7)
     const N = 80
     const world = Array.from({ length: N }, () => {
@@ -920,7 +922,7 @@ describe('reconstruct — held to a reference DEM (F13)', () => {
       return [x, y, ground(x, y)]
     })
     const centers = [
-      [0, 0, 0],
+      [0, offLine ? 1 : 0, 0],
       [2, 0, 0],
       [-2, 0, 0],
     ]
@@ -962,7 +964,7 @@ describe('reconstruct — held to a reference DEM (F13)', () => {
         }))
       : []
     const grid = buildDemHoldGrid({ x0: -4, y0: -3, x1: 4, y1: 3 }, ground, { maxSide: 81 })
-    return { images, pairs, gcps, demHold: { grid, sigma: 0.05, reference: 'plane' } }
+    return { images, pairs, gcps, centers, demHold: { grid, sigma: 0.05, reference: 'plane' } }
   }
 
   it('holds the tie points to the DEM in the frame of the GCPs', async () => {
@@ -979,6 +981,43 @@ describe('reconstruct — held to a reference DEM (F13)', () => {
     expect(rec.rounds[0].used).toBeGreaterThan(50)
     expect(rec.after.nmad).toBeLessThan(0.02)
     expect(Math.abs(rec.after.median)).toBeLessThan(0.02)
+  })
+
+  // Drone GPS: the three camera positions all 0.5 m too high, σ 1 m, no GCPs. The DEM
+  // (σ 0.05 m) must set the heights: the solve lowers the block onto it, and the frame
+  // it was held in is kept for every round and returned, not refitted to the cameras
+  // (a refit lifted the block back each round: median +0.5 m, as PUTI showed).
+  it('sets the heights from the DEM when loose camera positions place the model', async () => {
+    const { centers, ...sc } = scene(false, { offLine: true })
+    const cameraPriors = ['c0', 'c1', 'c2'].map((uuid, i) => ({
+      uuid,
+      x: centers[i][0],
+      y: centers[i][1],
+      z: centers[i][2] + 0.5,
+      accuracyX: 1,
+      accuracyY: 1,
+      accuracyZ: 1,
+    }))
+    const logs = []
+    const out = await reconstruct(
+      { ...sc, cameraPriors, settings: { baIterations: 25 } },
+      { onLog: (m, level, cat) => logs.push([level, cat, m]) },
+    )
+    expect(out.status).toBe('done')
+    const rec = out.summary.demHold
+    expect(rec).toMatchObject({ frame: 'cameras' })
+    expect(rec.rounds).toHaveLength(2)
+    expect(Math.abs(rec.rounds[0].median - 0.5)).toBeLessThan(0.05)
+    expect(Math.abs(rec.after.median)).toBeLessThan(0.05)
+    // The frame it was held in (the store places the model in it): the cameras no
+    // longer sit on their positions, which a refit to them would restore.
+    expect(rec.sim.scale).toBeGreaterThan(0)
+    const off = out.cameras.map((cam) => {
+      const prior = cameraPriors.find((p) => p.uuid === cam.uuid)
+      const q = applySimilarity(rec.sim, cameraCenter(cam))
+      return q[2] - prior.z
+    })
+    expect(Math.max(...off.map(Math.abs))).toBeGreaterThan(0.02)
   })
 
   it('says it is skipped with nothing to place the model', async () => {

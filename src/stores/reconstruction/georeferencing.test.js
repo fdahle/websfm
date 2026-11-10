@@ -226,3 +226,57 @@ it('moves the georeference by a co-registration, keeps it through a refit, and r
   expect(georef.value.fitSim).toBeUndefined()
   scope.stop()
 })
+
+// F13: a model held to a reference DEM by its camera positions is placed in the frame
+// the solve held it in, not refitted to the cameras (which would put it back on their
+// heights); a frame held in another CRS is not used.
+it('places a DEM-held model in its held frame, not a refit to the cameras', async () => {
+  const scope = effectScope()
+  const crs = ref('EPSG:3031')
+  const held = ref(null)
+  const georef = ref(null)
+  const cameras = ref(
+    new Map([
+      ['a', { R, t: [0, 0, 0] }],
+      ['b', { R, t: [-1, 0, 0] }],
+      ['c', { R, t: [0, -1, 0] }],
+    ]),
+  )
+  const api = scope.run(() =>
+    createGeoreferencing({
+      sparseCameras: cameras,
+      images: ref(['a', 'b', 'c'].map((id) => ({ id, uuid: id }))),
+      georef,
+      healthDirty: ref(0),
+      poses: () => [
+        { imageId: 'a', x: 0, y: 0, z: 0 },
+        { imageId: 'b', x: 2, y: 0, z: 0 },
+        { imageId: 'c', x: 0, y: 2, z: 0 },
+      ],
+      gcps: () => [],
+      currentCrs: () => crs.value,
+      heldFrame: () => held.value,
+      save: vi.fn(),
+      log: vi.fn(),
+    }),
+  )
+  const fitted = await api.georeference()
+  expect(fitted.method).toBe('poses')
+  // The solve lowered the block 0.5 onto the DEM: its frame is the pose fit moved down.
+  held.value = {
+    sim: { ...fitted.sim, t: [fitted.sim.t[0], fitted.sim.t[1], fitted.sim.t[2] - 0.5] },
+    crs: 'EPSG:3031',
+    verticalDatum: 'ellipsoidal',
+  }
+  georef.value = null
+  const placed = await api.georeference()
+  expect(placed.method).toBe('dem-hold')
+  expect(placed.sim.t[2]).toBeCloseTo(fitted.sim.t[2] - 0.5, 9)
+  expect(placed.verticalDatum).toBe('ellipsoidal')
+  expect(placed.rms).toBeCloseTo(0.5, 6)
+  // Held in another CRS: the cameras place it again.
+  held.value = { ...held.value, crs: 'EPSG:3413' }
+  georef.value = null
+  expect((await api.georeference()).method).toBe('poses')
+  scope.stop()
+})

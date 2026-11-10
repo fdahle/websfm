@@ -1243,7 +1243,9 @@ test('a reconstruction held to a reference DEM records the hold', async ({ page 
       { forceKind: 'dem' },
     )
     await recon.reconstruct({ demHold: { referenceId: meta.id, stableSetId: null, sigma: 0.5 } })
+    const g = await recon.georeference()
     return {
+      method: g?.method ?? null,
       status: recon.reconStatus,
       cameras: recon.mainSparseCloud?.cameras?.size ?? 0,
       hold: JSON.parse(JSON.stringify(recon.summary?.demHold ?? null)),
@@ -1255,6 +1257,10 @@ test('a reconstruction held to a reference DEM records the hold', async ({ page 
   expect(res.hold.rounds).toHaveLength(2)
   expect(res.hold.rounds[0].used).toBeGreaterThan(300)
   expect(res.hold.after.nmad).toBeLessThan(0.3)
+  // Placed by camera positions alone: the model keeps the frame the hold put it in, on
+  // the DEM, not a refit to the cameras.
+  expect(Math.abs(res.hold.after.median)).toBeLessThan(0.1)
+  expect(res.method).toBe('dem-hold')
 })
 
 test("footprints from poses follow the terrain tiles, in the cameras' vertical datum", async ({ page }) => {

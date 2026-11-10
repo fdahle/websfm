@@ -21,6 +21,17 @@ Notable changes to websfm. The format follows
   factorisation added no measurable time (Reconstruct 80 s either way).
 
 ### Changed
+- **Hold to a reference DEM sets the heights of a block placed by drone GPS.** With camera
+  positions and no GCPs, the model is now placed in the frame the hold solved it in, its
+  height set between the camera positions and the DEM by their accuracies; before, a fit
+  to the camera positions afterwards put it back on the GPS heights and the DEM only
+  corrected the shape. Evaluate ▸ Accuracy shows the source as *reference DEM*. With three
+  or more GCPs nothing changes. On a 444-photo RTK block with its positions loosened to
+  ±1.3 / 1.8 m (drone GPS) and the Copernicus DEM at its declared ±2 m, the 15 check
+  points' heights went from 101.6 to 17.3 cm RMS (mean +100 → −11 cm), horizontally
+  15.3 → 12.6 cm; a firmer ±0.5 m gave 29 cm. A rigid shift of the block changes no image
+  residual, so its height is set in closed form (least squares between the positions and
+  the held tie points) rather than left to the iterative solve.
 - **Less noise on flat ground in aerial dense clouds.** Build Dense Cloud ▸ Point position
   puts each point at the mean depth of its own depth map and the maps that agree with it,
   so their noise averages out; Auto does this for aerial and mapping projects and keeps

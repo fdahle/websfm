@@ -173,6 +173,26 @@ describe('sparse cloud round trip', () => {
     expect('calibration' in roundTrip(sparseCloud())).toBe(false)
   })
 
+  it('keeps the frame a DEM-held model was solved in through a save and a load', () => {
+    const heldFrame = {
+      sim: {
+        scale: 2.5,
+        R: [
+          [0, -1, 0],
+          [1, 0, 0],
+          [0, 0, 1],
+        ],
+        t: [3, 4, -0.5],
+        local: { e0: 500000, n0: 6000000, k: 0.9996, R: 6378137 },
+      },
+      crs: 'EPSG:32636',
+      verticalDatum: 'ellipsoidal',
+    }
+    const back = deserializeCloud(JSON.parse(JSON.stringify(serializeCloud(sparseCloud({ heldFrame })))), makeCloudId)
+    expect(back.heldFrame).toEqual(heldFrame)
+    expect('heldFrame' in roundTrip(sparseCloud())).toBe(false)
+  })
+
   it('drops colour when no point has any', () => {
     const records = sparseRecords()
     for (const p of records) delete p.color

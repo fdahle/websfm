@@ -916,7 +916,10 @@ export function createBundleSession(ctx) {
   // re-estimated as in the GCP pass: the bend is the focal and radial distortion
   // trading against the block's curvature, which fixed intrinsics cannot undo.
   //   demHold = { grid (demHoldGrid.js, survey frame), sigma (survey units), reference }
-  // → a record for the run summary, or null when it did not run.
+  // → a record for the run summary ({ reference, sigma, rounds, after, frame: 'gcps' |
+  //   'cameras', sim: the SfM → survey-frame similarity when the cameras placed it,
+  //   shift: the height it was moved by between the cameras and the DEM }),
+  //   or null when it did not run.
   async function runDemAnchoredBundleAdjust() {
     if (!demHold?.grid || fixedCameras?.size) return null
     const sample = demHoldSampler(demHold.grid)
@@ -961,6 +964,15 @@ export function createBundleSession(ctx) {
         maxAnchors: cfg.demHoldMaxAnchors ?? 4000,
       })
     const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`
+    // Each round fits the frame to the cameras again (an outer iteration: a focal far
+    // off at the start, as a default FOV guess, is pulled in over the rounds rather than
+    // traded for the camera heights), then solves with the anchors in it. The model is
+    // placed in the LAST round's frame (record.sim → the cloud's heldFrame), not in a
+    // fresh fit after it: that solve weighed the camera positions against the DEM, and
+    // a refit to the cameras alone would lift a block held onto the DEM back onto loose
+    // GPS heights. GCPs held in the solve are accurate enough to refit to, as the
+    // georeference does after it.
+    let last = null
     for (let round = 0; round < rounds; round++) {
       if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && baIterations > 0)) return null
       const uuidList = [...cameras.keys()]
@@ -986,6 +998,12 @@ export function createBundleSession(ctx) {
         return round ? record : null
       }
       record.rounds.push({ ...stats })
+      last = held
+      // The SfM → survey-frame similarity this round holds the model in (plain data for
+      // the store); the last round's stays.
+      if (held.source === 'cameras')
+        record.sim = { scale: held.fit.scale, R: held.fit.R.map((row) => [...row]), t: [...held.fit.t] }
+      else delete record.sim
       log(
         `Hold to a reference DEM (round ${round + 1}/${rounds}) — ${pluralize(anchors.length, 'tie point')} held ` +
           `(σ ${sigma.toPrecision(3)}), ${stats.rejected} left out as too far from the DEM; height against the ` +
@@ -1014,9 +1032,31 @@ export function createBundleSession(ctx) {
     // Where the tie points sit against the DEM now, in the frame they were held in.
     const uuidList = [...cameras.keys()]
     const ptIds = tracks.liveIds()
-    const held = await frameNow(uuidList, ptIds.length)
+    const held = last?.source === 'cameras' ? last : await frameNow(uuidList, ptIds.length)
     if (held) {
       record.after = anchorsNow(ptIds, held.frame).stats
+      // The block's height between the two kinds of control, in closed form. A shift of
+      // the whole block up or down changes no image residual, so only the camera
+      // positions and the held tie points weigh it, and at a DEM's σ of metres they are a
+      // ten-thousandth of the solve's cost: the iterative solve leaves that direction
+      // where it starts. Its least-squares value, d = W_dem · median / (W_dem + W_cams)
+      // (W the summed inverse vertical variances, in the frame's metres), moves the
+      // frame the model is placed in.
+      if (held.source === 'cameras' && record.sim && Number.isFinite(record.after.median)) {
+        const s2 = held.fit.scale * held.fit.scale
+        const wCams = (held.priorSet?.priors ?? []).reduce((a, p) => a + (p.weights?.[2] ?? 0) / s2, 0)
+        const wDem = record.after.used / (sigma * sigma)
+        const d = (wDem * record.after.median) / (wDem + wCams)
+        record.sim.t[2] -= d
+        record.after = { ...record.after, median: record.after.median - d }
+        record.shift = d
+        log(
+          `Hold to a reference DEM: the block placed ${fmt(-d)} in height, between the camera positions ` +
+            `(${pluralize(held.priorSet?.priors?.length ?? 0, 'camera')}) and the DEM by their weights`,
+          'info',
+          'Reconstruction',
+        )
+      }
       const before = record.rounds[0]
       log(
         `Hold to a reference DEM: height against the DEM NMAD ${before.nmad.toFixed(2)} → ` +

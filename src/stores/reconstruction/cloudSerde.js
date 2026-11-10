@@ -170,6 +170,8 @@ function serializeCloudData(c, opts) {
     // The lens and film frame the cameras were solved in (displayFrame.js
     // calibrationSnapshot): plain data, saved in the document beside the cameras.
     ...(c.calibration ? { calibration: c.calibration } : {}),
+    // The frame a DEM-held reconstruction was solved in (sparseRun.js heldFrameOf).
+    ...(c.heldFrame ? { heldFrame: c.heldFrame } : {}),
     cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
     pointCount: pts.length,
     hasColor: pts.hasColor,
@@ -312,6 +314,7 @@ function deserializeCloudData(c, makeCloudId) {
     ...(c.imported ? { imported: true } : {}),
     ...(c.secondary ? { secondary: true } : {}),
     ...(c.calibration ? { calibration: markRaw(c.calibration) } : {}),
+    ...(c.heldFrame ? { heldFrame: markRaw(c.heldFrame) } : {}),
     cameras: markRaw(cameras),
     points: markRaw(points),
   }
