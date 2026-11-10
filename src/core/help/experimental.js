@@ -25,10 +25,6 @@ export const EXPERIMENTAL = {
     feature: 'AprilTag and ArUco detection',
     unchecked: 'detection on real photos of printed tags',
   },
-  addToModel: {
-    feature: 'Add to the model',
-    unchecked: 'adding photos to a finished model against a full rebuild on real projects',
-  },
 }
 
 /** The hover text of a badge: what is experimental and what to do about it. */

@@ -23,7 +23,6 @@ import {
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { sparseEffects, sparseShorts, sparseModeEffect } from '../../../core/stepEffects/sparse.js'
 import { withShorts } from '../../../core/stepEffects/format.js'
-import ExperimentalBadge from '../../layout/ExperimentalBadge.vue'
 
 const props = defineProps({
   // Set when Georeference hands off here for its GCP-constrained adjustment path.
@@ -184,7 +183,7 @@ provideStepLayout('sparse-reconstruction')
       <SettingsField>
         <template #label><FieldHelp op="sparse-reconstruction" param="addToModel">Mode</FieldHelp></template>
         <SegmentedControl v-model="mode" :options="modes" />
-        <template #hint>{{ modeEffect }} <ExperimentalBadge v-if="adding" id="addToModel" /></template>
+        <template #hint>{{ modeEffect }}</template>
       </SettingsField>
       <SettingsField v-if="adding" label-for="existingCameras">
         <template #label

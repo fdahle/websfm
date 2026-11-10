@@ -43,6 +43,12 @@ Notable changes to websfm. The format follows
   20 m on the steep rock, so the hold stays soft: the tie points' heights on the other
   half went from −7.7 to −6.4 m median against REMA (NMAD 13.3 → 12.9 m). With these
   checks it is no longer marked Experimental.
+- **Add to the model is no longer Experimental.** Sparse Reconstruction ▸ Add to the model
+  places new photos in a finished model as well as a full rebuild does, in about half the
+  time. On a 347-photo quarry with its last 60 photos added, both registered 346 photos,
+  the camera centres agreed to 4.7 cm RMS and both fitted the GPS alike (H 23.5 / 21.9 cm),
+  in 34 s against 72 s; on South Building (98 + 30 photos) both registered all 128 and
+  matched COLMAP's cameras alike (0.14 % of the block), in 15 s against 29 s.
 - **Less noise on flat ground in aerial dense clouds.** Build Dense Cloud ▸ Point position
   puts each point at the mean depth of its own depth map and the maps that agree with it,
   so their noise averages out; Auto does this for aerial and mapping projects and keeps
