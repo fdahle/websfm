@@ -34,6 +34,7 @@ export {
   resolveViewSelection,
   resolveDepthMethod,
   filterDepthMap,
+  filterDepthMapChunked,
   qualityToMaxDim,
   fitDepthQuality,
   autoBestK,

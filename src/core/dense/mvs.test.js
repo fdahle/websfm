@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   filterDepthMap,
+  filterDepthMapChunked,
   depthMapForImage,
   qualityToMaxDim,
   fitDepthQuality,
@@ -72,13 +73,35 @@ describe('filterDepthMap', () => {
       h = 29
     let seed = 7
     const rnd = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31
+    // 20 % holes: mostly partial windows; 2 %: mostly full 3×3 ones (the median network).
+    for (const holes of [0.2, 0.02]) {
+      const depth = Float32Array.from({ length: w * h }, () =>
+        rnd() < holes ? 0 : 5 + 3 * rnd() + (rnd() < 0.05 ? 50 : 0),
+      )
+      for (const radius of [1, 2]) {
+        const opts = { radius, relTol: 0.1 }
+        const a = filterDepthMap(depth, w, h, opts)
+        const b = filterDepthMapReference(depth, w, h, opts)
+        expect([a.removed, a.smoothed]).toEqual([b.removed, b.smoothed])
+        expect(Array.from(a.depth)).toEqual(Array.from(b.depth))
+      }
+    }
+  })
+
+  it('in blocks of rows with pauses between gives the same output', async () => {
+    const w = 41,
+      h = 33
+    let seed = 11
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31
     const depth = Float32Array.from({ length: w * h }, () =>
-      rnd() < 0.2 ? 0 : 5 + 3 * rnd() + (rnd() < 0.05 ? 50 : 0),
+      rnd() < 0.05 ? 0 : 5 + 3 * rnd() + (rnd() < 0.05 ? 50 : 0),
     )
     for (const radius of [1, 2]) {
       const opts = { radius, relTol: 0.1 }
-      const a = filterDepthMap(depth, w, h, opts)
-      const b = filterDepthMapReference(depth, w, h, opts)
+      let pauses = 0
+      const a = await filterDepthMapChunked(depth, w, h, opts, async () => pauses++, 4)
+      const b = filterDepthMap(depth, w, h, opts)
+      expect(pauses).toBe(Math.ceil(h / 4) - 1)
       expect([a.removed, a.smoothed]).toEqual([b.removed, b.smoothed])
       expect(Array.from(a.depth)).toEqual(Array.from(b.depth))
     }

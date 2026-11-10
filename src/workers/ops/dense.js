@@ -8,7 +8,7 @@ import {
   resolveViewSelection,
   fuseDepthMaps,
   fuseDepthMapsStreamed,
-  filterDepthMap,
+  filterDepthMapChunked,
   filterDepthMapsGeometric,
   filterDepthMapsGeometricStreamed,
   applyPackedMask,
@@ -659,7 +659,18 @@ export function makeDenseOps({ rasterize }) {
         gpuMaps = 0
       const canProbe =
         cpuThreads > 1 && globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined'
+      // A finished map's filtering, statistics, preview and hand-over run while the next
+      // map matches (on the GPU the worker's thread is mostly waiting): chained, so maps
+      // leave in order, and pausing between their loops so the next map's GPU bands keep
+      // being submitted. They used to leave the GPU idle, 20–30 % of the depth stage. At
+      // most one map waits for it: map k+1 starts once map k−1's is done.
+      let postChain = Promise.resolve(),
+        postBehind = Promise.resolve(),
+        postError = null
+      const pause = () => new Promise((resolve) => setTimeout(resolve, 0))
       for (let k = 0; k < total; k++) {
+        await postBehind
+        if (postError) throw postError
         const i = order[k]
         const img = images[i]
         if (k > 0) updateLoopShare(k)
@@ -860,127 +871,149 @@ export function makeDenseOps({ rasterize }) {
             }
           }
         }
-        const tPost = performance.now()
         if (!dm) {
           emit('log', [`Depth maps: ${img.name} skipped (no sparse depth support)`, 'warn', 'Dense'])
           releaseAfter(i)
           continue
         }
-        // P2.1: invalidate "no measurement" pixels before filtering. A pixel no source
-        // ever saw keeps its random init depth at the max cost 2.0; left in place, the
-        // speckle filter's median mixes that junk into good neighbours. Zero its depth
-        // so it reads as a hole (depth<=0) everywhere downstream.
-        {
-          let culled = 0
-          for (let k = 0; k < dm.depth.length; k++) {
-            if (dm.depth[k] > 0 && dm.cost[k] >= 1.99) {
-              dm.depth[k] = 0
-              culled++
-            }
+        const finishMap = async () => {
+          // The thread time this takes, not the pauses (the "filtering + previews" figure).
+          let tSeg = performance.now()
+          const yieldNow = async () => {
+            prepMs.post += performance.now() - tSeg
+            await pause()
+            tSeg = performance.now()
           }
-          if (culled)
+          // P2.1: invalidate "no measurement" pixels before filtering. A pixel no source
+          // ever saw keeps its random init depth at the max cost 2.0; left in place, the
+          // speckle filter's median mixes that junk into good neighbours. Zero its depth
+          // so it reads as a hole (depth<=0) everywhere downstream.
+          {
+            let culled = 0
+            for (let k = 0; k < dm.depth.length; k++) {
+              if (dm.depth[k] > 0 && dm.cost[k] >= 1.99) {
+                dm.depth[k] = 0
+                culled++
+              }
+            }
+            if (culled)
+              emit('log', [
+                `Depth maps: ${img.name} — invalidated ${culled} no-measurement px (cost≈2.0)`,
+                'debug',
+                'Dense',
+              ])
+          }
+          await yieldNow()
+          // Median / speckle filter: clean per-image noise before the cross-view fusion
+          // gate sees it (the per-image PatchMatch has no geometric consistency check).
+          if (speckleFilter) {
+            const {
+              depth: fdepth,
+              removed,
+              smoothed,
+            } = await filterDepthMapChunked(
+              dm.depth,
+              dm.width,
+              dm.height,
+              { radius: filterRadius, relTol: filterRelTol },
+              yieldNow,
+            )
+            dm.depth = fdepth
             emit('log', [
-              `Depth maps: ${img.name} — invalidated ${culled} no-measurement px (cost≈2.0)`,
+              `Depth maps: ${img.name} — speckle filter dropped ${removed} px, smoothed ${smoothed}`,
               'debug',
               'Dense',
             ])
-        }
-        // Median / speckle filter: clean per-image noise before the cross-view fusion
-        // gate sees it (the per-image PatchMatch has no geometric consistency check).
-        if (speckleFilter) {
-          const {
-            depth: fdepth,
-            removed,
-            smoothed,
-          } = filterDepthMap(dm.depth, dm.width, dm.height, { radius: filterRadius, relTol: filterRelTol })
-          dm.depth = fdepth
+          }
+          // Drop masked regions from the dense cloud: zero the depth there so fusion
+          // (which treats depth <= 0 as "no data") skips those pixels.
+          // The mask moves with the raster (undistortion, or the fisheye canvas, whose pixels
+          // off the photo are dropped too).
+          const maskLut = refMask
+          if (maskLut && maskLut.length === dm.depth.length) {
+            for (let k = 0; k < dm.depth.length; k++) if (maskLut[k]) dm.depth[k] = 0
+          }
+          const rgb = rRef.channel ? rgbFromChannel(rRef.channel) : rgbFromRgba(rRef.data, rRef.width, rRef.height)
+          await yieldNow()
+          const displayBlob = await depthToPng(dm.depth, dm.width, dm.height)
+          // F4: for film images the depth preview is in the canonical frame, not scan
+          // space, so it won't line up with the scan in the viewer (v1 limitation).
+          if (rRef.fid) {
+            emit('log', [
+              `Depth maps: ${img.name} — preview is in the canonical fiducial frame ` +
+                `(${dm.width}×${dm.height}), not scan space`,
+              'debug',
+              'Dense',
+            ])
+          }
+          if (rRef.pad) {
+            emit('log', [
+              `Depth maps: ${img.name} — fisheye resampled onto a ${dm.width}×${dm.height} pinhole canvas ` +
+                `(up to ${FISHEYE_DENSE_MAX_DEG}° off-axis); its preview is in that frame, not the photo's`,
+              'debug',
+              'Dense',
+            ])
+          }
+          // Per-pixel diagnostics: how many pixels got a depth, and the matching-cost
+          // distribution over those pixels (low cost = confident; high = likely junk
+          // that fusion's maxCost gate will drop — the key signal for dense quality).
+          const cs = costStat(dm.depth, dm.cost)
+          const valid = cs.valid
+          perImage.push({
+            ms: imgMs,
+            coveragePct: (100 * valid) / dm.depth.length,
+            costMedian: cs.median,
+          })
+          const seedPct = ((100 * dm.seeded) / dm.depth.length).toFixed(1)
           emit('log', [
-            `Depth maps: ${img.name} — speckle filter dropped ${removed} px, smoothed ${smoothed}`,
-            'debug',
+            `Depth maps: ${img.name} — ${srcUuids.length} sources (best-${imgBestK}), ${dm.width}×${dm.height}, ` +
+              `depth ${dm.depthMin.toFixed(2)}–${dm.depthMax.toFixed(2)} (${dm.seeded} seeds, ${seedPct}%), ` +
+              `${((100 * valid) / dm.depth.length).toFixed(0)}% with depth, ` +
+              `cost median ${cs.median.toFixed(2)} / p95 ${cs.p95.toFixed(2)}, ${(imgMs / 1000).toFixed(1)}s`,
+            'info',
             'Dense',
           ])
-        }
-        // Drop masked regions from the dense cloud: zero the depth there so fusion
-        // (which treats depth <= 0 as "no data") skips those pixels.
-        // The mask moves with the raster (undistortion, or the fisheye canvas, whose pixels
-        // off the photo are dropped too).
-        const maskLut = refMask
-        if (maskLut && maskLut.length === dm.depth.length) {
-          for (let k = 0; k < dm.depth.length; k++) if (maskLut[k]) dm.depth[k] = 0
-        }
-        const rgb = rRef.channel ? rgbFromChannel(rRef.channel) : rgbFromRgba(rRef.data, rRef.width, rRef.height)
-        const displayBlob = await depthToPng(dm.depth, dm.width, dm.height)
-        // F4: for film images the depth preview is in the canonical frame, not scan
-        // space, so it won't line up with the scan in the viewer (v1 limitation).
-        if (rRef.fid) {
-          emit('log', [
-            `Depth maps: ${img.name} — preview is in the canonical fiducial frame ` +
-              `(${dm.width}×${dm.height}), not scan space`,
-            'debug',
-            'Dense',
-          ])
-        }
-        if (rRef.pad) {
-          emit('log', [
-            `Depth maps: ${img.name} — fisheye resampled onto a ${dm.width}×${dm.height} pinhole canvas ` +
-              `(up to ${FISHEYE_DENSE_MAX_DEG}° off-axis); its preview is in that frame, not the photo's`,
-            'debug',
-            'Dense',
-          ])
-        }
-        // Per-pixel diagnostics: how many pixels got a depth, and the matching-cost
-        // distribution over those pixels (low cost = confident; high = likely junk
-        // that fusion's maxCost gate will drop — the key signal for dense quality).
-        const cs = costStat(dm.depth, dm.cost)
-        const valid = cs.valid
-        perImage.push({
-          ms: imgMs,
-          coveragePct: (100 * valid) / dm.depth.length,
-          costMedian: cs.median,
-        })
-        const seedPct = ((100 * dm.seeded) / dm.depth.length).toFixed(1)
-        emit('log', [
-          `Depth maps: ${img.name} — ${srcUuids.length} sources (best-${imgBestK}), ${dm.width}×${dm.height}, ` +
-            `depth ${dm.depthMin.toFixed(2)}–${dm.depthMax.toFixed(2)} (${dm.seeded} seeds, ${seedPct}%), ` +
-            `${((100 * valid) / dm.depth.length).toFixed(0)}% with depth, ` +
-            `cost median ${cs.median.toFixed(2)} / p95 ${cs.p95.toFixed(2)}, ${(imgMs / 1000).toFixed(1)}s`,
-          'info',
-          'Dense',
-        ])
 
-        const map = {
-          uuid: img.uuid,
-          name: img.name,
-          width: dm.width,
-          height: dm.height,
-          K: ref.K,
-          R: img.R,
-          t: img.t,
-          // Per-pixel converged plane normals (camera-frame, unit, nz<0). Kept
-          // alongside depth for fusion → Poisson meshing. Holes are defined by
-          // depth<=0 everywhere downstream, so stale normals under a zeroed depth are
-          // harmless and deliberately NOT cleaned up.
-          depth: dm.depth,
-          cost: dm.cost,
-          normals: dm.normals || null,
-          rgb,
-          displayBlob,
+          const map = {
+            uuid: img.uuid,
+            name: img.name,
+            width: dm.width,
+            height: dm.height,
+            K: ref.K,
+            R: img.R,
+            t: img.t,
+            // Per-pixel converged plane normals (camera-frame, unit, nz<0). Kept
+            // alongside depth for fusion → Poisson meshing. Holes are defined by
+            // depth<=0 everywhere downstream, so stale normals under a zeroed depth are
+            // harmless and deliberately NOT cleaned up.
+            depth: dm.depth,
+            cost: dm.cost,
+            normals: dm.normals || null,
+            rgb,
+            displayBlob,
+          }
+          pxDone += dm.width * dm.height
+          prepMs.post += performance.now() - tSeg
+          const planes = [dm.depth.buffer, dm.cost.buffer, rgb.buffer, ...(dm.normals ? [dm.normals.buffer] : [])]
+          if (streamMaps) {
+            emit('map', [map], planes)
+            streamed++
+            const tWait = performance.now()
+            if (input.settings?.ackToken) await untilSaved(input.settings.ackToken, streamed)
+            prepMs.saveWait += performance.now() - tWait
+          } else {
+            maps.push(map)
+            transfer.push(...planes)
+          }
+          releaseAfter(i) // evict rasters this image was the last consumer of
         }
-        pxDone += dm.width * dm.height
-        prepMs.post += performance.now() - tPost
-        const planes = [dm.depth.buffer, dm.cost.buffer, rgb.buffer, ...(dm.normals ? [dm.normals.buffer] : [])]
-        if (streamMaps) {
-          emit('map', [map], planes)
-          streamed++
-          const tWait = performance.now()
-          if (input.settings?.ackToken) await untilSaved(input.settings.ackToken, streamed)
-          prepMs.saveWait += performance.now() - tWait
-        } else {
-          maps.push(map)
-          transfer.push(...planes)
-        }
-        releaseAfter(i) // evict rasters this image was the last consumer of
+        postBehind = postChain
+        postChain = postChain.then(finishMap).catch((err) => {
+          postError ??= err
+        })
       }
+      await postChain
+      if (postError) throw postError
     }
 
     emit('log', [

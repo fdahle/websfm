@@ -52,6 +52,14 @@ Notable changes to websfm. The format follows
   against 1.066), and the texture's seams are as before (mean step 12.6 levels). A block
   shot at one exposure is unchanged.
 
+### Performance
+- **Depth maps keep the GPU busier.** Each finished map's filtering and preview now run
+  while the next map is matched on the GPU, instead of the GPU waiting for them, and the
+  depth filter's 3×3 median is computed by a fixed comparison network. The maps are
+  exactly the same. Depth Maps on ETH3D courtyard (38 photos, Full, Medium): 147 → 135 s
+  (−9 %, both passes −10 %), the same depth-map digest; the filter alone 340 → 200 ms per
+  2.6 MP map.
+
 ### Fixed
 - **Importing camera positions again updates them.** Importing a camera file a second
   time now replaces each photo's position, even when the file names the photos without

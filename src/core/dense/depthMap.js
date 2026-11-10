@@ -471,23 +471,82 @@ export async function geomDepthMapForImage(
 //   • smoothing — surviving pixels are set to the local median (edge-preserving),
 //     unless `smooth` is false.
 // Pure: returns { depth: Float32Array, removed, smoothed }; input is not mutated.
-export function filterDepthMap(depth, w, h, opts = {}) {
-  const radius = numOpt(opts.radius, 1, { int: true, min: 1 })
-  const relTol = numOpt(opts.relTol, DEPTHMAP_DEFAULTS.filterRelTol / 100, { positive: true })
-  const minValidNeighbors = numOpt(opts.minValidNeighbors, 4, { int: true, min: 0 })
-  const smooth = boolOpt(opts.smooth, true)
-  const out = new Float32Array(depth.length)
+// The median of the 3×3 window centred on `idx`, or 0 when any of its nine depths is a
+// hole (the caller then takes the general path). Paeth's median-of-9 network: 19
+// compare-swaps leave the median in the middle slot.
+function median9(depth, idx, w) {
+  let a0 = depth[idx - w - 1],
+    a1 = depth[idx - w],
+    a2 = depth[idx - w + 1],
+    a3 = depth[idx - 1],
+    a4 = depth[idx],
+    a5 = depth[idx + 1],
+    a6 = depth[idx + w - 1],
+    a7 = depth[idx + w],
+    a8 = depth[idx + w + 1],
+    t
+  if (!(a0 > 0 && a1 > 0 && a2 > 0 && a3 > 0 && a5 > 0 && a6 > 0 && a7 > 0 && a8 > 0)) return 0
+  if (a1 > a2) ((t = a1), (a1 = a2), (a2 = t))
+  if (a4 > a5) ((t = a4), (a4 = a5), (a5 = t))
+  if (a7 > a8) ((t = a7), (a7 = a8), (a8 = t))
+  if (a0 > a1) ((t = a0), (a0 = a1), (a1 = t))
+  if (a3 > a4) ((t = a3), (a3 = a4), (a4 = t))
+  if (a6 > a7) ((t = a6), (a6 = a7), (a7 = t))
+  if (a1 > a2) ((t = a1), (a1 = a2), (a2 = t))
+  if (a4 > a5) ((t = a4), (a4 = a5), (a5 = t))
+  if (a7 > a8) ((t = a7), (a7 = a8), (a8 = t))
+  if (a0 > a3) a3 = a0
+  if (a5 > a8) a5 = a8
+  if (a4 > a7) ((t = a4), (a4 = a7), (a7 = t))
+  if (a3 > a6) a6 = a3
+  if (a1 > a4) a4 = a1
+  if (a2 > a5) a2 = a5
+  if (a4 > a7) a4 = a7
+  if (a4 > a2) ((t = a4), (a4 = a2), (a2 = t))
+  if (a6 > a4) a4 = a6
+  if (a4 > a2) a4 = a2
+  return a4
+}
+
+// The filter's options, resolved once (filterDepthMap, filterDepthMapChunked).
+function filterOptions(opts) {
+  return {
+    radius: numOpt(opts.radius, 1, { int: true, min: 1 }),
+    relTol: numOpt(opts.relTol, DEPTHMAP_DEFAULTS.filterRelTol / 100, { positive: true }),
+    minValidNeighbors: numOpt(opts.minValidNeighbors, 4, { int: true, min: 0 }),
+    smooth: boolOpt(opts.smooth, true),
+  }
+}
+
+// Rows v0…v1−1 of the filter into `out`; returns the counts for those rows. Each output
+// pixel reads only `depth`, so row blocks can run in any order or with pauses between.
+function filterRows(depth, out, w, h, v0, v1, { radius, relTol, minValidNeighbors, smooth }) {
   // The window's valid depths, kept sorted as they arrive (insertion into a fixed
   // buffer): a JS array pushed and comparator-sorted per pixel cost ~15 s on each
   // 27 MP map of a film block at High.
   const win = new Float64Array((2 * radius + 1) ** 2)
   let removed = 0,
     smoothed = 0
-  for (let v = 0; v < h; v++) {
+  for (let v = v0; v < v1; v++) {
     for (let u = 0; u < w; u++) {
       const idx = v * w + u
       const d = depth[idx]
       if (!(d > 0)) continue // already a hole
+      // A full 3×3 window inside the map (most pixels at the default radius): its
+      // median from a fixed 19-comparison network, the same value as the sort below,
+      // about four times faster.
+      if (radius === 1 && u > 0 && v > 0 && u < w - 1 && v < h - 1) {
+        const med = median9(depth, idx, w)
+        if (med > 0) {
+          if (Math.abs(d - med) > relTol * med) {
+            removed++
+            continue
+          }
+          out[idx] = smooth ? med : d
+          if (smooth && med !== d) smoothed++
+          continue
+        }
+      }
       let n = 0
       for (let dv = -radius; dv <= radius; dv++) {
         const vv = v + dv
@@ -518,6 +577,29 @@ export function filterDepthMap(depth, w, h, opts = {}) {
       out[idx] = smooth ? med : d
       if (smooth && med !== d) smoothed++
     }
+  }
+  return { removed, smoothed }
+}
+
+export function filterDepthMap(depth, w, h, opts = {}) {
+  const out = new Float32Array(depth.length)
+  const { removed, smoothed } = filterRows(depth, out, w, h, 0, h, filterOptions(opts))
+  return { depth: out, removed, smoothed }
+}
+
+// The same filter in blocks of rows, awaiting `pause()` between them: the depth worker
+// runs it while the next map matches on the GPU, and a pause lets that map's next band be
+// submitted instead of leaving the GPU idle for the whole filter. Same output.
+export async function filterDepthMapChunked(depth, w, h, opts = {}, pause = async () => {}, rowsPerBlock = 64) {
+  const out = new Float32Array(depth.length)
+  const o = filterOptions(opts)
+  let removed = 0,
+    smoothed = 0
+  for (let v0 = 0; v0 < h; v0 += rowsPerBlock) {
+    const r = filterRows(depth, out, w, h, v0, Math.min(h, v0 + rowsPerBlock), o)
+    removed += r.removed
+    smoothed += r.smoothed
+    if (v0 + rowsPerBlock < h) await pause()
   }
   return { depth: out, removed, smoothed }
 }
