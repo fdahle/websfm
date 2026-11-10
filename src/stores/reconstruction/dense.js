@@ -30,6 +30,7 @@ import {
   POOL_SIZE,
   terminateAll,
   releaseIdleWorkers,
+  recycleWorker,
   filterDepthMaps as workerFilterDepthMaps,
   densify as workerDensify,
   meshify as workerMeshify,
@@ -1400,6 +1401,10 @@ export function createDense({
         )
         done[i] = 1
         report(`Tile ${i + 1}/${n} done`)
+        // A fresh worker for the next tile: a wasm heap reused tile after tile grew
+        // past the estimate (quarry at depth 11, 16 GB budget: the tab crept 13 → 19 GB
+        // over 48 tiles; recycled, it peaks at 15.1 GB, for 2 % more time).
+        if (queue.length) recycleWorker(first + w)
       }
     }
     await Promise.all(Array.from({ length: workers }, (_, w) => runner(w)))

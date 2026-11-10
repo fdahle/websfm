@@ -61,11 +61,13 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
-- **Build Mesh keeps closer to its memory budget.** A mesh solved in tiles now plans its
-  workers with what the open project already holds, sends each worker only its tile's
-  points, and frees the workers before the tiles are joined. Quarry at depth 11 (73 M
-  points, 16 GB budget): the tab's peak 32.1 → 19.3 GB, the same 11.1 M-triangle mesh, in
-  663 s instead of 540 s (four workers fit the budget, not six).
+- **Build Mesh keeps to its memory budget.** A mesh solved in tiles now plans its workers
+  with what the open project already holds, sends each worker only its tile's points,
+  starts each tile on a fresh worker, and frees the workers before the tiles are joined.
+  Quarry at depth 11 (73 M points, 16 GB budget): the tab's peak 32.1 → 15.1 GB, the same
+  11.1 M-triangle mesh, in 676 s instead of 540 s (four workers fit the budget, not six).
+  Step by step: planning and freeing 25.4 GB, per-tile points 19.3 GB, a fresh worker per
+  tile 15.1 GB (a worker's heap grew past its estimate tile after tile).
 - **Importing camera positions again updates them.** Importing a camera file a second
   time now replaces each photo's position, even when the file names the photos without
   the extension or in another case. Before, such a re-import (or one after reopening the

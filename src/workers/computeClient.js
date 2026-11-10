@@ -115,6 +115,18 @@ export function releaseIdleWorkers({ keep = [] } = {}) {
   return true
 }
 
+// A fresh worker in one pool slot, when no job is pending on it (false otherwise). For a
+// run whose solves leave a wasm heap at its high-water mark: a heap reused for the next
+// solve grows past what that solve needs (Build Mesh's tiles), a fresh one does not.
+export function recycleWorker(index) {
+  if (!workers?.[index]) return true
+  const w = workers[index]
+  for (const entry of pending.values()) if (entry.worker === w) return false
+  w.terminate()
+  workers[index] = spawn(index)
+  return true
+}
+
 // Reconfigure only while idle: killing a pool with active jobs would turn a
 // harmless preference change into a cancelled reconstruction. Returns false
 // when a run is active; the persisted choice still takes effect after reload.

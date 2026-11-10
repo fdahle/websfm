@@ -39,4 +39,18 @@ describe('releaseIdleWorkers', () => {
     // Without `keep`, a pending job still blocks the whole release.
     expect(client.releaseIdleWorkers()).toBe(false)
   })
+
+  it('recycles one slot only when nothing is pending on it', () => {
+    if (client.POOL_SIZE === 1) return
+    const busy = client.GPU_MATCH_WORKER
+    const idle = busy === 0 ? 1 : 0
+    const dead = () => made.filter((w) => w.dead).length
+    const [n0, d0] = [made.length, dead()]
+    // The pending GPU job from above still sits on `busy`: refused, nothing changes.
+    expect(client.recycleWorker(busy)).toBe(false)
+    expect([made.length, dead()]).toEqual([n0, d0])
+    // An idle slot: its worker goes, one fresh worker takes its place.
+    expect(client.recycleWorker(idle)).toBe(true)
+    expect([made.length, dead()]).toEqual([n0 + 1, d0 + 1])
+  })
 })

@@ -1373,7 +1373,8 @@ cleanup below is part of the method.
   per tile, so a hole crossing a seam can stay open there. The tiles run on as many pool
   workers as the memory budget holds solves of the largest tile, after what the open
   project and worker 0's copy of the input take; each gets only its tile's samples
-  (`tileTask`), and the tile workers are released before worker 0 joins the tiles.
+  (`tileTask`) and a fresh worker per tile (a reused wasm heap grows past the next solve's
+  estimate), and the tile workers are released before worker 0 joins the tiles.
 - **Depth Auto** (`depth: 0`, `autoMeshDepth`): the depth whose leaf `E / 2^d` (E the
   longest extent) is nearest `leafSpacings` sample spacings in octaves, then lowered while
   the predicted mesh passes `maxTriangles`. The prediction counts the leaves the surface
