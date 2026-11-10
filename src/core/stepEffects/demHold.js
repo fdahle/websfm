@@ -30,7 +30,8 @@ export function demHoldEffects(
         ? '; it declares no vertical accuracy'
         : ''
   const reference =
-    `Each tie point seen in three or more photos is held to the height of ${ref} there, ±\u00a0${s.sigma}\u00a0m${why}, ` +
+    `Each tie point seen in three or more photos is held to the height of ${ref} there, ±\u00a0${s.sigma}\u00a0m${why} ` +
+    '(or the DEM’s own disagreement with the photos, where larger), ' +
     'along the vertical only: the photos keep where it lies. ' +
     `Up to ${fmtCount(SFM_TUNING.demHoldMaxAnchors)} tie points spread over the block, in ` +
     `${SFM_TUNING.demHoldRounds} rounds, with the focal length and distortion re-estimated; ` +

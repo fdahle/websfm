@@ -23,7 +23,9 @@ import { NMAD_K } from '../constants.js'
 //   sample   (x, y) → reference height in the project CRS, or NaN off it
 //   include  (x, y) → whether the place is stable ground (null: everywhere)
 // → { anchors: [{ ptIdx, target: [x, y, z] (model), precision: 3×3 (model) }],
-//     stats: { candidates, used, rejected, median, nmad } } (median, nmad: project units)
+//     stats: { candidates, used, rejected, median, nmad, scatter (about the smooth
+//     surface), sigma (the one used: at least `sigma`, and `scatter` with floorAtScatter) } }
+//     (lengths in project units)
 export function demAnchors({
   points,
   frame,
@@ -36,8 +38,17 @@ export function demAnchors({
   // Hold the shape only: each target sits at the reference's height plus the median
   // difference, an unknown datum shift between the reference and the control taken out.
   relative = false,
+  // Hold no firmer than the reference agrees with the photos: σ is at least the scatter
+  // of the height differences about a smooth (quadratic) surface through them, so a DEM
+  // that disagrees by metres (cliffs at its cell size, trees, changed ground) is not held
+  // at a declared ±2 m. The smooth part is left out of the measure because it is the bend
+  // the hold is there to remove.
+  floorAtScatter = true,
 }) {
-  const empty = { anchors: [], stats: { candidates: 0, used: 0, rejected: 0, median: NaN, nmad: NaN } }
+  const empty = {
+    anchors: [],
+    stats: { candidates: 0, used: 0, rejected: 0, median: NaN, nmad: NaN, scatter: NaN, sigma },
+  }
   if (!points?.pos || !(sigma > 0)) return empty
   const { pos, vcount } = points
   const n = vcount.length
@@ -58,6 +69,8 @@ export function demAnchors({
   const nmad = NMAD_K * dev[dev.length >> 1]
   const reach = Math.max(outlierK * nmad, 3 * sigma)
   const kept = cand.filter((c) => Math.abs(c.dz - median) <= reach)
+  const scatter = localScatter(kept, median)
+  const sigmaUsed = floorAtScatter && scatter > sigma ? scatter : sigma
   const picked = spreadEvenly(kept, maxAnchors)
   const anchors = picked.map(({ i, p, zr }) => {
     const zt = relative ? zr + median : zr
@@ -66,14 +79,70 @@ export function demAnchors({
     const up = frame.toSfm([p[0], p[1], zt + 1]).map((v, k) => v - target[k])
     const len = Math.hypot(up[0], up[1], up[2])
     const u = up.map((v) => v / len)
-    const w = 1 / (sigma * len) ** 2
+    const w = 1 / (sigmaUsed * len) ** 2
     const precision = [0, 1, 2].map((a) => [0, 1, 2].map((b) => w * u[a] * u[b]))
     return { ptIdx: i, target, precision }
   })
   return {
     anchors,
-    stats: { candidates: cand.length, used: anchors.length, rejected: cand.length - kept.length, median, nmad },
+    stats: {
+      candidates: cand.length,
+      used: anchors.length,
+      rejected: cand.length - kept.length,
+      median,
+      nmad,
+      scatter,
+      sigma: sigmaUsed,
+    },
   }
+}
+
+// The NMAD of the height differences about the least-squares quadratic surface through
+// them (x, y centred and scaled), or about their median when too few or degenerate.
+function localScatter(items, median) {
+  const nmadOf = (r) => {
+    const a = r.map(Math.abs).sort((x, y) => x - y)
+    return a.length ? NMAD_K * a[a.length >> 1] : NaN
+  }
+  if (items.length < 12) return nmadOf(items.map((c) => c.dz - median))
+  let cx = 0,
+    cy = 0
+  for (const c of items) {
+    cx += c.p[0]
+    cy += c.p[1]
+  }
+  cx /= items.length
+  cy /= items.length
+  let sc = 0
+  for (const c of items) sc = Math.max(sc, Math.abs(c.p[0] - cx), Math.abs(c.p[1] - cy))
+  if (!(sc > 0)) return nmadOf(items.map((c) => c.dz - median))
+  const basis = (c) => {
+    const x = (c.p[0] - cx) / sc,
+      y = (c.p[1] - cy) / sc
+    return [1, x, y, x * x, x * y, y * y]
+  }
+  const N = Array.from({ length: 6 }, () => new Float64Array(7))
+  for (const c of items) {
+    const b = basis(c)
+    for (let r = 0; r < 6; r++) {
+      for (let k = 0; k < 6; k++) N[r][k] += b[r] * b[k]
+      N[r][6] += b[r] * c.dz
+    }
+  }
+  // Gaussian elimination with partial pivoting.
+  for (let col = 0; col < 6; col++) {
+    let piv = col
+    for (let r = col + 1; r < 6; r++) if (Math.abs(N[r][col]) > Math.abs(N[piv][col])) piv = r
+    if (!(Math.abs(N[piv][col]) > 1e-12 * items.length)) return nmadOf(items.map((c) => c.dz - median))
+    ;[N[col], N[piv]] = [N[piv], N[col]]
+    for (let r = 0; r < 6; r++) {
+      if (r === col) continue
+      const f = N[r][col] / N[col][col]
+      for (let k = col; k < 7; k++) N[r][k] -= f * N[col][k]
+    }
+  }
+  const coef = N.map((row, r) => row[6] / row[r])
+  return nmadOf(items.map((c) => c.dz - basis(c).reduce((a, v, k) => a + v * coef[k], 0)))
 }
 
 // At most `max` of `items` (each with a project place `p`), spread over their extent: one

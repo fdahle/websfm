@@ -1012,7 +1012,8 @@ export function createBundleSession(ctx) {
       else delete record.sim
       log(
         `Hold to a reference DEM (round ${round + 1}/${rounds}) — ${pluralize(anchors.length, 'tie point')} held ` +
-          `(σ ${sigma.toPrecision(3)}), ${stats.rejected} left out as too far from the DEM; height against the ` +
+          `(σ ${stats.sigma.toPrecision(3)}${stats.sigma > sigma ? `: the DEM disagrees with the photos by ${stats.scatter.toPrecision(3)} about a smooth surface, more than the ${sigma.toPrecision(3)} given` : ''}), ` +
+          `${stats.rejected} left out as too far from the DEM; height against the ` +
           `DEM ${fmt(stats.median)} median, NMAD ${stats.nmad.toFixed(2)}, in the ${held.source === 'gcps' ? 'GCPs' : 'camera positions'}' frame`,
         'info',
         'Reconstruction',
@@ -1061,7 +1062,7 @@ export function createBundleSession(ctx) {
           wCams += w
           wc += w * c
         }
-        const wDem = record.after.used / (sigma * sigma)
+        const wDem = record.after.used / (record.after.sigma * record.after.sigma)
         const d = (wDem * record.after.median + wc) / (wDem + wCams)
         record.sim.t[2] -= d
         record.after = { ...record.after, median: record.after.median - d }

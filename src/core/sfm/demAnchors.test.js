@@ -76,6 +76,36 @@ describe('demAnchors', () => {
     expect(frame.fromSfm(abs.anchors[0].target)[2]).toBeCloseTo(50, 6)
   })
 
+  // A DEM that disagrees by metres is held no firmer than that; a smooth bend of the
+  // same size is not counted as disagreement, as it is what the hold removes.
+  it('holds no firmer than the DEM agrees with the photos, a smooth bend aside', () => {
+    let seed = 3
+    const noise = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) * 2 - 1
+    const at = (f) => {
+      const pts = []
+      for (let x = 0; x < 200; x += 5)
+        for (let y = 0; y < 200; y += 5) pts.push([500000 + x, 4000000 + y, 100 + f(x, y)])
+      return cloud(pts)
+    }
+    const flat = () => 100
+    // Rough: ±6 m of disagreement (cliffs at the DEM's cell size, trees).
+    const rough = demAnchors({ points: at(() => 6 * noise()), frame, sample: flat, sigma: 2 })
+    expect(rough.stats.scatter).toBeGreaterThan(4)
+    expect(rough.stats.sigma).toBeCloseTo(rough.stats.scatter, 9)
+    const w = rough.anchors[0].precision[2][2] / (20 * 20) // model units are 1/20 of a metre
+    expect(w).toBeCloseTo(1 / rough.stats.sigma ** 2, 9)
+    // A 5 m dome with 0.1 m of noise: the declared 2 m stays.
+    const dome = (x, y) => 5 * (1 - ((x - 100) ** 2 + (y - 100) ** 2) / 20000) + 0.1 * noise()
+    const bent = demAnchors({ points: at(dome), frame, sample: flat, sigma: 2 })
+    expect(bent.stats.nmad).toBeGreaterThan(1)
+    expect(bent.stats.scatter).toBeLessThan(0.2)
+    expect(bent.stats.sigma).toBe(2)
+    // Off: the declared σ whatever the scatter.
+    expect(
+      demAnchors({ points: at(() => 6 * noise()), frame, sample: flat, sigma: 2, floorAtScatter: false }).stats.sigma,
+    ).toBe(2)
+  })
+
   it('leaves out blunders, unstable ground, places off the DEM and weakly seen points', () => {
     const pts = ground.map((p, i) => (i % 50 === 7 ? [p[0], p[1], p[2] + 40] : p))
     const res = demAnchors({ points: cloud(pts), frame, sample, sigma: 0.5 })

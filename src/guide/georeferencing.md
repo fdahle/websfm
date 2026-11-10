@@ -81,8 +81,9 @@ your GCPs or camera positions alone set the height.
 <!-- param: holdSigma  default: The DEM's vertical accuracy, else 2 -->
 How far, in metres (1σ), a tie point may sit from the reference's height. It starts at
 the DEM's declared vertical accuracy. Thousands of tie points average the DEM's noise,
-so even a loose value takes out a bend; lower it for a lidar DEM, raise it where the
-reference is coarse against the terrain's relief.
+so even a loose value takes out a bend; lower it for a lidar DEM. Where the DEM
+disagrees with the photos by more (cliffs, trees, changed ground), the hold uses that
+disagreement instead, and the log says so.
 
 ## Stable ground to hold
 <!-- param: holdStable  default: Everywhere -->

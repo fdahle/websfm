@@ -812,7 +812,10 @@ weak height observations from it constrain exactly that low-frequency mode.
   the GCPs' similarity when ≥ 3 triangulate, else the camera positions'), sampled on the
   reference, and kept on stable ground. Height differences beyond max(4·NMAD, 3σ) from the
   median are left out (buildings missing from the DEM, moved ice, blunders); at most 4,000
-  are kept, one per grid cell. Each becomes a GCP-style anchor on a real point, with target
+  are kept, one per grid cell. σ is at least the NMAD of the differences about their
+  least-squares quadratic surface: a DEM that disagrees by metres locally (cliffs at its
+  cell size, trees, changed ground) is not held at a declared ±2 m, while the smooth part
+  (the bend being removed) does not count. Each becomes a GCP-style anchor on a real point, with target
   = the point moved vertically onto the DEM and a **rank-one precision**
   `P = u uᵀ / (σ·ℓ)²` (`u` the survey vertical in the SfM frame, `ℓ` the SfM length of one
   survey unit): held in height, free horizontally, which a coarse DEM cannot judge. The
@@ -847,7 +850,8 @@ weak height observations from it constrain exactly that low-frequency mode.
   quarry (346 photos, heights shifted +3 m) the camera heights went +3.00 → +1.68 m:
   Copernicus lies ~1.4 m above that ground and disagrees with the tie points by NMAD
   6.2 m (cliffs, an active pit), and holding it at ±2 m worsened the shape (V 13.4 → 16.8
-  cm). A σ that follows the measured disagreement is open (plan-f13 ▸ weight vs resolution).
+  cm). With σ at its local scatter (5.6 m) the shape stays (13.4 cm) and the heights go
+  +3.00 → +2.37 m; PUTI (scatter 0.3 m) is unchanged.
 
 ### 6.6 Guided marking
 

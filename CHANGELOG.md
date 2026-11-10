@@ -34,7 +34,11 @@ Notable changes to websfm. The format follows
   the held tie points) rather than left to the iterative solve. The DEM sets the height
   only when its vertical datum and the control's are declared; otherwise it holds the
   shape alone (undeclared EXIF heights 52 m from the DEM's geoid had pulled a 346-photo
-  block 45 m and shrunk it 6 %).
+  block 45 m and shrunk it 6 %). The hold is no firmer than the DEM agrees with the
+  photos: σ is at least their local disagreement about a smooth surface. On a quarry
+  where Copernicus disagrees by 5.6 m, its ±2 m had bent the block (V 13.4 → 16.8 cm);
+  now the shape stays and the heights move from +3.00 to +2.37 m toward the DEM, which
+  itself lies ~1.4 m high there.
 - **Less noise on flat ground in aerial dense clouds.** Build Dense Cloud ▸ Point position
   puts each point at the mean depth of its own depth map and the maps that agree with it,
   so their noise averages out; Auto does this for aerial and mapping projects and keeps

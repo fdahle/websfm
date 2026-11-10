@@ -12,7 +12,9 @@ describe('demHoldEffects', () => {
     expect(e.stable).toMatch(/anywhere on "Copernicus"/)
     expect(e.blocked).toBeNull()
     const withGcps = demHoldEffects({ sigma: 1 }, { ...project, gcps: 6 }).reference
-    expect(withGcps).toMatch(/±\s1\sm, along.*the 6 GCPs place the model on it\.$/)
+    expect(withGcps).toMatch(
+      /±\s1\sm \(or the DEM’s own disagreement with the photos, where larger\), along.*the 6 GCPs place the model on it\.$/,
+    )
     expect(demHoldEffects({ sigma: 2 }, { ...project, referenceSigma: null }).reference).toMatch(
       /declares no vertical accuracy/,
     )
