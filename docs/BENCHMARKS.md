@@ -280,7 +280,8 @@ the cell empty rather than interpolating.
 | run | cameras | checkpoints | DEM vs reference RMSE / NMAD | DEM coverage |
 | --- | --- | --- | --- | --- |
 | WebSfM | 123/125 | 1.97 / 2.46 m | **20.0** / 2.44 m | 27 % |
-| WebSfM (10-13) | 124/125 | 1.74 / 1.98 m | — | — |
+| WebSfM (10-13) | 121/125 | 2.03 / 2.09 m (17 checks) | — | — |
+| WebSfM (10-13), detection at Auto resolution | 124/125 | 1.74 / 1.98 m | — | — |
 | COLMAP (10-13) | **125/125** | 3.94 / 103 m | — | — |
 | Metashape defaults | **125/125** | **1.54 / 0.97 m** | 153.6 / **1.38 m** | **62 %** |
 
@@ -290,8 +291,8 @@ Metashape leads here:
   outliers that WebSfM leaves out.
 - **Tracks:** WebSfM's are short. 65 % of its points are seen in three or more photos,
   and its reprojection median is 1.38 px.
-- **Since October:** the WebSfM run is worse than in October (1.98 → 2.46 m in height).
-  The cause is not yet known.
+- **Since October:** with the same settings, the October run's heights were 0.37 m better
+  (2.09 against 2.46 m). The cause is not yet known.
 
 ### Antarctic trimetrogon film (TMA), no ground control
 
