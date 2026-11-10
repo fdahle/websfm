@@ -641,6 +641,79 @@ window.bench = {
     return { points: d.count, outside }
   },
 
+  // Reprojection residuals of the main sparse model by distance from the principal point
+  // (stage `radial`): per ring of r / half-diagonal, the observations' share against the
+  // ring's share of the frame (coverage), the mean radial part (observed − projected,
+  // + outward: a keypoint bias the lens did not absorb) and the RMS of the radial and
+  // tangential parts. Pixels are BA-frame (undistorted) ones; the frame is 2cx × 2cy.
+  async radial({ rings = 12, ringStep = 0.1, minViews = 2 } = {}) {
+    const { projectPoint } = await import('/src/core/sfm/geometry.js')
+    const c = recon.mainSparseCloud
+    if (!c) throw new Error('radial: no sparse model')
+    const pts = c.points
+    const bins = Array.from({ length: rings }, () => ({ n: 0, sr: 0, sr2: 0, st2: 0 }))
+    let total = 0,
+      frameCx = 0,
+      frameCy = 0,
+      cams = 0
+    for (const cam of c.cameras.values()) {
+      frameCx += cam.K.cx
+      frameCy += cam.K.cy
+      cams++
+    }
+    frameCx /= Math.max(1, cams)
+    frameCy /= Math.max(1, cams)
+    for (let i = 0; i < pts.length; i++) {
+      if (pts.viewCount(i) < minViews) continue
+      const x = pts.x(i),
+        y = pts.y(i),
+        z = pts.z(i)
+      pts.forEachPixel(i, (uuid, px, py) => {
+        const cam = c.cameras.get(uuid)
+        if (!cam) return
+        const p = projectPoint(cam, x, y, z)
+        if (!p) return
+        const dx = px - cam.K.cx,
+          dy = py - cam.K.cy,
+          r = Math.hypot(dx, dy)
+        if (!(r > 1)) return
+        const du = px - p.u,
+          dv = py - p.v
+        const rad = (du * dx + dv * dy) / r,
+          tan = (dv * dx - du * dy) / r
+        const k = Math.min(rings - 1, Math.floor(r / Math.hypot(cam.K.cx, cam.K.cy) / ringStep))
+        const b = bins[k]
+        b.n++
+        b.sr += rad
+        b.sr2 += rad * rad
+        b.st2 += tan * tan
+        total++
+      })
+    }
+    // Each ring's share of the frame, by sampling it on a grid.
+    const area = new Float64Array(rings),
+      G = 400,
+      half = Math.hypot(frameCx, frameCy)
+    for (let a = 0; a < G; a++)
+      for (let b = 0; b < G; b++) {
+        const dx = ((a + 0.5) / G) * 2 * frameCx - frameCx,
+          dy = ((b + 0.5) / G) * 2 * frameCy - frameCy
+        area[Math.min(rings - 1, Math.floor(Math.hypot(dx, dy) / half / ringStep))] += 1 / (G * G)
+      }
+    const r3 = (v) => Math.round(v * 1000) / 1000
+    return {
+      observations: total,
+      rings: bins.map((b, k) => ({
+        r: `${r3(k * ringStep)}–${k === rings - 1 ? '…' : r3((k + 1) * ringStep)}`,
+        n: b.n,
+        coverage: area[k] > 0 ? r3(b.n / Math.max(1, total) / area[k]) : null,
+        meanRadialPx: b.n ? r3(b.sr / b.n) : null,
+        rmsRadialPx: b.n ? r3(Math.sqrt(b.sr2 / b.n)) : null,
+        rmsTangentialPx: b.n ? r3(Math.sqrt(b.st2 / b.n)) : null,
+      })),
+    }
+  },
+
   // The main sparse model's Quality Report numbers (core/eval/sparseStats.js): the
   // reprojection distribution over every stored observation, cameras, points.
   async modelStats() {
@@ -758,6 +831,7 @@ window.bench = {
       minTriAngleDeg: v.minTriAngleDeg,
       maxIncidenceDeg: v.maxIncidenceDeg,
       removeIsolated: v.removeIsolated,
+      position: v.position,
       memBudgetBytes: overrides.memBudgetBytes ?? memBudgetBytes.value,
       // The whole limit, which fusion's wasm-held arrays may use (Settings ▸ Compute);
       // `ramBudgetBytes` in the stage config overrides it.

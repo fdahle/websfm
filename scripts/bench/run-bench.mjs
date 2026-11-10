@@ -574,6 +574,7 @@ try {
     modeledit: 'modelEdit',
     scalebar: 'scaleBar',
     stats: 'modelStats',
+    radial: 'radial',
     region: 'setRegion',
     regioncheck: 'regionCheck',
     togglepair: 'togglePair',
