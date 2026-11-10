@@ -1290,6 +1290,7 @@ window.bench = {
       y: p.lat,
       z: p.alt,
       ...(p.se ? { accuracyX: p.se, accuracyY: p.sn, accuracyZ: p.su } : {}),
+      ...(reference.verticalDatum ? { verticalDatum: reference.verticalDatum } : {}),
     }))
     return poses.addPoses(raw, 'EPSG:4326')
   },
@@ -1980,7 +1981,9 @@ window.bench = {
     }
   },
 
-  async importRasterFile() {
+  // `verticalDatum` / `verticalAccuracy` (m): declared on the imported raster, as its
+  // Accuracy menu does (a GeoTIFF rarely says either; Copernicus is 'geoid:EGM2008').
+  async importRasterFile({ verticalDatum, verticalAccuracy } = {}) {
     const { useExternalStore } = await import('/src/stores/useExternalStore.js')
     const ext = useExternalStore()
     const file = document.getElementById('bench-raster-file')?.files?.[0]
@@ -1990,6 +1993,8 @@ window.bench = {
     const t1 = performance.now()
     await ext.flushPendingWork()
     const t2 = performance.now()
+    if (rec && (verticalDatum !== undefined || verticalAccuracy !== undefined))
+      await ext.setRasterAccuracy(rec.id, { verticalDatum, verticalAccuracy })
     const meta = rec && ext.rasterById(rec.id)
     return {
       ok: !!rec,
@@ -2004,6 +2009,8 @@ window.bench = {
             width: meta.width,
             height: meta.height,
             crs: meta.crs ?? null,
+            verticalDatum: meta.verticalDatum ?? null,
+            verticalAccuracy: meta.verticalAccuracy ?? null,
             gpuReady: !!meta.gpuReady,
           }
         : null,
@@ -2497,13 +2504,22 @@ window.bench = {
   } = {}) {
     const settings = { ...withPreset(RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, preset), ...overrides }
     // `demHold: { referenceId: 'last', sigma }`: Georeference ▸ Hold to a reference DEM,
-    // with the raster an `importraster:<tag>` stage brought in last.
-    if (settings.demHold?.referenceId === 'last') {
+    // with the raster an `importraster:<tag>` stage brought in last. Without `sigma`, the
+    // dialog's: the raster's declared vertical accuracy, else DEM_HOLD_DEFAULTS.sigma.
+    if (settings.demHold) {
       const { useExternalStore } = await import('/src/stores/useExternalStore.js')
-      const rasters = useExternalStore().rasters ?? []
-      const last = rasters[rasters.length - 1]
-      if (!last) throw new Error("reconstruct: demHold.referenceId 'last' but no raster imported")
-      settings.demHold = { ...settings.demHold, referenceId: last.id }
+      const ext = useExternalStore()
+      const rasters = ext.rasters ?? []
+      const id =
+        settings.demHold.referenceId === 'last' ? rasters[rasters.length - 1]?.id : settings.demHold.referenceId
+      if (!id) throw new Error("reconstruct: demHold.referenceId 'last' but no raster imported")
+      const { DEM_HOLD_DEFAULTS } = await import('/src/core/defaults.user.js')
+      const declared = ext.rasterById(id)?.verticalAccuracy
+      settings.demHold = {
+        ...settings.demHold,
+        referenceId: id,
+        sigma: settings.demHold.sigma ?? (declared > 0 ? declared : DEM_HOLD_DEFAULTS.sigma),
+      }
     }
     for (const p of poses.poses) p.enabled = posePriors
     const arm = leverArm && reference?.leverArm ? [...reference.leverArm] : null

@@ -189,6 +189,7 @@ export function createSparseRun({
     const crs = projects.currentCrs
     const frame = survey.surveyFrame
     if (!frame) return fail('it needs a projected coordinate system (Project Settings) and GCPs or camera positions')
+    if (!(request.sigma > 0)) return fail('its height uncertainty must be above 0 m')
     const external = useExternalStore()
     const meta = external.rasterById(request.referenceId)
     if (!meta || meta.kind !== 'dem') return fail('the reference DEM is no longer in the project')

@@ -1149,7 +1149,9 @@ try {
         continue
       }
       if (entry.startsWith('importraster:')) {
-        // `importraster:<tag>`: Import ▸ Reference raster of cfg[entry].path.
+        // `importraster:<tag>`: Import ▸ Reference raster of cfg[entry].path, with an
+        // optional declared `verticalDatum` ('ellipsoidal', 'geoid:EGM96', 'geoid:EGM2008' …) and
+        // `verticalAccuracy` (m).
         const path = cfg[entry]?.path
         if (!path) throw new Error(`${entry}: config needs { path }`)
         await page.evaluate(() => {
@@ -1162,7 +1164,11 @@ try {
         lastLogAt = Date.now()
         let r
         try {
-          r = await Promise.race([page.evaluate(() => window.bench.importRasterFile()), watchdog()])
+          const { verticalDatum, verticalAccuracy } = cfg[entry]
+          r = await Promise.race([
+            page.evaluate((o) => window.bench.importRasterFile(o), { verticalDatum, verticalAccuracy }),
+            watchdog(),
+          ])
         } finally {
           for (const t of watchdog.timers.splice(0)) clearInterval(t)
         }

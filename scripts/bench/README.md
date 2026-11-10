@@ -255,7 +255,10 @@ node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2
   `{ "decimateOnly": true }` it runs Decimate alone, split into blocks over the pool and
   on one worker (`"splits"`), on the computed mesh or else the last imported one.
 - `importraster:<tag>`: Import ▸ Reference raster of `cfg[tag].path`, then the
-  background display conversion. `rastersample:<tag>` samples the last reference DEM at
+  background display conversion. `verticalDatum` (`ellipsoidal`, `geoid:EGM96`,
+  `geoid:EGM2008` …) and `verticalAccuracy` (m) declare what the GeoTIFF doesn't say,
+  as the raster's Accuracy menu does (Copernicus: `geoid:EGM2008`).
+  `reference.verticalDatum` declares the camera file's heights the same way. `rastersample:<tag>` samples the last reference DEM at
   `points` given in the project CRS (reports the raster-CRS point, z, and whether its
   plane was resident); `rasterstyle[:tag]` restyles the last raster with a new stretch.
 - `aligncheck`: moves the computed dense cloud by a known transform, puts it back by

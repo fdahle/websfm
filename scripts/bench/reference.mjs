@@ -77,6 +77,9 @@ export async function loadReference(ref) {
     // they are reported but left out of the checkpoint RMS.
     excludeGcps: Array.isArray(ref.excludeGcps) ? ref.excludeGcps.map(String) : [],
     markOffsetsPx: Array.isArray(ref.markOffsetsPx) ? ref.markOffsetsPx.map(Number).filter(Number.isFinite) : [],
+    // The camera positions' vertical datum ('ellipsoidal', 'geoid:EGM2008' …): a camera
+    // file rarely says, and Hold to a reference DEM converts between it and the DEM's.
+    verticalDatum: ref.verticalDatum ?? null,
   }
   if (ref.cameras) {
     out.positions = {}
