@@ -43,8 +43,10 @@ matching than in detection.
 <!-- param: maxDimMode  default: Fixed for all images -->
 **Fixed for all images** detects every image at the same long side. **Scale with image
 size** detects each at a share of its own size, with the set value as the floor: more
-detail for large or mixed-resolution sets. For SIFT the keypoint limit then grows with
-the area too.
+detail for large or mixed-resolution sets. In an object (close-range) project it takes
+two thirds of the long side, up to 4,000 px, so a 6,000 px photo of a room or facade keeps
+the fine texture it needs to register. Elsewhere SIFT's keypoint limit grows with the
+area too.
 
 ## Detection resolution
 <!-- param: maxDim  default: 2400 px (SIFT) · 1600 px (SuperPoint) · 1024 px (DISK, ALIKED) -->

@@ -1,7 +1,12 @@
 import { computeSourceOf } from '../../utils/image.js'
 import { learnedDetector, detectorLabel } from '../../core/features/learnedDetectors.js'
 import { useModelsStore } from '../useModelsStore.js'
-import { resolveDetectMaxDim, resolveDetectKeypoints, detectSize } from '../../core/features/detectResolution.js'
+import {
+  resolveDetectMaxDim,
+  resolveDetectKeypoints,
+  detectSize,
+  detectBand,
+} from '../../core/features/detectResolution.js'
 import { DETECT_TUNING } from '../../core/tuning.js'
 import { detectKeypoints, POOL_SIZE } from '../../workers/computeClient.js'
 import { Keypoints, fillNormalized, asKeypoints } from '../../core/features/keypoints.js'
@@ -29,7 +34,13 @@ export function createDetection({
   save,
   whenComputeReady,
 }) {
+  // The project's scene type rides along: auto resolution picks its band by it
+  // (core/features/detectResolution.js detectBand). A caller's own value wins.
+  const withScene = (settings) =>
+    settings.sceneType !== undefined ? settings : { ...settings, sceneType: projects.currentSceneType ?? null }
+
   async function detectOne(id, settings = {}, onDetected, shouldCancel) {
+    settings = withScene(settings)
     const img = images.value.find((i) => i.id === id)
     if (!img || img.kpStatus === 'running') return
     // A learned detector needs its weights — fetch them (with consent) first.
@@ -234,6 +245,7 @@ export function createDetection({
   // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt on
   // open). The images it lists keep their features; only the rest are detected.
   async function detectAll(settings = {}, onDetected, onProgress, shouldCancel, { resume = null } = {}) {
+    settings = withScene(settings)
     const requested = journalSettings(structuredClone(toRaw(settings)))
     const key = journalKey({ images: images.value.map((im) => im.uuid), settings: requested })
     let journal = null
@@ -298,7 +310,10 @@ export function createDetection({
     // Resolution: one figure in absolute mode; in auto mode it varies per image, so
     // report the band being applied rather than a number that would only be right
     // for some of the batch.
-    const resLabel = maxDimMode === 'auto' ? `auto resolution (${preset} band, ≥${maxDim}px)` : `≤${maxDim}px`
+    const band = maxDimMode === 'auto' ? detectBand(settings) : null
+    const resLabel = band
+      ? `auto resolution (${preset}${band.closeRange ? ' close-range' : ''} band, ≥${maxDim}px)`
+      : `≤${maxDim}px`
     const concurrency = detectionConcurrency(pending, settings, POOL_SIZE, navigator.deviceMemory)
     const started = performance.now()
     const budgetNote =
@@ -306,7 +321,7 @@ export function createDetection({
     log(
       `${batchTag} batch: ${pluralize(total, 'image')} queued — ${resLabel}, ${concurrency} concurrent${budgetNote}` +
         `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp` +
-        `${maxDimMode === 'auto' && !learnedSpec ? ' (auto: scaled with the detected area, up to 4×)' : ''}` +
+        `${band && !learnedSpec && band.scaleKeypoints !== false ? ' (auto: scaled with the detected area, up to 4×)' : ''}` +
         `${
           learnedSpec
             ? ''

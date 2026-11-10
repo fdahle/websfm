@@ -355,6 +355,7 @@ const exportingFootprints = computed(
       :images="images"
       :only-ids="detectOnlyIds"
       :in-model="detectInModel"
+      :scene-type="currentSceneType"
       @close="detectFeaturesOpen = false"
       @run="onDetectRun"
     />

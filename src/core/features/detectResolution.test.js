@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { resolveDetectMaxDim, DETECT_RESOLUTION_BANDS, resolveDetectKeypoints, detectSize } from './detectResolution.js'
+import {
+  resolveDetectMaxDim,
+  DETECT_RESOLUTION_BANDS,
+  DETECT_CLOSE_RANGE_BANDS,
+  resolveDetectKeypoints,
+  detectSize,
+} from './detectResolution.js'
 import {
   DETECT_SIFT_DEFAULTS,
   DETECT_SIFT_PRESETS,
@@ -192,5 +198,49 @@ describe('resolveDetectKeypoints — auto scales the SIFT cap with the detected 
     // Synthetic KH-9 block, 8214 × 4107 → detected 3286 × 1643 = 5.4 MP.
     const r = capFor(8214, 4107)
     expect(r.maxKeypoints).toBe(Math.round((10000 * 3286 * 1643) / (2400 * 1600)))
+  })
+})
+
+describe('the close-range band (an object project)', () => {
+  const auto = { maxDim: 2400, maxDimMode: 'auto', detector: 'sift', preset: 'medium' }
+  const object = { ...auto, sceneType: 'object' }
+
+  it('detects a 6,048 px close-range photo at about 4,000 px', () => {
+    // 0.66 × 6048 = 3992: the resolution that registered every ETH3D camera.
+    expect(resolveDetectMaxDim(6048, object).maxDim).toBe(3992)
+    expect(resolveDetectMaxDim(6048, object).reason).toMatch(/close-range band/)
+  })
+
+  it('leaves the same photo at the general band in an aerial project', () => {
+    expect(resolveDetectMaxDim(6048, { ...auto, sceneType: 'aerial' }).maxDim).toBe(2419)
+    expect(resolveDetectMaxDim(6048, auto).maxDim).toBe(2419)
+  })
+
+  it('keeps a 3,072 px photo at the 2,400 px floor and stops at 4,000 px', () => {
+    expect(resolveDetectMaxDim(3072, object).maxDim).toBe(2400)
+    expect(resolveDetectMaxDim(11425, object).maxDim).toBe(4000)
+    expect(resolveDetectMaxDim(2000, object).maxDim).toBe(2000)
+  })
+
+  it('applies only to the medium preset and to SIFT', () => {
+    // The high band (0.65 of native) as in an aerial project, not the close-range one.
+    expect(resolveDetectMaxDim(9000, { ...object, preset: 'high' }).maxDim).toBe(5850)
+    expect(resolveDetectMaxDim(6048, { ...object, detector: 'superpoint', maxDim: 1600 }).band.closeRange).toBe(false)
+  })
+
+  it('does nothing in absolute mode', () => {
+    expect(resolveDetectMaxDim(6048, { ...object, maxDimMode: 'absolute' }).maxDim).toBe(2400)
+  })
+
+  it('keeps the configured keypoint cap', () => {
+    const size = detectSize(6048, 4032, resolveDetectMaxDim(6048, object).maxDim)
+    expect(resolveDetectKeypoints(size, { ...object, maxKeypoints: 10000 }).maxKeypoints).toBe(10000)
+    // The general band scales the same area's cap.
+    expect(resolveDetectKeypoints(size, { ...auto, maxKeypoints: 10000 }).maxKeypoints).toBeGreaterThan(10000)
+  })
+
+  it("pins each close-range floor to that preset's absolute default, as the general bands", () => {
+    for (const [preset, band] of Object.entries(DETECT_CLOSE_RANGE_BANDS.sift))
+      expect(band.floorPx).toBe(absoluteMaxDim(DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, preset))
   })
 })

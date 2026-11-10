@@ -84,16 +84,43 @@ export const DETECT_RESOLUTION_BANDS = {
   },
 }
 
+// Close-range photos (an object project: a building, a room, an object at a few metres)
+// fill the frame with fine texture, and a 6,000 px photo detected at 2,400 px loses the
+// keypoints a low-texture interior needs to register. ETH3D's 6,048 px photos at the
+// medium band's 2,400 px: office 20 of 26 cameras, pipes 8 of 14; at 4,000 px every
+// camera of all six scenes, at the same or better pose accuracy (pipes median 3.9 →
+// 1.6 mm). South Building's 3,072 px photos gain nothing from more, so the rule is a
+// fraction (0.66 × 6,048 ≈ 4,000; 0.66 × 3,072 → the 2,400 floor). The keypoint cap
+// stays as configured: scaling it with the area (28 k at 4,000 px) changed the pose
+// error by noise and took 2–4× the matching time (courtyard 93 → 352 s on the CPU).
+// Aerial photos keep the general band: a nadir block gained nothing from 4,000 px
+// (GeoScan PUTI, 2026-11-10). The measurements are in the CHANGELOG entry.
+// Only the medium preset has a close-range band; the others use the general ones.
+export const DETECT_CLOSE_RANGE_BANDS = {
+  sift: {
+    medium: { fraction: 0.66, floorPx: 2400, ceilPx: 4000, scaleKeypoints: false },
+  },
+}
+
+// The band auto mode applies: the close-range one for an object project where there is
+// one, else the preset's general band.
+export function detectBand({ detector = 'sift', preset = 'medium', sceneType = null } = {}) {
+  const close = sceneType === 'object' ? DETECT_CLOSE_RANGE_BANDS[detector]?.[preset] : null
+  if (close) return { ...close, closeRange: true }
+  const bands = DETECT_RESOLUTION_BANDS[detector] ?? DETECT_RESOLUTION_BANDS.sift
+  return { ...(bands[preset] ?? bands.medium), closeRange: false }
+}
+
 // Resolve the working resolution for one image.
 //
 //   nativeMax   the image's long side in px (0/unknown ⇒ fall back to absolute)
-//   settings    { maxDim, maxDimMode, detector, preset }
+//   settings    { maxDim, maxDimMode, detector, preset, sceneType }
 //
 // Returns { maxDim, mode, band, nativeMax, reason } — `reason` is a short audit
 // string for the log, since a silently-derived resolution is exactly the kind of
 // value CLAUDE.md ▸ Conventions requires be auditable.
 export function resolveDetectMaxDim(nativeMax, settings = {}) {
-  const { maxDim = 2400, maxDimMode = 'absolute', detector = 'sift', preset = 'medium' } = settings
+  const { maxDim = 2400, maxDimMode = 'absolute' } = settings
 
   if (maxDimMode !== 'auto') {
     return { maxDim, mode: 'absolute', band: null, nativeMax, reason: `fixed ${maxDim}px` }
@@ -105,8 +132,7 @@ export function resolveDetectMaxDim(nativeMax, settings = {}) {
     return { maxDim, mode: 'absolute', band: null, nativeMax, reason: `fixed ${maxDim}px (native size unknown)` }
   }
 
-  const bands = DETECT_RESOLUTION_BANDS[detector] ?? DETECT_RESOLUTION_BANDS.sift
-  const band = bands[preset] ?? bands.medium
+  const band = detectBand(settings)
   const raw = Math.round(band.fraction * nativeMax)
   const clampedLow = raw < band.floorPx
   const clampedHigh = raw > band.ceilPx
@@ -116,11 +142,12 @@ export function resolveDetectMaxDim(nativeMax, settings = {}) {
   const maxDimOut = Math.min(resolved, nativeMax)
 
   const reason =
-    maxDimOut >= nativeMax
+    (maxDimOut >= nativeMax
       ? `${maxDimOut}px = full native resolution`
       : `${maxDimOut}px = ${(band.fraction * 100).toFixed(0)}% of ${nativeMax}px` +
         (clampedLow ? ` (raised to the ${band.floorPx}px floor)` : '') +
-        (clampedHigh ? ` (capped at the ${band.ceilPx}px ceiling)` : '')
+        (clampedHigh ? ` (capped at the ${band.ceilPx}px ceiling)` : '')) +
+    (band.closeRange ? ', close-range band' : '')
 
   return { maxDim: maxDimOut, mode: 'auto', band, nativeMax, reason }
 }
@@ -157,6 +184,9 @@ export function resolveDetectKeypoints(size, settings = {}) {
   const px = (size?.width || 0) * (size?.height || 0)
   if (maxDimMode !== 'auto' || !rule || !(px > 0)) {
     return { maxKeypoints, factor: 1, reason: `fixed ${maxKeypoints}` }
+  }
+  if (detectBand(settings).scaleKeypoints === false) {
+    return { maxKeypoints, factor: 1, reason: `${maxKeypoints} (configured cap; close-range band)` }
   }
   const factor = Math.min(rule.maxFactor, Math.max(1, px / rule.refPx))
   const out = Math.round(maxKeypoints * factor)

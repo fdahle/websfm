@@ -28,6 +28,7 @@ import { PYRAMID_TUNING } from '../../../core/io/rasterPyramid.js'
 import { LEARNED_DETECTORS, learnedDetector, detectorLabel } from '../../../core/features/learnedDetectors.js'
 import { MODELS, isRedistributable } from '../../../core/models/registry.js'
 import { planDetection, planImageDetection } from '../../../core/features/detectPlan.js'
+import { detectBand } from '../../../core/features/detectResolution.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { fmtCount } from '../../../core/stepEffects/format.js'
 
@@ -39,6 +40,9 @@ const props = defineProps({
   // (null: the Mode decides). And how many of them the sparse model holds.
   onlyIds: { type: Array, default: null },
   inModel: { type: Number, default: 0 },
+  // The project's scene type: Scale with image size uses the close-range band in an
+  // object project (core/features/detectResolution.js detectBand).
+  sceneType: { type: String, default: null },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -177,7 +181,7 @@ const settings = computed(() => {
   // The dataset-derived card is not one of `detectResolution.js`'s bands (which
   // are compute ceilings per *quality* preset), so it reports the balanced band
   // rather than silently falling through to it inside core.
-  const base = { preset: baseId.value === 'recommended' ? 'medium' : baseId.value }
+  const base = { preset: baseId.value === 'recommended' ? 'medium' : baseId.value, sceneType: props.sceneType }
   return { ...base, ...activeSettings.value }
 })
 
@@ -358,9 +362,19 @@ const tileLimit = computed(() => {
   return t.exact ? `${fmt(t.size)} px` : `${fmt(t.size)} px or less (fits GPU memory)`
 })
 
+// The band Scale with image size applies, said once after the sizes.
+const bandNote = computed(() => {
+  if (activeSettings.value.maxDimMode !== 'auto') return ''
+  const b = detectBand({ ...settings.value, detector: detector.value })
+  const share = `${Math.round(b.fraction * 100)} % of each image's long side, ${fmt(b.floorPx)}–${fmt(b.ceilPx)} px`
+  return b.closeRange ? ` Close-range project: ${share}.` : ` Scaled: ${share}.`
+})
 const resizeEffect = computed(() => {
   const p = plan.value
   if (!p) return ''
+  return resizeSizes(p) + bandNote.value
+})
+function resizeSizes(p) {
   const n = p.count
   const range = p.minDetect === p.maxDetect ? `${fmt(p.maxDetect)} px` : `${fmt(p.minDetect)}–${fmt(p.maxDetect)} px`
   if (p.downscaled === 0)
@@ -370,7 +384,7 @@ const resizeEffect = computed(() => {
     `${fmt(p.downscaled)} of ${fmt(n)} images are reduced before detection, to ${range} on the long side. ` +
     `Largest: ${dims(L.natW, L.natH)} → ${dims(L.width, L.height)} (${Math.round(L.scale * 100)} %).`
   )
-})
+}
 // Tiling only matters when a detection image is larger than one tile.
 const tilingIdle = computed(() => tilingOn.value && plan.value && plan.value.tiled === 0)
 const tileEffect = computed(() => {
@@ -562,7 +576,7 @@ provideStepLayout('detect-features')
           label-for="maxDimMode"
           :hint="
             maxDimMode === 'auto'
-              ? 'Each image is detected at a fraction of its own size, never below the value below. Best for mixed or very large images such as film scans.'
+              ? 'Each image is detected at a fraction of its own size, never below the value below. Best for close-range photos, mixed sizes and very large images such as film scans.'
               : 'Every image is reduced to the same long side, whatever its native size. Smaller images are never enlarged.'
           "
         >
