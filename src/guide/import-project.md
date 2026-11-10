@@ -1,7 +1,7 @@
 ---
 id: import-project
 title: Import Project
-summary: Brings another WebSfM project's photos, features and matches into this one, so two flights, two days or a colleague's block can be joined into one model.
+summary: Brings another WebSfM project into this one, its photos and its solved model, so two flights, two days or a colleague's block become one model, with or without overlap.
 category: Reconstruction pipeline
 order: 11
 ---
@@ -24,15 +24,38 @@ What comes:
 - **GCPs and markers**, joined by name: their image marks come, and a point that is
   already here keeps its position. **Imported camera positions** come with their photos
   (positions from the photos' EXIF are read again anyway). Masks come too.
+- **Its model**, merged into this one, unless you leave it behind (below).
 
-What stays behind: the other project's model, depth maps, clouds, meshes and rasters.
+What stays behind: the other project's depth maps, clouds, meshes and rasters.
 
 The photos come a batch at a time, behind a progress bar. **Cancel** stops after the
 batch under way: the photos already in stay, with their features, the pairs between
 them and their marks, and importing the project again brings the rest (the photos
-already here are recognised and kept once).
+already here are recognised and kept once). A cancelled import does not merge the model.
 
-## Joining the photos to the model
+## Its model
+<!-- param: model default: Merge into this model -->
+**Merge into this model** places the other project's solved cameras and tie points in
+this model's frame, as Metashape's Align Chunks and Merge Chunks do. The blocks need not
+overlap: they only need photos, GCPs or a georeference in common (**Place it by**). The
+result is a new model; the one it was merged into stays in the list. Without a model
+here, the other one comes in as it is. **Leave behind** brings only the photos.
+
+## Place it by
+<!-- param: align default: Auto -->
+What the two models share. **Photos in both**: photos both projects solved (three or
+more), their cameras must agree. **GCPs and markers**: three or more of the same name,
+marked in both blocks; surveyed coordinates are not needed. **Georeference**: both
+projects georeferenced, in any projected CRS; heights are taken as they are, so use the
+same vertical datum. **Auto** tries them in that order and the log says which placed it.
+
+## After merging
+Each block keeps its own shape and its own lens. [Optimize Cameras](guide:optimize-cameras) adjusts the two
+together; the [georeference](help:georeferencing) is fitted again on the merged model,
+from the GCPs of both. Where the blocks overlap, Match Features with **Match only new
+pairs** and then Sparse Reconstruction ▸ **Add to the model** tie them with matches too.
+
+## Leaving the model behind
 The imported photos are matched among themselves, but not yet with this project's.
 1. **Match Features** with **Match only new pairs** on (it starts on by itself here):
    only the pairs between the two blocks are matched.
@@ -41,6 +64,5 @@ The imported photos are matched among themselves, but not yet with this project'
    and so do its depth maps, clouds and rasters; **Refined** lets every camera move
    with the new ones. Without a model yet, **Rebuild** makes one from all photos.
 
-The two blocks must overlap for this: photos of the same ground, so the matcher finds
-the same features in both. Blocks that only share GCPs, or lie side by side without
-overlap, cannot be joined this way yet.
+This needs overlap: photos of the same ground, so the matcher finds the same features
+in both.

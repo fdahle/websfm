@@ -68,14 +68,35 @@ export function transformCamera(cam, sim) {
 
 // ── Points in both frames ─────────────────────────────────────────────────────
 
-/** Photos solved in both: camsA / camsB Map<uuid, camera>, sharedBtoA Map<B uuid, A uuid>. */
-export function sharedPhotoPairs(camsA, camsB, sharedBtoA) {
-  const out = []
+/**
+ * Photos solved in both: camsA / camsB Map<uuid, camera>, sharedBtoA Map<B uuid, A uuid>.
+ * Each gives its centre and, unless `axes` is false, two points one span along its
+ * viewing and sideways axes (the rows of R): shared photos along one flight line have
+ * almost collinear centres, which leave the roll about that line to rounding, while
+ * their directions fix it (one span of the shared centres in each frame, so the
+ * points correspond whatever the scale between the models).
+ */
+export function sharedPhotoPairs(camsA, camsB, sharedBtoA, { axes = true } = {}) {
+  const both = []
   for (const [ub, ua] of sharedBtoA) {
     const a = camsA.get(ua),
       b = camsB.get(ub)
-    if (a && b) out.push({ label: ub, src: cameraCenter(b), dst: cameraCenter(a) })
+    if (a && b) both.push({ ub, a, b, ca: cameraCenter(a), cb: cameraCenter(b) })
   }
+  const out = both.map(({ ub, ca, cb }) => ({ label: ub, src: cb, dst: ca }))
+  if (!axes || both.length < 2) return out
+  const spanA = diameter(both.map((x) => x.ca)),
+    spanB = diameter(both.map((x) => x.cb))
+  if (!(spanA > 0 && spanB > 0)) return out
+  for (const { ub, a, b, ca, cb } of both)
+    for (const row of [2, 0]) {
+      out.push({
+        label: `${ub} ${row ? 'view' : 'side'}`,
+        axis: true,
+        src: cb.map((v, i) => v + spanB * b.R[row][i]),
+        dst: ca.map((v, i) => v + spanA * a.R[row][i]),
+      })
+    }
   return out
 }
 
@@ -174,9 +195,14 @@ export function alignModels(inputs, method = 'auto', opts = {}) {
   const tried = []
   for (const m of order) {
     let pairs = null
-    if (m === 'photos' && inputs.sharedBtoA?.size)
+    if (m === 'photos' && inputs.sharedBtoA?.size) {
       pairs = sharedPhotoPairs(inputs.camsA, inputs.camsB, inputs.sharedBtoA)
-    else if (m === 'gcps' && inputs.triA && inputs.triB) pairs = gcpPairs(inputs.triA, inputs.triB)
+      const photos = pairs.filter((p) => !p.axis).length
+      if (photos < 3) {
+        tried.push({ method: m, accepted: false, n: photos, reason: `${photos} of the 3 photos needed` })
+        continue
+      }
+    } else if (m === 'gcps' && inputs.triA && inputs.triB) pairs = gcpPairs(inputs.triA, inputs.triB)
     else if (m === 'georef' && inputs.toA) pairs = crossGeorefPairs(inputs.camsB, inputs.toA)
     if (!pairs) {
       tried.push({ method: m, accepted: false, reason: UNAVAILABLE[m] })
@@ -184,11 +210,16 @@ export function alignModels(inputs, method = 'auto', opts = {}) {
     }
     const fit = fitModelAlignment(pairs, opts[m] ?? {})
     let result = { method: m, ...fit }
-    if (fit.accepted && m === 'photos') {
+    // Shared photos: their directions must agree too, and when they do not, that is the
+    // reason to give (the axis points then fail the position gate as well).
+    if (fit.sim && m === 'photos') {
       const rot = rotationAgreement(inputs.camsA, inputs.camsB, inputs.sharedBtoA, fit.sim, opts.rotation)
-      result = { ...result, rotation: rot, accepted: rot.accepted, ...(rot.accepted ? {} : { reason: rot.reason }) }
+      result = { ...result, rotation: rot }
+      if (!rot.accepted) result = { ...result, accepted: false, reason: rot.reason }
     }
-    tried.push({ method: m, accepted: result.accepted, n: fit.n, reason: result.reason ?? null })
+    const n = m === 'photos' ? pairs.filter((p) => !p.axis).length : fit.n
+    result.n = n
+    tried.push({ method: m, accepted: result.accepted, n, reason: result.reason ?? null })
     if (result.accepted) return { ...result, tried }
   }
   return { accepted: false, method: null, tried }
@@ -228,9 +259,13 @@ export function mergeModels(a, b, { sim = null, sharedBtoA = new Map(), sensorOf
     addedCameras++
   }
 
-  // B's tracks without their views on shared photos (B's keypoint numbers of them).
+  // B's tracks without their views on shared photos (B's keypoint numbers of them), nor
+  // on photos whose camera `b.cameras` does not hold (a photo that did not come).
   const sharedB = new Set(sharedBtoA.keys())
-  const { points: bKept } = (b.points ?? SparsePoints.empty()).withoutViews(sharedB, 2)
+  const src = b.points ?? SparsePoints.empty()
+  const drop = new Set(sharedB)
+  for (const u of src.viewUuids) if (!b.cameras.has(u)) drop.add(u)
+  const { points: bKept } = src.withoutViews(drop, 2)
   let bPoints = bKept
   if (sim && bKept.length) {
     const pos = new Float64Array(3 * bKept.length)
@@ -238,7 +273,6 @@ export function mergeModels(a, b, { sim = null, sharedBtoA = new Map(), sensorOf
     bPoints = bKept.withPositions(pos)
   }
   let droppedViews = 0 // views on shared photos
-  const src = b.points ?? SparsePoints.empty()
   for (let k = 0; k < src.viewTotal; k++) if (sharedB.has(src.viewUuids[src.vcam[k]])) droppedViews++
   const points = SparsePoints.concat([a?.points ?? SparsePoints.empty(), bPoints])
 

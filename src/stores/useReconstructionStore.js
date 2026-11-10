@@ -880,7 +880,7 @@ export const useReconstructionStore = registerProjectStore(
     }
 
     // COLMAP / interop sparse models and imported clouds (reconstruction/importers.js).
-    const { importColmapModel, importInteropModel, importCloud } = createImporters({
+    const { addMergedModel, importColmapModel, importInteropModel, importCloud } = createImporters({
       clouds,
       images,
       log,
@@ -1559,6 +1559,7 @@ export const useReconstructionStore = registerProjectStore(
       hasSparseProducts,
       importColmapModel,
       importInteropModel,
+      addMergedModel,
       importCloud,
       editClouds,
       textureMesh,

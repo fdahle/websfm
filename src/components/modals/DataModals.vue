@@ -206,6 +206,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
     <ImportProjectModal
       v-if="importProjectOpen"
       :projects="otherProjects"
+      :has-model="sparseCameras.size > 0"
       @close="importProjectOpen = false"
       @run="onImportProject"
     />

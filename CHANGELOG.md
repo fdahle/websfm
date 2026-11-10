@@ -6,6 +6,19 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Merge blocks that do not overlap.** Import ▸ WebSfM Project now brings the other
+  project's solved model too and places it in this one by photos both solved, GCPs and
+  markers marked in both, or both georeferences (*Its model* and *Place it by*), as
+  Metashape's Align Chunks and Merge Chunks do. The merged model becomes the main one, and
+  the one it was merged into stays in the list; each block keeps its own shape and lens,
+  and Optimize Cameras adjusts them together. Importing into a project without a model now
+  brings the other model in as it is; *Leave behind* keeps the old behaviour (photos only,
+  then Match only new pairs and Add to the model, which needs overlap). Shared photos along
+  one flight line are placed by their camera directions as well as their centres, which
+  their nearly collinear centres alone leave open. Tested against known truth: unit tests
+  move a block by a known similarity and place it back by each of the three ways, and a
+  browser test merges a 5-photo model moved by a similarity into a copy missing two of its
+  cameras, which land back within 10⁻⁶ of the block's span.
 - **How well the focal is fixed.** The Quality Report's Calibration card shows the
   refined focal with its ± (how well the photos fixed it), and says when a nadir block
   without camera positions or GCPs cannot fix it at all, so its heights scale with it.

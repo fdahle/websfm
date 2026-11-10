@@ -137,6 +137,38 @@ describe('alignModels', () => {
     expect(moved.rs.tau).toBe(0.02)
   })
 
+  it('shared photos on one straight line still fix the roll about it', () => {
+    // Three shared photos exactly along x: their centres alone leave the turn about x open.
+    const line = [0, 25, 50].map((x) => [x, 40, 60])
+    const camsA = new Map(),
+      camsB = new Map(),
+      sharedBtoA = new Map()
+    line.forEach((C, i) => {
+      camsA.set(`la${i}`, camA(C, 0.05 * i))
+      camsB.set(`lb${i}`, inB(camA(C, 0.05 * i)))
+      sharedBtoA.set(`lb${i}`, `la${i}`)
+    })
+    centresB.forEach((C, i) => camsB.set(`b${i}`, inB(camA(C))))
+    const centresOnly = fitModelAlignment(sharedPhotoPairs(camsA, camsB, sharedBtoA, { axes: false }))
+    expect(centresOnly.accepted).toBe(false)
+    const r = alignModels({ camsA, camsB, sharedBtoA }, 'photos')
+    expect(r.accepted).toBe(true)
+    centresB.forEach((C, i) =>
+      expect(near(cameraCenter(transformCamera(camsB.get(`b${i}`), r.sim)), C, 1e-9)).toBe(true),
+    )
+  })
+
+  it('photos needs three shared photos, whatever their axes add', () => {
+    const { camsA, camsB } = scene()
+    const two = new Map([
+      ['sB0', 'sA0'],
+      ['sB1', 'sA1'],
+    ])
+    const r = alignModels({ camsA, camsB, sharedBtoA: two }, 'photos')
+    expect(r.accepted).toBe(false)
+    expect(r.tried[0].reason).toBe('2 of the 3 photos needed')
+  })
+
   it('refuses shared photos whose directions disagree', () => {
     const { camsA, camsB, sharedBtoA } = scene()
     const c = camsA.get('sA1')
@@ -189,7 +221,9 @@ describe('alignModels', () => {
     const { camsA, camsB, sharedBtoA } = scene()
     const r = alignModels({ camsA, camsB, sharedBtoA, toA }, 'auto')
     expect(r.method).toBe('photos')
-    expect(sharedPhotoPairs(camsA, camsB, sharedBtoA)).toHaveLength(4)
+    // 4 centres + a viewing and a sideways point each.
+    expect(sharedPhotoPairs(camsA, camsB, sharedBtoA)).toHaveLength(12)
+    expect(sharedPhotoPairs(camsA, camsB, sharedBtoA, { axes: false })).toHaveLength(4)
   })
 })
 
@@ -305,6 +339,17 @@ describe('mergeModels', () => {
     expect(m.cameras.has('sB0')).toBe(false)
     expect(m.cameras.get('b0')).toBe(b.cameras.get('b0'))
     expect(m.added.cameras).toBe(b.cameras.size)
+  })
+
+  it('a photo that did not come takes its views along', () => {
+    const b = bModel()
+    b.cameras.delete('b1') // its photo could not be read
+    const m = mergeModels(null, b, {})
+    // Point 0 (b0, b1) is left with one view and goes; point 2 keeps b0 and sB1.
+    expect(m.points.length).toBe(2)
+    const uuids = new Set()
+    for (let i = 0; i < m.points.length; i++) m.points.forEachView(i, (u) => uuids.add(u))
+    expect(uuids.has('b1')).toBe(false)
   })
 })
 

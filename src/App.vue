@@ -321,13 +321,13 @@ const {
 })
 // Import ▸ Project into this project (useProjectMerge), behind the run progress bar.
 const { importProjectInto } = useProjectMerge()
-async function onImportProject(sourceId) {
+async function onImportProject(sourceId, options = {}) {
   useModalsStore().importProjectOpen = false
   // Cancel stops between batches (no worker to terminate).
   exportProgress.open('Importing Project', 0, () => {}, { unit: 'photos' })
   let ok = false
   try {
-    const r = await importProjectInto(sourceId, exportProgress.report, () => exportProgress.aborted.value)
+    const r = await importProjectInto(sourceId, exportProgress.report, () => exportProgress.aborted.value, options)
     ok = !!r && !r.cancelled
   } finally {
     await exportProgress.close(ok)

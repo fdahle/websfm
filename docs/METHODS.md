@@ -569,6 +569,36 @@ fall while f doubles).
 
 ---
 
+### 4.12 Merging another project's model
+
+`core/sfm/modelMerge.js`. Import ▸ WebSfM Project ▸ *Its model: Merge into this model*
+places another project's solved model (B) in this one's frame (A) and joins them, as
+Metashape's Align Chunks and Merge Chunks do; the blocks need not overlap.
+
+- **Points known in both frames.** Every way of placing B gives pairs of points (B's
+  frame, A's frame) and one 7-DOF similarity (`georef.js fitSimilarity`) is fitted through
+  them. *Photos in both*: each photo both models solved gives its camera centre, and two
+  points one span of the shared centres along its viewing and sideways axes. Shared photos
+  along one flight line have nearly collinear centres, which leave the roll about the line
+  to rounding; their directions fix it. *GCPs and markers*: each one of the same name
+  triangulated in both models (§6.2), each from its marks through its own model's lens;
+  surveyed coordinates are not needed. *Georeference*: B's camera centres taken through
+  B's georeference into B's CRS, converted to A's CRS (proj4, horizontal only; heights pass
+  as they are), and through the inverse of A's georeference into A's frame. *Auto* tries
+  them in that order and takes the first accepted.
+- **Gates.** At least three photos or GCPs; the position RMS of the fit at most 2 % of the
+  span of the common points; the leave-one-out scale spread at most 5 %; for shared photos
+  the camera rotations must agree (median ≤ 3°, worst ≤ 8°), the same gates as a secondary
+  model (§4). A refused merge leaves the imported photos without B's cameras.
+- **The merge.** A's cameras win on a photo both hold. B's cameras and points are moved by
+  the similarity (a rolling-shutter camera's velocity turns and scales with them). B's
+  tracks lose their views on shared photos (they number B's keypoints, and A keeps its
+  own) and points left with one view go. Each B camera keeps B's solved lens as its own
+  calibration group, which the frame resolver takes before the sensor's
+  (`displayFrame.js`). Nothing is re-adjusted: each block keeps its shape. The merged model
+  is a new sparse model and becomes the main one; the georeference is fitted again on it.
+  *Optimize cameras* (§4.11) then adjusts the two blocks together.
+
 ## 5. Camera model & lens distortion
 
 `core/sfm/distortion.js`. **Brown–Conrady** (radial `k1,k2,k3`, tangential `p1,p2`) by

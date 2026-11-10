@@ -109,6 +109,12 @@ test('a project imported into another brings photos, features, matches and marks
     markers: 2,
   })
   expect(merged.marks).toBeGreaterThan(0)
+  // A project without a model takes the imported one as it is (Its model: Bring in).
+  const brought = await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    return useReconstructionStore().mainSparseCloud?.cameras?.size ?? 0
+  })
+  expect(brought).toBe(5)
 
   // The imported features and matches build the model in the new project.
   const cameras = await page.evaluate(async () => {
@@ -178,5 +184,131 @@ test('a cancelled import keeps the photos already in, with their features and pa
     }
   }, sourceId)
   expect(r).toEqual({ cancelled: true, images: 2, done: 2, pairs: 1, pairsOnImported: true })
+  expect(errors).toEqual([])
+})
+
+// Import ▸ Project with Its model ▸ Merge (core/sfm/modelMerge.js), against known truth:
+// B is the fixture with its model moved by a similarity (another frame, as a project
+// solved apart has); A is the fixture with two cameras taken out of its model. Placed by
+// the three photos both solved, B's two cameras land where the fixture had them.
+async function openFixture(page) {
+  await page.evaluate((b64) => {
+    const bin = atob(b64)
+    const u8 = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i)
+    document
+      .querySelector('#app')
+      .__vue_app__._instance.setupState.importProjectFile(new File([u8], 'aukerman-5.websfm'))
+  }, readFileSync(fixture).toString('base64'))
+  if (await page.evaluate(() => typeof window.showDirectoryPicker === 'function')) {
+    await page
+      .getByRole('dialog', { name: 'Open project file' })
+      .getByRole('button', { name: 'In this browser' })
+      .click()
+  }
+  await expect(page.locator('.toast', { hasText: 'Project opened' }).last()).toBeVisible({ timeout: 60_000 })
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.locator('.toast').evaluateAll((els) => els.forEach((e) => e.remove()))
+}
+
+test('a model solved apart is merged into this one, placed by the photos both solved', async ({ page }) => {
+  test.setTimeout(240_000)
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto('/')
+  await page.waitForFunction(() => document.querySelector('#app')?.__vue_app__?._instance?.setupState)
+
+  // B: the fixture, its model moved by s = 3, a turn about z and a shift.
+  await openFixture(page)
+  const bId = await page.evaluate(async () => {
+    const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { transformCamera } = await import('/src/core/sfm/modelMerge.js')
+    const { applySimilarity } = await import('/src/core/products/georef.js')
+    const recon = useReconstructionStore()
+    const main = recon.mainSparseCloud
+    const a = 0.8
+    const sim = {
+      scale: 3,
+      R: [
+        [Math.cos(a), -Math.sin(a), 0],
+        [Math.sin(a), Math.cos(a), 0],
+        [0, 0, 1],
+      ],
+      t: [50, -20, 7],
+    }
+    const cameras = new Map([...main.cameras].map(([u, c]) => [u, transformCamera(c, sim)]))
+    const pos = new Float64Array(3 * main.points.length)
+    for (let i = 0; i < main.points.length; i++) pos.set(applySimilarity(sim, main.points.xyz(i)), 3 * i)
+    await recon.addMergedModel({
+      cameras,
+      points: main.points.withPositions(pos),
+      calibration: main.calibration,
+      name: 'Moved',
+    })
+    return useProjectsStore().currentProjectId
+  })
+
+  // A: the fixture again, without two of its cameras.
+  await openFixture(page)
+  const truth = await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { cameraCenter } = await import('/src/core/sfm/geometry.js')
+    const recon = useReconstructionStore()
+    const main = recon.mainSparseCloud
+    const out = [...main.cameras.keys()].sort().slice(3)
+    const truth = Object.fromEntries(out.map((u) => [u, cameraCenter(main.cameras.get(u))]))
+    const cameras = new Map([...main.cameras].filter(([u]) => !out.includes(u)))
+    const { points } = main.points.withoutViews(new Set(out), 2)
+    await recon.addMergedModel({ cameras, points, calibration: main.calibration, name: 'Three' })
+    return truth
+  })
+  expect(Object.keys(truth)).toHaveLength(2)
+
+  await page.evaluate(async () => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    useModalsStore().importProjectOpen = true
+  })
+  const dialog = page.getByRole('dialog', { name: 'Import Project' })
+  await dialog.locator('#imp-proj-src').selectOption(bId)
+  await expect(dialog.locator('#imp-proj-model')).toHaveValue('merge')
+  await dialog.locator('#imp-proj-align').selectOption('photos')
+  await dialog.getByRole('button', { name: 'Import', exact: true }).click()
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+          return useReconstructionStore().mainSparseCloud?.name ?? ''
+        }),
+      { timeout: 120_000 },
+    )
+    .toMatch(/\+/)
+  await expect(page.locator('.progress-modal')).toHaveCount(0, { timeout: 30_000 })
+
+  const result = await page.evaluate(async (truth) => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { cameraCenter } = await import('/src/core/sfm/geometry.js')
+    const recon = useReconstructionStore()
+    const main = recon.mainSparseCloud
+    const span = Math.max(...Object.values(truth).flatMap((c) => c.map(Math.abs)), 1)
+    const err = Object.entries(truth).map(([u, c]) => {
+      const cam = main.cameras.get(u)
+      return cam ? Math.hypot(...cameraCenter(cam).map((v, i) => v - c[i])) / span : Infinity
+    })
+    const sparse = recon.clouds.filter((c) => c.kind === 'sparse')
+    return {
+      cameras: main.cameras.size,
+      worst: Math.max(...err),
+      models: sparse.map((c) => c.name),
+      groups: (main.calibration?.groups ?? []).filter((g) => g.imageUuid && truth[g.imageUuid]).length,
+    }
+  }, truth)
+  expect(result.cameras).toBe(5)
+  // The fixture's rotations are orthonormal to ~1e-7 only, so moving B and placing it
+  // back leaves ~1e-6 of the span; a wrong placement is off by the span itself.
+  expect(result.worst).toBeLessThan(1e-4)
+  expect(result.models).toContain('Three') // the model it was merged into stays
+  expect(result.groups).toBe(2) // B's two cameras keep B's lens
   expect(errors).toEqual([])
 })

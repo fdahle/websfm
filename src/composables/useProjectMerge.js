@@ -1,6 +1,13 @@
 import { toRaw } from 'vue'
 import * as opfs from '../utils/opfs.js'
 import { planProjectMerge } from '../core/io/projectMerge.js'
+import { alignModels, mergeModels } from '../core/sfm/modelMerge.js'
+import { triangulateAllGcps } from '../core/sfm/gcpTriangulation.js'
+import { gcpsInPinholeFrame, makeFrameModelResolver } from '../core/sfm/displayFrame.js'
+import { frameFromSimilarity } from '../core/products/georef.js'
+import { ensureProjection, isGeographic, transformer } from '../core/crs.js'
+import { deserializeCloud } from '../stores/reconstruction/cloudSerde.js'
+import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { asKeypoints } from '../core/features/keypoints.js'
 import { projectFormatOf, projectFormatProblem, PROJECT_FORMAT_VERSION } from '../core/projectFormat.js'
 import { pluralize } from '../core/textFormat.js'
@@ -15,9 +22,11 @@ import { useLog } from './useLog.js'
 
 // Import ▸ Project into this project: another project's photos, sensors, features,
 // matches, masks, GCP marks and imported camera positions join the open one (the plan:
-// core/io/projectMerge.js). Its model and products stay behind; the photos join the
-// model by matching the new pairs (Match only new pairs) and adding them to it
-// (Sparse Reconstruction ▸ Add to the model).
+// core/io/projectMerge.js). Its products stay behind. Its model either stays behind too
+// (the photos then join this model by Match only new pairs and Add to the model, which
+// needs overlap), or is merged into this one (`model: 'merge'`, core/sfm/modelMerge.js):
+// placed by photos both projects solved, GCPs and markers marked in both, or both
+// georeferences, so blocks without overlap join too.
 export function useProjectMerge() {
   const projects = useProjectsStore()
   const imagesStore = useImagesStore()
@@ -25,6 +34,7 @@ export function useProjectMerge() {
   const matches = useMatchesStore()
   const gcps = useGcpsStore()
   const poses = usePosesStore()
+  const recon = useReconstructionStore()
   const { log } = useLog()
 
   // The other project made readable: a folder-backed one needs its folder (a click on
@@ -44,10 +54,13 @@ export function useProjectMerge() {
     return data
   }
 
-  // → { added, shared, pairs, sensors, gcps, poses, cancelled } or null when nothing ran.
-  // `shouldCancel()` is asked between batches: a cancelled import stops there, and the
-  // photos already in stay with their features, the pairs between them and their marks.
-  async function importProjectInto(sourceId, onProgress = () => {}, shouldCancel = () => false) {
+  // → { added, shared, pairs, sensors, gcps, poses, cancelled, model? } or null when nothing
+  // ran. `shouldCancel()` is asked between batches: a cancelled import stops there, and the
+  // photos already in stay with their features, the pairs between them and their marks
+  // (the model is then not merged). `options.model`: 'leave' (default) | 'merge';
+  // `options.align`: 'auto' | 'photos' | 'gcps' | 'georef'.
+  async function importProjectInto(sourceId, onProgress = () => {}, shouldCancel = () => false, options = {}) {
+    const { model = 'leave', align = 'auto' } = options
     const targetId = projects.currentProjectId
     if (!targetId || !projects.isPersisting) {
       log('Import project: open a saved project first', 'error', 'Import')
@@ -58,6 +71,11 @@ export function useProjectMerge() {
       return null
     }
     const sourceName = projects.projects.find((p) => p.id === sourceId)?.name ?? 'project'
+    // This model's georeference as it is now: the photos and marks the import adds retire
+    // it (its evidence changes), but it still places this model, which the import leaves
+    // as it is.
+    const georefA = recon.validGeoref ? structuredClone(toRaw(recon.validGeoref)) : null
+    const crsA = projects.currentCrs
     let data
     try {
       data = await prepareSource(sourceId)
@@ -90,7 +108,8 @@ export function useProjectMerge() {
       'info',
       'Import',
     )
-    if (!plan.added.length) return { added: 0, shared: plan.shared.length, pairs: 0, sensors: 0, gcps: 0, poses: 0 }
+    if (!plan.added.length && model !== 'merge')
+      return { added: 0, shared: plan.shared.length, pairs: 0, sensors: 0, gcps: 0, poses: 0 }
 
     const newSensors = await sensors.addSensors(plan.sensors.add)
 
@@ -199,16 +218,159 @@ export function useProjectMerge() {
       gcps: gcpCount,
       poses: poseCount,
     }
+    const merging = model === 'merge' && !cancelled
     log(
       `Import project: added ${pluralize(result.added, 'photo')} from "${sourceName}" with their features and ` +
         `${pluralize(pairs, 'matched pair')}` +
         (newSensors ? `, ${pluralize(newSensors, 'new sensor')}` : '') +
-        `. To join them to the model: Match Features (Match only new pairs), then Sparse Reconstruction ▸ Add to the model.`,
+        (merging
+          ? ''
+          : `. To join them to the model: Match Features (Match only new pairs), then Sparse Reconstruction ▸ Add to the model.`),
       'success',
       'Import',
     )
+    if (merging) {
+      onProgress(total, total, 'Merging the model…')
+      result.model = await mergeSourceModel({ sourceId, sourceName, data, plan, sensorDoc, georefA, crsA, align })
+    }
     return result
+  }
+
+  // The other project's main model merged into this one (core/sfm/modelMerge.js), after
+  // its photos, marks and sensors are in. → { merged, method?, cameras?, points?, tried? }.
+  async function mergeSourceModel({ sourceId, sourceName, data, plan, sensorDoc, georefA, crsA, align }) {
+    let doc
+    try {
+      doc = await opfs.loadReconstruction(sourceId)
+    } catch (err) {
+      log(`Import project: the model of "${sourceName}" cannot be read — ${err?.message ?? err}`, 'error', 'Import')
+      return { merged: false, reason: 'unreadable' }
+    }
+    const sparse = (doc?.clouds ?? []).filter((c) => (c.kind ?? 'sparse') === 'sparse' && !c.secondary)
+    const raw = sparse.find((c) => c.id === doc.mainSparseId) ?? sparse[0]
+    if (!raw) {
+      log(`Import project: "${sourceName}" has no model to merge; its photos came without one`, 'info', 'Import')
+      return { merged: false, reason: 'no model' }
+    }
+    let n = 0
+    const cloudB = deserializeCloud(raw, () => `merge-source-${n++}`)
+    const here = new Set(imagesStore.images.map((im) => im.uuid))
+    const sharedBtoA = new Map(plan.shared.map(({ source, target }) => [source.uuid, target.uuid]))
+    // B's cameras on the photos that are here (one that could not be read stayed behind).
+    const camsB = new Map([...cloudB.cameras].filter(([u]) => here.has(sharedBtoA.get(u) ?? u)))
+    const sensorOfB = new Map((data.images ?? []).map((im) => [im.uuid, im.sensorId ?? null]))
+    const main = recon.mainSparseCloud
+    const camsA = main?.cameras ?? new Map()
+
+    let alignment = null
+    if (camsA.size) {
+      const inputs = { camsA, camsB, sharedBtoA, ...(await gcpsInBoth({ camsA, camsB, cloudB, doc, sensorDoc, plan })) }
+      const toA = await crossGeoref({ georefA, crsA, georefB: doc.georef, crsB: doc.georef?.crs ?? data.crs })
+      if (toA) inputs.toA = toA
+      alignment = alignModels(inputs, align)
+      if (!alignment.accepted) {
+        log(
+          `Import project: the model of "${sourceName}" could not be placed in this one — ` +
+            alignment.tried.map((t) => `${METHOD_LABEL[t.method]}: ${t.reason}`).join('; ') +
+            '. Its photos are in; where the blocks overlap, Match only new pairs and Add to the model join them.',
+          'warn',
+          'Import',
+        )
+        return { merged: false, tried: alignment.tried }
+      }
+    }
+    const merged = mergeModels(
+      main ? { cameras: camsA, points: main.points, calibration: main.calibration ?? null } : null,
+      { cameras: camsB, points: cloudB.points, calibration: cloudB.calibration ?? null },
+      { sim: alignment?.sim ?? null, sharedBtoA, sensorOfB },
+    )
+    await recon.addMergedModel({
+      cameras: merged.cameras,
+      points: merged.points,
+      calibration: merged.calibration,
+      name: main ? `${main.name} + ${sourceName}` : `${sourceName} (merged)`,
+    })
+    log(
+      `Import project: merged the model of "${sourceName}"` +
+        (alignment
+          ? ` by ${METHOD_LABEL[alignment.method]} (${alignment.n} in common, ` +
+            `RMS ${(100 * alignment.rmsFrac).toFixed(2)} % of their span)`
+          : '') +
+        ` — ${pluralize(merged.added.cameras, 'camera')} and ${pluralize(merged.added.points, 'point')} added` +
+        (merged.dropped.cameras
+          ? `; ${pluralize(merged.dropped.cameras, 'photo')} in both keep this model's camera`
+          : '') +
+        `. The model it was merged into stays in the list. Optimize Cameras adjusts the two together.`,
+      'success',
+      'Import',
+    )
+    // The georeference is fitted again on the merged model (GCPs of both, or positions).
+    if (recon.canGeoreference) await recon.georeference()
+    return {
+      merged: true,
+      method: alignment?.method ?? null,
+      cameras: merged.added.cameras,
+      points: merged.added.points,
+      tried: alignment?.tried ?? [],
+    }
+  }
+
+  // GCPs and markers triangulated in each model from their marks (now all in this
+  // project's GCP list, on this project's photo labels), each through its own model's
+  // lens. → { triA, triB } (Map name → [x, y, z]) or {}.
+  async function gcpsInBoth({ camsA, camsB, cloudB, doc, sensorDoc, plan }) {
+    const list = gcps.gcps.filter((g) => g.enabled !== false && (g.observations ?? []).length >= 2)
+    if (!list.length) return {}
+    const imagesA = new Map(imagesStore.images.map((im) => [im.id, im]))
+    // B's view of the same photos: its uuid for each (a shared photo has B's own) and its
+    // own sensor id, as B's calibration names them.
+    const byUuidB = new Map(plan.shared.map(({ source, target }) => [target.uuid, source]))
+    for (const { image } of plan.added) byUuidB.set(image.uuid, image)
+    const imagesB = new Map()
+    for (const im of imagesStore.images) {
+      const b = byUuidB.get(im.uuid)
+      if (b) imagesB.set(im.id, { ...b, id: im.id })
+    }
+    const frameB = makeFrameModelResolver({
+      calibration: cloudB.calibration ?? null,
+      summary: doc.summary ?? null,
+      sensors: sensorDoc?.sensors ?? [],
+    })
+    const tri = async (cams, images, frameModel) => {
+      const mapped = gcpsInPinholeFrame(list, { imagesById: images, sparseCameras: cams, frameModel })
+      const out = new Map()
+      for (const { gcp, tri: t } of await triangulateAllGcps(mapped, cams, images))
+        if (t && [t.x, t.y, t.z].every(Number.isFinite)) out.set(gcp.name, [t.x, t.y, t.z])
+      return out
+    }
+    return {
+      triA: await tri(camsA, imagesA, recon.frameModelFor),
+      triB: await tri(camsB, imagesB, frameB),
+    }
+  }
+
+  // B model frame → A model frame through both georeferences and the two CRSs, or null
+  // when the two are not both georeferenced in projected CRSs. Heights pass as they are.
+  async function crossGeoref({ georefA, crsA, georefB, crsB }) {
+    if (!georefA?.sim || !georefB?.sim || !crsA || !crsB || crsA === 'local' || crsB === 'local') return null
+    try {
+      await ensureProjection(crsA)
+      await ensureProjection(crsB)
+      if (isGeographic(crsA) || isGeographic(crsB)) return null
+    } catch {
+      return null
+    }
+    const fromB = frameFromSimilarity(georefB.sim, crsB)
+    const toA = frameFromSimilarity(georefA.sim, crsA)
+    const conv = transformer(crsB, crsA)
+    return (p) => {
+      const g = fromB.fromSfm(p)
+      const [x, y] = conv(g[0], g[1])
+      return Number.isFinite(x) && Number.isFinite(y) ? toA.toSfm([x, y, g[2]]) : null
+    }
   }
 
   return { importProjectInto }
 }
+
+const METHOD_LABEL = { photos: 'photos in both', gcps: 'GCPs and markers', georef: 'georeference' }

@@ -180,6 +180,15 @@ export function createImporters({
     return true
   }
 
+  // Another project's model merged with this one (Import ▸ WebSfM Project, core/sfm/
+  // modelMerge.js): a NEW sparse cloud that becomes the main model, so the model it was
+  // made from stays beside it (Set as main brings it back). Not `imported`: its cameras
+  // were solved by WebSfM, and every tool treats it as a computed model.
+  function addMergedModel({ cameras, points, calibration, name }) {
+    upsertSparseCloud(markRaw(cameras), markRaw(points), { replaceId: null, asMain: true, name, calibration })
+    return save()
+  }
+
   // Import an external point cloud or mesh (parsed off-thread by the `parseCloud`
   // worker op, transformed by applyImportTransform). Always ADDS a new cloud —
   // never replaces computed ones — flagged `imported: true` so upsertDense/Mesh
@@ -222,6 +231,7 @@ export function createImporters({
   }
 
   return {
+    addMergedModel,
     importColmapModel,
     importInteropModel,
     importCloud,
