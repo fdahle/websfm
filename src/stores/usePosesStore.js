@@ -322,6 +322,12 @@ export const usePosesStore = registerProjectStore(
                 orientationAccuracySource: raw.orientationSource ? 'exif' : null,
               }) || changed
           }
+          // As a new pose and a reopened one are: a photo without EXIF attitude gets the
+          // default angle accuracy, not null. A pose that differs after a reopen retires
+          // the georeference fitted on it (its evidence includes the poses).
+          const before = JSON.stringify([existing.accuracyOmega, existing.accuracyPhi, existing.accuracyKappa])
+          normalizePose(existing)
+          changed ||= before !== JSON.stringify([existing.accuracyOmega, existing.accuracyPhi, existing.accuracyKappa])
         } else {
           const pose = normalizePose({
             imageId: im.id,

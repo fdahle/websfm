@@ -153,6 +153,28 @@ describe('EXIF pose synchronization', () => {
     expect(lines[1]).toContain('EPSG:32632')
   })
 
+  it('an EXIF pose synced again keeps the angle accuracies a reopened project gives it', async () => {
+    // The georeference's evidence includes the poses: a pose that differs after a reopen
+    // (null here, the default on load) retired every pose-fitted georeference.
+    openTransientProject()
+    const images = useImagesStore()
+    const poses = usePosesStore()
+    const photo = (n) => ({
+      id: `image-${n}`,
+      uuid: `uuid-${n}`,
+      name: `p${n}.jpg`,
+      meta: { gpsLat: 48, gpsLon: 9 + n * 1e-4, gpsAlt: 120 },
+    })
+    images.images = [photo(1)]
+    await vi.waitFor(() => expect(poses.poses).toHaveLength(1))
+    images.images = [photo(1), photo(2)] // the sync runs again over the first photo
+    await vi.waitFor(() => expect(poses.poses).toHaveLength(2))
+    for (const p of poses.poses) {
+      expect([p.accuracyOmega, p.accuracyPhi, p.accuracyKappa]).toEqual([p.accAngle, p.accAngle, p.accAngle])
+      expect(p.accAngle).toBeGreaterThan(0)
+    }
+  })
+
   it('gives every pose its own id, kept through a re-import and a CRS change', async () => {
     openTransientProject()
     const poses = usePosesStore()
