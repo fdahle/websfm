@@ -1217,7 +1217,14 @@ test('a reconstruction held to a reference DEM records the hold', async ({ page 
       overwrite: true,
     })
     await poses.addPoses(
-      centres.map(([x, y], j) => ({ imageName: `hold-${j}`, x: X0 + x, y: Y0 + y, z: H, accXYZ: 0.5 })),
+      centres.map(([x, y], j) => ({
+        imageName: `hold-${j}`,
+        x: X0 + x,
+        y: Y0 + y,
+        z: H,
+        accXYZ: 0.5,
+        verticalDatum: 'ellipsoidal',
+      })),
       'EPSG:32633',
     )
     // The reference: 1 m cells over 120 m.
@@ -1242,6 +1249,8 @@ test('a reconstruction held to a reference DEM records the hold', async ({ page 
       ),
       { forceKind: 'dem' },
     )
+    // Both heights in one declared datum, so the DEM may set the height too.
+    await external.setRasterAccuracy(meta.id, { verticalDatum: 'ellipsoidal' })
     await recon.reconstruct({ demHold: { referenceId: meta.id, stableSetId: null, sigma: 0.5 } })
     const g = await recon.georeference()
     return {

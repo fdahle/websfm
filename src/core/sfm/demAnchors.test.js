@@ -57,6 +57,25 @@ describe('demAnchors', () => {
       expect(Math.abs(P[r][c])).toBeLessThan(1e-9)
   })
 
+  // Heights in no common datum: the DEM 50 m off as a whole (a geoid height). Only the
+  // shape is held: each target is the DEM plus the median difference, so the tilt is
+  // pulled out and the block's height stays where the control put it.
+  it('holds the shape only, the median offset taken out, when the datums differ', () => {
+    const { anchors, stats } = demAnchors({
+      points: cloud(ground),
+      frame,
+      sample: () => 50,
+      sigma: 0.5,
+      relative: true,
+    })
+    expect(stats.median).toBeCloseTo(51, 6)
+    const zs = anchors.map((a) => frame.fromSfm(a.target)[2])
+    expect(zs.every((z) => Math.abs(z - 101) < 1e-6)).toBe(true)
+    // The absolute hold would pull every point 50 m down.
+    const abs = demAnchors({ points: cloud(ground), frame, sample: () => 50, sigma: 0.5 })
+    expect(frame.fromSfm(abs.anchors[0].target)[2]).toBeCloseTo(50, 6)
+  })
+
   it('leaves out blunders, unstable ground, places off the DEM and weakly seen points', () => {
     const pts = ground.map((p, i) => (i % 50 === 7 ? [p[0], p[1], p[2] + 40] : p))
     const res = demAnchors({ points: cloud(pts), frame, sample, sigma: 0.5 })

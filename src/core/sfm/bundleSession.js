@@ -37,6 +37,7 @@ import { pluralize } from '../textFormat.js'
 import { demAnchors } from './demAnchors.js'
 import { demHoldSampler } from './demHoldGrid.js'
 import { frameFromSimilarity } from '../products/georef.js'
+import { cameraCenter } from './geometry.js'
 
 export function createBundleSession(ctx) {
   const {
@@ -924,6 +925,10 @@ export function createBundleSession(ctx) {
     if (!demHold?.grid || fixedCameras?.size) return null
     const sample = demHoldSampler(demHold.grid)
     const sigma = demHold.sigma
+    // Both heights in one known datum (sparseRun.js demHoldInput): the DEM also sets the
+    // model's height. Otherwise it holds the shape only, the median difference taken out
+    // as an unknown datum shift, and the GCPs or camera positions place the model.
+    const absolute = demHold.absolute !== false
     const rounds = cfg.demHoldRounds ?? 2
     const record = { reference: demHold.reference ?? null, sigma, rounds: [], after: null, frame: null }
     // The frame of this model now: GCPs when three or more triangulate, else the
@@ -962,6 +967,7 @@ export function createBundleSession(ctx) {
         sample,
         sigma,
         maxAnchors: cfg.demHoldMaxAnchors ?? 4000,
+        relative: !absolute,
       })
     const fmt = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`
     // Each round fits the frame to the cameras again (an outer iteration: a focal far
@@ -1001,7 +1007,7 @@ export function createBundleSession(ctx) {
       last = held
       // The SfM → survey-frame similarity this round holds the model in (plain data for
       // the store); the last round's stays.
-      if (held.source === 'cameras')
+      if (absolute && held.source === 'cameras')
         record.sim = { scale: held.fit.scale, R: held.fit.R.map((row) => [...row]), t: [...held.fit.t] }
       else delete record.sim
       log(
@@ -1038,25 +1044,44 @@ export function createBundleSession(ctx) {
       // The block's height between the two kinds of control, in closed form. A shift of
       // the whole block up or down changes no image residual, so only the camera
       // positions and the held tie points weigh it, and at a DEM's σ of metres they are a
-      // ten-thousandth of the solve's cost: the iterative solve leaves that direction
-      // where it starts. Its least-squares value, d = W_dem · median / (W_dem + W_cams)
-      // (W the summed inverse vertical variances, in the frame's metres), moves the
-      // frame the model is placed in.
-      if (held.source === 'cameras' && record.sim && Number.isFinite(record.after.median)) {
+      // ten-thousandth of the solve's cost: the iterative solve does not settle that
+      // direction. Its least-squares value moves the frame the model is placed in:
+      // d = (W_dem·m + Σ wᵢ·cᵢ) / (W_dem + Σ wᵢ), m the median height above the DEM, cᵢ
+      // each camera's height above its position, W and w the inverse vertical variances.
+      if (record.sim && Number.isFinite(record.after.median)) {
         const s2 = held.fit.scale * held.fit.scale
-        const wCams = (held.priorSet?.priors ?? []).reduce((a, p) => a + (p.weights?.[2] ?? 0) / s2, 0)
+        let wCams = 0,
+          wc = 0
+        for (const p of held.priorSet?.priors ?? []) {
+          const cam = cameras.get(uuidList[p.camIdx])
+          const w = (p.weights?.[2] ?? 0) / s2
+          if (!cam || !(w > 0)) continue
+          const c = held.frame.fromSfm(cameraCenter(cam))[2] - held.frame.fromSfm(p.target)[2]
+          if (!Number.isFinite(c)) continue
+          wCams += w
+          wc += w * c
+        }
         const wDem = record.after.used / (sigma * sigma)
-        const d = (wDem * record.after.median) / (wDem + wCams)
+        const d = (wDem * record.after.median + wc) / (wDem + wCams)
         record.sim.t[2] -= d
         record.after = { ...record.after, median: record.after.median - d }
         record.shift = d
         log(
           `Hold to a reference DEM: the block placed ${fmt(-d)} in height, between the camera positions ` +
-            `(${pluralize(held.priorSet?.priors?.length ?? 0, 'camera')}) and the DEM by their weights`,
+            `(${pluralize(held.priorSet?.priors?.length ?? 0, 'camera')}, now ${fmt(wCams ? wc / wCams - d : 0)} ` +
+            `from them) and the DEM by their weights`,
           'info',
           'Reconstruction',
         )
       }
+      if (!absolute)
+        log(
+          'Hold to a reference DEM held the shape only: the heights of the ' +
+            `${held.source === 'gcps' ? 'GCPs' : 'camera positions'} and of the DEM are not in one known datum, so ` +
+            'the offset between them was left out. Declare both datums to let the DEM set the height too.',
+          'info',
+          'Reconstruction',
+        )
       const before = record.rounds[0]
       log(
         `Hold to a reference DEM: height against the DEM NMAD ${before.nmad.toFixed(2)} → ` +

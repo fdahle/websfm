@@ -74,8 +74,8 @@ photos. It is experimental: keep a few GCPs as check points to see what it did.
 The DEM the tie points are held to: a lidar survey or a global DEM. **Copernicus DEM
 (30 m)** fetches the free [Copernicus DEM](help:copernicus-dem) around the camera
 positions and GCPs. Declare its [vertical datum](help:vertical-datum) and your
-control's, so the heights are converted; otherwise the model is shifted by the
-difference.
+control's, so the heights are converted; otherwise the DEM only holds the shape, and
+your GCPs or camera positions alone set the height.
 
 ## Height uncertainty
 <!-- param: holdSigma  default: The DEM's vertical accuracy, else 2 -->

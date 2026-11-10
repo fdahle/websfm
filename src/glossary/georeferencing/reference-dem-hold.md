@@ -25,7 +25,8 @@ blunder) are left out, and the hold is rebuilt over two rounds, as a point that 
 sideways meets the DEM elsewhere. GCPs still place the model and the DEM only keeps
 its shape. Placed by camera positions alone, the model's height is set between them
 and the DEM, each by its accuracy: drone GPS heights a metre off give way to thousands
-of held tie points.
+of held tie points. That needs both heights in one known
+[vertical datum](help:vertical-datum); otherwise the DEM holds the shape only.
 
 It is not [DEM co-registration](help:dem-coregistration), which moves a finished DEM
 as a whole and cannot take a bend out. Nor does it fix a wrong camera model: the

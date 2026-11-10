@@ -834,10 +834,20 @@ weak height observations from it constrain exactly that low-frequency mode.
   block changes no image residual, and at a DEM's σ of metres the anchors and positions
   are ~10⁻⁴ of the cost, so the iterative solve leaves that direction where it starts;
   the frame is moved by its least-squares value instead,
-  `d = W_dem·median(dz) / (W_dem + W_cams)`, W the summed inverse vertical variances.
+  `d = (W_dem·median(dz) + Σ wᵢcᵢ) / (W_dem + Σ wᵢ)`, cᵢ each camera's height above its
+  position and W, w the inverse vertical variances.
+- **Datums**: the DEM sets the height only when its heights and the control's are in one
+  known datum (converted, or the same ellipsoidal or global-geoid datum). Otherwise each
+  target is the DEM plus the median difference (`demAnchors` `relative`), so the hold keeps
+  the shape and the control alone places the model: undeclared EXIF heights 52 m from
+  EGM2008 (ellipsoidal plus a 3 m shift) had pulled a 346-photo block 45 m and shrunk it 6 %.
   Measured on a 444-photo RTK block with its positions loosened to ±1.3/1.8 m and the
   Copernicus GLO-30 tile (σ 2 m): checkpoint heights in the app's georeference
-  101.6 → 17.3 cm RMS (mean +100 → −11 cm); σ 0.5 m bends the shape more (29 cm).
+  101.6 → 17.3 cm RMS (mean +100 → −11 cm); σ 0.5 m bends the shape more (29 cm). On a
+  quarry (346 photos, heights shifted +3 m) the camera heights went +3.00 → +1.68 m:
+  Copernicus lies ~1.4 m above that ground and disagrees with the tie points by NMAD
+  6.2 m (cliffs, an active pit), and holding it at ±2 m worsened the shape (V 13.4 → 16.8
+  cm). A σ that follows the measured disagreement is open (plan-f13 ▸ weight vs resolution).
 
 ### 6.6 Guided marking
 

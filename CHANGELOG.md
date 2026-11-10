@@ -31,7 +31,10 @@ Notable changes to websfm. The format follows
   points' heights went from 101.6 to 17.3 cm RMS (mean +100 → −11 cm), horizontally
   15.3 → 12.6 cm; a firmer ±0.5 m gave 29 cm. A rigid shift of the block changes no image
   residual, so its height is set in closed form (least squares between the positions and
-  the held tie points) rather than left to the iterative solve.
+  the held tie points) rather than left to the iterative solve. The DEM sets the height
+  only when its vertical datum and the control's are declared; otherwise it holds the
+  shape alone (undeclared EXIF heights 52 m from the DEM's geoid had pulled a 346-photo
+  block 45 m and shrunk it 6 %).
 - **Less noise on flat ground in aerial dense clouds.** Build Dense Cloud ▸ Point position
   puts each point at the mean depth of its own depth map and the maps that agree with it,
   so their noise averages out; Auto does this for aerial and mapping projects and keeps

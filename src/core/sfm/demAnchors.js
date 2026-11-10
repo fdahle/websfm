@@ -33,6 +33,9 @@ export function demAnchors({
   minViews = 3,
   maxAnchors = 4000,
   outlierK = 4,
+  // Hold the shape only: each target sits at the reference's height plus the median
+  // difference, an unknown datum shift between the reference and the control taken out.
+  relative = false,
 }) {
   const empty = { anchors: [], stats: { candidates: 0, used: 0, rejected: 0, median: NaN, nmad: NaN } }
   if (!points?.pos || !(sigma > 0)) return empty
@@ -57,9 +60,10 @@ export function demAnchors({
   const kept = cand.filter((c) => Math.abs(c.dz - median) <= reach)
   const picked = spreadEvenly(kept, maxAnchors)
   const anchors = picked.map(({ i, p, zr }) => {
-    const target = frame.toSfm([p[0], p[1], zr])
+    const zt = relative ? zr + median : zr
+    const target = frame.toSfm([p[0], p[1], zt])
     // The vertical in the model frame, and how many model units a project unit is there.
-    const up = frame.toSfm([p[0], p[1], zr + 1]).map((v, k) => v - target[k])
+    const up = frame.toSfm([p[0], p[1], zt + 1]).map((v, k) => v - target[k])
     const len = Math.hypot(up[0], up[1], up[2])
     const u = up.map((v) => v / len)
     const w = 1 / (sigma * len) ** 2

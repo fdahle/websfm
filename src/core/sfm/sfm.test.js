@@ -1020,6 +1020,33 @@ describe('reconstruct — held to a reference DEM (F13)', () => {
     expect(Math.max(...off.map(Math.abs))).toBeGreaterThan(0.02)
   })
 
+  // The same, with the heights in no common known datum: the DEM holds the shape only,
+  // the cameras keep the block's height, and no frame is handed on for placement.
+  it('holds the shape only when the heights are not in one known datum', async () => {
+    const { centers, demHold, ...sc } = scene(false, { offLine: true })
+    const cameraPriors = ['c0', 'c1', 'c2'].map((uuid, i) => ({
+      uuid,
+      x: centers[i][0],
+      y: centers[i][1],
+      z: centers[i][2] + 0.5,
+      accuracyX: 1,
+      accuracyY: 1,
+      accuracyZ: 1,
+    }))
+    const logs = []
+    const out = await reconstruct(
+      { ...sc, demHold: { ...demHold, absolute: false }, cameraPriors, settings: { baIterations: 25 } },
+      { onLog: (m, level, cat) => logs.push([level, cat, m]) },
+    )
+    expect(out.status).toBe('done')
+    const rec = out.summary.demHold
+    expect(rec).toMatchObject({ frame: 'cameras' })
+    expect(rec.sim).toBeUndefined()
+    expect(Math.abs(rec.after.median - 0.5)).toBeLessThan(0.05)
+    expect(rec.after.nmad).toBeLessThan(0.02)
+    expect(logs.some(([, , m]) => m.includes('held the shape only'))).toBe(true)
+  })
+
   it('says it is skipped with nothing to place the model', async () => {
     const logs = []
     const out = await reconstruct(

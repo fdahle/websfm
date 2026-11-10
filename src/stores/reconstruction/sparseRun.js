@@ -43,7 +43,7 @@ import { useFootprintsStore } from '../useFootprintsStore.js'
 import { demLayerTest } from '../../composables/demLayerTest.js'
 import { demHoldExtent, buildDemHoldGrid } from '../../core/sfm/demHoldGrid.js'
 import { localToGrid, gridToLocal } from '../../core/products/localFrame.js'
-import { datumLabel } from '../../core/verticalDatum.js'
+import { datumLabel, isConvertible } from '../../core/verticalDatum.js'
 
 // The sparse reconstruction run, split out of useReconstructionStore: packing the
 // keypoints, matches and survey constraints for the SfM worker, the memory
@@ -255,7 +255,12 @@ export function createSparseRun({
       'Reconstruction',
     )
     delete grid.valid
-    return { grid, sigma: request.sigma / perUnit, reference: meta.name }
+    // The DEM sets the model's height only when both heights are in one known datum
+    // (converted, or the same global datum); otherwise it holds the shape alone, the
+    // offset between them an unknown datum shift (bundleSession.js runDemAnchoredBundleAdjust).
+    const converted = !!(conv && Number.isFinite(conv.min))
+    const absolute = converted || (datum === refDatum && isConvertible(datum))
+    return { grid, sigma: request.sigma / perUnit, reference: meta.name, absolute }
   }
 
   // Run incremental SfM in the compute worker (off the main thread). The heavy
