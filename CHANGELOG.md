@@ -38,7 +38,11 @@ Notable changes to websfm. The format follows
   photos: σ is at least their local disagreement about a smooth surface. On a quarry
   where Copernicus disagrees by 5.6 m, its ±2 m had bent the block (V 13.4 → 16.8 cm);
   now the shape stays and the heights move from +3.00 to +2.37 m toward the DEM, which
-  itself lies ~1.4 m high there.
+  itself lies ~1.4 m high there. On a 178-photo 1970s Antarctic block (camera positions
+  ±10 m, REMA held on half the rock outcrops), the scanned photos disagree with REMA by
+  20 m on the steep rock, so the hold stays soft: the tie points' heights on the other
+  half went from −7.7 to −6.4 m median against REMA (NMAD 13.3 → 12.9 m). With these
+  checks it is no longer marked Experimental.
 - **Less noise on flat ground in aerial dense clouds.** Build Dense Cloud ▸ Point position
   puts each point at the mean depth of its own depth map and the maps that agree with it,
   so their noise averages out; Auto does this for aerial and mapping projects and keeps

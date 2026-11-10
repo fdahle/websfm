@@ -149,7 +149,7 @@ function run() {
     </SettingsField>
 
     <template v-if="mode === 'dem'">
-      <SettingsStep step="1" title="Reference DEM" :effect="hold.reference" experimental="demHold">
+      <SettingsStep step="1" title="Reference DEM" :effect="hold.reference">
         <SettingsField label-for="hold-ref">
           <template #label><FieldHelp op="georeferencing" param="holdReference">Reference DEM</FieldHelp></template>
           <select

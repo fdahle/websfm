@@ -21,10 +21,6 @@ export const EXPERIMENTAL = {
     feature: 'Reflectance map',
     unchecked: 'reflectance against a held-out calibration panel on a real flight',
   },
-  demHold: {
-    feature: 'Hold to a reference DEM',
-    unchecked: 'accuracy of a block held to a DEM against independent checkpoints',
-  },
   targetTags: {
     feature: 'AprilTag and ArUco detection',
     unchecked: 'detection on real photos of printed tags',
