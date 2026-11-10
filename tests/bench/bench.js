@@ -65,6 +65,7 @@ import {
 } from '/src/core/sfm/fiducialCalibration.js'
 import { RESEAU_DEFAULTS, PANORAMIC_DEFAULTS, COREG_DEFAULTS } from '/src/core/defaults.user.js'
 import { useDemCoregistration } from '/src/composables/useDemCoregistration.js'
+import { useProjectMerge } from '/src/composables/useProjectMerge.js'
 import { buildBorderMask } from '/src/core/mask.js'
 import { overlapVisibility, chooseOverlapSubset } from '/src/core/sfm/reduceOverlap.js'
 import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
@@ -446,6 +447,92 @@ window.bench = {
         .filter((p) => !name || p.name === name)
         .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0))[0]?.id ?? null
     )
+  },
+
+  // Which part of the georeference's evidence differs between the saved fit and the
+  // project as it is now (a reopened project should match its saved fit exactly).
+  async georefKey() {
+    const doc = await opfs.loadReconstruction(projects.currentProjectId)
+    const saved = doc?.georef?.evidenceKey ? JSON.parse(doc.georef.evidenceKey) : null
+    if (!saved) return { saved: false }
+    const main = recon.mainSparseCloud
+    const now = JSON.parse(
+      JSON.stringify({
+        crs: projects.currentCrs,
+        model: main ? [main.id, main.createdAt] : null,
+        cameras: [...recon.sparseCameras],
+        images: images.images.map((im) => [im.id, im.uuid]),
+        gcps: gcpsStore.gcps,
+        poses: poses.poses,
+      }),
+    )
+    const diff = {}
+    for (const k of Object.keys(saved)) {
+      const a = JSON.stringify(saved[k]),
+        b = JSON.stringify(now[k])
+      if (a === b) continue
+      let i = 0
+      while (i < a.length && a[i] === b[i]) i++
+      diff[k] = {
+        saved: a.slice(Math.max(0, i - 80), i + 120),
+        now: (b ?? 'undefined').slice(Math.max(0, i - 80), i + 120),
+      }
+    }
+    return { saved: true, valid: !!recon.validGeoref, stored: !!recon.georef, diff }
+  },
+
+  // Import ▸ WebSfM Project from the project named `source` (made by an earlier run in the
+  // same kept profile) into the open one, its model merged (core/sfm/modelMerge.js) or left
+  // behind; then the merged model scored as a reconstruction is: cameras against the
+  // reference positions, checkpoints from the reference marks, the app's GCP residuals.
+  async mergeProject({ source, model = 'merge', align = 'auto' } = {}) {
+    await projects.loadIndex()
+    const src = [...projects.projects]
+      .filter((p) => p.name === source && p.id !== projects.currentProjectId)
+      .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0))[0]
+    if (!src) throw new Error(`mergeProject: no other project named "${source}"`)
+    const before = recon.mainSparseCloud?.cameras?.size ?? 0
+    // This model's georeference as the merge will find it: kept on disk, and still valid.
+    const georefBefore = { stored: recon.georef?.method ?? null, valid: recon.validGeoref?.method ?? null }
+    const t0 = performance.now()
+    const r = await useProjectMerge().importProjectInto(
+      src.id,
+      () => {},
+      () => false,
+      { model, align },
+    )
+    const seconds = (performance.now() - t0) / 1000
+    const cloud = recon.mainSparseCloud
+    const pc = positionCheckOf(cloud)
+    lastPositionCheck = pc
+    const checkpointCheck =
+      pc && reference?.gcps ? await checkpoints(cloud, pc).catch((e) => ({ error: String(e?.stack ?? e) })) : null
+    const gcpResiduals =
+      gcpsStore.gcps.length && cloud?.cameras?.size
+        ? await window.bench.gcpReport().catch((e) => ({ error: String(e?.stack ?? e) }))
+        : null
+    const r4 = (v) => (v == null ? null : Math.round(v * 1e4) / 1e4)
+    return {
+      seconds,
+      import: r,
+      camerasBefore: before,
+      georefBefore,
+      cameras: cloud?.cameras?.size ?? 0,
+      points: cloud?.points?.length ?? 0,
+      georef: recon.georef
+        ? { method: recon.georef.method, rms: r4(recon.georef.rms), count: recon.georef.count }
+        : null,
+      positionCheck: pc && {
+        count: pc.count,
+        rms3d: r4(pc.rms3d),
+        rmsH: r4(pc.rmsH),
+        rmsV: r4(pc.rmsV),
+        maxH: r4(pc.maxH),
+        maxV: r4(pc.maxV),
+      },
+      checkpointCheck,
+      gcpResiduals,
+    }
   },
 
   // Exclude one accepted pair, then include it again, as the match list's toggle does;

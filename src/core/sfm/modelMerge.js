@@ -187,7 +187,8 @@ export function rotationAgreement(camsA, camsB, sharedBtoA, sim, opts = {}) {
 /**
  * Align B to A by `method` ('auto' | 'photos' | 'gcps' | 'georef'). `inputs` holds what
  * each method needs; a method whose input is missing is skipped:
- *   { camsA, camsB, sharedBtoA, triA, triB, toA }
+ *   { camsA, camsB, sharedBtoA, triA, triB, toA, why? } — `why[method]`: the caller's
+ *   reason a method's input is missing, said in place of the generic one
  * → { accepted, method, sim, …fit, tried: [{ method, accepted, reason }] }.
  */
 export function alignModels(inputs, method = 'auto', opts = {}) {
@@ -205,7 +206,7 @@ export function alignModels(inputs, method = 'auto', opts = {}) {
     } else if (m === 'gcps' && inputs.triA && inputs.triB) pairs = gcpPairs(inputs.triA, inputs.triB)
     else if (m === 'georef' && inputs.toA) pairs = crossGeorefPairs(inputs.camsB, inputs.toA)
     if (!pairs) {
-      tried.push({ method: m, accepted: false, reason: UNAVAILABLE[m] })
+      tried.push({ method: m, accepted: false, reason: inputs.why?.[m] ?? UNAVAILABLE[m] })
       continue
     }
     const fit = fitModelAlignment(pairs, opts[m] ?? {})

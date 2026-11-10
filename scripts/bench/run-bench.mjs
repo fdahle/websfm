@@ -586,6 +586,8 @@ try {
     texturedump: 'texturedump',
     ortho: 'ortho',
     modeledit: 'modelEdit',
+    mergeproject: 'mergeProject',
+    georefkey: 'georefKey',
     scalebar: 'scaleBar',
     stats: 'modelStats',
     radial: 'radial',

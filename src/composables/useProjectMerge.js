@@ -265,8 +265,9 @@ export function useProjectMerge() {
     let alignment = null
     if (camsA.size) {
       const inputs = { camsA, camsB, sharedBtoA, ...(await gcpsInBoth({ camsA, camsB, cloudB, doc, sensorDoc, plan })) }
-      const toA = await crossGeoref({ georefA, crsA, georefB: doc.georef, crsB: doc.georef?.crs ?? data.crs })
-      if (toA) inputs.toA = toA
+      const cross = await crossGeoref({ georefA, crsA, georefB: doc.georef, crsB: doc.georef?.crs ?? data.crs })
+      if (cross.toA) inputs.toA = cross.toA
+      else inputs.why = { georef: cross.reason }
       alignment = alignModels(inputs, align)
       if (!alignment.accepted) {
         log(
@@ -349,24 +350,29 @@ export function useProjectMerge() {
     }
   }
 
-  // B model frame → A model frame through both georeferences and the two CRSs, or null
-  // when the two are not both georeferenced in projected CRSs. Heights pass as they are.
+  // B model frame → A model frame through both georeferences and the two CRSs:
+  // { toA } or { reason } (which side is not georeferenced, in a projected CRS). Heights
+  // pass as they are.
   async function crossGeoref({ georefA, crsA, georefB, crsB }) {
-    if (!georefA?.sim || !georefB?.sim || !crsA || !crsB || crsA === 'local' || crsB === 'local') return null
+    if (!georefA?.sim) return { reason: 'this model is not georeferenced' }
+    if (!georefB?.sim) return { reason: 'the other model is not georeferenced' }
+    if (!crsA || crsA === 'local' || !crsB || crsB === 'local') return { reason: 'a project has no CRS' }
     try {
       await ensureProjection(crsA)
       await ensureProjection(crsB)
-      if (isGeographic(crsA) || isGeographic(crsB)) return null
-    } catch {
-      return null
+    } catch (err) {
+      return { reason: `its CRS is not known here (${err?.message ?? err})` }
     }
+    if (isGeographic(crsA) || isGeographic(crsB)) return { reason: 'a project CRS is not projected' }
     const fromB = frameFromSimilarity(georefB.sim, crsB)
-    const toA = frameFromSimilarity(georefA.sim, crsA)
+    const intoA = frameFromSimilarity(georefA.sim, crsA)
     const conv = transformer(crsB, crsA)
-    return (p) => {
-      const g = fromB.fromSfm(p)
-      const [x, y] = conv(g[0], g[1])
-      return Number.isFinite(x) && Number.isFinite(y) ? toA.toSfm([x, y, g[2]]) : null
+    return {
+      toA: (p) => {
+        const g = fromB.fromSfm(p)
+        const [x, y] = conv(g[0], g[1])
+        return Number.isFinite(x) && Number.isFinite(y) ? intoA.toSfm([x, y, g[2]]) : null
+      },
     }
   }
 

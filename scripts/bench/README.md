@@ -272,6 +272,12 @@ node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2
 - `aligncheck`: moves the computed dense cloud by a known transform, puts it back by
   3 point pairs (with pick offsets) and ICP onto the imported dense reference, then
   Distance to reference; reports the residual left per point.
+- `mergeproject`: Import ▸ WebSfM Project from another project in the same kept `profile`
+  (made by an earlier run, found by name) into the open one, with `mergeproject: { source,
+  model: "merge" | "leave", align: "auto" | "photos" | "gcps" | "georef" }`; the merged
+  model is then scored as a reconstruction (`positionCheck`, `checkpointCheck`, the app's
+  GCP residuals). Two runs solve the halves (`name` each, the same `profile`), a third
+  starts with `reopen` (`project`: the half to merge into) and runs `mergeproject`.
 - `pool:<n>`: set the compute worker pool to n workers (Settings ▸ worker count; 0 =
   the default). It applies at once only while the pool is idle (`ok`); it is also
   stored, so `pool:1,reopen,depth:one,dense:one` repeats a run on one worker.
