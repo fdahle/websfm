@@ -34,7 +34,9 @@ Fusion needs one more step than "keep everything". A surface seen by $k$ cameras
 produces $k$ near-coincident copies of itself — a shell — so kept pixels are
 accumulated into world-space voxel cells and averaged to one point per cell. The
 cell size is chosen at the median [GSD](help:ground-sample-distance), so that one
-ground pixel becomes roughly one point. **That cell size sets the finest
+ground pixel becomes roughly one point. Before that, a kept pixel can be moved to the
+mean depth of the views that agree with it, so each map's noise averages out
+(Build Dense Cloud ▸ Point position). **That cell size sets the finest
 spacing the cloud can have.** Sampling fewer input pixels (a larger sample step)
 does not change the cell, but it leaves more cells empty, so the cloud is thinner
 as well as faster to build: a step of 2 reads a quarter of the pixels.

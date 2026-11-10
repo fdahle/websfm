@@ -340,10 +340,20 @@ export const DENSE_FUSE_DEFAULTS = {
   maxIncidenceDeg: 80, // max angle between the surface normal and the viewing ray —
   // thins edge-on vegetation shells (0/90 disables; fallback normals inert)
   removeIsolated: true, // drop low-support voxel cells with too few occupied neighbours
+  // Where a kept point sits: 'mean' at the mean depth of its own map and the views that
+  // agree with it (the views' noise averages out, as in COLMAP's fusion), 'own' at its
+  // own map's depth, 'auto' by the project's scene type (DENSE_POSITION_AUTO). A
+  // trade-off: on a flat aerial block the mean cut the scatter 5.1 → 4.0 cm (within
+  // 10 cm of the LiDAR 92.9 → 97.4 %), on close-range scenes it lowered F1 @2 cm by
+  // 0.17 on average, 2026-11-10.
+  position: 'auto',
   // Output: add the new product beside the others as the main one (false), or put it
   // in place of the main one (true). Off, so a rebuild never loses a result by default.
   replaceMain: false,
 }
+// What an 'auto' Point position resolves to, by project scene type (an unknown type
+// gets the aerial value, as DEPTHMAP_MIN_CONSISTENT_AUTO).
+export const DENSE_POSITION_AUTO = { object: 'own', aerial: 'mean' }
 // Dense quality cards: point density by the sample step (deltas; high ≡ the defaults,
 // every pixel). A step of n keeps about 1/n² of the points.
 export const DENSE_FUSE_PRESETS = {

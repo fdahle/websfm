@@ -1209,6 +1209,13 @@ describe('user-facing numeric options (engine-boundary sanitizing)', () => {
       })
       expect(g).toEqual(defaults)
     }
+    // Point position: an explicit choice wins; Auto (or blank, or unknown) follows the
+    // scene type, the mean for an aerial or unknown project, the own depth for an object.
+    expect(fusionGates({ position: 'own', sceneType: 'aerial' }).meanPosition).toBe(false)
+    expect(fusionGates({ position: 'mean', sceneType: 'object' }).meanPosition).toBe(true)
+    expect(fusionGates({ position: 'auto', sceneType: 'object' }).meanPosition).toBe(false)
+    expect(fusionGates({ position: 'auto', sceneType: 'aerial' }).meanPosition).toBe(true)
+    expect(fusionGates({ position: 'x', sceneType: null }).meanPosition).toBe(true)
     // Out of range: a zero/negative step, a zero tolerance (a cleared % field ÷ 100).
     expect(fusionGates({ step: 0 }).step).toBe(1)
     expect(fusionGates({ step: -3 }).step).toBe(1)

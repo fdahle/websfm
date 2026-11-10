@@ -213,10 +213,11 @@ export const accumulatorCellLimit = (maxArrayBytes = maxLocalArrayBytes()) =>
 
 // What the streamed consistency check (mvs.js fuseDepthMapsStreamed) allocates per
 // reference pixel beside the map itself: the agree (Uint32) + angle (Float64) scratch
-// planes, 12 B/px, and the eligible-pixel buffers (mvs.js streamedEligible) — Int32
-// index + Float64×3 world point, 28 B, plus the Int32 list of pixels still open, 4 B,
-// per eligible pixel, charged as if every pixel were.
-export const DENSIFY_STREAMED_REF_BYTES_PER_PX = 12 + 32
+// planes, 12 B/px, the depth sum (Float32) + count (Uint8) of Point position 'mean',
+// 5 B/px (charged either way), and the eligible-pixel buffers (mvs.js streamedEligible)
+// — Int32 index + Float64×3 world point, 28 B, plus the Int32 list of pixels still
+// open, 4 B, per eligible pixel, charged as if every pixel were.
+export const DENSIFY_STREAMED_REF_BYTES_PER_PX = 12 + 5 + 32
 
 // Bytes the fusion input holds resident. Resident maps (`streamed: false`) are the
 // planes themselves, transferred to the worker (×1; residency 2 models a clone).

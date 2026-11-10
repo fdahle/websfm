@@ -1106,6 +1106,20 @@ compares each map with at most `DENSE_TUNING.fuseMaxViews` (12) maps whose frust
 it, those with enough parallax at its mean depth first (`fusionViews`, chosen once in the
 plan, so resident and streamed fusion agree).
 
+**Point position.** With `position` 'mean' a kept pixel is emitted at the mean of its own
+depth and each agreeing view's, as COLMAP's fusion averages its consistent views. A view
+with centre C′ measures P at depth d′ = its map read at P's exact projection (bilinear in
+inverse depth, which is linear on a plane; no value if any of the four pixels is empty),
+i.e. at C′ + s·(P − C′) with s = d′ / (P's depth in that view). Depth is linear along a
+ray, so in the reference camera that point lies at z_C′ + s·(d − z_C′), z_C′ the
+reference-frame depth of C′. Only the views counted before the pixel settles (`minViews`
+reached with the parallax) enter the mean. 'own' keeps the pixel's own depth, and only
+the voxel merge averages. 'auto' resolves by scene type: mean for aerial (and unknown),
+own for object captures (`DENSE_POSITION_AUTO`). Measured on the same depth maps: on a
+flat aerial block the scatter about the LiDAR fell 5.1 → 4.0 cm (within 10 cm 92.9 →
+97.4 %, 16 % fewer points); on six ETH3D close-range scenes F1 @2 cm fell by 0.17 on
+average (accuracy up, completeness down), hence the split.
+
 Three **geometric outlier filters** clean the fused cloud without a segmentation model (all
 opt-out):
 - **min triangulation angle**: a pixel must agree with a neighbour at ≥ `minTriAngleDeg`

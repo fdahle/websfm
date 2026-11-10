@@ -1,11 +1,19 @@
 // What each step of Build Dense Cloud does to this project (DenseModal.vue): the
 // one-line effects under its numbered steps, with Auto's thresholds as fusion picks
-// them (core/dense/fusionPlan.js: minViews = min(2, maps − 1), the default cost gate).
+// them (core/dense/fusionPlan.js: minViews = min(2, maps − 1), the default cost gate),
+// and an Auto Point position as the project's scene type resolves it.
 import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
+import { resolveFusePosition } from '../dense/fusionPlan.js'
 import { plural } from './format.js'
 import { ordinal } from '../textFormat.js'
 
-export function denseEffects(s, { maps = 0 } = {}) {
+// The resolved Point position and whether Auto chose it.
+function positionOf(s, sceneType) {
+  const auto = s.position == null || s.position === 'auto'
+  return { mean: resolveFusePosition(s.position, sceneType) === 'mean', auto }
+}
+
+export function denseEffects(s, { maps = 0, sceneType = null } = {}) {
   const sample = !maps
     ? 'Compute depth maps first: the dense cloud is fused from them.'
     : s.step > 1
@@ -18,7 +26,8 @@ export function denseEffects(s, { maps = 0 } = {}) {
   const views = s.auto && !maps ? '2 other depth maps (1 when there are only two)' : plural(minViews, 'other depth map')
   const agree =
     `A point is kept where at least ${views} put the same surface within ${s.depthTolPct} % of its depth, ` +
-    `from pixels matched at a cost of ${maxCost} or less${s.auto ? ' (Auto)' : ''}.`
+    `from pixels matched at a cost of ${maxCost} or less${s.auto ? ' (Auto)' : ''}. ` +
+    positionLine(positionOf(s, sceneType), sceneType)
 
   const tri =
     s.minTriAngleDeg > 0 ? `Points whose agreeing views are less than ${s.minTriAngleDeg}° apart are dropped` : ''
@@ -42,11 +51,18 @@ export function denseEffects(s, { maps = 0 } = {}) {
 }
 
 // The steps' short facts, for the dialog's step chain (≤ SHORT_MAX characters).
-export function denseShorts(s, { maps = 0 } = {}) {
+function positionLine({ mean, auto }, sceneType) {
+  const why = auto ? ` (Auto, ${sceneType === 'object' ? 'an object capture' : 'an aerial / mapping'} project)` : ''
+  return mean
+    ? `Each point sits at the mean depth of its own map and the agreeing ones, which evens out their noise${why}.`
+    : `Each point keeps its own depth map's depth${why}.`
+}
+
+export function denseShorts(s, { maps = 0, sceneType = null } = {}) {
   const minViews = s.auto ? Math.max(1, Math.min(2, maps - 1)) : s.minViews
   return {
     sample: !maps ? 'no depth maps' : s.step > 1 ? `every ${ordinal(s.step)} pixel` : 'every pixel',
-    agree: `≥ ${plural(minViews, 'view')} · ${s.depthTolPct} %`,
+    agree: `≥ ${plural(minViews, 'view')} · ${s.depthTolPct} % · ${positionOf(s, sceneType).mean ? 'mean' : 'own depth'}`,
     gates:
       s.minTriAngleDeg > 0 || (s.maxIncidenceDeg > 0 && s.maxIncidenceDeg < 90)
         ? [

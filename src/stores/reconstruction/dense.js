@@ -43,7 +43,7 @@ import { serializeDepthMap } from '../../core/dense/depthMapCodec.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes, projectDensePeakBytes, workingPixels } from '../../core/dense/memBudget.js'
 import { contiguousChunks, depthWorkerCount, mergeDepthSummaries } from '../../core/dense/depthSplit.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
-import { FUSION_PLAN_SHARE } from '../../core/dense/fusionPlan.js'
+import { FUSION_PLAN_SHARE, resolveFusePosition } from '../../core/dense/fusionPlan.js'
 import { joinCloudParts } from '../../core/dense/cloudParts.js'
 import { bufferFailureText } from '../../core/bufferLimit.js'
 import { pluralize } from '../../core/textFormat.js'
@@ -1074,7 +1074,17 @@ export function createDense({
     const { pageBytes, pagePoolBytes } = pageCloudBytes()
     if (pageBytes > 0)
       log(`Dense: the open project holds ${formatBytes(pageBytes)} of point data in this tab`, 'debug', 'Dense')
-    settings = { ...settings, pageBytes, pagePoolBytes }
+    // An 'auto' Point position follows the project's scene type (fusionPlan.js
+    // resolveFusePosition, resolved where fusion reads it).
+    const sceneType = projects.currentSceneType ?? null
+    if (settings.position == null || settings.position === 'auto')
+      log(
+        `Dense: point position auto → ${resolveFusePosition('auto', sceneType) === 'mean' ? 'mean of the agreeing views' : 'own depth map'} ` +
+          `(${sceneType === 'object' ? 'object capture' : 'aerial / mapping'} project)`,
+        'info',
+        'Dense',
+      )
+    settings = { ...settings, pageBytes, pagePoolBytes, sceneType }
     if (streamed)
       log(
         'Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use',

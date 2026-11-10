@@ -21,6 +21,15 @@ Notable changes to websfm. The format follows
   factorisation added no measurable time (Reconstruct 80 s either way).
 
 ### Changed
+- **Less noise on flat ground in aerial dense clouds.** Build Dense Cloud ▸ Point position
+  puts each point at the mean depth of its own depth map and the maps that agree with it,
+  so their noise averages out; Auto does this for aerial and mapping projects and keeps
+  each map's own depth for object captures. On the same depth maps of a 347-photo aerial
+  block with airborne LiDAR, the dense cloud's scatter about flat ground fell from 5.1 to
+  4.0 cm, and the points within 10 cm of the LiDAR rose from 92.9 to 97.4 % (16 % fewer
+  points). On six close-range ETH3D scenes the mean lowered F1 at 2 cm by 0.17 on average
+  (more accurate, less complete), so object captures keep the old behaviour; choose
+  **Mean of the agreeing views** or **Own depth map** to override Auto.
 - **Mesh size follows the block.** Build Mesh ▸ Octree depth is Auto by default: it picks
   the depth for leaves of about 8 point spacings of the dense cloud, lowered until the mesh
   stays within the card's triangle limit (Coarse 250 k, Balanced 1 M, Fine 4 M), and the

@@ -143,6 +143,7 @@ export const WORKFLOW_BLOCKS = [
   automated('dense', 'Dense Model', 'Dense', ['depthMaps'], ['dense'], { ...DENSE_FUSE_DEFAULTS }, [
     { key: 'auto', label: 'Automatic thresholds', type: 'boolean' },
     { key: 'minViews', label: 'Minimum views', type: 'number', min: 1 },
+    { key: 'position', label: 'Point position', type: 'select', options: ['auto', 'mean', 'own'] },
     { key: 'removeIsolated', label: 'Remove isolated points', type: 'boolean' },
     { key: 'replaceMain', label: 'Replace the main dense cloud', type: 'boolean' },
   ]),
@@ -668,6 +669,7 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
       minTriAngleDeg: v.minTriAngleDeg,
       maxIncidenceDeg: v.maxIncidenceDeg,
       removeIsolated: v.removeIsolated,
+      position: v.position,
       memBudgetBytes: runtime.memBudgetBytes,
       // The whole limit: fusion keeps its accumulators in wasm memory (fusionPlan.js).
       ...(runtime.ramBudgetBytes > 0 ? { ramBudgetBytes: runtime.ramBudgetBytes } : {}),

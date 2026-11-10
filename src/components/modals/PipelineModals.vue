@@ -492,6 +492,7 @@ const exportingFootprints = computed(
     <DenseModal
       v-if="denseOpen"
       :maps="enabledCameras.maps"
+      :scene-type="currentSceneType"
       :output="reconstructionStore.outputPlan('dense')"
       @close="denseOpen = false"
       @run="onDenseRun"

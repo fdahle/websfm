@@ -135,6 +135,41 @@ describe.each(Object.keys(RUNNERS))('fusion on a known plane (%s)', (runner) => 
     })
   })
 
+  it('averages the agreeing views: a fused point is nearer the surface than one map', async () => {
+    // Each map with its own ±0.3 % depth noise (a different pattern per map), within the
+    // 1 % tolerance. A point at the mean of its own depth and its agreeing views' has less
+    // of it than any single map's pixel (about 1/√(views + 1) of it).
+    const rnd = (u, v, k) => {
+      const x = Math.sin(12.9898 * u + 78.233 * v + 37.719 * k) * 43758.5453
+      return 2 * (x - Math.floor(x)) - 1
+    }
+    const maps = WIDE.map((C, k) => render(C, { depthOf: (u, v, d) => d * (1 + 0.003 * rnd(u, v, k)) }))
+    // The scatter of one map's own pixels about the plane.
+    const one = maps[1],
+      Ci = centreOf(one)
+    let raw = 0,
+      n = 0
+    for (let v = 0; v < H; v++)
+      for (let u = 0; u < W; u++) {
+        const d = one.depth[v * W + u]
+        if (!(d > 0)) continue
+        const X = mulT(one.R, [((u - K.cx) / K.fx) * d, ((v - K.cy) / K.fy) * d, d]).map((x, i) => x + Ci[i])
+        raw += offPlane(X) ** 2
+        n++
+      }
+    raw = Math.sqrt(raw / n)
+    const out = await fuse(maps, { minViews: 3 })
+    expect(out.count).toBeGreaterThan(500)
+    const fused = Math.sqrt(points(out).reduce((a, p) => a + offPlane(p) ** 2, 0) / out.count)
+    // Own depth + three agreeing views: about ½ of one map's scatter (0.40 here, the voxel
+    // merge adds a little). Each pixel at its own depth, merged by voxel alone: 0.71.
+    expect(fused).toBeLessThan(0.55 * raw)
+    // Point position 'own' (Auto for an object capture): each point keeps its map's noise.
+    const own = await fuse(maps, { minViews: 3, position: 'auto', sceneType: 'object' })
+    const ownRms = Math.sqrt(points(own).reduce((a, p) => a + offPlane(p) ** 2, 0) / own.count)
+    expect(ownRms).toBeGreaterThan(0.6 * raw)
+  })
+
   it('keeps depths that agree within the tolerance', async () => {
     // ±0.4 % noise against a 1 % tolerance: still the same surface.
     const noisy = (u, v, d) => d * (1 + 0.004 * Math.sin(12.9898 * u + 78.233 * v))

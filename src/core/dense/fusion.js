@@ -13,6 +13,38 @@ import { createVoxelAccumulator } from './voxelAccumulator.js'
 import { runWithMaps, fusionPlanSteps } from './fusionPlan.js'
 import { nounFor, pluralize } from '../textFormat.js'
 
+// Camera-frame depth (z) of world point X in map m.
+const refDepthOf = (m, X) => m.R[2][0] * X[0] + m.R[2][1] * X[1] + m.R[2][2] * X[2] + m.t[2]
+
+// Where an agreeing view puts the surface, as a depth on the reference pixel's ray. The
+// view measures the point at s = (its depth there) / (the depth it predicted for P),
+// i.e. at C' + s·(P − C') on its own ray; depth is linear along a ray, so in the
+// reference camera that point lies at zC + s·(dRef − zC), zC the reference-frame depth
+// of the view's centre C'. Within the depth tolerance this is the view's measurement
+// carried onto the reference ray (exact for a point on the line C'P).
+export const consensusDepth = (dRef, zC, s) => zC + s * (dRef - zC)
+
+// A map's depth at sub-pixel (u, v), bilinear in inverse depth over its four pixels; 0 where any of them
+// has none. The consensus reads a view at P's exact projection: the rounded pixel the
+// agreement test accepts lies up to half a pixel (more with the search radius) away, and
+// on a sloped surface its depth is not the depth at P.
+export function depthAt(map, u, v) {
+  const x0 = Math.floor(u),
+    y0 = Math.floor(v)
+  if (x0 < 0 || y0 < 0 || x0 + 1 >= map.width || y0 + 1 >= map.height) return 0
+  const w = map.width,
+    i = y0 * w + x0,
+    a = map.depth[i],
+    b = map.depth[i + 1],
+    c = map.depth[i + w],
+    d = map.depth[i + w + 1]
+  if (!(a > 0 && b > 0 && c > 0 && d > 0)) return 0
+  const fx = u - x0,
+    fy = v - y0
+  // Inverse depth: on a plane it is linear in the pixel coordinates, depth is not.
+  return 1 / ((1 / a) * (1 - fx) * (1 - fy) + (1 / b) * fx * (1 - fy) + (1 / c) * (1 - fx) * fy + (1 / d) * fx * fy)
+}
+
 // ── Stage B: fusion ──────────────────────────────────────────────────────────
 
 // Fuse per-image depth maps into a dense point cloud. Each map carries its
@@ -136,12 +168,17 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
         depthTolRel,
         consistencyPx,
         step,
+        meanPosition = false,
         slab,
         slabIndex = 0,
         slabCount = 1,
       } = request
       const agree = new Uint32Array(m.width * m.height),
-        angle = new Float64Array(agree.length)
+        angle = new Float64Array(agree.length),
+        // Σ over the agreeing views of their surface depth on this pixel's ray, for a
+        // point at the mean of the views (Point position); not allocated without it.
+        dsum = meanPosition ? new Float32Array(agree.length) : null,
+        nsum = meanPosition ? new Uint8Array(agree.length) : null
       const C = cameraCenter(m),
         rad = Math.max(0, Math.round(consistencyPx))
       const loadComparison = hooks.loadDepth ?? loadMap
@@ -202,6 +239,7 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
         compared++
         t = now()
         const otherC = cameraCenter(other)
+        const zC = meanPosition ? refDepthOf(m, otherC) : 0
         // One point and one projection, reused over the pixels (denseGeometry.js).
         const projectOther = pixelProjector(other),
           P = { x: 0, y: 0, z: 0 },
@@ -237,6 +275,11 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
           }
           if (hit) {
             agree[idx]++
+            const od = meanPosition ? depthAt(other, p.u, p.v) : 0
+            if (od > 0 && Math.abs(od - p.depth) <= tol && nsum[idx] < 255) {
+              dsum[idx] += consensusDepth(m.depth[idx], zC, od / p.depth)
+              nsum[idx]++
+            }
             if (minTriAngleDeg > 0) angle[idx] = Math.max(angle[idx], triangulationAngle(C, otherC, P))
             if (settled(idx)) continue
           }
@@ -252,7 +295,7 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
           'Checking depth consistency…',
         )
       }
-      next = iterator.next({ agree, angle })
+      next = iterator.next({ agree, angle, dsum, nsum })
     }
   }
   const stream = { compared, culled, skipped, reads, hits, cacheBytes, loadMs, eligMs, checkMs }
@@ -377,7 +420,8 @@ export function mergeFusionCounters(list) {
 }
 
 function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
-  const { consistencyPx, depthTolRel, step, minTriAngleDeg, removeIsolated, incidenceOn, cosIncGate } = plan.gates
+  const { consistencyPx, depthTolRel, step, minTriAngleDeg, removeIsolated, incidenceOn, cosIncGate, meanPosition } =
+    plan.gates
   const { minViews, maxCost, bounds, mergeCell, region, axis, slabs, tiled, halo, visits, firstSlab, est } = plan
   const { onProgress } = hooks
   const inv = 1 / mergeCell,
@@ -419,7 +463,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
       // This map's pixels unprojected into one reused point (denseGeometry.js).
       const unproject = pixelUnprojector(m),
         P = { x: 0, y: 0, z: 0 }
-      // Streamed: a check request ↔ { agree, angle } (protocol: fusionPlan.js runWithMaps).
+      // Streamed: a check request ↔ { agree, angle, dsum, nsum } (protocol: fusionPlan.js runWithMaps).
       const checks = hooks.streaming
         ? yield {
             mi,
@@ -430,6 +474,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
             depthTolRel,
             consistencyPx,
             step,
+            meanPosition,
             slab: tiled ? { key: axKey, inv, lo: loH, hi: hiH } : null,
             slabIndex: ti,
             slabCount: nT,
@@ -500,7 +545,9 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
           // depth tolerance scaled by 1e-3, i.e. ≈0).
           const rad = Math.max(0, Math.round(consistencyPx))
           let agree = checks ? checks.agree[idx] : 0,
-            maxAngle = checks ? checks.angle[idx] : 0
+            maxAngle = checks ? checks.angle[idx] : 0,
+            dsum = checks?.dsum ? checks.dsum[idx] : 0,
+            nsum = checks?.nsum ? checks.nsum[idx] : 0
           const allowed = viewSets?.[mi]
           for (let ci = 0; ci < cams.length && !checks; ci++) {
             const c = cams[ci]
@@ -526,6 +573,11 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
             }
             if (hit) {
               agree++
+              const od = meanPosition ? depthAt(c.m, p.u, p.v) : 0
+              if (od > 0 && Math.abs(od - p.depth) <= tol) {
+                dsum += consensusDepth(d, refDepthOf(m, camCenters[ci]), od / p.depth)
+                nsum++
+              }
               // WS4: track the widest triangulation angle among agreeing views. A pixel
               // that only "agrees" at ~0° parallax (sky / distant haze) never reaches
               // minTriAngleDeg, so it is culled below rather than fused into a flyer.
@@ -548,6 +600,10 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
             if (own) lowParallax++
             continue
           }
+          // Point position 'mean': the point at the mean of its own depth and the
+          // agreeing views' (as in COLMAP's fusion), so each view's error averages out
+          // instead of every pixel keeping its own map's noise. 'own' leaves nsum 0.
+          if (nsum > 0) unproject(u, v, (d + dsum) / (nsum + 1), P)
 
           // World-space oriented normal: rotate the converged camera-frame normal
           // (nz<0 ⇒ facing camera ⇒ outward for aerial). No normals (stale cache) ⇒
@@ -683,7 +739,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
 // slabs, in slab order) it also joins the cloud — empty when the slabs went to onTile.
 export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks = {}) {
   const { minViews, maxCost, mergeCell, region, estCells, tiled, bboxStride, slabs, nMaps } = plan
-  const { minTriAngleDeg, maxIncidenceDeg, incidenceOn } = plan.gates
+  const { minTriAngleDeg, maxIncidenceDeg, incidenceOn, meanPosition } = plan.gates
   const {
     considered,
     noDepth,
@@ -714,7 +770,8 @@ export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks
       `${failedConsistency} <${minViews} views (${pct(failedConsistency)}%)` +
       `${minTriAngleDeg > 0 ? `, ${lowParallax} <${minTriAngleDeg}° parallax (${pct(lowParallax)}%)` : ''}` +
       `${incidenceOn ? `, ${grazing} >${maxIncidenceDeg}° grazing (${pct(grazing)}%)` : ''}` +
-      `${region ? `, ${outsideRegion} outside the region (${pct(outsideRegion)}%)` : ''}`,
+      `${region ? `, ${outsideRegion} outside the region (${pct(outsideRegion)}%)` : ''}; ` +
+      `points at ${meanPosition ? 'the mean depth of the agreeing views' : 'their own depth map’s depth'}`,
     'info',
     'Dense',
   )

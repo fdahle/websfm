@@ -7,7 +7,7 @@
 
 import { DENSE_TUNING } from '../tuning.js'
 import { normalizeRegion, regionContains } from '../products/region.js'
-import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
+import { DENSE_FUSE_DEFAULTS, DENSE_POSITION_AUTO } from '../defaults.user.js'
 import {
   projectDensifyPeakBytes,
   projectDensifyPoolBytes,
@@ -425,6 +425,13 @@ export function planFusionSlabs(hist, cap) {
   return slabs
 }
 
+// Where a kept point sits ('mean' | 'own'): an explicit choice wins; 'auto', blank or
+// unknown follows the project's scene type (DENSE_POSITION_AUTO, aerial when unknown).
+export function resolveFusePosition(position, sceneType) {
+  if (position === 'mean' || position === 'own') return position
+  return DENSE_POSITION_AUTO[sceneType] ?? DENSE_POSITION_AUTO.aerial
+}
+
 // Fusion's per-pixel gates, read through the engine-boundary checks (numOpt): a blank,
 // non-finite or out-of-range value takes its DENSE_FUSE_DEFAULTS / tuning value, and
 // `step` is an integer ≥ 1 — the slab loops advance by it.
@@ -440,7 +447,18 @@ export function fusionGates(opts = {}) {
   // cos of the incidence gate; ≤0 or ≥90 ⇒ disabled (cosInc ≥ 0 always passes).
   const incidenceOn = maxIncidenceDeg > 0 && maxIncidenceDeg < 90
   const cosIncGate = incidenceOn ? Math.cos((maxIncidenceDeg * Math.PI) / 180) : -1
-  return { consistencyPx, depthTolRel, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated, incidenceOn, cosIncGate }
+  const meanPosition = resolveFusePosition(opts.position, opts.sceneType) === 'mean'
+  return {
+    consistencyPx,
+    depthTolRel,
+    step,
+    minTriAngleDeg,
+    maxIncidenceDeg,
+    removeIsolated,
+    incidenceOn,
+    cosIncGate,
+    meanPosition,
+  }
 }
 
 // The pre-passes read every map once per pass (cost count, cost samples, bounds, cell

@@ -196,13 +196,14 @@ describe('densifyInputBytes', () => {
       { width: 20, height: 10, hasNormals: false },
       { width: 5, height: 5, hasNormals: true },
     ]
-    // Per map: planes (23 B/px with normals, 11 without) + agree/angle 12 B/px + every
-    // pixel eligible, Int32 index + Float64×3 point + Int32 open-list entry = 32 B/px.
-    // Comparison planes live in the separately charged cache — no second full map is ever held.
-    // 100·(23+12+32) = 6700 vs 200·(11+12+32) = 11000.
-    expect(densifyInputBytes(metas, { streamed: true })).toBe(200 * (11 + 12 + 32))
-    expect(densifyInputBytes([metas[0], metas[2]], { streamed: true })).toBe(100 * (23 + 12 + 32))
-    expect(DENSIFY_STREAMED_REF_BYTES_PER_PX).toBe(12 + 32)
+    // Per map: planes (23 B/px with normals, 11 without) + agree/angle 12 B/px + the
+    // mean position's depth sum/count 5 B/px + every pixel eligible, Int32 index +
+    // Float64×3 point + Int32 open-list entry = 32 B/px. Comparison planes live in the
+    // separately charged cache — no second full map is ever held.
+    // 100·(23+12+5+32) = 7200 vs 200·(11+12+5+32) = 12000.
+    expect(densifyInputBytes(metas, { streamed: true })).toBe(200 * (11 + 12 + 5 + 32))
+    expect(densifyInputBytes([metas[0], metas[2]], { streamed: true })).toBe(100 * (23 + 12 + 5 + 32))
+    expect(DENSIFY_STREAMED_REF_BYTES_PER_PX).toBe(12 + 5 + 32)
   })
 })
 

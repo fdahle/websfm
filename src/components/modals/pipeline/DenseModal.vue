@@ -19,7 +19,12 @@ import OutputStep from '../ui/OutputStep.vue'
 
 // The depth maps fusion reads, for the steps' effect lines; `output` is the store's
 // outputPlan('dense'), what step 5 (Output) adds or replaces.
-const props = defineProps({ maps: { type: Number, default: 0 }, output: { type: Object, default: null } })
+// `sceneType` is the project's, what an Auto Point position resolves by.
+const props = defineProps({
+  maps: { type: Number, default: 0 },
+  sceneType: { type: String, default: null },
+  output: { type: Object, default: null },
+})
 const emit = defineEmits(['close', 'run'])
 
 // Memory budget for the fusion pre-flight is machine-level (Settings ▸ Compute).
@@ -58,17 +63,31 @@ const numbers = computed(() =>
 
 // What each step does to this project (core/stepEffects/dense.js).
 const effects = computed(() =>
-  withShorts(denseEffects(settings.value, { maps: props.maps }), denseShorts(settings.value, { maps: props.maps })),
+  withShorts(
+    denseEffects(settings.value, { maps: props.maps, sceneType: props.sceneType }),
+    denseShorts(settings.value, { maps: props.maps, sceneType: props.sceneType }),
+  ),
 )
 
 function run() {
   dialog.remember()
-  const { auto, minViews, depthTolPct, maxCost, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated, replaceMain } =
-    settings.value
+  const {
+    auto,
+    minViews,
+    depthTolPct,
+    maxCost,
+    position,
+    step,
+    minTriAngleDeg,
+    maxIncidenceDeg,
+    removeIsolated,
+    replaceMain,
+  } = settings.value
   emit('run', {
     minViews: auto ? null : minViews,
     maxCost: auto ? null : maxCost,
     depthTolRel: depthTolPct / 100,
+    position,
     step,
     minTriAngleDeg,
     maxIncidenceDeg,
@@ -123,7 +142,7 @@ provideStepLayout('dense-cloud')
       </template>
     </SettingsStep>
 
-    <SettingsStep step="2" title="Agree across depth maps" :effect="effects.agree" :more="4">
+    <SettingsStep step="2" title="Agree across depth maps" :effect="effects.agree" :more="5">
       <template #tuning>
         <SettingsField hint="Min-views from the image count, the default cost gate. Turn off to set them by hand.">
           <template #label
@@ -211,6 +230,15 @@ provideStepLayout('dense-cloud')
             step="0.1"
             class="field-input"
           />
+        </SettingsField>
+
+        <SettingsField label-for="position" hint="Where a kept point sits along its ray.">
+          <template #label><FieldHelp op="dense-cloud" param="position">Point position</FieldHelp></template>
+          <select id="position" v-model="settings.position" class="field-select">
+            <option value="auto">Auto (by scene type)</option>
+            <option value="mean">Mean of the agreeing views</option>
+            <option value="own">Own depth map</option>
+          </select>
         </SettingsField>
       </template>
     </SettingsStep>

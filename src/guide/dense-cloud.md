@@ -40,6 +40,15 @@ With Auto off: pixels that matched worse than this
 Lowering it mostly removes real weak-texture surface; tighten it only to test where
 noise comes from.
 
+## Point position
+<!-- param: position default: Auto -->
+Where a kept point sits. **Mean of the agreeing views** puts it at the average depth of
+its own map and the maps that confirm it, which evens out their noise: flat ground and
+roofs come out thinner and cleaner, at the cost of some fine detail and a few edge
+points. **Own depth map** keeps each pixel's own depth, sharper on small structure.
+**Auto** takes the mean for aerial and mapping projects and the own depth for object
+captures.
+
 ## Geometric outlier filters
 Three filters during fusion remove points that agree for the wrong reasons. Keep the
 defaults unless they remove a thin structure you need.
