@@ -12,6 +12,7 @@
 //                              textured mesh, DEM, orthomosaic) with the positions in the
 //                              solve: the config's reference cameras with their accuracies
 //                              (and, with recon.leverArm, the antenna offset), else EXIF
+//        [--optimize]          sparse only: Optimize Cameras after alignment
 //        [--cloud-crs <crs>]   with --full: also export the point cloud as LAS in this CRS
 //                              (e.g. EPSG::32632, for the LiDAR check)
 //
@@ -58,16 +59,20 @@ const noPriors = cfg.recon?.posePriors === false
 const ref = await loadReference(cfg.reference)
 const full = !!args.full
 
+// The config's reference cameras (with their accuracies) replace the EXIF positions in
+// Metashape's solve, as importPoses does for WebSfM, unless the positions are off.
+const refArgs = []
+if (ref?.positions && !noPriors) {
+  // loadReference turns the antenna offset into the OpenCV camera frame; Metashape wants
+  // its own axes back (x right, y up, z back: flip y and z).
+  const arm = cfg.recon?.leverArm && ref.leverArm ? [ref.leverArm[0], -ref.leverArm[1], -ref.leverArm[2]] : null
+  await writeFile(join(ws, 'reference.json'), JSON.stringify({ positions: ref.positions, leverArm: arm }))
+  refArgs.push('--reference', join(ws, 'reference.json'))
+}
+
 let pyArgs
 if (full) {
-  pyArgs = [join(here, 'metashape_full.py'), '--images', images, '--ws', ws]
-  if (ref?.positions) {
-    // loadReference turns the antenna offset into the OpenCV camera frame; Metashape wants
-    // its own axes back (x right, y up, z back: flip y and z).
-    const arm = cfg.recon?.leverArm && ref.leverArm ? [ref.leverArm[0], -ref.leverArm[1], -ref.leverArm[2]] : null
-    await writeFile(join(ws, 'reference.json'), JSON.stringify({ positions: ref.positions, leverArm: arm }))
-    pyArgs.push('--reference', join(ws, 'reference.json'))
-  }
+  pyArgs = [join(here, 'metashape_full.py'), '--images', images, '--ws', ws, ...refArgs]
   if (args['cloud-crs']) pyArgs.push('--cloud-crs', args['cloud-crs'])
 } else {
   pyArgs = [
@@ -78,6 +83,8 @@ if (full) {
     ws,
     ...(preselect ? ['--preselect-reference'] : []),
     ...(noPriors ? ['--no-pose-priors'] : []),
+    ...refArgs,
+    ...(args.optimize ? ['--optimize'] : []),
   ]
 }
 

@@ -27,6 +27,8 @@ from pathlib import Path
 
 import Metashape
 
+from metashape_align import apply_reference
+
 PHOTO_EXT = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 
 
@@ -59,25 +61,7 @@ def main():
 
     stage("addPhotos", lambda: chunk.addPhotos(files))
 
-    referenced = 0
-    if a.reference:
-        ref = json.load(open(a.reference))
-        chunk.crs = Metashape.CoordinateSystem("EPSG::4326")
-        pos = ref.get("positions") or {}
-        for c in chunk.cameras:
-            p = pos.get(c.label.lower())  # reference.mjs keys are lower-case stems
-            if not p:
-                continue
-            c.reference.location = Metashape.Vector([p["lon"], p["lat"], p["alt"]])
-            c.reference.location_enabled = True
-            if p.get("sn"):
-                c.reference.location_accuracy = Metashape.Vector([p["se"], p["sn"], p["su"]])
-            referenced += 1
-        if ref.get("leverArm"):
-            for s in chunk.sensors:
-                s.antenna.location_ref = Metashape.Vector(ref["leverArm"])
-                s.antenna.location_fixed = True
-        print(f"   {referenced} camera references from the reference file", flush=True)
+    referenced = apply_reference(chunk, a.reference) if a.reference else 0
 
     stage("matching", lambda: chunk.matchPhotos())
     stage("alignment", lambda: chunk.alignCameras())

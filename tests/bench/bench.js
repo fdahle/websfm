@@ -996,9 +996,10 @@ window.bench = {
     return {
       settings,
       seconds: (performance.now() - t0) / 1000,
-      width: d?.width ?? 0,
-      height: d?.height ?? 0,
-      gsd: d?.gsd ?? null,
+      // A DEM in blocks keeps an overview in width/height/gsd; report the product itself.
+      width: d?.fullWidth ?? d?.width ?? 0,
+      height: d?.fullHeight ?? d?.height ?? 0,
+      gsd: d?.fullGsd ?? d?.gsd ?? null,
     }
   },
 

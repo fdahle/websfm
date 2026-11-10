@@ -9,6 +9,7 @@ point cloud, DEM from the point cloud, exported in the GCP CRS and scored.
         --intrinsics <camera_model_intrinsics.csv> --ws <dir> --epsg 6341
         [--ref-dem <ref.tif>] [--check-every 4]   every 4th GCP is a checkpoint
         [--downscale-depth 2] [--dem-res 2]
+        [--match-downscale 1] [--keypoints 40000] [--tiepoints 4000] [--guided]
 
 Run with an interpreter that has the Metashape module (hist_env3). Stages that already
 ran in the saved project are skipped.
@@ -41,6 +42,10 @@ def main():
     ap.add_argument("--downscale-depth", type=int, default=2)
     ap.add_argument("--dem-res", type=float, default=2.0)
     ap.add_argument("--no-gcps", action="store_true", help="align + a GCP similarity only (no marker optimisation)")
+    ap.add_argument("--match-downscale", type=int, default=1, help="0 Highest, 1 High (default), 2 Medium")
+    ap.add_argument("--keypoints", type=int, default=40000, help="keypoint limit per photo (0: none)")
+    ap.add_argument("--tiepoints", type=int, default=4000, help="tie point limit per photo (0: none)")
+    ap.add_argument("--guided", action="store_true", help="guided image matching")
     a = ap.parse_args()
 
     ws = Path(a.ws)
@@ -96,8 +101,9 @@ def main():
     stage("add", add)
 
     def align():
-        chunk.matchPhotos(downscale=1, generic_preselection=True, reference_preselection=False,
-                          keypoint_limit=40000, tiepoint_limit=4000, filter_mask=bool(a.mask))
+        chunk.matchPhotos(downscale=a.match_downscale, generic_preselection=True, reference_preselection=False,
+                          keypoint_limit=a.keypoints, tiepoint_limit=a.tiepoints, guided_matching=a.guided,
+                          filter_mask=bool(a.mask))
         chunk.alignCameras()
     stage("align", align)
 
@@ -173,6 +179,7 @@ def main():
         "control_rms_h": rms(ctrl, ["dE", "dN"]), "control_rms_v": rms(ctrl, ["dU"]),
         "check_rms_h": rms(chk, ["dE", "dN"]), "check_rms_v": rms(chk, ["dU"]),
         "n_control": len(ctrl), "n_check": len(chk), "markers": me, "timings": timings,
+        "matching": {"downscale": a.match_downscale, "keypoints": a.keypoints, "tiepoints": a.tiepoints, "guided": a.guided},
     }
     if a.ref_dem:
         r = subprocess.run([sys.executable, str(HERE / "score_dem.py"), str(ws / "dem.tif"), a.ref_dem, "--out", str(ws / "dem_score.json")],
