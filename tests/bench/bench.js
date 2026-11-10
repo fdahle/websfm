@@ -168,6 +168,33 @@ let reference = null // scripts/bench/reference.mjs: { positions, leverArm, gcps
 // similarity into ENU and compared with its survey. The solve never saw them.
 // `offsetPx` shifts every mark (on top of the loader's markOffsetPx) to score another
 // pixel convention against the same cameras.
+// Camera centres through the app's own georeference (pose fit, GCP fit or a DEM-held
+// frame) into the project CRS, against `truth` ([{ p: pose, x, y, z }]): the absolute
+// error a user's products carry.
+async function appCameraCheckOf(cloud, truth) {
+  const { isGeographic } = await import('/src/core/crs.js')
+  const { cameraCenter } = await import('/src/core/sfm/geometry.js')
+  const g = cloud && !isGeographic(projects.currentCrs) ? await recon.georeference() : null
+  if (!g) return null
+  const uuidOf = new Map(images.images.map((im) => [im.id, im.uuid]))
+  const d = truth
+    .map((t) => {
+      const cam = cloud.cameras.get(uuidOf.get(t.p.imageId))
+      if (!cam || !Number.isFinite(t.z)) return null
+      const q = applySimilarity(g.sim, cameraCenter(cam))
+      return [q[0] - t.x, q[1] - t.y, q[2] - t.z]
+    })
+    .filter(Boolean)
+  const rmsOf = (v) => (v.length ? Math.sqrt(v.reduce((a, b) => a + b * b, 0) / v.length) : null)
+  return {
+    method: g.method,
+    count: d.length,
+    rmsH: rmsOf(d.map((v) => Math.hypot(v[0], v[1]))),
+    rmsV: rmsOf(d.map((v) => v[2])),
+    meanU: d.length ? d.reduce((a, v) => a + v[2], 0) / d.length : null,
+  }
+}
+
 async function checkpoints(cloud, pc, offsetPx = 0) {
   const imgByStem = new Map(images.images.map((i) => [stem(i.name), i]))
   const imagesById = new Map(images.images.map((i) => [i.id, i]))
@@ -2307,6 +2334,21 @@ window.bench = {
     return { ok, poolSize: c.POOL_SIZE, max: c.MAX_POOL_SIZE }
   },
 
+  // The project CRS changed as Project Settings does (useProjectLifecycle.js), without
+  // its confirmation: GCPs, footprints and camera positions reprojected into it.
+  async setCrs(crs) {
+    const { ensureProjection } = await import('/src/core/crs.js')
+    const from = projects.currentCrs || 'EPSG:4326'
+    if (crs === from) return { crs, changed: false }
+    await ensureProjection(crs).catch(() => {})
+    await projects.setProjectCrs(projects.currentProjectId, crs, async (f, t) => {
+      await gcpsStore.reprojectGcps(f, t)
+      await useFootprintsStore().reprojectFootprints(f, t)
+      await poses.reprojectPoses(f, t)
+    })
+    return { crs: projects.currentCrs, from, changed: true }
+  },
+
   async start({ name = 'bench', sceneType = 'object', crs = undefined } = {}) {
     await projects.loadIndex()
     await projects.createProject(name, sceneType, crs)
@@ -2518,12 +2560,19 @@ window.bench = {
     return n
   },
 
+  // priorShift: [dx, dy, dz] (project units) added to every camera position and
+  // priorSigma (m) as every position's accuracy, for this run only (drone GPS from RTK
+  // positions: a height bias and metre σ); the positions are restored after it, and
+  // appCameraCheck scores the camera centres through the app's georeference against them.
   async reconstruct({
     preset = null,
     posePriors = true,
     leverArm = false,
     sensor = null,
     exportPoints = false,
+    priorShift = null,
+    priorSigma = null,
+    priorDatum = null,
     ...overrides
   } = {}) {
     const settings = { ...withPreset(RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, preset), ...overrides }
@@ -2554,7 +2603,40 @@ window.bench = {
     }
     const priors = poses.poses.filter((p) => p.enabled !== false).length
     const t0 = performance.now()
-    await recon.reconstruct(settings, report)
+    const truePoses = poses.poses.map((p) => ({
+      p,
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      a: [p.accuracyX, p.accuracyY, p.accuracyZ],
+      datum: p.verticalDatum,
+    }))
+    const tamper = !!(priorShift || priorSigma || priorDatum)
+    if (tamper)
+      for (const t of truePoses) {
+        if (priorShift) Object.assign(t.p, { x: t.x + priorShift[0], y: t.y + priorShift[1], z: t.z + priorShift[2] })
+        if (priorSigma) Object.assign(t.p, { accuracyX: priorSigma, accuracyY: priorSigma, accuracyZ: priorSigma })
+        if (priorDatum) t.p.verticalDatum = priorDatum
+      }
+    let appCameraCheck = null
+    try {
+      await recon.reconstruct(settings, report)
+      // Camera centres through the app's georeference (pose fit, GCP fit or DEM-held
+      // frame), fitted while the run's positions are in place, against the true ones.
+      appCameraCheck = await appCameraCheckOf(recon.mainSparseCloud, truePoses)
+    } finally {
+      if (tamper)
+        for (const t of truePoses)
+          Object.assign(t.p, {
+            x: t.x,
+            y: t.y,
+            z: t.z,
+            accuracyX: t.a[0],
+            accuracyY: t.a[1],
+            accuracyZ: t.a[2],
+            verticalDatum: t.datum,
+          })
+    }
     const cloud = recon.mainSparseCloud
     const points = cloud?.points ?? null
     let ge3 = 0,
@@ -2622,6 +2704,7 @@ window.bench = {
       baSolver: s?.baSolver ?? null,
       timings: s?.timings ?? null,
       positionCheck,
+      appCameraCheck,
       checkpointCheck,
       checkpointOffsets,
       gcpResiduals,

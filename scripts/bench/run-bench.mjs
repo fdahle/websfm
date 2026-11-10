@@ -898,6 +898,9 @@ try {
     ;(result.inventory ??= {}).reopen = inv
     console.log(`== reopen: ${JSON.stringify(numbers)}`)
     console.log(`== inventory reopen: ${invLine(inv)}`)
+    // `crs` on a reopened project: changed as Project Settings does (GCPs, footprints and
+    // camera positions reprojected), not only at creation.
+    if (cfg.crs) console.log(`== crs: ${JSON.stringify(await page.evaluate((c) => window.bench.setCrs(c), cfg.crs))}`)
     await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
   }
   // A LiDAR reference (scripts/bench/lidar.mjs) is gridded once, then every

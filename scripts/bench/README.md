@@ -132,6 +132,10 @@ project:
 - `recon.posePriors: false`: disable every camera pose for that run. That includes the
   EXIF GNSS positions the app imports automatically, which otherwise constrain bundle
   adjustment as camera priors.
+- `recon.priorShift: [dx, dy, dz]` (project units), `recon.priorSigma` (m) and
+  `recon.priorDatum` (a vertical datum id): every camera position shifted, given that
+  accuracy and height datum for the run, then restored: drone GPS made from RTK positions. The result's `appCameraCheck` scores the camera centres through the app's
+  own georeference (pose fit, GCP fit or a DEM-held frame) against the true positions.
 
 ## Accuracy: `positionCheck`
 
