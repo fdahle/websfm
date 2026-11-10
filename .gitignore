@@ -10,6 +10,8 @@ crates/target/
 
 # Test images / datasets — keep large binaries out of git
 data/
+# …but not the third-party licence texts for data (the build ships them).
+!licenses/data/
 
 # ONNX model weights — large (the SAM2 encoder alone is >GitHub's 100 MB limit)
 # and downloaded on demand at runtime with user consent (see src/core/models/).
