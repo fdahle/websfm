@@ -90,12 +90,28 @@ export function terminateAll(reason = 'cancelled') {
 // a worker that allocates runs its GC: the depth filter's caches stayed charged to the
 // pool through all of fusion. The pool respawns on the next call. Returns false (and
 // does nothing) while any job is pending.
-export function releaseIdleWorkers() {
-  if (pending.size) return false
-  const oldWorkers = workers
-  workers = null
-  if (oldWorkers) for (const w of oldWorkers) w.terminate()
-  rr = 0
+//
+// `keep`: pool slots to leave as they are (a worker that holds a run's state for a later
+// call, as Build Mesh's worker 0 holds the prepared cloud for the join); every other slot
+// gets a fresh worker. Then only jobs on the replaced slots block it.
+export function releaseIdleWorkers({ keep = [] } = {}) {
+  if (!keep.length) {
+    if (pending.size) return false
+    const oldWorkers = workers
+    workers = null
+    if (oldWorkers) for (const w of oldWorkers) w.terminate()
+    rr = 0
+    return true
+  }
+  if (!workers) return true
+  const kept = new Set(keep)
+  const replaced = new Set(workers.filter((_, i) => !kept.has(i)))
+  for (const entry of pending.values()) if (replaced.has(entry.worker)) return false
+  workers = workers.map((w, i) => {
+    if (kept.has(i)) return w
+    w.terminate()
+    return spawn(i)
+  })
   return true
 }
 

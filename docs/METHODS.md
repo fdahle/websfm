@@ -1370,7 +1370,10 @@ cleanup below is part of the method.
   vertices on the same lattice edges; a tile keeps the triangles whose centroid's cell is in
   its core, and seam vertices are welded by lattice edge. Tiles trim against the scene's
   median support; floating pieces are judged on the stitched mesh. Hole refill is decided
-  per tile, so a hole crossing a seam can stay open there.
+  per tile, so a hole crossing a seam can stay open there. The tiles run on as many pool
+  workers as the memory budget holds solves of the largest tile, after what the open
+  project and worker 0's copy of the input take; each gets only its tile's samples
+  (`tileTask`), and the tile workers are released before worker 0 joins the tiles.
 - **Depth Auto** (`depth: 0`, `autoMeshDepth`): the depth whose leaf `E / 2^d` (E the
   longest extent) is nearest `leafSpacings` sample spacings in octaves, then lowered while
   the predicted mesh passes `maxTriangles`. The prediction counts the leaves the surface

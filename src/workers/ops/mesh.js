@@ -4,7 +4,7 @@ import {
   generateMesh,
   poissonHeapBytes,
   prepareMesh,
-  solveMeshTile,
+  solveTileTask,
   stitchMeshTiles,
   tileShare,
   parseMeshBuffer,
@@ -241,10 +241,11 @@ export function makeMeshOps() {
     return { result: { share, tiles: share.tiling.tiles.length }, transfer: [] }
   }
   // One tile of a run's share → { part, stats } (the part's buffers handed over).
-  async function meshTile([{ share, index }], { emit }) {
+  // One tile task (core/products/mesh.js tileTask: the tile's own samples) → its part.
+  async function meshTile([{ task }], { emit }) {
     await ensureWasm()
     const wasm64 = bigArrayCaps().memory64 ? await ensureWasm64().catch(() => null) : null
-    const r = solveMeshTile(share, index, poissonFor(emit, wasm64))
+    const r = solveTileTask(task, poissonFor(emit, wasm64))
     return { result: r, transfer: [r.part.pos, r.part.idx] }
   }
   async function meshFinish([{ runId, results }], { emit }) {

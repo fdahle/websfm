@@ -20,7 +20,7 @@ import {
 } from '../../core/dense/mvs.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
-import { meshDepthBasis } from '../../core/products/mesh.js'
+import { meshDepthBasis, tileTask } from '../../core/products/mesh.js'
 import { regionContains } from '../../core/products/region.js'
 import {
   computeDepthMaps as workerComputeDepthMaps,
@@ -1070,15 +1070,7 @@ export function createDense({
     // budget, and with the rest of the buffer pool for its plain arrays (shared ones are
     // wasm memory, outside the pool). Quarry: projected 12 GB, the renderer peaked at
     // 17.7 GB with the previous 95 M-point cloud open.
-    let pageBytes = 0,
-      pagePoolBytes = 0
-    for (const c of clouds.value ?? [])
-      for (const v of [c, c.attributes, c.points])
-        for (const a of Object.values(v ?? {}))
-          if (ArrayBuffer.isView(a)) {
-            pageBytes += a.byteLength
-            if (!isSharedArray(a)) pagePoolBytes += a.byteLength
-          }
+    const { pageBytes, pagePoolBytes } = pageCloudBytes()
     if (pageBytes > 0)
       log(`Dense: the open project holds ${formatBytes(pageBytes)} of point data in this tab`, 'debug', 'Dense')
     settings = { ...settings, pageBytes, pagePoolBytes }
@@ -1302,7 +1294,12 @@ export function createDense({
     try {
       const { mesh } =
         POOL_SIZE > 1 && meshSettings.tiles !== 'off'
-          ? await meshOnPool(input, transfer, meshSettings, onProgress)
+          ? await meshOnPool(input, transfer, meshSettings, onProgress, {
+              // Worker 0 keeps the input until the join; a shared cloud goes as a view.
+              heldBytes:
+                pageCloudBytes().pageBytes +
+                [posCopy, colCopy, nrmCopy].reduce((n, a) => n + (a && !isSharedArray(a) ? a.byteLength : 0), 0),
+            })
           : await workerMeshify(input, {
               onLog: (m, l, c) => log(m, l, c),
               onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
@@ -1327,12 +1324,27 @@ export function createDense({
     }
   }
 
+  // The point data the open project's clouds hold in this tab: all of it (pageBytes), and
+  // the part in the tab's ArrayBuffer pool (pagePoolBytes; shared arrays are wasm memory).
+  function pageCloudBytes() {
+    let pageBytes = 0,
+      pagePoolBytes = 0
+    for (const c of clouds.value ?? [])
+      for (const v of [c, c.attributes, c.points])
+        for (const a of Object.values(v ?? {}))
+          if (ArrayBuffer.isView(a)) {
+            pageBytes += a.byteLength
+            if (!isSharedArray(a)) pagePoolBytes += a.byteLength
+          }
+    return { pageBytes, pagePoolBytes }
+  }
+
   // Build Mesh with its tiles over the pool (workers/ops/mesh.js meshPrepare / meshTile /
   // meshFinish): worker 0 conditions the input and plans — and solves at once when one
   // solve fits — then the tiles go to as many workers as the memory budget holds solves of
   // the largest tile (each a wasm heap that keeps its high-water mark), and worker 0 joins
   // them. Resolves to { mesh }.
-  async function meshOnPool(input, transfer, settings, onProgress) {
+  async function meshOnPool(input, transfer, settings, onProgress, { heldBytes = 0 } = {}) {
     const onLog = (m, l, c) => log(m, l, c)
     const runId = `mesh-${Date.now().toString(36)}`
     const prep = await workerMeshPrepare(
@@ -1344,10 +1356,16 @@ export function createDense({
     const tiles = share.tiling.tiles
     const perTile = poissonHeapBytes(Math.max(...tiles.map((t) => t.samples)), share.solveArgs.depth)
     const budget = settings.ramBudgetBytes > 0 ? settings.ramBudgetBytes : DEFAULT_BUDGET_BYTES
-    const workers = Math.max(1, Math.min(POOL_SIZE, n, Math.floor(budget / perTile)))
+    // The tiles plan with the budget less what the tab already holds (the project's
+    // clouds, worker 0's copy of the input): each solve's wasm heap keeps its high-water
+    // mark until the worker goes. Worker 0 holds the run for the join, so the tiles go to
+    // the others where the pool has them.
+    const room = Math.max(perTile, budget - heldBytes)
+    const first = POOL_SIZE > 1 ? 1 : 0
+    const workers = Math.max(1, Math.min(POOL_SIZE - first, n, Math.floor(room / perTile)))
     log(
       `Mesh: ${n} tiles on ${pluralize(workers, 'worker')} (a solve ≤ ${formatBytes(perTile)} each, memory ` +
-        `budget ${formatBytes(budget)})`,
+        `budget ${formatBytes(budget)}${heldBytes > 0 ? `, of which the open project and the input hold ${formatBytes(heldBytes)}` : ''})`,
       'info',
       'Products',
     )
@@ -1365,10 +1383,13 @@ export function createDense({
     const runner = async (w) => {
       while (queue.length) {
         const i = queue.shift()
+        // Only this tile's samples go, handed over (core/products/mesh.js tileTask).
+        const task = tileTask(share, i)
         results[i] = await workerMeshTile(
-          { share, index: i },
+          { task },
           {
-            worker: w,
+            worker: first + w,
+            transfer: [task.input.pos.buffer, task.input.nrm.buffer, task.input.wgt.buffer],
             onLog,
             // The worker reports a tile's progress as its share of the whole bar.
             onProgress: (d, t, lbl, f) => {
@@ -1382,6 +1403,10 @@ export function createDense({
       }
     }
     await Promise.all(Array.from({ length: workers }, (_, w) => runner(w)))
+    // The tile workers' heaps stay at their largest solve while they live: give them up
+    // before worker 0 joins the tiles and colours the mesh (quarry at depth 11, 16 GB
+    // budget: the join at 28–32 GB before, 6–9 GB after).
+    releaseIdleWorkers({ keep: [0] })
     onProgress?.(n, n, 'Joining the tiles…', 1 - JOIN, 'join')
     return workerMeshFinish({ runId, results }, { worker: 0, onLog })
   }

@@ -580,12 +580,21 @@ export function tileShare(ctx, onLog = () => {}) {
   return { sub, grid, tiling, solveArgs, medianSupport }
 }
 
-// Tile `i` of `share`: { part: its cut mesh, stats: the solver's stats }.
-export function solveMeshTile(share, i, poissonFn) {
+// Tile `i` of `share` as a task a worker solves on its own: the tile's samples (its core
+// and overlap, plain arrays to hand over) and the share without the whole sample set. A
+// share posted with every tile was the run's samples copied once per tile (quarry at
+// depth 11: 48 copies of 175 MB), garbage that piled up in workers busy in wasm.
+export function tileTask(share, i) {
   const { sub, grid, tiling, solveArgs, medianSupport } = share
+  return { index: i, input: tileInput(sub, tiling, tiling.tiles[i], grid), grid, tiling, solveArgs, medianSupport }
+}
+
+// A tile task solved: { part: its cut mesh, stats: the solver's stats }.
+export function solveTileTask(task, poissonFn) {
+  const { index: i, input, grid, tiling, solveArgs, medianSupport } = task
   const tile = tiling.tiles[i]
   const out = poissonFn({
-    ...tileInput(sub, tiling, tile, grid),
+    ...input,
     ...solveArgs,
     minComponentShare: 0,
     medianSupport,
@@ -593,6 +602,11 @@ export function solveMeshTile(share, i, poissonFn) {
     tile: { index: i, count: tiling.tiles.length },
   })
   return { part: cutToCore(parseMeshBuffer(out?.bytes ?? out), tiling, tile, grid), stats: parseMeshStats(out?.stats) }
+}
+
+// Tile `i` of `share`: { part: its cut mesh, stats: the solver's stats }.
+export function solveMeshTile(share, i, poissonFn) {
+  return solveTileTask(tileTask(share, i), poissonFn)
 }
 
 // The tiles' results, in tile order, joined into one mesh.
