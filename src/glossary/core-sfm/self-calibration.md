@@ -28,6 +28,14 @@ nearly identical images and so cannot be separated from a small, weakly-varied
 block. The reported error drops while the geometry gets worse; the signature is
 the "dome" or "bowl" artefact, a flat surface reconstructed as curved.
 
+A second correlation decides the heights of a **nadir block flown at one height**:
+focal length against camera distance. Pointed straight down, a longer focal and a
+higher camera see the same image, so the photos barely fix the focal, and the distortion
+terms can trade with it. Accurate camera positions fix the cameras, so whatever error
+is left in the focal moves the ground instead. A lens model that fits the observations
+better can therefore give worse heights. Ground control, oblique photos or a second
+flying height separate the two.
+
 WebSfM's default is therefore a **staged schedule** rather than all-parameters-at-once:
 refine $f, k_1$ during registration, then escalate to $k_2$, then the principal
 point and the decentring terms $p_1, p_2$, then $k_3$ — each unlocked only once the

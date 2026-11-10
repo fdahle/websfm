@@ -33,6 +33,13 @@ the **GNSS** button in the **Sensor table**, in metres in camera axes (x right, 
 z forward). Metashape's (x, y, z) is (x, −y, −z) here. Without it, expect a camera
 residual about the offset's length.
 
+Camera positions alone fix the cameras, not the focal length. In a block of nadir
+photos at one flying height, a slightly wrong [self-calibrated](help:self-calibration)
+focal length moves the ground up or down by the same share of the flying height, and
+the residuals cannot show it. For heights to a few centimetres, add a few GCPs, some
+oblique photos, or a second flight at another height; keep the GCPs as checkpoints to
+measure it.
+
 ## Ground control points
 A GCP needs 3D coordinates and marks in at least two registered images; use at least
 three, spread over the area and its height range. Keep some as checkpoints for an
