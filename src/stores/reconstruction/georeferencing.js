@@ -78,6 +78,8 @@ export function createGeoreferencing({
   // are clicked on the raw scan; the cameras project into the pinhole/canonical
   // frame, so every triangulation here maps them first. Null ⇒ identity.
   frameModel = () => null,
+  // True while the project's stores are restoring (projectStores.js projectRestoring).
+  restoring = ref(false),
 }) {
   const inPinhole = (list) =>
     gcpsInPinholeFrame(list, {
@@ -136,10 +138,13 @@ export function createGeoreferencing({
   // Only while there is a fit to invalidate: the key serialises every camera, image,
   // GCP and pose, and a sync watch re-ran it on each one restored or imported (a
   // 347-image reopen spent 3 s of main thread here with no fit to check).
+  // Not while a project is being restored (`restoring`): its stores restore concurrently,
+  // and a georeference restored before its poses or GCPs would otherwise be judged
+  // against half a project and dropped. The check runs once the restore is whole.
   watch(
-    [() => (georef.value ? evidenceKey.value : null), () => georef.value],
+    [() => (georef.value ? evidenceKey.value : null), () => georef.value, () => restoring.value],
     () => {
-      if (georef.value && !validGeoref.value) georef.value = null
+      if (!restoring.value && georef.value && !validGeoref.value) georef.value = null
     },
     { flush: 'sync' },
   )

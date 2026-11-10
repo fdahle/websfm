@@ -25,6 +25,8 @@
 // defineStore() in registerProjectStore(), and delete any manual restore/clear
 // lines from App.vue — the fan-out below picks it up automatically.
 
+import { ref } from 'vue'
+
 const registry = []
 
 // Register a store factory (the `useXStore` function). Returns it for chaining,
@@ -53,12 +55,24 @@ const now = () => globalThis.performance?.now?.() ?? Date.now()
 // (whose own run starts after this one, from a clean store).
 let lastRun = Promise.resolve()
 
+// True while a restore runs. The stores restore concurrently, so state that spans
+// stores (a georeference is valid for the model AND the poses and GCPs it was fitted
+// on) is not whole until every one has finished: checks across stores wait for this.
+export const projectRestoring = ref(false)
+let pending = 0
+
 export function restoreProjectStores(ctx) {
+  pending++
+  projectRestoring.value = true
   const run = lastRun.then(
     () => restoreAll(ctx),
     () => restoreAll(ctx),
   )
   lastRun = run.catch(() => {})
+  const done = () => {
+    if (--pending === 0) projectRestoring.value = false
+  }
+  run.then(done, done)
   return run
 }
 

@@ -280,3 +280,57 @@ it('places a DEM-held model in its held frame, not a refit to the cameras', asyn
   expect((await api.georeference()).method).toBe('poses')
   scope.stop()
 })
+
+it('keeps a restored georeference while the project is still restoring, then checks it', async () => {
+  // The stores restore concurrently: the model and its georeference may arrive before
+  // the poses they were fitted on. Judged then, every reopen dropped the fit.
+  const scope = effectScope()
+  const full = [
+    { imageId: 'a', x: 0, y: 0, z: 0 },
+    { imageId: 'b', x: 2, y: 0, z: 0 },
+    { imageId: 'c', x: 0, y: 2, z: 0 },
+  ]
+  const poses = ref(structuredClone(full))
+  const cameras = ref(
+    new Map([
+      ['a', { R, t: [0, 0, 0] }],
+      ['b', { R, t: [-1, 0, 0] }],
+      ['c', { R, t: [0, -1, 0] }],
+    ]),
+  )
+  const georef = ref(null),
+    restoring = ref(false)
+  const api = scope.run(() =>
+    createGeoreferencing({
+      sparseCameras: cameras,
+      images: ref(['a', 'b', 'c'].map((id) => ({ id, uuid: id }))),
+      georef,
+      healthDirty: ref(0),
+      poses: () => poses.value,
+      gcps: () => [],
+      currentCrs: () => 'EPSG:3031',
+      save: vi.fn(),
+      log: vi.fn(),
+      restoring,
+    }),
+  )
+  const fitted = { ...(await api.georeference()) }
+
+  // Reopen: the georeference lands while the poses are not in yet.
+  restoring.value = true
+  poses.value = []
+  georef.value = fitted
+  expect(georef.value).not.toBeNull()
+  poses.value = structuredClone(full)
+  restoring.value = false
+  expect(georef.value).not.toBeNull()
+  expect(api.validGeoref.value).not.toBeNull()
+
+  // A fit that really is stale still goes, once the restore is whole.
+  restoring.value = true
+  georef.value = { ...fitted, evidenceKey: 'other evidence' }
+  expect(georef.value).not.toBeNull()
+  restoring.value = false
+  expect(georef.value).toBeNull()
+  scope.stop()
+})

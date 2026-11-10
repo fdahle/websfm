@@ -28,7 +28,7 @@ import { createSavedCloudFiles } from './reconstruction/savedCloudFiles.js'
 import { createDepthMapCache } from './reconstruction/depthMapCache.js'
 import { createGeoreferencing } from './reconstruction/georeferencing.js'
 import { createScaling } from './reconstruction/scaling.js'
-import { registerProjectStore } from './projectStores.js'
+import { registerProjectStore, projectRestoring } from './projectStores.js'
 import { showToast } from '../composables/useToasts.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
@@ -1110,6 +1110,7 @@ export const useReconstructionStore = registerProjectStore(
       healthDirty,
       modelStamp: () => (mainSparseCloud.value ? [mainSparseCloud.value.id, mainSparseCloud.value.createdAt] : null),
       heldFrame: () => mainSparseCloud.value?.heldFrame ?? null,
+      restoring: projectRestoring,
       poses: () => posesStore.poses,
       gcps: () => gcpsStore.gcps,
       currentCrs: () => projects.currentCrs,

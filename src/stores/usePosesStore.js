@@ -314,20 +314,21 @@ export const usePosesStore = registerProjectStore(
               }) || changed
           }
           if (existing.orientationAccuracySource !== 'user') {
+            // A photo without EXIF attitude keeps the default angle accuracy, as a new pose
+            // and a reopened one have it, and never passes through null on the way: the
+            // georeference's evidence includes the poses and is checked on every write, so
+            // a pose that differs even for a moment retires the georeference fitted on it.
+            const angle =
+              Number.isFinite(existing.accAngle) && existing.accAngle > 0 ? existing.accAngle : DEFAULT_ACC_ANGLE
+            const or = (v) => (Number.isFinite(v) && v > 0 ? v : angle)
             changed =
               assignIfChanged(existing, {
-                accuracyOmega: raw.accuracyOmega,
-                accuracyPhi: raw.accuracyPhi,
-                accuracyKappa: raw.accuracyKappa,
+                accuracyOmega: or(raw.accuracyOmega),
+                accuracyPhi: or(raw.accuracyPhi),
+                accuracyKappa: or(raw.accuracyKappa),
                 orientationAccuracySource: raw.orientationSource ? 'exif' : null,
               }) || changed
           }
-          // As a new pose and a reopened one are: a photo without EXIF attitude gets the
-          // default angle accuracy, not null. A pose that differs after a reopen retires
-          // the georeference fitted on it (its evidence includes the poses).
-          const before = JSON.stringify([existing.accuracyOmega, existing.accuracyPhi, existing.accuracyKappa])
-          normalizePose(existing)
-          changed ||= before !== JSON.stringify([existing.accuracyOmega, existing.accuracyPhi, existing.accuracyKappa])
         } else {
           const pose = normalizePose({
             imageId: im.id,

@@ -98,11 +98,13 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
-- **A georeference from camera positions survives reopening the project.** A project placed
-  by its photos' GPS lost its georeference each time it was opened again, until
-  Georeference ran once more, whenever the photos' positions had been read a second time
-  (for example after more photos were added). The positions are now kept as a reopened
-  project reads them. A project saved before this needs Georeference once more.
+- **A georeference survives reopening the project.** A project placed by its photos' GPS
+  could lose its georeference when it was opened again, until Georeference ran once more:
+  the check that retires a fit whose poses or GCPs changed saw the project half-restored,
+  or a photo's position half-rewritten, and took it for a change. It now waits for the
+  project to finish opening, and positions are never written through an empty value. A
+  project saved with a photo's positions read twice (for example after adding photos)
+  needs Georeference once more.
 - **Build Mesh keeps to its memory budget.** A mesh solved in tiles now plans its workers
   with what the open project already holds, sends each worker only its tile's points,
   starts each tile on a fresh worker, and frees the workers before the tiles are joined.

@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { watch } from 'vue'
 import { useImagesStore } from './useImagesStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -167,8 +168,17 @@ describe('EXIF pose synchronization', () => {
     })
     images.images = [photo(1)]
     await vi.waitFor(() => expect(poses.poses).toHaveLength(1))
+    // Every write is seen (the georeference's check runs synchronously): not even for a
+    // moment may a pose hold a null angle accuracy.
+    let sawNull = false
+    watch(
+      () => poses.poses.map((p) => [p.accuracyOmega, p.accuracyPhi, p.accuracyKappa]),
+      (v) => (sawNull ||= v.flat().some((x) => x == null)),
+      { flush: 'sync' },
+    )
     images.images = [photo(1), photo(2)] // the sync runs again over the first photo
     await vi.waitFor(() => expect(poses.poses).toHaveLength(2))
+    expect(sawNull).toBe(false)
     for (const p of poses.poses) {
       expect([p.accuracyOmega, p.accuracyPhi, p.accuracyKappa]).toEqual([p.accAngle, p.accAngle, p.accAngle])
       expect(p.accAngle).toBeGreaterThan(0)
