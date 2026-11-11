@@ -254,36 +254,39 @@ async function pack() {
   )
 }
 
-if (!args['dry-run']) await mkdir(join(out, 'configs'), { recursive: true })
-if (args.pack)
-  for (const job of jobs)
-    if (existsSync(join(out, job.id)) && existsSync(configPath(job.config)))
+// Run only as a script: importing this file (for scoreOf) must not start any job.
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  if (!args['dry-run']) await mkdir(join(out, 'configs'), { recursive: true })
+  if (args.pack)
+    for (const job of jobs)
+      if (existsSync(join(out, job.id)) && existsSync(configPath(job.config)))
+        await copyFile(configPath(job.config), join(out, 'configs', `${job.config}.json`))
+  if (!args.tabulate) {
+    const progress = join(out, 'progress.log')
+    const log = (m) => appendFile(progress, `${new Date().toISOString().slice(11, 19)} ${m}\n`)
+    for (const job of jobs) {
+      const { summary, steps } = await commandsOf(job)
+      if (args['dry-run']) {
+        console.log(`# ${job.id}`)
+        for (const [exe, argv] of steps) console.log([exe, ...argv].join(' '))
+        continue
+      }
       await copyFile(configPath(job.config), join(out, 'configs', `${job.config}.json`))
-if (!args.tabulate) {
-  const progress = join(out, 'progress.log')
-  const log = (m) => appendFile(progress, `${new Date().toISOString().slice(11, 19)} ${m}\n`)
-  for (const job of jobs) {
-    const { summary, steps } = await commandsOf(job)
-    if (args['dry-run']) {
-      console.log(`# ${job.id}`)
-      for (const [exe, argv] of steps) console.log([exe, ...argv].join(' '))
-      continue
+      if (existsSync(summary)) {
+        await log(`skip ${job.id} (summary there)`)
+        continue
+      }
+      await mkdir(join(out, job.id), { recursive: true })
+      await log(`start ${job.id}`)
+      let code = 0
+      for (const [exe, argv] of steps) {
+        code = await run(exe, argv, join(out, job.id, 'console.log'))
+        if (code !== 0) break
+      }
+      await log(`done ${job.id} exit ${code}`)
     }
-    await copyFile(configPath(job.config), join(out, 'configs', `${job.config}.json`))
-    if (existsSync(summary)) {
-      await log(`skip ${job.id} (summary there)`)
-      continue
-    }
-    await mkdir(join(out, job.id), { recursive: true })
-    await log(`start ${job.id}`)
-    let code = 0
-    for (const [exe, argv] of steps) {
-      code = await run(exe, argv, join(out, job.id, 'console.log'))
-      if (code !== 0) break
-    }
-    await log(`done ${job.id} exit ${code}`)
+    if (!args['dry-run']) await log('scoreboard finished')
   }
-  if (!args['dry-run']) await log('scoreboard finished')
+  if (!args['dry-run']) await tabulate()
+  if (args.pack) await pack()
 }
-if (!args['dry-run']) await tabulate()
-if (args.pack) await pack()
