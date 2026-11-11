@@ -20,24 +20,28 @@ error away.
 
 Registered cameras · median camera-centre error: against ETH3D's laser-scanned ground
 truth (mm), and against COLMAP's South Building model (model units). The ETH3D images
-carry no EXIF focal length. WebSfM 2026-11-07, COLMAP 2026-10-16, Metashape 2026-11-06.
+carry no EXIF focal length. All three tools on 2026-11-11, one after another, on the GPU
+(`scripts/bench/scoreboard.mjs --only eth3d-sparse`).
 
-| scene | WebSfM | WebSfM, detection 4,000 px | COLMAP | Metashape | time, s (WebSfM · Metashape) |
-| --- | --- | --- | --- | --- | --- |
-| courtyard | 38/38 · 6.7 | 38/38 · 7.5 | 38/38 · 32 | 38/38 · 5.2 | 56 · 36 |
-| delivery_area | 44/44 · 2.9 | – | 44/44 · 22 | 44/44 · 1.4 | 33 · 31 |
-| office | **20/26** · 1.6 · 1 off | 26/26 · 2.6 | 26/26 · 5.8 · 3 off | 26/26 · 2.6 | 11 · 18 |
-| pipes | **8/14** · 3.9 | 14/14 · 1.6 | 14/14 · 5.1 | 14/14 · 1.0 | 9 · 10 |
-| playground | 35/38 · 1.3 | 38/38 · 1.4 | 37/38 · broken | 35/38 · 4.2 · 3 off | 45 · 42 |
-| terrace | 23/23 · 2.2 | – | 23/23 · 5.9 · 1 off | 23/23 · 2.1 | 27 · 22 |
-| South Building | 128/128 · 0.0049 | – | reference | 128/128 · 0.0055 | 378 · 100 |
+| scene | WebSfM | COLMAP | Metashape | time, s (WebSfM · COLMAP · Metashape) |
+| --- | --- | --- | --- | --- |
+| courtyard | 38/38 · 7.5 | 38/38 · 32 | 38/38 · **5.2** | 49 · 79 · 37 |
+| delivery_area | 44/44 · 2.6 | 44/44 · 27 | 44/44 · **1.4** | 46 · 82 · 33 |
+| office | 26/26 · **2.6** | 26/26 · 9.2 | 26/26 · 3.9 · 2 off | 19 · 33 · 18 |
+| pipes | 14/14 · 1.6 | 14/14 · 4.9 | 14/14 · **1.1** | 19 · 18 · 10 |
+| playground | 38/38 · **1.4** | 37/38 · 4.5 | 38/38 · 1.5 | 40 · 76 · 34 |
+| terrace | 23/23 · 2.5 | 23/23 · 8.5 | 23/23 · **2.1** | 32 · 42 · 20 |
+| South Building | 128/128 · **0.0049** | reference | 128/128 · 0.0055 | 103 · – · 88 |
 
-- **Low-texture interiors are the gap**: at the default 2,400 px detection size WebSfM
-  misses 6 of 26 office and 6 of 14 pipes images. Detecting at 4,000 px registers them all.
-- **Accuracy is level with Metashape**: better on South Building and playground, behind on
-  four ETH3D scenes.
-- **Time and memory**: WebSfM matched on the CPU in these runs (no WebGPU adapter) and
-  peaks at 2.4–3.9 GB in the browser, against Metashape's 1.1–1.5 GB.
+- **Every camera registers** at the defaults. The low-texture interiors (office, pipes)
+  were the gap until detection scaled with the photo size in object projects (Detect
+  Features ▸ Detection resolution ▸ By project type).
+- **Accuracy is level with Metashape**: better on office, playground and South Building,
+  behind on courtyard, delivery_area, pipes and terrace by 0.4–2.3 mm. COLMAP's median
+  errors are 3–10× WebSfM's.
+- **Time**: WebSfM takes 1.1–1.9× Metashape's time (detection, matching and
+  reconstruction; copying the photos into the browser comes on top), and is faster than
+  COLMAP on five of the six scenes.
 
 ### Drone blocks, no positions in the solve
 
