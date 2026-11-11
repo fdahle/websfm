@@ -75,22 +75,25 @@ positions in the solve, the others without:
 
 The same blocks with each camera's RTK position and its stated accuracy in the bundle
 adjustment, every GCP a checkpoint. Checkpoints and cameras against RTK, horizontal /
-vertical RMS in cm; time for detection, matching and SfM in s. WebSfM PUTI 2026-11-08,
-the rest 2026-11-10. Metashape at its defaults with the same marks (`quarry_marks.py`,
+vertical RMS in cm; time for detection, matching and SfM in s. WebSfM 2026-11-11,
+Metashape 2026-11-10. Metashape at its defaults with the same marks (`quarry_marks.py`,
 `metashape_checkpoints.py`). Optimize Cameras afterwards changes Metashape's numbers by
 less than 1 mm, so it gets no row of its own.
 
 | block | run | checkpoints | mean height error | cameras vs RTK | time |
 | --- | --- | --- | --- | --- | --- |
-| quarry (347, 9 checkpoints) | WebSfM | 6.4 / 30.2 | +29.5 | 10.4 / 5.4 | 327 |
+| quarry (347, 9 checkpoints) | WebSfM | 4.6 / 21.6 | +21.2 | 6.3 / 4.4 | 327 |
 | | Metashape | **3.8 / 17.8** | +17.6 | **4.5 / 3.2** | 295 |
-| GeoScan PUTI (444, 15 checkpoints) | WebSfM | 3.4 / 11.1 | +9.8 | 1.8 / 1.2 | 351 |
-| | Metashape | **2.4 / 6.4** | +4.1 | **0.5 / 1.0** | 418 |
+| GeoScan PUTI (444, 15 checkpoints) | WebSfM | 3.5 / 9.2 | +7.5 | 0.6 / **0.9** | 351 |
+| | Metashape | **2.4 / 6.4** | +4.1 | **0.5** / 1.0 | 418 |
 
-- **Metashape is ahead on both blocks.** Its checkpoint heights are 5–12 cm closer.
+- **Metashape's checkpoint heights are 3–4 cm closer** on both blocks. WebSfM's cameras
+  are level with it on PUTI. Before 11-11 the gap was 5–12 cm, and quarry's cameras were
+  10.4 / 5.4 cm off: a tie point counted 5–6 times what it measured against the RTK
+  positions (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly).
 - **Both tools put the ground too high on both blocks**, by the same pattern: WebSfM's
-  focal comes out about 2 px shorter (quarry 4,402.1 against 4,404.0 px, PUTI 5,673.5
-  against 5,675.3). A flat nadir block with RTK alone barely fixes the focal, and the
+  focal comes out shorter (quarry 4,403.5 against 4,404.0 px, PUTI 5,671.8 against
+  5,675.3). A flat nadir block with RTK alone barely fixes the focal, and the
   heights follow it. On PUTI, the lens shape, the lever arm and the tie points were ruled
   out. Metashape itself moves 6 cm when it is given one more lens term.
 - **Most of the quarry's height offset is shared by both tools** (+18 cm in Metashape).
@@ -258,7 +261,8 @@ keeps its bend; it is shown with a GCP similarity fit.
 
 | run | cameras | checkpoints | DEM vs reference RMSE / NMAD | DEM coverage |
 | --- | --- | --- | --- | --- |
-| WebSfM, preprocessed scans | **37/37** | 1.25 / 1.18 m | **1.41 / 0.68 m** | 41 % |
+| WebSfM, preprocessed scans (11-11) | **37/37** | 1.09 / 1.01 m | — | — |
+| WebSfM, preprocessed scans, before tie weighting | **37/37** | 1.25 / 1.18 m | **1.41 / 0.68 m** | 41 % |
 | WebSfM, raw scans + fiducials (10-13) | **37/37** | **1.05 / 0.96 m** | — | — |
 | COLMAP (10-13) | **37/37** | 1.18 / 14.1 m | 13.0 / 13.5 m | — |
 | Metashape defaults | 32/37 | 1.20 / 0.95 m (9 checks) | 9.06 / 0.82 m | **69 %** |
@@ -272,19 +276,23 @@ the cell empty rather than interpolating.
 
 | run | cameras | checkpoints | DEM vs reference RMSE / NMAD | DEM coverage |
 | --- | --- | --- | --- | --- |
-| WebSfM | 123/125 | 1.97 / 2.46 m (18 checks) | **20.0** / 2.44 m | 27 % |
+| WebSfM (11-11) | 123/125 | 1.74 / 1.02 m (18 checks) | — | — |
+| WebSfM, before tie weighting | 123/125 | 1.97 / 2.46 m (18 checks) | **20.0** / 2.44 m | 27 % |
 | WebSfM (10-13) | 121/125 | 2.03 / 2.09 m (17 checks) | — | — |
 | WebSfM (10-13), detection at Auto resolution | 124/125 | 1.74 / 1.98 m | — | — |
 | COLMAP (10-13) | **125/125** | 3.94 / 103 m | — | — |
 | Metashape defaults | **125/125** | **1.54 / 0.97 m** | 153.6 / **1.38 m** | **62 %** |
 
 Metashape leads here:
-- **Height error:** WebSfM's is two and a half times Metashape's.
+- **Height error:** level since 11-11 (1.02 against 0.97 m). Before, a tie point detected
+  at a fifth of the scan's size counted 23 times what it measured against the GCPs
+  (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly), and WebSfM's height
+  error was two and a half times Metashape's. Horizontal, Metashape is 0.2 m ahead.
 - **DEM:** Metashape's is sharper (NMAD) and covers twice the area. Its RMSE comes from
   outliers that WebSfM leaves out.
 - **Tracks:** WebSfM's are short. 65 % of its points are seen in three or more photos,
   and its reprojection median is 1.38 px.
-- **Since October:** the heights look 0.37 m worse (2.46 against 2.09 m), but the two runs
+- **October to 11-10:** the heights looked 0.37 m worse (2.46 against 2.09 m), but the two runs
   score different checkpoints. This run registers two more photos, which brings checkpoint
   153 into the score: it lies at the block's south-west end, is seen in only two photos and
   is 5.2 m off. Without it, the other 17 checkpoints give 2.18 m. The October run's files
