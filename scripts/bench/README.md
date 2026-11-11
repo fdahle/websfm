@@ -135,6 +135,9 @@ project:
 - `recon.priorShift: [dx, dy, dz]` (project units), `recon.priorSigma` (m) and
   `recon.priorDatum` (a vertical datum id): every camera position shifted, given that
   accuracy and height datum for the run, then restored: drone GPS made from RTK positions.
+- `recon.gcpSigma` (m) and `recon.gcpMarkSigma` (px): every GCP's accuracy and every GCP
+  mark's, for the run, then restored: how hard the GCPs pull in the anchored adjustment
+  (in `variants`, several weightings on one detect + match).
 - `recon.demHold: { referenceId: 'last', sigma, stable }`: Georeference ▸ Hold to a reference
   DEM, `stable` a polygon layer by name (from a `layers` stage). `recon.demCheck: { raster,
   layer }` scores the ≥ 3-view sparse points, through the app's georeference, against that

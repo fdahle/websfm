@@ -2694,6 +2694,8 @@ window.bench = {
   // priorSigma (m) as every position's accuracy, for this run only (drone GPS from RTK
   // positions: a height bias and metre σ); the positions are restored after it, and
   // appCameraCheck scores the camera centres through the app's georeference against them.
+  // gcpSigma (m) as every GCP's accuracy and gcpMarkSigma (px) as every GCP mark's, for
+  // this run only (how hard the GCPs pull in the anchored adjustment); restored after it.
   async reconstruct({
     preset = null,
     posePriors = true,
@@ -2703,6 +2705,8 @@ window.bench = {
     priorShift = null,
     priorSigma = null,
     priorDatum = null,
+    gcpSigma = null,
+    gcpMarkSigma = null,
     demCheck = null,
     ...overrides
   } = {}) {
@@ -2749,6 +2753,18 @@ window.bench = {
       datum: p.verticalDatum,
     }))
     const tamper = !!(priorShift || priorSigma || priorDatum)
+    const gcpSaved =
+      gcpSigma || gcpMarkSigma
+        ? gcpsStore.gcps.map((g) => ({
+            g,
+            a: [g.accuracyX, g.accuracyY, g.accuracyZ],
+            o: (g.observations ?? []).map((o) => [o, o.accuracyX, o.accuracyY]),
+          }))
+        : []
+    for (const { g, o } of gcpSaved) {
+      if (gcpSigma) Object.assign(g, { accuracyX: gcpSigma, accuracyY: gcpSigma, accuracyZ: gcpSigma })
+      if (gcpMarkSigma) for (const [obs] of o) Object.assign(obs, { accuracyX: gcpMarkSigma, accuracyY: gcpMarkSigma })
+    }
     if (tamper)
       for (const t of truePoses) {
         if (priorShift) Object.assign(t.p, { x: t.x + priorShift[0], y: t.y + priorShift[1], z: t.z + priorShift[2] })
@@ -2764,6 +2780,10 @@ window.bench = {
       appCameraCheck = await appCameraCheckOf(recon.mainSparseCloud, truePoses)
       if (demCheck) demCheckResult = await demCheckOf(recon.mainSparseCloud, demCheck)
     } finally {
+      for (const { g, a, o } of gcpSaved) {
+        Object.assign(g, { accuracyX: a[0], accuracyY: a[1], accuracyZ: a[2] })
+        for (const [obs, ax, ay] of o) Object.assign(obs, { accuracyX: ax, accuracyY: ay })
+      }
       if (tamper)
         for (const t of truePoses)
           Object.assign(t.p, {
