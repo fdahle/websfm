@@ -142,17 +142,6 @@ The products are not the same size, so read the stage columns with this:
 - ODM's features, matching and texturing run on the CPU; the GPU only speeds its dense step.
 - WebSfM's total includes copying the photos into browser storage (60–210 s).
 
---- | --- | --- | --- | --- | --- | --- | --- |
-| quarry | 3,927 | 1,551 | 320 | 497 | 1,058 | 217 | 29 GB |
-| PUTI | 6,097 | 2,733 | 465 | 346 | 1,738 | 254 | 37 GB |
-| UseGeo | 4,737 | 1,541 | 440 | 437 | 2,030 | 100 | 42 GB |
-
-WebSfM and Metashape: same day, being added.
-
-- ODM computes depth at 1/8 of the photo size (its default `pc-quality` medium), WebSfM at
-  up to 1,500 px, Metashape at 1/4 (Medium).
-- ODM's features, matching and texturing run on the CPU; the GPU only speeds its dense step.
-
 ---
 
 ## Bundle adjustment against Ceres (BAL)
