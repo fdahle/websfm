@@ -132,9 +132,11 @@ project:
 - `recon.posePriors: false`: disable every camera pose for that run. That includes the
   EXIF GNSS positions the app imports automatically, which otherwise constrain bundle
   adjustment as camera priors.
-- `recon.priorShift: [dx, dy, dz]` (project units), `recon.priorSigma` (m) and
-  `recon.priorDatum` (a vertical datum id): every camera position shifted, given that
-  accuracy and height datum for the run, then restored: drone GPS made from RTK positions.
+- `recon.priorShift: [dx, dy, dz]` (project units), `recon.priorNoise: [σx, σy, σz]`
+  (project units, seeded per photo name), `recon.priorSigma` (m, or `[x, y, z]`) and
+  `recon.priorDatum` (a vertical datum id): every camera position shifted and given its own
+  noise, that accuracy and height datum for the run, then restored: drone GPS made from RTK
+  positions. `positionCheck` still scores against the true positions.
 - `recon.gcpSigma` (m) and `recon.gcpMarkSigma` (px): every GCP's accuracy and every GCP
   mark's, for the run, then restored: how hard the GCPs pull in the anchored adjustment
   (in `variants`, several weightings on one detect + match).

@@ -379,6 +379,18 @@ async function liveHeap() {
 
 let findGcpsUi = null
 
+// Three standard normal draws seeded by a string (a photo's name): the same noise for the
+// same photo in every run, so variants and branches compare on one perturbation.
+function gaussians(key) {
+  let h = 2166136261
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0
+  const rnd = () => {
+    h = (Math.imul(h, 1664525) + 1013904223) >>> 0
+    return (h + 0.5) / 4294967296
+  }
+  return [0, 1, 2].map(() => Math.sqrt(-2 * Math.log(rnd())) * Math.cos(2 * Math.PI * rnd()))
+}
+
 window.bench = {
   // What the page holds per item, after a GC: the counts that scale the renderer's
   // V8 heap (TODO ▸ MEM). Counts, not estimates — compare with heapBytes. Keypoints and
@@ -2691,7 +2703,9 @@ window.bench = {
   },
 
   // priorShift: [dx, dy, dz] (project units) added to every camera position and
-  // priorSigma (m) as every position's accuracy, for this run only (drone GPS from RTK
+  // priorNoise: [σx, σy, σz] (project units) of seeded Gaussian noise added to each camera
+  // position (consumer GNSS from RTK positions: errors that differ from photo to photo);
+  // priorSigma (m, or [x, y, z]) as every position's accuracy, for this run only (drone GPS from RTK
   // positions: a height bias and metre σ); the positions are restored after it, and
   // appCameraCheck scores the camera centres through the app's georeference against them.
   // gcpSigma (m) as every GCP's accuracy and gcpMarkSigma (px) as every GCP mark's, for
@@ -2703,6 +2717,7 @@ window.bench = {
     sensor = null,
     exportPoints = false,
     priorShift = null,
+    priorNoise = null,
     priorSigma = null,
     priorDatum = null,
     gcpSigma = null,
@@ -2752,7 +2767,7 @@ window.bench = {
       a: [p.accuracyX, p.accuracyY, p.accuracyZ],
       datum: p.verticalDatum,
     }))
-    const tamper = !!(priorShift || priorSigma || priorDatum)
+    const tamper = !!(priorShift || priorNoise || priorSigma || priorDatum)
     const gcpSaved =
       gcpSigma || gcpMarkSigma
         ? gcpsStore.gcps.map((g) => ({
@@ -2768,7 +2783,18 @@ window.bench = {
     if (tamper)
       for (const t of truePoses) {
         if (priorShift) Object.assign(t.p, { x: t.x + priorShift[0], y: t.y + priorShift[1], z: t.z + priorShift[2] })
-        if (priorSigma) Object.assign(t.p, { accuracyX: priorSigma, accuracyY: priorSigma, accuracyZ: priorSigma })
+        if (priorNoise) {
+          const n = gaussians(`${t.p.imageName ?? t.p.id}`)
+          Object.assign(t.p, {
+            x: t.p.x + n[0] * priorNoise[0],
+            y: t.p.y + n[1] * priorNoise[1],
+            z: t.p.z + n[2] * priorNoise[2],
+          })
+        }
+        if (priorSigma) {
+          const [sx, sy, sz] = Array.isArray(priorSigma) ? priorSigma : [priorSigma, priorSigma, priorSigma]
+          Object.assign(t.p, { accuracyX: sx, accuracyY: sy, accuracyZ: sz })
+        }
         if (priorDatum) t.p.verticalDatum = priorDatum
       }
     let appCameraCheck = null,
