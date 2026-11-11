@@ -23,7 +23,9 @@ export const DETECT_SIFT_DEFAULTS = {
   // 'auto' ⇒ a fraction of each image's OWN native size, clamped into a per-preset
   // band whose floor IS the absolute value above — so auto can only add resolution
   // to large images, never take it away. See core/features/detectResolution.js.
-  maxDimMode: 'absolute',
+  // 'scene' ⇒ By project type: 'auto' in an object project (the close-range band),
+  // 'absolute' elsewhere (effectiveDimMode; the evidence is in detectResolution.js).
+  maxDimMode: 'scene',
   // DoG response floor (lower = more, weaker keypoints). COLMAP's 0.0067 was tried and
   // reverted (2026-10-16, HANDOVER ▸ B-full-2026-10-16): with the pair-focal estimate and
   // the registration check in, it registered at most 1–2 more cameras on full blocks,

@@ -37,9 +37,13 @@
 //    6000 px DSLR  → 2400                     (unchanged — the band is centred here)
 //    2000 px phone → 800 → floored to 2400 → capped at native 2000  (full, as before)
 //
-// ── Why this is opt-in ────────────────────────────────────────────────────────
-// It changes the detector's output for every project, so it is gated behind
-// `maxDimMode` and defaults to 'absolute' (the previous behaviour, bit-identical).
+// ── Where it is the default ───────────────────────────────────────────────────
+// SIFT's default rule is 'scene', By project type (effectiveDimMode below): this rule
+// in an object project, where the close-range band holds, and the fixed size
+// elsewhere. Aerial blocks are mixed: film scans gain from more resolution (Iceland
+// 1980 checkpoints 1.97/2.46 → 1.45/1.96 m), a 42 MP drone block loses height
+// (UseGeo 1 cameras V 6.1 → 9.6 cm), both at 2.5–4× the time, so they keep the fixed
+// size and Scale with image size stays a choice. Learned detectors default to fixed.
 // It is safe to adopt later precisely because core/scaleContext.js is already in:
 // the reprojection and RANSAC gates are denominated in detection pixels and follow
 // whatever resolution detection actually used, so changing that resolution does
@@ -102,6 +106,16 @@ export const DETECT_CLOSE_RANGE_BANDS = {
   },
 }
 
+// The rule a setting resolves to: 'auto' (Scale with image size) or 'absolute' (Fixed
+// for all images). 'scene' (By project type, SIFT's default) is 'auto' where the
+// project has a close-range band (an object project at the medium preset), else
+// 'absolute'.
+export function effectiveDimMode(settings = {}) {
+  const mode = settings.maxDimMode ?? 'absolute'
+  if (mode !== 'scene') return mode
+  return detectBand(settings).closeRange ? 'auto' : 'absolute'
+}
+
 // The band auto mode applies: the close-range one for an object project where there is
 // one, else the preset's general band.
 export function detectBand({ detector = 'sift', preset = 'medium', sceneType = null } = {}) {
@@ -120,10 +134,17 @@ export function detectBand({ detector = 'sift', preset = 'medium', sceneType = n
 // string for the log, since a silently-derived resolution is exactly the kind of
 // value CLAUDE.md ▸ Conventions requires be auditable.
 export function resolveDetectMaxDim(nativeMax, settings = {}) {
-  const { maxDim = 2400, maxDimMode = 'absolute' } = settings
+  const { maxDim = 2400 } = settings
+  const byScene = settings.maxDimMode === 'scene'
 
-  if (maxDimMode !== 'auto') {
-    return { maxDim, mode: 'absolute', band: null, nativeMax, reason: `fixed ${maxDim}px` }
+  if (effectiveDimMode(settings) !== 'auto') {
+    return {
+      maxDim,
+      mode: 'absolute',
+      band: null,
+      nativeMax,
+      reason: `fixed ${maxDim}px` + (byScene ? ' (by project type)' : ''),
+    }
   }
   // Without a native size there is nothing to take a fraction OF. Falling back to
   // the absolute value is the only honest option — guessing from a stale meta or a
@@ -147,7 +168,8 @@ export function resolveDetectMaxDim(nativeMax, settings = {}) {
       : `${maxDimOut}px = ${(band.fraction * 100).toFixed(0)}% of ${nativeMax}px` +
         (clampedLow ? ` (raised to the ${band.floorPx}px floor)` : '') +
         (clampedHigh ? ` (capped at the ${band.ceilPx}px ceiling)` : '')) +
-    (band.closeRange ? ', close-range band' : '')
+    (band.closeRange ? ', close-range band' : '') +
+    (byScene ? ' (by project type)' : '')
 
   return { maxDim: maxDimOut, mode: 'auto', band, nativeMax, reason }
 }
@@ -179,10 +201,10 @@ export function detectSize(natW, natH, maxDim) {
 // Resolve the keypoint cap for one image. `size` is the detection working size;
 // settings as resolveDetectMaxDim. Returns { maxKeypoints, factor, reason }.
 export function resolveDetectKeypoints(size, settings = {}) {
-  const { maxKeypoints = 10000, maxDimMode = 'absolute', detector = 'sift' } = settings
+  const { maxKeypoints = 10000, detector = 'sift' } = settings
   const rule = DETECT_KEYPOINT_SCALING[detector]
   const px = (size?.width || 0) * (size?.height || 0)
-  if (maxDimMode !== 'auto' || !rule || !(px > 0)) {
+  if (effectiveDimMode(settings) !== 'auto' || !rule || !(px > 0)) {
     return { maxKeypoints, factor: 1, reason: `fixed ${maxKeypoints}` }
   }
   if (detectBand(settings).scaleKeypoints === false) {

@@ -28,7 +28,7 @@ import { PYRAMID_TUNING } from '../../../core/io/rasterPyramid.js'
 import { LEARNED_DETECTORS, learnedDetector, detectorLabel } from '../../../core/features/learnedDetectors.js'
 import { MODELS, isRedistributable } from '../../../core/models/registry.js'
 import { planDetection, planImageDetection } from '../../../core/features/detectPlan.js'
-import { detectBand } from '../../../core/features/detectResolution.js'
+import { detectBand, effectiveDimMode } from '../../../core/features/detectResolution.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { fmtCount } from '../../../core/stepEffects/format.js'
 
@@ -214,6 +214,18 @@ const maxDimMode = computed({
     activeSettings.value = { ...activeSettings.value, maxDimMode: v }
   },
 })
+// The rule that applies in this project: By project type resolves to one of the others.
+const appliedDimMode = computed(() => effectiveDimMode({ ...settings.value, detector: detector.value }))
+const dimModeHint = computed(() => {
+  if (maxDimMode.value === 'scene')
+    return (
+      'Scale with image size in an object project, fixed for all images in an aerial one. ' +
+      (appliedDimMode.value === 'auto' ? 'This project: scaled.' : 'This project: fixed.')
+    )
+  return maxDimMode.value === 'auto'
+    ? 'Each image is detected at a fraction of its own size, never below the value below. Best for close-range photos, mixed sizes and very large images such as film scans.'
+    : 'Every image is reduced to the same long side, whatever its native size. Smaller images are never enlarged.'
+})
 
 // Run stays disabled while a field of the ACTIVE detector is blank or out of range
 // (rules = the inputs' own min/max/step); tiling fields only while they are shown.
@@ -221,7 +233,7 @@ const numbers = computed(() => {
   const s = activeSettings.value
   return checkNumberFields(s, {
     maxDim: {
-      label: s.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution',
+      label: appliedDimMode.value === 'auto' ? 'Minimum resolution' : 'Detection resolution',
       min: 100,
       integer: true,
     },
@@ -364,7 +376,12 @@ const tileLimit = computed(() => {
 
 // The band Scale with image size applies, said once after the sizes.
 const bandNote = computed(() => {
-  if (activeSettings.value.maxDimMode !== 'auto') return ''
+  if (appliedDimMode.value !== 'auto')
+    return maxDimMode.value === 'scene'
+      ? props.sceneType === 'object'
+        ? ' By project type: one size for every image at this preset (the close-range rule is Balanced only).'
+        : ' By project type: one size for every image outside an object project.'
+      : ''
   const b = detectBand({ ...settings.value, detector: detector.value })
   const share = `${Math.round(b.fraction * 100)} % of each image's long side, ${fmt(b.floorPx)}–${fmt(b.ceilPx)} px`
   return b.closeRange ? ` Close-range project: ${share}.` : ` Scaled: ${share}.`
@@ -572,16 +589,10 @@ provideStepLayout('detect-features')
 
     <SettingsStep step="1" title="Resize to detection resolution" :effect="resizeStep" :more="2">
       <template #tuning>
-        <SettingsField
-          label-for="maxDimMode"
-          :hint="
-            maxDimMode === 'auto'
-              ? 'Each image is detected at a fraction of its own size, never below the value below. Best for close-range photos, mixed sizes and very large images such as film scans.'
-              : 'Every image is reduced to the same long side, whatever its native size. Smaller images are never enlarged.'
-          "
-        >
+        <SettingsField label-for="maxDimMode" :hint="dimModeHint">
           <template #label><FieldHelp op="detect-features" param="maxDimMode">Resolution rule</FieldHelp></template>
           <select id="maxDimMode" v-model="maxDimMode" class="field-input field-select">
+            <option v-if="!isLearned || maxDimMode === 'scene'" value="scene">By project type</option>
             <option value="absolute">Fixed for all images</option>
             <option value="auto">Scale with image size</option>
           </select>
@@ -591,7 +602,7 @@ provideStepLayout('detect-features')
           label-for="maxDim"
           unit="px"
           :hint="
-            maxDimMode === 'auto'
+            appliedDimMode === 'auto'
               ? 'Floor for the scaled resolution — larger images get proportionally more, up to a per-preset ceiling.'
               : 'Long side the detector works at. Keypoints are mapped back to native pixels afterwards.'
           "
@@ -602,7 +613,7 @@ provideStepLayout('detect-features')
               param="maxDim"
               :value="activeSettings.maxDim"
               :default-value="presetBase.maxDim"
-              >{{ maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution' }}</FieldHelp
+              >{{ appliedDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution' }}</FieldHelp
             ></template
           >
           <input

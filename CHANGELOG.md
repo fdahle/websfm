@@ -21,6 +21,19 @@ Notable changes to websfm. The format follows
   factorisation added no measurable time (Reconstruct 80 s either way).
 
 ### Changed
+- **Close-range photos are detected at more of their resolution.** Detect Features ▸
+  Resolution rule now defaults to *By project type*: in an object project each photo is
+  detected at two thirds of its long side, 2,400 to 4,000 px; aerial projects keep one
+  size for every photo, as before. On ETH3D's 6,048 px photos, 2,400 px registered 20 of
+  26 cameras of *office* and 8 of 14 of *pipes*; 4,000 px registers every camera of all six
+  scenes, at similar pose error (median: courtyard 6.7 → 7.5 mm, delivery_area 2.86 → 2.62
+  mm, pipes 3.9 → 1.6 mm). The keypoint limit stays as set in that band: scaling it to
+  ~28k with the area changed the error within noise and took 2–4× the matching time
+  (courtyard 93 → 352 s on the CPU). Aerial blocks were mixed, so they keep the fixed
+  size: Scale with image size gained on the Iceland 1980 film scans (check points 1.97 /
+  2.46 → 1.45 / 1.96 m, 124 of 125 photos against 123) and lost height on a 42 MP drone
+  block (UseGeo 1, cameras against the reference 3.8 / 6.1 → 3.8 / 9.6 cm), at 2.5× the
+  time on the GPU and 3.8× on the CPU. Projects that chose a rule keep it.
 - **Hold to a reference DEM sets the heights of a block placed by drone GPS.** With camera
   positions and no GCPs, the model is now placed in the frame the hold solved it in, its
   height set between the camera positions and the DEM by their accuracies; before, a fit

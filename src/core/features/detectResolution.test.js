@@ -5,6 +5,7 @@ import {
   DETECT_CLOSE_RANGE_BANDS,
   resolveDetectKeypoints,
   detectSize,
+  effectiveDimMode,
 } from './detectResolution.js'
 import {
   DETECT_SIFT_DEFAULTS,
@@ -242,5 +243,47 @@ describe('the close-range band (an object project)', () => {
   it("pins each close-range floor to that preset's absolute default, as the general bands", () => {
     for (const [preset, band] of Object.entries(DETECT_CLOSE_RANGE_BANDS.sift))
       expect(band.floorPx).toBe(absoluteMaxDim(DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, preset))
+  })
+})
+
+describe("By project type (SIFT's default rule)", () => {
+  const scene = (o) => ({ maxDim: 2400, maxKeypoints: 10000, maxDimMode: 'scene', detector: 'sift', ...o })
+
+  it('is the SIFT default; the learned detectors keep a fixed size', () => {
+    expect(DETECT_SIFT_DEFAULTS.maxDimMode).toBe('scene')
+    for (const d of [DETECT_SUPERPOINT_DEFAULTS, DETECT_DISK_DEFAULTS, DETECT_ALIKED_DEFAULTS])
+      expect(d.maxDimMode).toBe('absolute')
+  })
+
+  it('scales a 6,048 px photo in an object project to the close-range 3,992 px', () => {
+    expect(effectiveDimMode(scene({ sceneType: 'object' }))).toBe('auto')
+    expect(resolveDetectMaxDim(6048, scene({ sceneType: 'object' })).maxDim).toBe(3992)
+  })
+
+  it('keeps the fixed size in an aerial project or one of unknown type, at any photo size', () => {
+    for (const sceneType of ['aerial', null, undefined]) {
+      expect(effectiveDimMode(scene({ sceneType }))).toBe('absolute')
+      for (const px of [2000, 6048, 7952, 11425])
+        expect(resolveDetectMaxDim(px, scene({ sceneType })).maxDim).toBe(2400)
+    }
+  })
+
+  it('keeps the fixed size where an object project has no close-range band (other presets, learned detectors)', () => {
+    const high = scene({ sceneType: 'object', preset: 'high', maxDim: 4000 })
+    expect(effectiveDimMode(high)).toBe('absolute')
+    expect(resolveDetectMaxDim(9000, high).maxDim).toBe(4000)
+    expect(effectiveDimMode(scene({ sceneType: 'object', detector: 'superpoint' }))).toBe('absolute')
+  })
+
+  it('never scales the keypoint cap: fixed in an aerial project, the configured cap in the close-range band', () => {
+    const big = detectSize(7952, 5304, 3181)
+    expect(resolveDetectKeypoints(big, scene({ sceneType: 'aerial' })).maxKeypoints).toBe(10000)
+    expect(resolveDetectKeypoints(big, scene({ sceneType: 'object' })).maxKeypoints).toBe(10000)
+  })
+
+  it('leaves an explicit choice alone', () => {
+    expect(effectiveDimMode({ maxDimMode: 'auto', sceneType: 'aerial' })).toBe('auto')
+    expect(effectiveDimMode({ maxDimMode: 'absolute', sceneType: 'object' })).toBe('absolute')
+    expect(effectiveDimMode({})).toBe('absolute')
   })
 })

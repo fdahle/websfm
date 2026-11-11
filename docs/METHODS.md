@@ -103,6 +103,22 @@ native size has σ < 4 px), which is the first to stop matching under viewpoint 
 COLMAP keeps whole octaves, so its limit is soft; WebSfM's stays an exact budget, because
 brute-force matching is O(Na·Nb). The cap runs after masking and after the tile merge.
 
+**Detection resolution** (`core/features/detectResolution.js`). *Fixed* reduces every image
+to `maxDim` on the long side. *Scale with image size* takes a fraction of each image's own
+long side, clamped to a per-preset band whose floor is the fixed value (SIFT Balanced:
+0.4 × native, 2,400–4,000 px), and scales SIFT's keypoint cap with the detected area (up
+to 4×). An object project at Balanced uses a close-range band instead: 0.66 × native,
+2,400–4,000 px, with the keypoint cap as set. SIFT's default, *By project type*, is that
+close-range rule in an object project and the fixed size elsewhere. Close-range evidence
+(ETH3D, 6,048 px): at 2,400 px office registers 20 of 26 cameras and pipes 8 of 14, at
+4,000 px every camera of all six scenes, at similar pose error (median: courtyard 6.7 →
+7.5 mm, delivery_area 2.86 → 2.62 mm, pipes 3.9 → 1.6 mm); scaling the cap to
+~28k changed the error within noise at 2–4× the matching time. Aerial evidence is mixed,
+so aerial projects keep the fixed size: Iceland 1980 film scans gain (check points
+1.97/2.46 → 1.45/1.96 m), a 42 MP drone block loses height (UseGeo 1, cameras V 6.1 →
+9.6 cm), at 2.5× the time on the GPU and 3.8× on the CPU. The reprojection and RANSAC gates are in detection
+pixels (`core/scaleContext.js`), so they follow whichever resolution ran.
+
 **Other details:**
 - **Duplicate-keypoint suppression** (`suppress_duplicate_positions`, response-weighted
   NMS): one strong blob can fire across adjacent scales and octaves as several keypoints

@@ -40,13 +40,12 @@ where small texture matters; **Fast** is a first check. Higher settings cost mor
 matching than in detection.
 
 ## Resolution rule
-<!-- param: maxDimMode  default: Fixed for all images -->
+<!-- param: maxDimMode  default: By project type (SIFT) · Fixed for all images (learned detectors) -->
 **Fixed for all images** detects every image at the same long side. **Scale with image
-size** detects each at a share of its own size, with the set value as the floor: more
-detail for large or mixed-resolution sets. In an object (close-range) project it takes
-two thirds of the long side, up to 4,000 px, so a 6,000 px photo of a room or facade keeps
-the fine texture it needs to register. Elsewhere SIFT's keypoint limit grows with the
-area too.
+size** detects each at a share of its own size, never below the set value: in an object
+project two thirds of the long side, up to 4,000 px, so close-range photos keep their
+fine texture. **By project type** scales in an object project and keeps one size in an
+aerial one. Choose Scale for large film scans: more detail, slower matching.
 
 ## Detection resolution
 <!-- param: maxDim  default: 2400 px (SIFT) · 1600 px (SuperPoint) · 1024 px (DISK, ALIKED) -->
