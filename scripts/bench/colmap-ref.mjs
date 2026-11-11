@@ -11,8 +11,9 @@
 //                                                         (e.g. ETH3D's ground-truth cameras)
 //
 // Defaults are COLMAP's own, except two choices that mirror the websfm run so the
-// comparison is one of methods, not of setup: one shared camera per set
-// (ImageReader.single_camera), and spatial matching with the config's neighbour count
+// comparison is one of methods, not of setup: one shared camera per set when every photo
+// has the same size (ImageReader.single_camera; ETH3D's undistorted photos differ, and a
+// shared camera would drop all but those of the first size), and spatial matching with the config's neighbour count
 // when the config uses websfm's position preselection (else exhaustive). COLMAP runs
 // on the GPU (CUDA build); run it alone, not beside a bench run, or both timings lie.
 // Writes bench-out/colmap-<name>-<stamp>/ (database, models, logs) and a JSON summary.
@@ -73,11 +74,36 @@ const sparseDir = join(ws, 'sparse')
 const mapper = args.mapper ?? 'mapper'
 const preselect = cfg.match?.strategy === 'preselect'
 const ref = await loadReference(cfg.reference)
+// Width × height from a JPEG's frame header (null for anything else or a broken file).
+async function jpegSize(file) {
+  const b = await readFile(file)
+  if (b[0] !== 0xff || b[1] !== 0xd8) return null
+  for (let i = 2; i + 9 < b.length;) {
+    if (b[i] !== 0xff) return null
+    const m = b[i + 1]
+    const len = b.readUInt16BE(i + 2)
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc)
+      return `${b.readUInt16BE(i + 7)}x${b.readUInt16BE(i + 5)}`
+    i += 2 + len
+  }
+  return null
+}
+// One shared camera, as websfm groups one camera's photos, unless the sizes differ (a JPEG
+// set whose sizes can be read and are not all equal); then COLMAP's own default, one each.
+async function oneSize(dir) {
+  const files = (await readdir(dir)).filter((f) => /\.jpe?g$/i.test(f))
+  if (!files.length) return true
+  const sizes = new Set(await Promise.all(files.map((f) => jpegSize(join(dir, f)))))
+  return sizes.size === 1 || sizes.has(null)
+}
+
 if (!given) {
+  const shared = await oneSize(images)
+  if (!shared) console.log('   photos of different sizes: one COLMAP camera per photo')
   await run('features', 'feature_extractor', {
     'image_path': images,
     'database_path': db,
-    'ImageReader.single_camera': 1,
+    'ImageReader.single_camera': shared ? 1 : 0,
     'ImageReader.camera_model': args.cameraModel ?? 'SIMPLE_RADIAL',
   })
   // The positions websfm's preselection pairs by (the config's reference file) become
