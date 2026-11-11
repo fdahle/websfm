@@ -27,6 +27,7 @@ import { SparsePoints } from '../core/sfm/sparsePoints.js'
 import { createSavedCloudFiles } from './reconstruction/savedCloudFiles.js'
 import { createDepthMapCache } from './reconstruction/depthMapCache.js'
 import { createGeoreferencing } from './reconstruction/georeferencing.js'
+import { currentEvidenceKey } from '../core/sfm/georefEvidence.js'
 import { createScaling } from './reconstruction/scaling.js'
 import { registerProjectStore, projectRestoring } from './projectStores.js'
 import { showToast } from '../composables/useToasts.js'
@@ -1387,7 +1388,8 @@ export const useReconstructionStore = registerProjectStore(
       ensureMainSparse() // legacy docs (no mainSparseId) → first sparse cloud
       // A stale or missing id means the newest of the kind (mainOf).
       mainProductIds.value = data.mainProductIds && typeof data.mainProductIds === 'object' ? data.mainProductIds : {}
-      georef.value = data.georef ?? null
+      // A key saved before the photo names were left out of it, read in the current form.
+      georef.value = data.georef ? { ...data.georef, evidenceKey: currentEvidenceKey(data.georef.evidenceKey) } : null
       scaleFit.value = data.scaleFit ?? null // absent in older projects ⇒ no scale
       coregistration.value = data.coregistration ?? null // absent ⇒ none
       region.value = normalizeRegion(data.region) ?? null

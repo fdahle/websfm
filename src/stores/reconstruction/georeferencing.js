@@ -22,6 +22,7 @@ import {
   subCovariance,
 } from '../../core/gcpAccuracy.js'
 import { isGroundControl } from '../../core/io/gcp.js'
+import { georefEvidenceKey } from '../../core/sfm/georefEvidence.js'
 import { suggestProjectedCrs, formatLatLon } from '../../core/crsSuggest.js'
 
 // One spelling of "may this point constrain the solve" (core/io/gcp.js), shared
@@ -125,7 +126,7 @@ export function createGeoreferencing({
   const evidenceKey = computed(() => {
     // Camera buffers are markRaw; healthDirty signals in-place model edits.
     void healthDirty.value
-    return JSON.stringify({
+    return georefEvidenceKey({
       crs: currentCrs(),
       model: modelStamp(),
       cameras: [...sparseCameras.value],

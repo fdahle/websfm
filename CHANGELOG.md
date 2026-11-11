@@ -116,8 +116,12 @@ Notable changes to websfm. The format follows
   the check that retires a fit whose poses or GCPs changed saw the project half-restored,
   or a photo's position half-rewritten, and took it for a change. It now waits for the
   project to finish opening, and positions are never written through an empty value. A
-  project saved with a photo's positions read twice (for example after adding photos)
-  needs Georeference once more.
+  camera-position or marker file that names the photos in another case or without the
+  extension also retired it on every reopen, when its rows took the photos' names; the
+  names no longer count, and projects saved that way keep their georeference again (a
+  GeoScan PUTI half placed by its RTK file came back without one). A project saved with a
+  photo's positions read twice (for example after adding photos) needs Georeference once
+  more.
 - **Build Mesh keeps to its memory budget.** A mesh solved in tiles now plans its workers
   with what the open project already holds, sends each worker only its tile's points,
   starts each tile on a fresh worker, and frees the workers before the tiles are joined.
