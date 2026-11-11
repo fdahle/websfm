@@ -2,13 +2,358 @@
   "about": "Tables of docs/BENCHMARKS.md that scoreboard.mjs runs and writes. Configs are scripts/bench/configs/<config>.json (local, gitignored); a run copies them to <out>/configs/.",
   "tables": [
     {
+      "id": "eth3d-sparse",
+      "title": "ETH3D high-res and South Building (cameras against ETH3D's laser-scan cameras; South Building against COLMAP's model)",
+      "unit": "mm",
+      "columns": ["truth", "time"],
+      "jobs": [
+        {
+          "id": "eth3d-courtyard-websfm",
+          "block": "courtyard",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-eth3d-courtyard",
+          "truth": "/data1/websfm_testdata/eth3d-full/courtyard"
+        },
+        {
+          "id": "eth3d-courtyard-colmap",
+          "block": "courtyard",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-eth3d-courtyard",
+          "truth": "/data1/websfm_testdata/eth3d-full/courtyard"
+        },
+        {
+          "id": "eth3d-courtyard-metashape",
+          "block": "courtyard",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-eth3d-courtyard",
+          "truth": "/data1/websfm_testdata/eth3d-full/courtyard"
+        },
+        {
+          "id": "eth3d-delivery_area-websfm",
+          "block": "delivery_area",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-eth3d-delivery_area",
+          "truth": "/data1/websfm_testdata/eth3d-full/delivery_area"
+        },
+        {
+          "id": "eth3d-delivery_area-colmap",
+          "block": "delivery_area",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-eth3d-delivery_area",
+          "truth": "/data1/websfm_testdata/eth3d-full/delivery_area"
+        },
+        {
+          "id": "eth3d-delivery_area-metashape",
+          "block": "delivery_area",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-eth3d-delivery_area",
+          "truth": "/data1/websfm_testdata/eth3d-full/delivery_area"
+        },
+        {
+          "id": "eth3d-office-websfm",
+          "block": "office",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-eth3d-office",
+          "truth": "/data1/websfm_testdata/eth3d-full/office"
+        },
+        {
+          "id": "eth3d-office-colmap",
+          "block": "office",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-eth3d-office",
+          "truth": "/data1/websfm_testdata/eth3d-full/office"
+        },
+        {
+          "id": "eth3d-office-metashape",
+          "block": "office",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-eth3d-office",
+          "truth": "/data1/websfm_testdata/eth3d-full/office"
+        },
+        {
+          "id": "eth3d-pipes-websfm",
+          "block": "pipes",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-eth3d-pipes",
+          "truth": "/data1/websfm_testdata/eth3d-full/pipes"
+        },
+        {
+          "id": "eth3d-pipes-colmap",
+          "block": "pipes",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-eth3d-pipes",
+          "truth": "/data1/websfm_testdata/eth3d-full/pipes"
+        },
+        {
+          "id": "eth3d-pipes-metashape",
+          "block": "pipes",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-eth3d-pipes",
+          "truth": "/data1/websfm_testdata/eth3d-full/pipes"
+        },
+        {
+          "id": "eth3d-playground-websfm",
+          "block": "playground",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-eth3d-playground",
+          "truth": "/data1/websfm_testdata/eth3d-full/playground"
+        },
+        {
+          "id": "eth3d-playground-colmap",
+          "block": "playground",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-eth3d-playground",
+          "truth": "/data1/websfm_testdata/eth3d-full/playground"
+        },
+        {
+          "id": "eth3d-playground-metashape",
+          "block": "playground",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-eth3d-playground",
+          "truth": "/data1/websfm_testdata/eth3d-full/playground"
+        },
+        {
+          "id": "eth3d-terrace-websfm",
+          "block": "terrace",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-eth3d-terrace",
+          "truth": "/data1/websfm_testdata/eth3d-full/terrace"
+        },
+        {
+          "id": "eth3d-terrace-colmap",
+          "block": "terrace",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-eth3d-terrace",
+          "truth": "/data1/websfm_testdata/eth3d-full/terrace"
+        },
+        {
+          "id": "eth3d-terrace-metashape",
+          "block": "terrace",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-eth3d-terrace",
+          "truth": "/data1/websfm_testdata/eth3d-full/terrace"
+        },
+        {
+          "id": "southbuilding-websfm",
+          "block": "South Building",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-southbuilding",
+          "truth": "/data1/websfm_testdata/south-building-full/south-building/sparse/images.txt",
+          "unit": "model"
+        },
+        {
+          "id": "southbuilding-metashape",
+          "block": "South Building",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-southbuilding",
+          "truth": "/data1/websfm_testdata/south-building-full/south-building/sparse/images.txt",
+          "unit": "model"
+        }
+      ]
+    },
+    {
+      "id": "eth3d-dense",
+      "title": "ETH3D high-res dense from the ground-truth cameras (eth3d_score.py --occlusion min: ETH3D's method, about \u00b14 points from the official evaluator)",
+      "columns": ["f1", "denseTime"],
+      "jobs": [
+        {
+          "id": "eth3d-dense-courtyard-websfm",
+          "block": "courtyard",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-dense-eth3d-courtyard",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/courtyard"
+        },
+        {
+          "id": "eth3d-dense-courtyard-metashape-medium",
+          "block": "courtyard",
+          "label": "Metashape Medium",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-courtyard",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/courtyard",
+          "args": ["--downscale", "4"]
+        },
+        {
+          "id": "eth3d-dense-courtyard-metashape-high",
+          "block": "courtyard",
+          "label": "Metashape High",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-courtyard",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/courtyard",
+          "args": ["--downscale", "2"]
+        },
+        {
+          "id": "eth3d-dense-delivery_area-websfm",
+          "block": "delivery_area",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-dense-eth3d-delivery_area",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/delivery_area"
+        },
+        {
+          "id": "eth3d-dense-delivery_area-metashape-medium",
+          "block": "delivery_area",
+          "label": "Metashape Medium",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-delivery_area",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/delivery_area",
+          "args": ["--downscale", "4"]
+        },
+        {
+          "id": "eth3d-dense-delivery_area-metashape-high",
+          "block": "delivery_area",
+          "label": "Metashape High",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-delivery_area",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/delivery_area",
+          "args": ["--downscale", "2"]
+        },
+        {
+          "id": "eth3d-dense-office-websfm",
+          "block": "office",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-dense-eth3d-office",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/office"
+        },
+        {
+          "id": "eth3d-dense-office-metashape-medium",
+          "block": "office",
+          "label": "Metashape Medium",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-office",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/office",
+          "args": ["--downscale", "4"]
+        },
+        {
+          "id": "eth3d-dense-office-metashape-high",
+          "block": "office",
+          "label": "Metashape High",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-office",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/office",
+          "args": ["--downscale", "2"]
+        },
+        {
+          "id": "eth3d-dense-pipes-websfm",
+          "block": "pipes",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-dense-eth3d-pipes",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/pipes"
+        },
+        {
+          "id": "eth3d-dense-pipes-metashape-medium",
+          "block": "pipes",
+          "label": "Metashape Medium",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-pipes",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/pipes",
+          "args": ["--downscale", "4"]
+        },
+        {
+          "id": "eth3d-dense-pipes-metashape-high",
+          "block": "pipes",
+          "label": "Metashape High",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-pipes",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/pipes",
+          "args": ["--downscale", "2"]
+        },
+        {
+          "id": "eth3d-dense-playground-websfm",
+          "block": "playground",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-dense-eth3d-playground",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/playground"
+        },
+        {
+          "id": "eth3d-dense-playground-metashape-medium",
+          "block": "playground",
+          "label": "Metashape Medium",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-playground",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/playground",
+          "args": ["--downscale", "4"]
+        },
+        {
+          "id": "eth3d-dense-playground-metashape-high",
+          "block": "playground",
+          "label": "Metashape High",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-playground",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/playground",
+          "args": ["--downscale", "2"]
+        },
+        {
+          "id": "eth3d-dense-terrace-websfm",
+          "block": "terrace",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-dense-eth3d-terrace",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/terrace"
+        },
+        {
+          "id": "eth3d-dense-terrace-metashape-medium",
+          "block": "terrace",
+          "label": "Metashape Medium",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-terrace",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/terrace",
+          "args": ["--downscale", "4"]
+        },
+        {
+          "id": "eth3d-dense-terrace-metashape-high",
+          "block": "terrace",
+          "label": "Metashape High",
+          "tool": "metashape-dense",
+          "config": "sb-dense-eth3d-terrace",
+          "eth3d": "/data1/websfm_testdata/eth3d-full/terrace",
+          "args": ["--downscale", "2"]
+        }
+      ]
+    },
+    {
       "id": "drone-free",
       "title": "Drone blocks, no positions in the solve",
       "unit": "cm",
       "columns": ["cameras", "position", "time"],
       "jobs": [
-        { "id": "quarry-websfm", "block": "quarry", "label": "WebSfM", "tool": "websfm", "config": "nm-quarry347" },
-        { "id": "quarry-colmap", "block": "quarry", "label": "COLMAP", "tool": "colmap", "config": "nm-quarry347" },
+        {
+          "id": "quarry-websfm",
+          "block": "quarry",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "nm-quarry347"
+        },
+        {
+          "id": "quarry-colmap",
+          "block": "quarry",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "nm-quarry347"
+        },
         {
           "id": "quarry-glomap",
           "block": "quarry",
@@ -32,8 +377,20 @@
           "config": "nm-quarry347",
           "args": ["--mode", "sfm", "--gpu"]
         },
-        { "id": "puti-websfm", "block": "GeoScan PUTI", "label": "WebSfM", "tool": "websfm", "config": "nm-puti444" },
-        { "id": "puti-colmap", "block": "GeoScan PUTI", "label": "COLMAP", "tool": "colmap", "config": "nm-puti444" },
+        {
+          "id": "puti-websfm",
+          "block": "GeoScan PUTI",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "nm-puti444"
+        },
+        {
+          "id": "puti-colmap",
+          "block": "GeoScan PUTI",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "nm-puti444"
+        },
         {
           "id": "puti-glomap",
           "block": "GeoScan PUTI",
@@ -125,7 +482,13 @@
       "unit": "m",
       "columns": ["cameras", "checkpoints", "dem", "coverage"],
       "jobs": [
-        { "id": "cg-websfm", "block": "Casa Grande 1978", "label": "WebSfM", "tool": "websfm", "config": "r3-cg" },
+        {
+          "id": "cg-websfm",
+          "block": "Casa Grande 1978",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "r3-cg"
+        },
         {
           "id": "cg-metashape",
           "block": "Casa Grande 1978",
@@ -141,7 +504,13 @@
           "config": "r3-cg",
           "args": ["--keypoints", "80000", "--tiepoints", "0", "--guided"]
         },
-        { "id": "il-websfm", "block": "Iceland 1980", "label": "WebSfM", "tool": "websfm", "config": "r3-il" },
+        {
+          "id": "il-websfm",
+          "block": "Iceland 1980",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "r3-il"
+        },
         {
           "id": "il-metashape",
           "block": "Iceland 1980",

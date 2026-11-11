@@ -19,8 +19,13 @@
 // Tools: websfm (run-bench.mjs), metashape (metashape-ref.mjs; `checkpoints: true` scores
 // the config's GCP marks with metashape_checkpoints.py), metashape-hist
 // (hist/metashape_hist.py, the film blocks), colmap (colmap-ref.mjs), odm (odm-ref.mjs).
-// `args` are passed to the tool as they are. Every run is sequential: two at once and both
-// timings lie.
+// `args` are passed to the tool as they are. `truth` (an ETH3D scene folder or a COLMAP
+// images.txt) scores the run's cameras with camera-check.mjs into camera-check.json, for the
+// `truth` column; `unit` on a job overrides its table's (South Building is in model units).
+// `eth3d` (an ETH3D scene folder) scores the run's dense cloud with eth3d_score.py
+// --occlusion min into eth3d.json, for the `f1` column: the websfm run's exportDense cloud,
+// or metashape-dense's (metashape_dense.py: Metashape's cloud from the scene's
+// ground-truth cameras). Every run is sequential: two at once and both timings lie.
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -54,12 +59,14 @@ for (const j of jobs) {
   ids.add(j.id)
 }
 
+// The thinned ETH3D scans, built once per scene by eth3d_score.py (a minute each) and kept.
+const ETH3D_GT_CACHE = process.env.ETH3D_GT_CACHE ?? '/data1/websfm_eval/eth3d-gt-cache'
 const configPath = (name) => join(repo, 'scripts/bench/configs', `${name}.json`)
 const loadConfig = async (name) => JSON.parse(await readFile(configPath(name), 'utf8'))
 const epsgOf = (crs) => String(crs ?? '').replace(/^EPSG:+/i, '')
 
 // The command lines of one job: [exe, argv][] run in order, and where its summary lands.
-async function commandsOf(job) {
+async function toolCommandsOf(job) {
   const cfg = await loadConfig(job.config)
   const dir = join(out, job.id)
   const extra = job.args ?? []
@@ -100,6 +107,11 @@ async function commandsOf(job) {
       if (h.refDem) argv.push('--ref-dem', h.refDem)
       return { summary: join(dir, 'summary.json'), steps: [[python, [...argv, ...extra]]] }
     }
+    case 'metashape-dense': {
+      if (!job.eth3d) throw new Error(`${job.id}: metashape-dense needs eth3d (the scene folder)`)
+      const argv = [join(repo, 'scripts/bench/metashape_dense.py'), '--scene', job.eth3d, '--ws', dir]
+      return { summary: join(dir, 'metashape.json'), steps: [[python, [...argv, ...extra]]] }
+    }
     case 'colmap':
       return {
         summary: join(dir, 'summary.json'),
@@ -115,13 +127,42 @@ async function commandsOf(job) {
   }
 }
 
-function run(exe, argv, logFile) {
+// The tool's steps, then the camera check against `truth` when the job names one.
+async function commandsOf(job) {
+  const c = await toolCommandsOf(job)
+  if (job.truth)
+    c.steps.push([
+      process.execPath,
+      [join(repo, 'scripts/bench/camera-check.mjs'), c.summary, job.truth],
+      { stdout: join(out, job.id, 'camera-check.json') },
+    ])
+  if (job.eth3d) {
+    const dir = join(out, job.id)
+    const cloud = job.tool === 'websfm' ? join(dir, 'run.dense.bin') : join(dir, 'dense.ply')
+    c.steps.push([
+      python,
+      [
+        join(repo, 'scripts/bench/eth3d_score.py'),
+        ...['--scene', job.eth3d, '--recon', cloud, '--occlusion', 'min', '--label', job.id],
+        ...['--cache', ETH3D_GT_CACHE, '--out', join(dir, 'eth3d.json')],
+      ],
+    ])
+  }
+  return c
+}
+
+// `opts.stdout`: a file that takes the step's standard output alone (a JSON line).
+function run(exe, argv, logFile, opts = {}) {
   return new Promise((done) => {
     const p = spawn(exe, argv, { cwd: repo, env: { ...process.env, QT_QPA_PLATFORM: 'offscreen' } })
     const write = (b) => appendFile(logFile, b)
-    p.stdout.on('data', write)
+    let stdout = ''
+    p.stdout.on('data', opts.stdout ? (b) => (stdout += b) : write)
     p.stderr.on('data', write)
-    p.on('close', (code) => done(code))
+    p.on('close', async (code) => {
+      if (opts.stdout) await writeFile(opts.stdout, stdout)
+      done(code)
+    })
   })
 }
 
@@ -131,6 +172,22 @@ const read = async (f) => (existsSync(f) ? JSON.parse(await readFile(f, 'utf8'))
 // One tool's result in common terms: lengths in metres, times in seconds.
 export function scoreOf(tool, s, extra = {}) {
   if (!s) return null
+  const cc = extra.cameraCheck
+  const truth = cc ? { registered: cc.registered, median: cc.median, off: cc.off ?? 0 } : null
+  const at2 = extra.eth3d?.rows?.find((row) => Math.abs(row.tolerance - 0.02) < 1e-9)
+  const dense = at2 ? { f1: at2.f1, accuracy: at2.accuracy, completeness: at2.completeness } : null
+  return { ...scoreOfTool(tool, s, extra), truth, dense, denseSeconds: denseSecondsOf(tool, s) }
+}
+
+// Depth maps + fusion (WebSfM) or depth maps + point cloud from the given cameras (Metashape).
+function denseSecondsOf(tool, s) {
+  if (tool === 'websfm') return (s.stages?.depth?.seconds ?? 0) + (s.stages?.dense?.seconds ?? 0) || null
+  if (tool === 'metashape-dense') return s.seconds?.denseTotal ?? null
+  return null
+}
+
+function scoreOfTool(tool, s, extra) {
+  if (tool === 'metashape-dense') return { cameras: [s.posed, s.cameras] }
   const pos = (pc) => (pc ? { h: pc.rmsH, v: pc.rmsV } : null)
   if (tool === 'websfm') {
     const st = s.stages ?? {}
@@ -179,6 +236,11 @@ export function scoreOf(tool, s, extra = {}) {
 
 const COLUMNS = {
   cameras: { head: 'cameras', cell: (x) => (x.cameras ? `${x.cameras[0]}/${x.cameras[1]}` : '–') },
+  truth: {
+    head: (u) => `cameras · median error vs truth (${u})`,
+    cell: (x, k) =>
+      x.truth ? `${x.truth.registered} · ${fmt(x.truth.median * k)}${x.truth.off ? ` · ${x.truth.off} off` : ''}` : '–',
+  },
   position: {
     head: (u) => `cameras vs reference (${u})`,
     cell: (x, k) => (x.position ? `${fmt(x.position.h * k)} / ${fmt(x.position.v * k)}` : '–'),
@@ -198,10 +260,24 @@ const COLUMNS = {
     cell: (x) => (x.dem ? `${fmt(x.dem.rmse)} / ${fmt(x.dem.nmad)}` : '–'),
   },
   coverage: { head: 'DEM coverage', cell: (x) => (x.dem ? `${Math.round(x.dem.coverage * 100)} %` : '–') },
+  f1: {
+    head: 'F1 at 2 cm (%) · accuracy / completeness',
+    cell: (x) =>
+      x.dense ? `${x.dense.f1.toFixed(1)} · ${x.dense.accuracy.toFixed(0)} / ${x.dense.completeness.toFixed(0)}` : '–',
+  },
+  denseTime: {
+    head: 'dense time (s)',
+    cell: (x) => (x.denseSeconds ? Math.round(x.denseSeconds).toLocaleString('en-US') : '–'),
+  },
   time: { head: 'SfM time (s)', cell: (x) => (x.sfmSeconds ? Math.round(x.sfmSeconds).toLocaleString('en-US') : '–') },
 }
+// Results are in metres (ETH3D, the drone blocks) or the reference's own units (`model`).
+// Where each tool's runner writes its summary (commandsOf names the same files).
+const SUMMARY_FILE = { 'websfm': 'run.json', 'metashape-dense': 'metashape.json' }
+const SCALE = { m: 1, cm: 100, mm: 1000, model: 1 }
 function fmt(v) {
   if (v == null || !Number.isFinite(v)) return '–'
+  if (v !== 0 && Math.abs(v) < 0.1) return v.toPrecision(2) // model units (South Building)
   return Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)
 }
 
@@ -209,7 +285,6 @@ async function tabulate() {
   const lines = [`# Scoreboard ${out.split('/').pop()}`, '', `Manifest: ${manifestPath.replace(repo + '/', '')}`, '']
   for (const t of tables) {
     const unit = t.unit ?? 'm'
-    const k = unit === 'cm' ? 100 : 1
     const cols = t.columns ?? ['cameras', 'checkpoints']
     const head = [
       'block',
@@ -220,10 +295,16 @@ async function tabulate() {
     lines.push(`## ${t.title}`, '', `| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`)
     for (const j of t.jobs) {
       const dir = join(out, j.id)
-      const s = await read(j.tool === 'websfm' ? join(dir, 'run.json') : join(dir, 'summary.json'))
-      const x = scoreOf(j.tool, s, { checkpoints: await read(join(dir, 'checkpoints.json')) })
+      const s = await read(join(dir, SUMMARY_FILE[j.tool] ?? 'summary.json'))
+      const x = scoreOf(j.tool, s, {
+        checkpoints: await read(join(dir, 'checkpoints.json')),
+        cameraCheck: await read(join(dir, 'camera-check.json')),
+        eth3d: await read(join(dir, 'eth3d.json')),
+      })
+      const k = SCALE[j.unit ?? unit] ?? 1
       const cells = x ? cols.map((c) => COLUMNS[c].cell(x, k)) : cols.map(() => 'not run')
-      lines.push(`| ${j.block} | ${j.label ?? j.tool} | ${cells.join(' | ')} | \`${j.config}\` |`)
+      const label = `${j.label ?? j.tool}${j.unit && j.unit !== unit ? ` (${j.unit === 'model' ? 'model units' : j.unit})` : ''}`
+      lines.push(`| ${j.block} | ${label} | ${cells.join(' | ')} | \`${j.config}\` |`)
     }
     lines.push('')
   }
@@ -279,8 +360,8 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
       await mkdir(join(out, job.id), { recursive: true })
       await log(`start ${job.id}`)
       let code = 0
-      for (const [exe, argv] of steps) {
-        code = await run(exe, argv, join(out, job.id, 'console.log'))
+      for (const [exe, argv, opts] of steps) {
+        code = await run(exe, argv, join(out, job.id, 'console.log'), opts)
         if (code !== 0) break
       }
       await log(`done ${job.id} exit ${code}`)
