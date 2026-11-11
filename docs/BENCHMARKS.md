@@ -279,7 +279,7 @@ the cell empty rather than interpolating.
 
 | run | cameras | checkpoints | DEM vs reference RMSE / NMAD | DEM coverage |
 | --- | --- | --- | --- | --- |
-| WebSfM | 123/125 | 1.97 / 2.46 m | **20.0** / 2.44 m | 27 % |
+| WebSfM | 123/125 | 1.97 / 2.46 m (18 checks) | **20.0** / 2.44 m | 27 % |
 | WebSfM (10-13) | 121/125 | 2.03 / 2.09 m (17 checks) | — | — |
 | WebSfM (10-13), detection at Auto resolution | 124/125 | 1.74 / 1.98 m | — | — |
 | COLMAP (10-13) | **125/125** | 3.94 / 103 m | — | — |
@@ -291,8 +291,12 @@ Metashape leads here:
   outliers that WebSfM leaves out.
 - **Tracks:** WebSfM's are short. 65 % of its points are seen in three or more photos,
   and its reprojection median is 1.38 px.
-- **Since October:** with the same settings, the October run's heights were 0.37 m better
-  (2.09 against 2.46 m). The cause is not yet known.
+- **Since October:** the heights look 0.37 m worse (2.46 against 2.09 m), but the two runs
+  score different checkpoints. This run registers two more photos, which brings checkpoint
+  153 into the score: it lies at the block's south-west end, is seen in only two photos and
+  is 5.2 m off. Without it, the other 17 checkpoints give 2.18 m. The October run's files
+  were lost, so which 17 checkpoints it scored cannot be confirmed; 153 is the only
+  checkpoint seen in fewer than three photos.
 
 ### Antarctic trimetrogon film (TMA), no ground control
 
