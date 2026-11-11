@@ -418,8 +418,15 @@ redundancy. So each σ is marginal over every pose and point. Without control S 
 along the seven similarity directions, which move no lens term; the solve holds one camera
 and the scale along one baseline, which leaves the lens marginals as they are. Unit tests
 check the σ against the spread of the solved focal over 40 noise draws, and against a
-dense numerical (JᵀWJ)⁻¹. It holds when each term is weighted by its noise: observations
-carry weight 1 (1 px), camera positions and GCPs 1/σ² of their stated accuracies. With every
+dense numerical (JᵀWJ)⁻¹. It holds when each term is weighted by its noise: a tie
+observation 1/f², with f the native size over the detection size (`baObservations.js`
+`tieWeightOf`: a keypoint is measured in the detection raster, so its σ is one detection
+pixel, f native pixels), a GCP mark 1/σ² of its pixel accuracy, camera positions and GCPs
+1/σ² of their stated accuracies. Ties share f, so their own balance and the robust loss
+(on raw pixels) do not depend on it; only the pull of the survey terms does. Weighting
+ties as one native pixel had them count f² times what they measure: on Iceland's film scans
+(f 4.8) GCP checkpoints V 2.46 → 1.02 m, on quarry with RTK cameras against RTK 10.4 / 5.4
+→ 6.3 / 4.4 cm, with tie residuals unchanged. With every
 optical axis parallel, a z-stretch of the scene with the focal scaled alike leaves every
 image point in place: a nadir block fixes its focal only through camera positions, GCPs or
 oblique photos, and its σ then says so. The log gives fx ± σ and what it means for heights

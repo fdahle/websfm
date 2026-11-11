@@ -70,7 +70,8 @@ export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt, tieWeigh
  * (scaleContext.js), so its σ is one detection pixel: `detectScaleFactor` native pixels.
  * Weighting it as one native pixel made the ties count f² times what they measure, and
  * the GCPs and positions that much less. Iceland 1980 film (f 4.8): GCP checkpoints V
- * 2.46 → 1.33 m when the GCPs were weighted up by that much, tie residuals unchanged.
+ * 2.46 → 1.02 m; quarry with RTK (f 2.3): cameras against RTK 10.4 / 5.4 → 6.3 / 4.4 cm;
+ * tie residuals unchanged (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly).
  * All ties share the factor, so their own balance, the robust loss (in raw pixels) and the
  * solution of a run with no survey terms stay as they were. GCP marks are hand-placed in
  * native pixels and keep their own accuracy.
