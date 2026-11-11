@@ -18,7 +18,13 @@ Notable changes to websfm. The format follows
   their nearly collinear centres alone leave open. Tested against known truth: unit tests
   move a block by a known similarity and place it back by each of the three ways, and a
   browser test merges a 5-photo model moved by a similarity into a copy missing two of its
-  cameras, which land back within 10⁻⁶ of the block's span.
+  cameras, which land back within 10⁻⁶ of the block's span. On real blocks: GeoScan PUTI
+  split into a west (240 photos) and an east (102) block with 102 photos left out between
+  them, each placed by its RTK positions, merged by both georeferences to 3.8 / 8.3 cm at
+  11 check points (H / V RMS), where the whole 444-photo block solved at once gives 3.4 /
+  11.1 cm at 15; Casa Grande 1978 (film, blocks of 20 and 17 photos with their GCPs) merged
+  to 1.68 / 1.50 m by the GCPs and 1.09 / 1.29 m by the georeferences, at 11 check points.
+  A merge took 12–47 s.
 - **How well the focal is fixed.** The Quality Report's Calibration card shows the
   refined focal with its ± (how well the photos fixed it), and says when a nadir block
   without camera positions or GCPs cannot fix it at all, so its heights scale with it.
