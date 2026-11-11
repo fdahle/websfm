@@ -28,8 +28,9 @@ export function isObservationList(o) {
  * @param {(img: number) => number} camIdxOf    −1 ⇒ skip
  * @param {(img: number) => {n:number, xy:Float64Array} | null | undefined} keypointsAt
  *   the image's KeypointSet (keypointSet.js)
+ * @param {number} [tieWeight] every observation's weight (tieWeightOf); 1 ⇒ no weights
  */
-export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt) {
+export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt, tieWeight = 1) {
   let cap = 0
   for (let r = 0; r < ids.length; r++) cap += tracks.viewCount(ids[r])
   const cam = new Int32Array(cap),
@@ -50,7 +51,33 @@ export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt) {
       n++
     })
   }
-  return { n, cam, pt, x, y, wx: null, wy: null }
+  if (tieWeight === 1) return { n, cam, pt, x, y, wx: null, wy: null }
+  return {
+    n,
+    cam,
+    pt,
+    x,
+    y,
+    wx: fillArray(new Float64Array(n), tieWeight),
+    wy: fillArray(new Float64Array(n), tieWeight),
+  }
+}
+
+/**
+ * The weight of a tie-point observation against the survey terms of a bundle adjustment
+ * (GCP anchors and marks, camera positions, a held DEM), 1 / σ² with σ in native pixels.
+ * A keypoint is measured in the detection raster and mapped back to native pixels
+ * (scaleContext.js), so its σ is one detection pixel: `detectScaleFactor` native pixels.
+ * Weighting it as one native pixel made the ties count f² times what they measure, and
+ * the GCPs and positions that much less. Iceland 1980 film (f 4.8): GCP checkpoints V
+ * 2.46 → 1.33 m when the GCPs were weighted up by that much, tie residuals unchanged.
+ * All ties share the factor, so their own balance, the robust loss (in raw pixels) and the
+ * solution of a run with no survey terms stay as they were. GCP marks are hand-placed in
+ * native pixels and keep their own accuracy.
+ */
+export function tieWeightOf(detectScaleFactor) {
+  const f = Number.isFinite(detectScaleFactor) && detectScaleFactor > 1 ? detectScaleFactor : 1
+  return 1 / (f * f)
 }
 
 /** Positions of the points `ids` as one flat Float64Array [x0,y0,z0, x1,…], plus `extra` [{x,y,z}]. */

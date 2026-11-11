@@ -30,7 +30,13 @@ import {
   buildGcpAnchors,
 } from './surveyConstraints.js'
 import { compareRobustCost, projectFullXYZ } from './baAcceptance.js'
-import { buildBaObservations, appendObservations, trackPositions, mapObservations } from './baObservations.js'
+import {
+  buildBaObservations,
+  appendObservations,
+  trackPositions,
+  mapObservations,
+  tieWeightOf,
+} from './baObservations.js'
 import { fmtStats } from './modelStats.js'
 import { attachRollingShutter, captureSeconds } from './rollingShutter.js'
 import { pluralize } from '../textFormat.js'
@@ -63,6 +69,15 @@ export function createBundleSession(ctx) {
   // Defaults + rationale for these live in defaults.user.js (baIterations,
   // refineIntrinsics); `cfg` already merged them.
   const { baIterations, refineIntrinsics } = cfg
+  // Ties weigh what one detection pixel measures against the survey terms (tieWeightOf).
+  const tieWeight = tieWeightOf(cfg.detectScaleFactor)
+  if (tieWeight !== 1 && (cameraPriors?.length || gcps?.length || demHold))
+    log(
+      `Bundle adjustment: a tie point counts as ${Math.sqrt(1 / tieWeight).toFixed(2)} px (one detection pixel) ` +
+        'against the GCPs and camera positions',
+      'info',
+      'Reconstruction',
+    )
 
   // Rolling shutter (cfg.rollingShutter 'on', rollingShutter.js): before each solve every
   // registered camera gets its velocity from its neighbours in the current model and its
@@ -192,7 +207,7 @@ export function createBundleSession(ctx) {
     const { kList, observations, fullLens } = lensFrame(
       uuidList,
       camList.map((c) => c.K),
-      buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt),
+      buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt, tieWeight),
     )
     const posBefore = trackPositions(tracks, ptIds)
     const result = await bundleAdjust(camList, kList, posBefore, observations, {
@@ -328,7 +343,7 @@ export function createBundleSession(ctx) {
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     const fixedCams = fixedCameras?.size ? uuidList.flatMap((u, i) => (isFixed(u) ? [i] : [])) : null
     // Point rank in this solve → point id; the solve's point i is ptIds[i].
-    const tieObs = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt)
+    const tieObs = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt, tieWeight)
     // kList / observations in the solve's frame: a fisheye camera's in recorded pixels
     // with its lens on K (lensFrame). Everything below — the diagnostic, the robust
     // acceptance, the validation — judges the solve in that same frame.
@@ -739,7 +754,7 @@ export function createBundleSession(ctx) {
       const lf = lensFrame(
         uuidList,
         camList.map((c) => c.K),
-        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt),
+        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt, tieWeight),
       )
       const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds), lf.observations, {
         maxIters: baIterations,
@@ -857,7 +872,10 @@ export function createBundleSession(ctx) {
       const lf = lensFrame(
         uuidList,
         kList,
-        appendObservations(buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt), setup.observations),
+        appendObservations(
+          buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt, tieWeight),
+          setup.observations,
+        ),
       )
 
       const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds, anchorPts), lf.observations, {
