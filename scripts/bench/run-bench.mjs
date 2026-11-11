@@ -19,6 +19,7 @@
 // on file names), limit (first N after sorting), sceneType, stages ("detect,match,recon";
 // also depth, dense, dem, ortho, and reopen = reload the page and restore the project),
 // detect / match / recon (settings objects; `preset` selects a preset delta), port, headed,
+// gpu (default on: headed with the WebGPU flags when there is a display; false = CPU),
 // variants ([{ label, match?, recon? }]: one detection, then a match + reconstruct per
 // variant, so SfM-only experiments reuse the same keypoints and matches), holdBack (leave
 // the last N images out of the ingest; the stage `ingestRest` adds them later, as photos
@@ -266,6 +267,19 @@ const quiet = /^Matched: |^SIFT (start|done): |^Added image: |^Metadata /
 // (e.g. `reopen,ortho:a,ortho:b` on one set of depth maps), on the project named
 // `project` (default: the newest). Such a run skips ingest. Delete the profile by hand.
 const profileDir = cfg.profile ? resolve(repo, cfg.profile) : `${outPrefix}.profile`
+// The GPU by default: on Linux only a headed Chrome with these flags reaches it (headless
+// has no adapter or SwiftShader, and matching quietly falls back to the CPU; README ▸
+// Linux). With a display, a config that sets neither `headed` nor `gpu` runs headed with
+// them, and gpuRequired below stops the run if the GPU is not there. `"gpu": false` runs
+// headless on the CPU; a config's own `headed` and `chromeArgs` are kept.
+const GPU_FLAGS = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--ignore-gpu-blocklist']
+const hasDisplay = !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
+if (cfg.gpu !== false && cfg.headed === undefined && hasDisplay) cfg.headed = true
+if (cfg.gpu !== false && cfg.headed && !(cfg.chromeArgs ?? []).includes('--enable-unsafe-webgpu'))
+  cfg.chromeArgs = [...(cfg.chromeArgs ?? []), ...GPU_FLAGS]
+if (cfg.gpu !== false && !cfg.headed)
+  console.warn(`== gpu: ${hasDisplay ? 'headless run' : 'no display'}, so no WebGPU: matching runs on the CPU`)
+
 // Precise heap readings + a callable gc(), so the `== memory` lines below report live
 // bytes rather than quantised numbers that include uncollected garbage.
 // `maxOldSpaceMb` raises V8's heap ceiling for the page AND its workers (one renderer

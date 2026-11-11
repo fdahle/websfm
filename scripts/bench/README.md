@@ -301,12 +301,17 @@ node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2
 
 Headless Chrome on Linux offers no WebGPU adapter, or only SwiftShader (software)
 with `--enable-features=Vulkan`. Matching and depth maps then fall back to WASM with
-one `GPU requested but … no adapter` warning, and a dense stage takes hours. Run headed
-with Vulkan on (it needs a display, e.g. a remote-desktop session):
+one `GPU requested but … no adapter` warning, and a dense stage takes hours. So
+`run-bench.mjs` runs headed with Vulkan on whenever there is a display (a desktop or
+remote-desktop session), and stops if Chrome still comes up without the GPU. It is the
+same as writing:
 
 ```json
 { "headed": true, "chromeArgs": ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"] }
 ```
+
+`"gpu": false` runs headless on the CPU (a CPU timing, or no display). Without a
+display the run says so at the start and matches on the CPU.
 
 Measured 2026-10-14 on the NVIDIA Turing box (driver on Chrome's GPU blocklist):
 headless → SwiftShader whatever the flags; headed without `--ignore-gpu-blocklist` →
