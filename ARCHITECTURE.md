@@ -29,8 +29,11 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 - **`src/stores/`**: Pinia stores. They own the reactive state and its persistence,
   and they turn reactive data into plain arrays before posting it to a worker.
 - **`src/workers/`**: `computeClient.js` is a typed async client over a worker pool.
-  The op handlers live in `workers/ops/<domain>.js` (detect, match, sfm, dense,
-  products, mesh, io, export). WebGPU kernels are in `workers/gpu/`.
+  The op handlers live in `workers/ops/<domain>.js`, one module per domain (detect,
+  match, sfm, dense, products, mesh, texture, cloud, lod, laz, tiles3d, export, io,
+  tiff, undistort, segment, reflectance, referenceGcps, webTiles). WebGPU kernels are
+  in `workers/gpu/`. A call carries no run identity: a run's Cancel resets the workers
+  holding a job that is not background work (`computeClient.js` `cancelRun`).
 - **`src/core/`**: pure computation with no Vue, Pinia, OPFS or DOM. It takes plain
   data in and returns plain data, and reports through injected `onLog`/`onProgress`
   hooks. That is what lets the same code run in a worker and in Node tests. It is
@@ -161,8 +164,9 @@ to the algorithm; the other steps differ only in file names.
 ## Tests
 
 ```bash
-npm test             # Vitest: src/core, src/utils, src/stores
-npm run typecheck    # TypeScript, Vue template bindings, ESLint
+npm test             # Vitest: src/core, utils, stores, composables, components, workers; scripts/licenses
+npm run typecheck    # tsc on the few .ts files, vue-tsc on .vue templates (checkJs off), the
+                     # template-binding check, ESLint on .js (not .vue)
 npm run test:browser # Playwright, Chromium (test:browser:firefox for Firefox)
 cargo test --manifest-path crates/Cargo.toml --workspace --release
 ```
