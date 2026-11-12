@@ -20,6 +20,7 @@ import { demEffects, demShorts, frameText } from '../../../core/stepEffects/rast
 import { withShorts } from '../../../core/stepEffects/format.js'
 import { lasClassName } from '../../../core/products/cloudStyle.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
+import { demRunSettings } from '../../../core/runSettings.js'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
 // grid in the chosen frame. Defaults are the single source of truth in
@@ -107,12 +108,9 @@ const numbers = computed(() =>
 )
 
 // What a run gets: the size field shown (a cell size, or a long side in px), only
-// when set — 0 ⇒ the worker's auto.
+// when set — 0 ⇒ the worker's auto (core/runSettings.js, shared with the Workflow Builder).
 function runSettings() {
-  const { gsd, longSide, ...rest } = settings.value
-  const size = rest.sizeBy === 'px' ? (longSide > 1 ? { longSide } : {}) : gsd > 0 ? { gsd } : {}
-  // A plain array: the reactive one cannot be posted to the worker.
-  return { ...rest, classes: [...rest.classes], memBudgetBytes: memBudgetBytes.value, ...size }
+  return demRunSettings(settings.value, { memBudgetBytes: memBudgetBytes.value })
 }
 function run() {
   dialog.remember()

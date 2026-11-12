@@ -16,6 +16,7 @@ import { checkNumberFields } from '../../../utils/numberFields.js'
 import { denseEffects, denseShorts } from '../../../core/stepEffects/dense.js'
 import { withShorts } from '../../../core/stepEffects/format.js'
 import OutputStep from '../ui/OutputStep.vue'
+import { denseRunSettings } from '../../../core/runSettings.js'
 
 // The depth maps fusion reads, for the steps' effect lines; `output` is the store's
 // outputPlan('dense'), what step 5 (Output) adds or replaces.
@@ -71,31 +72,13 @@ const effects = computed(() =>
 
 function run() {
   dialog.remember()
-  const {
-    auto,
-    minViews,
-    depthTolPct,
-    maxCost,
-    position,
-    step,
-    minTriAngleDeg,
-    maxIncidenceDeg,
-    removeIsolated,
-    replaceMain,
-  } = settings.value
-  emit('run', {
-    minViews: auto ? null : minViews,
-    maxCost: auto ? null : maxCost,
-    depthTolRel: depthTolPct / 100,
-    position,
-    step,
-    minTriAngleDeg,
-    maxIncidenceDeg,
-    removeIsolated,
-    replaceMain,
-    memBudgetBytes: memBudgetBytes.value,
-    ramBudgetBytes: memBudgetRamBytes.value,
-  })
+  emit(
+    'run',
+    denseRunSettings(settings.value, {
+      memBudgetBytes: memBudgetBytes.value,
+      ramBudgetBytes: memBudgetRamBytes.value,
+    }),
+  )
 }
 
 // One list of steps (useStepLayout.js): each registers for the step chain, its tuning

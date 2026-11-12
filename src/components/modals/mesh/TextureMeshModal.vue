@@ -18,6 +18,7 @@ import { TEXTURE_DEFAULTS, TEXTURE_PRESETS, TEXTURE_PRESET_META } from '../../..
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { textureEffects, textureShorts } from '../../../core/stepEffects/texture.js'
 import { withShorts } from '../../../core/stepEffects/format.js'
+import { textureRunSettings } from '../../../core/runSettings.js'
 
 // Texture Mesh (Tools ▸ Mesh ▾): a photo texture from the registered cameras
 // (core/products/texture/, dev/planning/plan-texture.md). Non-destructive: adds a NEW
@@ -64,22 +65,10 @@ const effects = computed(() =>
 )
 
 function run() {
-  const s = settings.value
   dialog.remember()
   emit('run', {
     sourceId: sourceId.value,
-    settings: {
-      pageSize: s.pageSize,
-      maxPages: Math.max(1, Math.round(s.maxPages)),
-      maxScale: s.maxScale,
-      smoothness: Math.max(0, s.smoothness),
-      levelColours: !!s.levelColours,
-      useMasks: !!s.useMasks,
-      unseen: s.unseen,
-      photoConsistency: !!s.photoConsistency,
-      useGpu: !!useGpu.value,
-      memBudgetBytes: memBudgetBytes.value,
-    },
+    settings: textureRunSettings(settings.value, { useGpu: useGpu.value, memBudgetBytes: memBudgetBytes.value }),
     name: `${source.value?.name ?? 'Mesh'} (textured)`,
   })
 }

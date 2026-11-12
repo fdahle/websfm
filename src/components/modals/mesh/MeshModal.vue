@@ -20,6 +20,7 @@ import { meshEffects, meshShorts } from '../../../core/stepEffects/mesh.js'
 import { withShorts } from '../../../core/stepEffects/format.js'
 import OutputStep from '../ui/OutputStep.vue'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
+import { meshRunSettings } from '../../../core/runSettings.js'
 
 // Build Mesh (screened Poisson over a dense cloud). Defaults are the single source of
 // truth in core/defaults.user.js (core/products/mesh.js keeps matching fallbacks).
@@ -103,7 +104,10 @@ const { memBudgetRamBytes } = useComputeSettings()
 
 function run() {
   dialog.remember()
-  emit('run', { ...settings.value, sourceId: sourceId.value, ramBudgetBytes: memBudgetRamBytes.value })
+  emit('run', {
+    ...meshRunSettings(settings.value, { ramBudgetBytes: memBudgetRamBytes.value }),
+    sourceId: sourceId.value,
+  })
 }
 
 // One list of steps (useStepLayout.js): each registers for the step chain, its tuning

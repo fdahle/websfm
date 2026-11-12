@@ -17,6 +17,7 @@ import { badgePreset } from '../../../core/recommendUi.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { depthMapEffects, keepMapsEffect } from '../../../core/stepEffects/depthMaps.js'
 import { depthMapsKey, depthRunShape, reusableDepthMaps } from '../../../core/dense/depthReuse.js'
+import { depthRunSettings } from '../../../core/runSettings.js'
 
 const props = defineProps({
   // Every image (the largest original sets what Quality means) and how many have a
@@ -124,20 +125,10 @@ const effects = computed(() =>
 provideStepLayout('depth-maps')
 
 // What the run receives: the store keys kept maps on exactly this (depthReuse.js).
-const runSettings = computed(() => {
-  const { filterRelTol, maxDim, bestK, ...rest } = settings.value
-  const out = {
-    ...rest,
-    filterRelTol: filterRelTol / 100,
-    useGpu: useGpu.value,
-    memBudgetBytes: memBudgetBytes.value,
-  }
-  // Only forward the numeric overrides when actually set — otherwise let the
-  // store/worker derive them (maxDim from quality, bestK per image).
-  if (maxDim > 0) out.maxDim = maxDim
-  if (bestK > 0) out.bestK = bestK
-  return out
-})
+// (core/runSettings.js, shared with the Workflow Builder.)
+const runSettings = computed(() =>
+  depthRunSettings(settings.value, { useGpu: useGpu.value, memBudgetBytes: memBudgetBytes.value }),
+)
 const keptMaps = computed(() => {
   const m = props.model
   if (!m || !props.savedMaps.length) return 0

@@ -156,6 +156,12 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Workflow Builder's Dense Model block replaces the main dense cloud when asked.** With
+  *Replace the main dense cloud* on, a workflow now replaces it as the Build Dense Cloud
+  dialog does, instead of adding "Dense cloud 2, 3, …" on every run. The Depth Maps, Dense,
+  DEM, Orthophoto, Mesh and Texture blocks now turn their settings into a run by the same
+  code as their dialogs, so a block runs exactly as its dialog would; unit tests check each
+  block against its dialog, with the defaults and with Replace on.
 - **Optimize cameras and Gradual selection keep GCPs and positions at full weight.**
   Both tools now weigh a tie point as the reconstruction does, one pixel of the size
   Detect Features ran at. Before, they re-solved with every tie at one full-size pixel, so

@@ -23,6 +23,14 @@ import {
   DECIMATE_MESH_DEFAULTS,
 } from './defaults.user.js'
 import { DETECTOR_IDS } from './features/learnedDetectors.js'
+import {
+  depthRunSettings,
+  denseRunSettings,
+  demRunSettings,
+  orthoRunSettings,
+  meshRunSettings,
+  textureRunSettings,
+} from './runSettings.js'
 import { initialMatchStrategy } from './recommend.js'
 import {
   END_TARGET,
@@ -624,6 +632,8 @@ export function blockOutputValid(type, state = {}) {
 // Modal-equivalent settings resolution for blocks executed without opening their
 // modal. Preset deltas are applied last; editing an individual preset-controlled
 // field makes the builder mark the block `custom`.
+const blockSizeBy = (v) => (v.gsd > 0 ? 'gsd' : v.longSide > 1 ? 'px' : 'gsd')
+
 export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
   const value = { ...settings }
   if (type === 'detect-features') {
@@ -648,65 +658,17 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
     return { ...MATCH_DEFAULTS, ...value, ...(MATCH_PRESETS[value.preset] || {}), strategy, useGpu: runtime.useGpu }
   }
   if (type === 'reconstruct') return { ...RECONSTRUCT_DEFAULTS, ...value, ...(RECONSTRUCT_PRESETS[value.preset] || {}) }
-  if (type === 'compute-depth') {
-    const { filterRelTol, maxDim, bestK, ...rest } = { ...DEPTHMAP_DEFAULTS, ...value }
-    return {
-      ...rest,
-      filterRelTol: filterRelTol / 100,
-      useGpu: runtime.useGpu,
-      memBudgetBytes: runtime.memBudgetBytes,
-      ...(maxDim > 0 ? { maxDim } : {}),
-      ...(bestK > 0 ? { bestK } : {}),
-    }
-  }
-  if (type === 'dense') {
-    const v = { ...DENSE_FUSE_DEFAULTS, ...value }
-    return {
-      minViews: v.auto ? null : v.minViews,
-      maxCost: v.auto ? null : v.maxCost,
-      depthTolRel: v.depthTolPct / 100,
-      step: v.step,
-      minTriAngleDeg: v.minTriAngleDeg,
-      maxIncidenceDeg: v.maxIncidenceDeg,
-      removeIsolated: v.removeIsolated,
-      position: v.position,
-      memBudgetBytes: runtime.memBudgetBytes,
-      // The whole limit: fusion keeps its accumulators in wasm memory (fusionPlan.js).
-      ...(runtime.ramBudgetBytes > 0 ? { ramBudgetBytes: runtime.ramBudgetBytes } : {}),
-    }
-  }
-  if (type === 'gen-dem') {
-    const { gsd, ...rest } = { ...DEM_DEFAULTS, ...value, memBudgetBytes: runtime.memBudgetBytes }
-    return gsd > 0 ? { ...rest, gsd } : rest
-  }
-  if (type === 'gen-ortho') {
-    const v = { ...ORTHO_DEFAULTS, ...value }
-    return {
-      ...v,
-      gsd: v.gsd > 0 ? v.gsd : 0,
-      depthTolRel: v.depthTolRel / 100,
-      maxCost: v.maxCost > 0 ? v.maxCost : Infinity,
-      memBudgetBytes: runtime.memBudgetBytes,
-    }
-  }
-  if (type === 'gen-mesh')
-    return {
-      ...MESH_DEFAULTS,
-      ...value,
-      ...(MESH_PRESETS[value.preset] || {}),
-      // The whole memory limit: how many tiles of a tiled mesh solve at once.
-      ...(runtime.ramBudgetBytes > 0 ? { ramBudgetBytes: runtime.ramBudgetBytes } : {}),
-    }
+  // The Reconstruct blocks convert through the dialogs' own functions (core/runSettings.js).
+  if (type === 'compute-depth') return depthRunSettings(value, runtime)
+  if (type === 'dense') return denseRunSettings(value, runtime)
+  // A block's form has GSD and "long side when GSD is 0"; the dialog's `sizeBy` picks one.
+  if (type === 'gen-dem') return demRunSettings({ ...value, sizeBy: blockSizeBy(value) }, runtime)
+  if (type === 'gen-ortho') return orthoRunSettings({ ...value, sizeBy: blockSizeBy(value) }, runtime)
+  if (type === 'gen-mesh') return meshRunSettings(value, runtime)
   if (type === 'texture-mesh') {
-    const { decimateTo, ...rest } = { ...TEXTURE_DEFAULTS, ...value }
-    return {
-      ...rest,
-      maxScale: Number(rest.maxScale),
-      pageSize: Number(rest.pageSize),
-      decimateTo: Math.max(0, Math.round(decimateTo || 0)),
-      useGpu: runtime.useGpu,
-      memBudgetBytes: runtime.memBudgetBytes,
-    }
+    // Decimating first is the block's own step (useWorkflowWiring.js runTextureBlock).
+    const decimateTo = Math.max(0, Math.round(value.decimateTo || 0))
+    return { ...textureRunSettings(value, runtime), decimateTo }
   }
   // The tool blocks build the same request settings their dialogs emit.
   if (type === 'filter-cloud') {

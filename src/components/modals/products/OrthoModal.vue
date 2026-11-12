@@ -21,6 +21,7 @@ import { useComputeSettings } from '../../../composables/useComputeSettings.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { orthoEffects, orthoShorts, frameText } from '../../../core/stepEffects/raster.js'
 import { withShorts } from '../../../core/stepEffects/format.js'
+import { orthoRunSettings } from '../../../core/runSettings.js'
 
 // Build Orthophoto. Reprojects each cell of a SURFACE through the cached depth
 // maps (occlusion via their depth planes, colour from their RGB planes). The
@@ -146,20 +147,9 @@ const numbers = computed(() => {
   })
 })
 
+// What a run gets (core/runSettings.js, shared with the Workflow Builder).
 function runSettings() {
-  const { depthTolRel, maxCost, gsd, longSide, ...rest } = settings.value
-  const byPx = rest.sizeBy === 'px'
-  return {
-    ...rest,
-    memBudgetBytes: memBudgetBytes.value,
-    // The surface is built at its own natural resolution and the ortho grid is
-    // resampled to `gsd` (or the long side in px); passing it through as the surface
-    // GSD too would make a fine ortho pay for a needlessly fine mesh rasterisation.
-    gsd: !byPx && gsd > 0 ? gsd : 0,
-    longSide: byPx && longSide > 1 ? longSide : 0,
-    depthTolRel: depthTolRel / 100,
-    maxCost: maxCost > 0 ? maxCost : Infinity,
-  }
+  return orthoRunSettings(settings.value, { memBudgetBytes: memBudgetBytes.value })
 }
 function run() {
   dialog.remember()
