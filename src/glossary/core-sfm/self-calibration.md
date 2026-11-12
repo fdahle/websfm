@@ -42,7 +42,9 @@ point and the decentring terms $p_1, p_2$, then $k_3$ — each unlocked only onc
 camera and observation counts justify it. A four-term fisheye's $k_4$ comes last, on
 the pass after $k_3$ was first refined. The decentring terms are also tested: the
 first solve that frees them runs with and without them, and they stay only where they
-clearly lower the reprojection error, as they do for a decentred drone lens. When a
+clearly lower the reprojection error, as they do for a decentred drone lens. Under
+RTK or PPK camera positions they stay without the test: with the camera heights held, even
+a decentring too small to show in the reprojection error moves the ground heights. When a
 sensor already carries a calibrated distortion model, self-calibration is switched off
 instead and the calibration is kept.
 

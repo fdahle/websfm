@@ -29,6 +29,7 @@ import {
   qualifyingGcps,
   buildGcpAnchors,
 } from './surveyConstraints.js'
+import { surveyGradePositions } from './cameraPriors.js'
 import { compareRobustCost, projectFullXYZ } from './baAcceptance.js'
 import {
   buildBaObservations,
@@ -255,6 +256,12 @@ export function createBundleSession(ctx) {
       reference,
     })
 
+  // Survey-grade positions that a prior solve can use on these cameras, or null.
+  const positionsHoldBlock = (uuidList) => {
+    const grade = surveyGradePositions(cameraPriors, cfg.selfCalDecentringHeldSigma, cfg.cameraPriorBaMinCameras)
+    return grade.held && buildCameraPriorConstraints(uuidList) ? grade : null
+  }
+
   const cameraPriorReprojectionAccepts = (result) => {
     const allowance = Math.max(
       cfg.cameraPriorMaxReprojIncreasePx,
@@ -434,7 +441,19 @@ export function createBundleSession(ctx) {
     // The decentring trial: the same solve without p1, p2. They stay only if they lower
     // the reprojection RMS by selfCalDecentringMinGain: a decentred lens does (quarry,
     // 4 %); on a centred or already undistorted one they only trade with the poses.
-    if (trialP && result) {
+    // Under survey-grade camera positions they stay without a trial: the positions hold
+    // the camera heights, and a decentring too small to lower the RMS still moves the
+    // ground under them through the focal (tuning.js selfCalDecentringHeldSigma).
+    const held = trialP && result ? positionsHoldBlock(uuidList) : null
+    if (held) {
+      decentring = 'kept'
+      log(
+        `${label} decentring p1, p2 kept without a trial: ${held.surveyGrade} of ${held.total} camera ` +
+          `positions within ${cfg.selfCalDecentringHeldSigma} m hold the block`,
+        'info',
+        'Reconstruction',
+      )
+    } else if (trialP && result) {
       const without = await solve(withoutDecentring(refineMode))
       noteBaSolver(`${label} (without p1, p2)`, without)
       if (without?.costAfter != null && result.costAfter != null) {

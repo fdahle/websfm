@@ -1633,6 +1633,36 @@ describe('reconstruct — self-calibration propagation and bookkeeping', () => {
     }, 120_000)
   }
 
+  // Survey-grade camera positions keep p1, p2 without the trial (tuning.js
+  // selfCalDecentringHeldSigma); positions at consumer-GPS accuracy still go through it.
+  // Either way the solved decentring is the lens's: recovered on a decentred one, ~0 on
+  // a centred one.
+  for (const [what, dist, sigma, expectLog] of [
+    [
+      'a decentred lens, RTK positions',
+      { k1: -0.05, k2: 0.008, p1: 0.0025, p2: -0.0015 },
+      0.05,
+      'kept without a trial',
+    ],
+    ['a centred lens, RTK positions', { k1: -0.05, k2: 0.008 }, 0.05, 'kept without a trial'],
+    ['a centred lens, consumer GPS', { k1: -0.05, k2: 0.008 }, 5, 'dropped'],
+  ]) {
+    it(`decides p1, p2 on ${what}`, async () => {
+      const sc = aerialBlock({ seed: 11, rows: 4, cols: 6, nPoints: 2500, dist, priors: true })
+      const cameraPriors = sc.cameraPriors.map((p) => ({ ...p, accuracyX: sigma, accuracyY: sigma, accuracyZ: sigma }))
+      const logs = []
+      const out = await reconstruct(
+        { images: sc.images, pairs: sc.pairs, cameraPriors, settings: { secondaryModels: false } },
+        { onLog: (m) => logs.push(String(m)) },
+      )
+      expect(out.status).toBe('done')
+      expect(logs.some((m) => m.includes(`decentring p1, p2 ${expectLog}`))).toBe(true)
+      const [row] = out.summary.selfCalDistortion
+      expect(Math.abs(row.p1 - (dist.p1 ?? 0))).toBeLessThan(5e-4)
+      expect(Math.abs(row.p2 - (dist.p2 ?? 0))).toBeLessThan(5e-4)
+    }, 120_000)
+  }
+
   for (const mode of ['f', 'f,cxcy']) {
     it(`propagates a '${mode}' self-calibration to every image of the sensor`, async () => {
       const sc = aerialBlock({ seed: 3, rows: 4, cols: 6, nPoints: 2500, dist: { k1: 0, k2: 0 }, focalError: 1.06 })

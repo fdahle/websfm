@@ -229,6 +229,16 @@ export const SFM_TUNING = {
   // vertical; South Building, ETH3D playground and UseGeo (undistorted photos) 0.0 %,
   // where freeing them moved the cameras 9–24 % further from the reference.
   selfCalDecentringMinGain: 0.01,
+  // …but no trial under survey-grade camera positions (cameraPriors.js
+  // surveyGradePositions: at least half the priors within this σ on every axis, metres):
+  // p1, p2 stay. With the camera heights held, a small real decentring that lowers no RMS
+  // (GeoScan PUTI, RTK only: 0.0 %) still trades with the focal and so with the ground
+  // height under the cameras. Measured 2026-11-12: PUTI checkpoints V 9.2 → 7.8 cm with
+  // Metashape's p1, p2 (Metashape 6.4); UseGeo with its positions at ±3/5 cm even (LiDAR
+  // edge dome −3.5 → −2.4 cm). Consumer GPS (PUTI at ±10/20 m) is not held: kept there,
+  // checkpoints H 9 → 45 cm. GCP-held film blocks keep the trial (kept: Casa Grande
+  // 1.09/1.01 → 1.12/1.05 m, Iceland even).
+  selfCalDecentringHeldSigma: 0.1,
   // Adding images to a saved model (extendModel.js) rebuilds the old images' keypoints in
   // the model's frame and compares them with the pixels the model saved: above this
   // median gap (px) they are not the keypoints the model was solved from (re-detected

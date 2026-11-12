@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildCameraPriors, orientationPriorInSfm, surveyFrameFor, gcpToSurveyFrame } from './cameraPriors.js'
+import {
+  buildCameraPriors,
+  orientationPriorInSfm,
+  surveyFrameFor,
+  gcpToSurveyFrame,
+  surveyGradePositions,
+} from './cameraPriors.js'
 import { ensureProjection } from '../crs.js'
 import { estimatedPose } from './cameraEstimated.js'
 
@@ -231,5 +237,31 @@ describe('orientationPriorInSfm', () => {
   it('skips incomplete and gimbal-locked orientations', () => {
     expect(orientationPriorInSfm({ omega: 0, phi: null, kappa: 0 }, I)).toBeNull()
     expect(orientationPriorInSfm({ omega: 0, phi: 90, kappa: 0 }, I)).toBeNull()
+  })
+})
+
+describe('surveyGradePositions', () => {
+  const at = (sx, sy, sz) => ({ accuracyX: sx, accuracyY: sy, accuracyZ: sz })
+  it('holds a block whose RTK positions are within the limit on every axis', () => {
+    expect(surveyGradePositions([at(0.02, 0.02, 0.04), at(0.03, 0.03, 0.05), at(0.02, 0.02, 0.03)], 0.1)).toEqual({
+      held: true,
+      surveyGrade: 3,
+      total: 3,
+    })
+  })
+  it('does not hold it with consumer GNSS or with no accuracies (the 5 m default)', () => {
+    expect(surveyGradePositions([at(3, 3, 6), at(3, 3, 6), at(3, 3, 6)], 0.1).held).toBe(false)
+    expect(surveyGradePositions([{}, {}, {}], 0.1).held).toBe(false)
+  })
+  it('needs every axis: a precise plan position with a loose height is not survey grade', () => {
+    expect(surveyGradePositions([at(0.02, 0.02, 2), at(0.02, 0.02, 2), at(0.02, 0.02, 2)], 0.1).surveyGrade).toBe(0)
+  })
+  it('needs half the priors and the minimum count', () => {
+    const rtk = at(0.02, 0.02, 0.04)
+    const gps = at(3, 3, 6)
+    expect(surveyGradePositions([rtk, rtk, rtk, gps, gps], 0.1).held).toBe(true)
+    expect(surveyGradePositions([rtk, rtk, rtk, gps, gps, gps, gps], 0.1).held).toBe(false)
+    expect(surveyGradePositions([rtk, rtk], 0.1, 3).held).toBe(false)
+    expect(surveyGradePositions([], 0.1).held).toBe(false)
   })
 })

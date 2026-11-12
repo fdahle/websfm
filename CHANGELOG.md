@@ -40,6 +40,17 @@ Notable changes to websfm. The format follows
   factorisation added no measurable time (Reconstruct 80 s either way).
 
 ### Changed
+- **Truer heights from RTK-only drone blocks.** With RTK or PPK camera positions in the
+  solve, Auto self-calibration now always solves the lens's decentring (p1, p2) instead of
+  testing whether it lowers the reprojection error. With the camera heights held, even a
+  decentring too small to show there moved the ground under them. GeoScan PUTI (444
+  photos, RTK only, GCPs as checkpoints): p1, p2 now Metashape's (0.00019 / −0.00006
+  against 0.00017 / −0.00007), checkpoints H / V 3.5 / 9.2 → 3.7 / 7.8 cm, mean height
+  +7.5 → +5.5 cm (Metashape 2.4 / 6.4 cm, +4.1); UseGeo (224 undistorted photos, its
+  positions at ±3 / 5 cm) even against its LiDAR (offset 2.7 → 3.0 cm, edge dome −3.5 →
+  −2.4 cm, RMS 5.4 → 5.3 cm). Where the positions are consumer GPS, or GCPs hold the
+  block, the test stays: keeping p1, p2 there gave PUTI at ±10 / 20 m checkpoints H 9 →
+  45 cm, Casa Grande 1978 1.09 / 1.01 → 1.12 / 1.05 m and Iceland 1980 the same.
 - **GCPs and RTK positions hold the model more firmly.** In the bundle adjustment a tie
   point now counts as precisely as it was measured, at the size Detect Features ran at,
   so GCPs and accurate camera positions carry their stated weight against it. Before,

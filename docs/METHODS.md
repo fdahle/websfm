@@ -449,7 +449,16 @@ runs with and without them from the same start; they stay only when they lower t
 lens they fit nothing and trade with the poses (worse heights); the size of the solved
 decentring does not tell the cases apart, the RMS gain does. On a lens that needs them they
 remove most of a GCP-free nadir block's dome
-([BENCHMARKS](BENCHMARKS.md#drone-blocks-no-positions-in-the-solve)).
+([BENCHMARKS](BENCHMARKS.md#drone-blocks-no-positions-in-the-solve)). Under **survey-grade
+camera positions** (at least half the priors within `selfCalDecentringHeldSigma`, 0.1 m, on
+every axis, and enough of them for a prior solve; `cameraPriors.js surveyGradePositions`)
+p1, p2 stay without a trial. The positions hold the camera heights, and a decentring too
+small to lower the RMS still trades with the focal and so with the ground height under
+them: on an RTK-only block (GeoScan PUTI, 0.0 % RMS gain) keeping them gives Metashape's
+p1, p2 and checkpoints V 9.2 → 7.8 cm; on an undistorted block with ±3/5 cm positions
+(UseGeo) it is even. Positions at consumer-GNSS accuracy do not hold the block (kept there:
+PUTI checkpoints H 9 → 45 cm), and GCPs alone do not either (film blocks even or slightly
+worse), so both keep the trial.
 
 ### 4.7 Rolling shutter
 

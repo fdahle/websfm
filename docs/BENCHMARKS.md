@@ -84,26 +84,27 @@ less than 1 mm, so it gets no row of its own.
 | --- | --- | --- | --- | --- | --- |
 | quarry (347, 9 checkpoints) | WebSfM | 4.6 / 21.6 | +21.2 | 6.3 / 4.4 | 327 |
 | | Metashape | **3.8 / 17.8** | +17.6 | **4.5 / 3.2** | 295 |
-| GeoScan PUTI (444, 15 checkpoints) | WebSfM | 3.5 / 9.2 | +7.5 | 0.6 / **0.9** | 351 |
+| GeoScan PUTI (444, 15 checkpoints) | WebSfM (11-12) | 3.7 / 7.8 | +5.5 | **0.5 / 0.9** | 346 |
 | | Metashape | **2.4 / 6.4** | +4.1 | **0.5** / 1.0 | 418 |
 
-- **Metashape's checkpoint heights are 3–4 cm closer** on both blocks. WebSfM's cameras
-  are level with it on PUTI. Before 11-11 the gap was 5–12 cm, and quarry's cameras were
+- **Metashape's checkpoint heights are closer**: 4 cm on quarry, 1.4 cm on PUTI. WebSfM's
+  cameras are level with it on PUTI. Before 11-11 the gap was 5–12 cm, and quarry's cameras were
   10.4 / 5.4 cm off: a tie point counted 5–6 times what it measured against the RTK
   positions (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly).
-- **Both tools put the ground too high on both blocks; WebSfM 2–4 cm more.** On quarry the
-  two solve the same focal (4,403.5 px). On PUTI WebSfM's is shorter: 5,671.8 against
-  Metashape's 5,675.3 and 5,676.9 in GeoScan's own project with its GCPs as control, whose
-  cameras sit on the RTK positions (mean height −0.1 cm), so the RTK file is sound. Most of
-  PUTI's gap is the decentring terms: WebSfM keeps p1, p2 only where they lower the
-  photos-alone RMS by 1 %, and on PUTI they lower it by 0.0 % because the principal point
-  stands in for them, 2.8 px off. Kept, they come out as Metashape's (0.00019 / −0.00006
-  against 0.00017 / −0.00007) and the checkpoints go to 3.7 / 7.8 cm, mean +5.5 (11-12).
-  Nothing the solve sees tells this lens from the already undistorted photos of South
-  Building, ETH3D and UseGeo, where freeing p1, p2 moves the cameras away from the
-  reference: not the RMS, not |p|/σ (PUTI 27, South Building 30), not the fit to the RTK
-  positions. Detecting at 4,000 or 6,000 px instead of 2,400 does not close it either
-  (8.4 and 10.3 cm). Metashape itself moves 6 cm when it is given one more lens term.
+- **Both tools put the ground too high on both blocks.** On quarry the two solve the
+  same focal (4,403.5 px). On PUTI WebSfM's is shorter: 5,671.8 against Metashape's 5,675.3
+  and 5,676.9 in GeoScan's own project with its GCPs as control, whose cameras sit on the
+  RTK positions (mean height −0.1 cm), so the RTK file is sound. Until 11-12 most of PUTI's
+  gap was the decentring terms: WebSfM kept p1, p2 only where they lowered the photos-alone
+  RMS by 1 %, and on PUTI they lower it by 0.0 % because the principal point stands in for
+  them, 2.8 px off. Nothing the solve sees tells this lens from the already undistorted
+  photos of South Building, ETH3D and UseGeo, where freeing p1, p2 without control moves the
+  cameras away from the reference: not the RMS, not |p|/σ (PUTI 27, South Building 30).
+  What does is survey-grade camera positions, so WebSfM now keeps p1, p2 under them (UseGeo
+  with its positions: even) and they come out as Metashape's (0.00019 / −0.00006 against
+  0.00017 / −0.00007; CHANGELOG ▸ Truer heights from RTK-only drone blocks). Detecting at
+  4,000 or 6,000 px instead of 2,400 did not close the gap (8.4 and 10.3 cm). Metashape
+  itself moves 6 cm when it is given one more lens term.
 - **Most of the quarry's height offset is shared by both tools** (+18 cm in Metashape).
   The GCPs come in LV03 / LN02 and are converted to ETRS89 with swisstopo's CHENyx06 and
   CHGeo2004 grids. The camera heights are the drone's ellipsoidal RTK heights. A datum

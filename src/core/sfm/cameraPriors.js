@@ -191,3 +191,18 @@ export function buildCameraPriors(poses, images, crs, { surveyFrame = null, leve
     }
   })
 }
+
+/**
+ * Whether survey-grade camera positions hold the block: at least `minCount` priors, and
+ * at least half of all of them, give every axis an accuracy within `maxSigma` (metres).
+ * RTK and PPK positions do (a few cm); a consumer GNSS (metres) or a prior without
+ * accuracies (the 5 m the solve then assumes) does not. Returns
+ * `{ held, surveyGrade, total }`.
+ */
+export function surveyGradePositions(priors, maxSigma, minCount = 3) {
+  const total = priors?.length ?? 0
+  const surveyGrade = (priors ?? []).filter((p) =>
+    [p.accuracyX, p.accuracyY, p.accuracyZ].every((v) => Number.isFinite(v) && v > 0 && v <= maxSigma),
+  ).length
+  return { held: surveyGrade >= Math.max(1, minCount) && 2 * surveyGrade >= total, surveyGrade, total }
+}
