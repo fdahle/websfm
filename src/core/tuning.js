@@ -273,6 +273,11 @@ export const SFM_TUNING = {
   secondaryBoundaryImages: 12, // registered overlap halo used to align arbitrary frames
   seedRetryMax: 4, // retry alternate initial pairs when the primary stalls tiny
   seedRetryMinFraction: 0.5, // below this registered share, seed choice is still suspect
+  // ── GCP triangulation, robust mode (gcpTriangulation.js; guides and target detection) ──
+  // Absolute floor (native px) of the median cut max(3 × median, floor): on a clean set
+  // the median is ~0, and a pure multiple would reject honest marks over noise. The cut
+  // is for misclicks, so the floor is a misclick's size, not a marking accuracy.
+  gcpRobustFloorPx: 25,
 }
 
 // Tie-point matching knobs read in useMatchesStore but NOT exposed in

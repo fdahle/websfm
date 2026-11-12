@@ -25,6 +25,7 @@
 
 import { triangulateDlt, makeP34flat } from './reconstruction.js'
 import { cameraCenter, projectPoint, rowCamera } from './geometry.js'
+import { SFM_TUNING } from '../tuning.js'
 
 // Gauss-Newton refinement (defaults co-located with the algorithm, per CLAUDE.md).
 const GN_MAX_ITERS = 10
@@ -53,8 +54,8 @@ const GN_DAMPING = 1e-9
 const ROBUST_MEDIAN_FACTOR = 3
 // Absolute floor on the cut, load-bearing in the other direction: on a clean set
 // the median residual is ~0, and a pure multiple of it would reject honest marks
-// over sub-pixel noise.
-const ROBUST_FLOOR_PX = 25
+// over sub-pixel noise (SFM_TUNING.gcpRobustFloorPx).
+const ROBUST_FLOOR_PX = SFM_TUNING.gcpRobustFloorPx
 // Never robustify below this many views: with 2 the fit is exact (nothing to
 // disagree with), and rejection must always leave a triangulable pair.
 const ROBUST_MIN_VIEWS = 3

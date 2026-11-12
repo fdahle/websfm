@@ -157,7 +157,9 @@ LightGlue (Lindenberger et al. 2023) is an attention-based learned matcher.
    in `crates/matching`) → inlier mask. Each new best sample gets a **local optimisation**:
    refit F on its inliers and recount, up to four rounds while the set changes, keeping a
    refit only if it explains at least as many points. A homography is also fitted, for an
-   **H-vs-F** degeneracy signal.
+   **H-vs-F** degeneracy signal. It is logged and flags the pair (`entry.degenerate`), but
+   no gate reads it: seed selection (§4.2) guards against planar and low-parallax pairs by
+   its parallax floor and the calibrated five-point solve instead.
    **MAGSAC++** (opt-in, `verifier: 'magsac'`, `crates/matching/src/magsac.rs`; Barath et
    al. 2020): the same samples scored by the σ-marginalised loss (σ uniform on
    [0, σ_max], ν = 4, cut-off 3.64 σ_max = the user's threshold) and polished by
@@ -767,13 +769,14 @@ only the point moves.
 **Robust mode** rejects marks in two stages, and the order is the method:
 1. an **IRLS fit under Huber** (δ = 2 px, `w = min(1, δ/|r|)`), so a wild mark pulls with
    bounded force;
-2. a **median cut** on that fit's residuals: drop views beyond `max(3 × median, 3 px)`,
+2. a **median cut** on that fit's residuals: drop views beyond `max(3 × median, 25 px)`,
    only while ≥ 2 marks survive.
 
 Least squares has a breakdown point of zero: an outlier drags the point until its own
 residual looks ordinary, so a median cut on that fit rejects nothing. The Huber fit
-separates the residuals first. The 3 px floor keeps a clean set (median ≈ 0) from losing
-honest marks to sub-pixel noise. The **final fit is plain least squares over the
+separates the residuals first. The 25 px floor (`SFM_TUNING.gcpRobustFloorPx`) keeps a
+clean set (median ≈ 0) from losing honest marks to noise: the cut is for misclicks, so the
+floor is a misclick's size, not a marking accuracy. The **final fit is plain least squares over the
 survivors**. Rejected marks are still reported (`perViewReprojPx`, the guide's
 `rejectedCount`), and rejection is scoped to that one prediction: the UI says "7 of 9
 marks", not "2 ignored".
@@ -818,8 +821,10 @@ fit to grid + height leaves metres of model error over a few kilometres that per
 control cannot remove, and compresses relief by k. A conformal projection is locally a
 similarity, so the frame divides out k about the targets' centroid, corrects k's variation
 to second order (fixed by ∇log k for a conformal map), places a point h above its foot at
-ζ·(1 + h/R) along the tilted normal and restores the curvature drop |ζ|²/2R. The residual
-is third order (~10 µm over 10 km at 85°S). The similarity carries the frame (`sim.local`)
+ζ·(1 + h/R) along the tilted normal and restores the curvature drop |ζ|²/2R. The
+conformal part of the residual is third order (~10 µm over 10 km at 85°S); with relief,
+the height terms leave millimetres against true ENU (RMS 0.4 mm over ±5 km and ±500 m of
+relief at 80°S, 7 mm over ±10 km and ±1,000 m in UTM, 24 mm over ±20 km and ±1,500 m). The similarity carries the frame (`sim.local`)
 and every consumer maps through it back to the grid; GCP precision scales by 1/k
 horizontally. Without a projected CRS the fit is the plain grid fit.
 
