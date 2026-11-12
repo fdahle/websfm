@@ -1,5 +1,6 @@
 import { ref } from 'vue'
-import { cancelRun } from '../workers/computeClient.js'
+// The pool's cancel (computeClient.js); `cancelRun` below is the Cancel button's.
+import { cancelRun as cancelWorkers } from '../workers/computeClient.js'
 import { useModelsStore } from '../stores/useModelsStore.js'
 import { useLog } from './useLog.js'
 import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
@@ -274,7 +275,7 @@ export function usePipeline({
     return withProgress(
       'Detecting Features',
       pending.length,
-      () => cancelRun('detection cancelled'),
+      () => cancelWorkers('detection cancelled'),
       { unit: 'images' },
       async () => {
         // No per-image overlay callback: the keypoint overlay is a global toggle gated on
@@ -306,7 +307,7 @@ export function usePipeline({
     return withProgress(
       'Matching Features',
       0,
-      () => cancelRun('matching cancelled'),
+      () => cancelWorkers('matching cancelled'),
       { unit: 'pairs' },
       async () => {
         await matchAll(images.value, settings, report, shouldCancel, opts)
@@ -323,7 +324,7 @@ export function usePipeline({
     return withProgress(
       'Sparse Reconstruction',
       ready.length,
-      () => cancelRun('reconstruction cancelled'),
+      () => cancelWorkers('reconstruction cancelled'),
       { steps: SPARSE_STEPS },
       async () => {
         await reconstruct(settings, report)
@@ -339,7 +340,7 @@ export function usePipeline({
     return withProgress(
       'Building Depth Maps',
       images.value.length,
-      () => cancelRun('depth maps cancelled'),
+      () => cancelWorkers('depth maps cancelled'),
       { unit: 'images' },
       async () => {
         await computeDepthMaps(settings, report, opts)
@@ -353,7 +354,7 @@ export function usePipeline({
     return withProgress(
       'Building Dense Cloud',
       1,
-      () => cancelRun('densify cancelled'),
+      () => cancelWorkers('densify cancelled'),
       { indeterminate: true, unit: 'maps', steps: FUSION_STEPS },
       async () => {
         await densify(settings, report)
@@ -368,7 +369,7 @@ export function usePipeline({
     return withProgress(
       'Building DEM',
       1,
-      () => cancelRun('DEM cancelled'),
+      () => cancelWorkers('DEM cancelled'),
       { indeterminate: true },
       async () => {
         await generateDem(settings, report)
@@ -382,7 +383,7 @@ export function usePipeline({
     return withProgress(
       'Building Orthophoto',
       1,
-      () => cancelRun('orthophoto cancelled'),
+      () => cancelWorkers('orthophoto cancelled'),
       { indeterminate: true },
       async () => {
         await generateOrtho(settings, report)
@@ -397,7 +398,7 @@ export function usePipeline({
     return withProgress(
       'Building Mesh',
       1,
-      () => cancelRun('mesh cancelled'),
+      () => cancelWorkers('mesh cancelled'),
       { indeterminate: true },
       async () => {
         await generateMesh(settings, report)
@@ -432,7 +433,7 @@ export function usePipeline({
     return withProgress(
       titles[request.mode] ?? 'Editing Cloud',
       1,
-      () => cancelRun('cloud edit cancelled'),
+      () => cancelWorkers('cloud edit cancelled'),
       { indeterminate: true },
       async () => {
         // ok ⇔ the store committed a result (it returns null for a refusal, an empty
@@ -450,7 +451,7 @@ export function usePipeline({
     return withProgress(
       'Texturing Mesh',
       100,
-      () => cancelRun('texture cancelled'),
+      () => cancelWorkers('texture cancelled'),
       {},
       async () => {
         const cloud = await textureMesh(request, report)
