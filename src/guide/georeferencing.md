@@ -40,6 +40,11 @@ the residuals cannot show it. For heights to a few centimetres, add a few GCPs, 
 oblique photos, or a second flight at another height; keep the GCPs as checkpoints to
 measure it.
 
+Positions along one straight line (a single strip, a corridor) do not fix how the model
+is rolled about that line. In an aerial project the photos looking down fix it, as do
+orientation angles (omega, phi, kappa) imported with the positions; otherwise
+Georeference refuses and asks for GCPs or a second strip.
+
 ## Ground control points
 A GCP needs 3D coordinates and marks in at least two registered images; use at least
 three, spread over the area and its height range. Keep some as checkpoints for an

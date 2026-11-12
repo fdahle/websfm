@@ -398,3 +398,70 @@ it('places a block flown with a GNSS lever arm by its antenna positions', async 
   for (const r of rows) expect(r.dTotal).toBeLessThan(1e-3)
   scope.stop()
 })
+
+it.each([
+  ['object', null],
+  ['aerial', 0.5],
+])('a single strip placed by its positions: %s project', async (sceneType, maxRollDeg) => {
+  // 20 nadir cameras along east, GPS σ 1.5 m. An object project cannot tell the roll
+  // about the line and refuses; an aerial one fixes it from the photos looking down.
+  for (const start of [3, 11, 29, 47, 83]) await stripCase(sceneType, maxRollDeg, start)
+})
+
+async function stripCase(sceneType, maxRollDeg, start) {
+  let seed = start
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0), seed / 2 ** 32)
+  const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd())
+  const nadir = [
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 0, -1],
+  ]
+  const cams = new Map(),
+    poses = [],
+    images = []
+  for (let i = 0; i < 20; i++) {
+    const id = `c${i}`
+    const Cs = [i * 5 + 0.002 * gauss(), 0.002 * gauss(), 12 + 0.002 * gauss()] // SfM = truth / 10
+    cams.set(id, {
+      R: nadir,
+      t: [0, 1, 2].map((r) => -(nadir[r][0] * Cs[0] + nadir[r][1] * Cs[1] + nadir[r][2] * Cs[2])),
+    })
+    poses.push({
+      imageId: id,
+      x: 50 * i + 1.5 * gauss(),
+      y: 1.5 * gauss(),
+      z: 120 + 1.5 * gauss(),
+      accuracyX: 1.5,
+      accuracyY: 1.5,
+      accuracyZ: 1.5,
+    })
+    images.push({ id, uuid: id })
+  }
+  const log = vi.fn()
+  const scope = effectScope()
+  const api = scope.run(() =>
+    createGeoreferencing({
+      sparseCameras: ref(cams),
+      images: ref(images),
+      georef: ref(null),
+      healthDirty: ref(0),
+      poses: () => poses,
+      gcps: () => [],
+      currentCrs: () => 'local',
+      save: vi.fn(),
+      log,
+      sceneType: () => sceneType,
+    }),
+  )
+  const fitted = await api.georeference()
+  if (maxRollDeg == null) {
+    expect(fitted).toBeNull()
+    expect(log.mock.calls.some(([m]) => /lie along one line/.test(m))).toBe(true)
+  } else {
+    // SfM up (z) maps to the survey's up within the bound.
+    const up = [fitted.sim.R[0][2], fitted.sim.R[1][2], fitted.sim.R[2][2]]
+    expect((Math.acos(up[2]) * 180) / Math.PI).toBeLessThan(maxRollDeg)
+  }
+  scope.stop()
+}

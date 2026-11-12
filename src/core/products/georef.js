@@ -132,7 +132,95 @@ export function fitSimilarity(pairs) {
     const p = applySimilarity({ scale, R, t }, src)
     sse += weights[k] * ((p[0] - dst[0]) ** 2 + (p[1] - dst[1]) ** 2 + (p[2] - dst[2]) ** 2)
   }
-  return { scale, R, t, rms: Math.sqrt(sse / weightSum), count: n }
+  const rms = Math.sqrt(sse / weightSum)
+  return {
+    scale,
+    R,
+    t,
+    rms,
+    count: n,
+    roll: rollAboutStrip(
+      pairs.map((p) => p.dst),
+      weights,
+      rms,
+    ),
+  }
+}
+
+// How well the rotation about a strip's line is fixed. Targets on (nearly) one line fix
+// it only through their spread across the line: σ_roll ≈ σ / √(n·λ₂), σ the per-axis
+// residual and λ₂ the second eigenvalue of the targets' weighted covariance. Noise always
+// gives a strip some spread, so the collinearity test passes while the roll is arbitrary
+// (90° median error over a 30-camera strip). → { sigmaDeg, elongated } where `elongated`
+// (λ₂ < 0.1·λ₁) marks a strip-like layout, for which a large σ is the strip's roll and
+// not the general tilt of a small, noisy block.
+export const STRIP_ROLL_MAX_DEG = 1
+function rollAboutStrip(points, weights, rms) {
+  const n = points.length
+  let ws = 0
+  const c = [0, 0, 0]
+  points.forEach((p, k) => {
+    ws += weights[k]
+    for (let i = 0; i < 3; i++) c[i] += weights[k] * p[i]
+  })
+  for (let i = 0; i < 3; i++) c[i] /= ws
+  const C = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
+  points.forEach((p, k) => {
+    const d = [p[0] - c[0], p[1] - c[1], p[2] - c[2]]
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] += (weights[k] * d[i] * d[j]) / ws
+  })
+  const [l1, l2] = symmetricEigenvalues3(C)
+  const sigma = rms / Math.sqrt(3)
+  const sigmaDeg = l2 > 0 ? (Math.atan2(sigma, Math.sqrt(n * l2)) * 180) / Math.PI : 90
+  return { sigmaDeg, elongated: !(l2 >= 0.1 * l1) }
+}
+
+// Eigenvalues of a symmetric 3×3, largest first (the trigonometric closed form).
+function symmetricEigenvalues3(A) {
+  const p1 = A[0][1] ** 2 + A[0][2] ** 2 + A[1][2] ** 2
+  const q = (A[0][0] + A[1][1] + A[2][2]) / 3
+  if (p1 === 0) return [A[0][0], A[1][1], A[2][2]].sort((a, b) => b - a)
+  const p2 = (A[0][0] - q) ** 2 + (A[1][1] - q) ** 2 + (A[2][2] - q) ** 2 + 2 * p1
+  const p = Math.sqrt(p2 / 6)
+  const B = A.map((r, i) => r.map((v, j) => (v - (i === j ? q : 0)) / p))
+  const detB =
+    B[0][0] * (B[1][1] * B[2][2] - B[1][2] * B[2][1]) -
+    B[0][1] * (B[1][0] * B[2][2] - B[1][2] * B[2][0]) +
+    B[0][2] * (B[1][0] * B[2][1] - B[1][1] * B[2][0])
+  const phi = Math.acos(Math.max(-1, Math.min(1, detB / 2))) / 3
+  const e1 = q + 2 * p * Math.cos(phi),
+    e3 = q + 2 * p * Math.cos(phi + (2 * Math.PI) / 3)
+  return [e1, 3 * q - e1 - e3, e3]
+}
+
+/** Whether a fit's roll about its strip is left open (fitSimilarity `roll`). */
+export const stripRollOpen = (fit) => !!fit?.roll?.elongated && fit.roll.sigmaDeg > STRIP_ROLL_MAX_DEG
+
+/**
+ * Pairs that fix a strip's roll from the cameras' viewing directions: per camera, a point
+ * one span along its viewing axis in each frame (the spans make them correspond whatever
+ * the scale, as core/sfm/modelMerge.js sharedPhotoPairs does). `cams`: [{ src, dst,
+ * srcAxis, dstAxis, weight }], centres and unit viewing axes in the SfM and target frames.
+ */
+export function viewAxisPairs(cams) {
+  const diam = (pts) => {
+    let d = 0
+    for (let i = 0; i < pts.length; i++)
+      for (let j = i + 1; j < pts.length; j++) d = Math.max(d, Math.hypot(...sub(pts[i], pts[j])))
+    return d
+  }
+  const spanS = diam(cams.map((c) => c.src)),
+    spanD = diam(cams.map((c) => c.dst))
+  if (!(spanS > 0 && spanD > 0)) return []
+  return cams.map((c) => ({
+    src: c.src.map((v, i) => v + spanS * c.srcAxis[i]),
+    dst: c.dst.map((v, i) => v + spanD * c.dstAxis[i]),
+    ...(c.weight ? { weight: c.weight } : {}),
+  }))
 }
 
 const validM3 = (m) =>

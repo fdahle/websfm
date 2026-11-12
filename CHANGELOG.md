@@ -156,6 +156,15 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **A single flight strip is no longer georeferenced at a random tilt.** Placed by camera
+  positions alone, a single strip or corridor now takes its roll about the flight line
+  from the photos looking down (aerial projects) or from imported omega, phi, kappa;
+  otherwise Georeference says so and asks for GCPs or a second strip. Before, the
+  positions' noise let the fit pass while the model could be turned about the line by any
+  angle (a median of 90° over a simulated 30-photo strip, at 1.5 m and at 3 cm GPS
+  accuracy). Unit tests: the roll reported for one strip exceeds 1°, two strips 60 m apart
+  report under 0.1°, an aerial strip comes out level within 0.5° over five noise draws,
+  and an object project's strip is refused.
 - **COLMAP, OpenSfM and transforms.json line up with their images.** Models, cameras,
   keypoints and matches exchanged with COLMAP, OpenSfM and nerfstudio's transforms.json
   now take the half-pixel difference in where these tools put a pixel's centre into

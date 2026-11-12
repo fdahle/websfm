@@ -820,6 +820,13 @@ triangulate (preferred: GCPs define accuracy), else **camera centres ↔ camera 
 A sensor with a GNSS lever arm (§6.4) gives antenna positions, so its cameras pair as the
 antenna points `C + Rᵀ·a / s`: fitted first with the centres, then twice more at the latest
 scale `s`. The DEM-held placement's RMS and Evaluate ▸ Pose Residuals compare the same points.
+Positions along one line pass the collinearity test on their noise alone while the roll
+about the line stays arbitrary, so the fit reports it: `σ_roll ≈ σ/√(n·λ₂)`, σ the per-axis
+residual and λ₂ the second eigenvalue of the targets' covariance (`georef.js`
+`rollAboutStrip`). For a strip-like layout (λ₂ < 0.1·λ₁) above 1°, each camera adds a point
+one span along its viewing axis in both frames: from its omega/phi/kappa, or straight down
+in an aerial project. Without either the fit is refused. The bundle adjustment's prior
+frame (§6.4) does the same from omega/phi/kappa.
 A model held to a reference DEM by its camera positions is not fitted: it is placed in the
 frame of the hold's last round, moved in height between the cameras and the DEM (§6.5).
 `gcpAccuracyReport()` gives the per-GCP CRS residual and per-mark reprojection error.

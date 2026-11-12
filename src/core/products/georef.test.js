@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { fitSimilarity, applySimilarity, frameFromSimilarity, similarityPrecision } from './georef.js'
+import {
+  fitSimilarity,
+  applySimilarity,
+  frameFromSimilarity,
+  similarityPrecision,
+  stripRollOpen,
+  STRIP_ROLL_MAX_DEG,
+} from './georef.js'
 
 const close = (a, b, eps = 1e-4) => expect(Math.abs(a - b)).toBeLessThan(eps)
 
@@ -270,5 +277,34 @@ describe('similarityPrecision', () => {
     }
     // Baarda's point: a control's residual is smaller than its own σ says.
     for (let i = 0; i < 3; i++) expect(cases[0][2][i]).toBeLessThan(own[i])
+  })
+})
+
+describe('the roll of a strip', () => {
+  let seed = 7
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0), seed / 2 ** 32)
+  const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd())
+  const block = (strips, sigma) => {
+    const pairs = []
+    for (let s = 0; s < strips; s++)
+      for (let i = 0; i < 30; i++) {
+        const truth = [50 * i, 60 * s, 120]
+        // The SfM centres carry a few mm of noise too, as solved ones do.
+        pairs.push({ src: truth.map((v) => (v + 0.02 * gauss()) / 37), dst: truth.map((v) => v + sigma * gauss()) })
+      }
+    return fitSimilarity(pairs)
+  }
+  it('is reported open for one straight strip, whatever the GPS accuracy', () => {
+    for (const sigma of [1.5, 0.03]) {
+      const fit = block(1, sigma)
+      expect(fit.roll.elongated).toBe(true)
+      expect(fit.roll.sigmaDeg).toBeGreaterThan(STRIP_ROLL_MAX_DEG)
+      expect(stripRollOpen(fit)).toBe(true)
+    }
+  })
+  it('is fixed by a second strip', () => {
+    const fit = block(2, 0.03)
+    expect(fit.roll.sigmaDeg).toBeLessThan(0.1)
+    expect(stripRollOpen(fit)).toBe(false)
   })
 })

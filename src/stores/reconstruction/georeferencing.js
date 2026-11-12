@@ -4,7 +4,10 @@ import {
   applySimilarity,
   similarityPrecision,
   frameFromSimilarity,
+  stripRollOpen,
+  viewAxisPairs,
 } from '../../core/products/georef.js'
+import { opkMatrix } from '../../core/footprint.js'
 import { coregisteredSimilarity } from '../../core/products/demCoregistration.js'
 import { describeCoregistration } from '../../core/stepEffects/coregister.js'
 import { buildMetricFrame } from '../../core/products/localFrame.js'
@@ -84,6 +87,9 @@ export function createGeoreferencing({
   // () → (imageId → the sensor's GNSS lever arm in metres, camera axes, or null): a
   // pose of such an image is the antenna's position, at C + Rᵀ·a, not the centre's.
   leverArms = () => () => null,
+  // 'aerial' | 'object' | null: an aerial project's photos look down, which fixes the
+  // roll of a single strip placed by its camera positions (fitPosePairs).
+  sceneType = () => null,
 }) {
   const inPinhole = (list) =>
     gcpsInPinholeFrame(list, {
@@ -203,6 +209,9 @@ export function createGeoreferencing({
   // The pose fit with the antenna offsets: the offset in the SfM frame needs the
   // scale, which comes from the fit, so fit the centres, then refit the antenna points
   // at the latest scale (two rounds; each shrinks the scale error by arm / block size).
+  // Positions along one line leave the roll about it open (georef.js stripRollOpen):
+  // the cameras' viewing directions fix it where they are known (omega/phi/kappa, or
+  // looking down in an aerial project); otherwise the fit is refused (`reason: 'strip'`).
   function fitPosePairs(local) {
     let pairs = georefPairs()
     let fit = fitGeoreference(pairs, local)
@@ -214,7 +223,52 @@ export function createGeoreferencing({
       }
       pairs = georefPairs(fit.scale)
     }
+    if (fit && stripRollOpen(fit)) {
+      const axes = viewAxes()
+      if (!axes) return { fit: null, pairs, reason: 'strip', rollSigmaDeg: fit.roll.sigmaDeg }
+      const fixed = fitGeoreference([...pairs, ...viewAxisPairs(axes)], local)
+      if (!fixed) return { fit: null, pairs, reason: 'strip', rollSigmaDeg: fit.roll.sigmaDeg }
+      log(
+        `Georeference: the camera positions lie along one line (roll about it ±${fit.roll.sigmaDeg.toFixed(1)}° ` +
+          `from them alone), so the photos' ${axes.source} directions fix it`,
+        'info',
+        'Products',
+      )
+      fit = fixed
+    }
     return { fit, pairs }
+  }
+
+  // Each posed camera's centre and viewing axis in the SfM and target frames, or null
+  // unless every one has a viewing direction: its omega/phi/kappa (the camera's +z is
+  // the photo's −z axis, −M's third column), or straight down in an aerial project.
+  function viewAxes() {
+    const cams = sparseCameras.value
+    const imgById = new Map(images.value.map((im) => [im.id, im]))
+    const aerial = sceneType() === 'aerial'
+    const out = []
+    let fromAngles = 0
+    for (const p of poses()) {
+      if (p.enabled === false || p.imageId == null || !finite3d(p)) continue
+      const cam = imgById.get(p.imageId) && cams.get(imgById.get(p.imageId).uuid)
+      if (!cam) continue
+      let dstAxis = null
+      if ([p.omega, p.phi, p.kappa].every(Number.isFinite)) {
+        const M = opkMatrix(p.omega, p.phi, p.kappa)
+        dstAxis = [-M[0][2], -M[1][2], -M[2][2]]
+        fromAngles++
+      } else if (aerial) dstAxis = [0, 0, -1]
+      if (!dstAxis) return null
+      out.push({
+        src: cameraCenter(cam),
+        srcAxis: cam.R[2],
+        dst: [p.x, p.y, p.z],
+        dstAxis,
+        weight: inverseVariance3d(p),
+      })
+    }
+    if (out.length < 3) return null
+    return Object.assign(out, { source: fromAngles === out.length ? 'recorded viewing' : 'downward viewing' })
   }
 
   // Maps needed to resolve a GCP observation's imageId → its registered camera:
@@ -394,7 +448,19 @@ export function createGeoreferencing({
     }
     const local = await metricFrameFor(pairs.map((p) => p.dst))
     if (evidenceKey.value !== evidenceAtStart) return null
-    const fit = usingGcps ? fitGeoreference(pairs, local) : fitPosePairs(local).fit
+    const poseFit = usingGcps ? null : fitPosePairs(local)
+    const fit = usingGcps ? fitGeoreference(pairs, local) : poseFit.fit
+    if (poseFit?.reason === 'strip') {
+      clearFit()
+      log(
+        `Georeference: the camera positions lie along one line, which leaves the model's roll about it ` +
+          `open (±${poseFit.rollSigmaDeg.toFixed(1)}°). Add GCPs, a second strip, or the photos' ` +
+          `orientation (omega, phi, kappa) to the camera positions`,
+        'warn',
+        'Products',
+      )
+      return null
+    }
     if (!fit) {
       clearFit()
       log('Georeference: fit failed (degenerate configuration)', 'warn', 'Products')

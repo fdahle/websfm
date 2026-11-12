@@ -1146,6 +1146,7 @@ export const useReconstructionStore = registerProjectStore(
       log,
       frameModel: () => frameModelFor.value,
       // The same arms the run's camera priors use (sparseRun.js).
+      sceneType: () => projects.currentSceneType,
       leverArms: () => {
         const armBySensor = new Map(sensors.value.map((s) => [s.id, normalizeLeverArm(s.gnssLeverArm)]))
         const sensorOf = new Map(images.value.map((im) => [im.id, im.sensorId]))

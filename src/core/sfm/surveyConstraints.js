@@ -13,7 +13,8 @@
 import { cameraCenter } from './geometry.js'
 import { triangulateGcp } from './gcpTriangulation.js'
 import { orientationPriorInSfm } from './cameraPriors.js'
-import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
+import { fitSimilarity, frameFromSimilarity, stripRollOpen, viewAxisPairs } from '../products/georef.js'
+import { opkMatrix } from '../footprint.js'
 import { precisionFromGcp, precisionInSfmFrame } from '../gcpAccuracy.js'
 import { isGroundControl } from '../io/gcp.js'
 
@@ -87,6 +88,22 @@ export function buildCameraPriorConstraints({ cameras, cameraPriors, uuidList, m
     }
   }
   if (!fit) return null
+  // Centres along one line leave the roll about it open (georef.js stripRollOpen). It
+  // moves no centre, but the orientation priors are built in this frame: where every
+  // prior carries omega/phi/kappa, its viewing direction fixes the roll.
+  if (!reference && stripRollOpen(fit) && usable.every((p) => [p.omega, p.phi, p.kappa].every(Number.isFinite))) {
+    const axes = usable.map((p) => {
+      const M = opkMatrix(p.omega, p.phi, p.kappa)
+      const pair = pairsAt(fit.scale)[usable.indexOf(p)]
+      return {
+        src: pair.src,
+        srcAxis: cameras.get(p.uuid).R[2],
+        dst: pair.dst,
+        dstAxis: [-M[0][2], -M[1][2], -M[2][2]],
+      }
+    })
+    fit = fitSimilarity([...pairsAt(fit.scale), ...viewAxisPairs(axes)]) ?? fit
+  }
   const frame = reference?.frame ?? frameFromSimilarity(fit, 'camera-prior')
   const priors = usable.map((p) => {
     // sigma_sfm = sigma_project / scale, hence inverse variance scales by s². The σ are
