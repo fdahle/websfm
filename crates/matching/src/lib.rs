@@ -759,7 +759,9 @@ fn ransac_fundamental_ordered(
                     let free = (n - 8) as f64;
                     let b4 = (4.0 * beta).min(0.5);
                     beyond_chance |= best_count as f64 >= 8.0 + b4 * free + 3.0 * (b4 * (1.0 - b4) * free).sqrt();
-                    p.stop_after(&best_mask, beta).min(adaptive_iters(w, 8, RANSAC_CONFIDENCE)).max(PROSAC_MIN_DRAWS)
+                    // PROSAC's own stop waits for PROSAC_MIN_DRAWS; uniform RANSAC's rule
+                    // still ends a clean pair at once (a handful of draws at w ≈ 0.9).
+                    adaptive_iters(w, 8, RANSAC_CONFIDENCE).min(p.stop_after(&best_mask, beta).max(PROSAC_MIN_DRAWS))
                 }
                 None => adaptive_iters(w, 8, RANSAC_CONFIDENCE),
             };
@@ -1216,7 +1218,7 @@ mod tests {
         let order: Vec<u32> = (0..a.len() as u32).collect();
         let (_, _, uniform) = ransac_fundamental(&a, &b, 4.0, 10_000).unwrap();
         let (_, _, ordered) = ransac_fundamental_ordered(&a, &b, 4.0, 10_000, &order).unwrap();
-        assert!(ordered <= uniform.max(50) * 2, "clean pair: {ordered} draws with PROSAC, {uniform} without");
+        assert!(ordered <= uniform + 5, "clean pair: {ordered} draws with PROSAC, {uniform} without");
     }
 
     // Noisy general-motion scene with a fraction of random outliers.
