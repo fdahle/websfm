@@ -903,6 +903,9 @@ fn transfer_sq(h: &M3, pa: (f64, f64), pb: (f64, f64)) -> f64 {
     dx * dx + dy * dy
 }
 
+// The homography's squared gate against F's (see ransac_homography).
+const H_GATE_FACTOR: f64 = 3.0;
+
 // RANSAC homography; returns the best inlier count (the model itself is unused
 // downstream — only the count feeds the H-vs-F degeneracy ratio).
 fn ransac_homography(pa: &[(f64, f64)], pb: &[(f64, f64)], thresh_sq: f64, max_iters: usize) -> usize {
@@ -923,11 +926,30 @@ fn ransac_homography(pa: &[(f64, f64)], pb: &[(f64, f64)], thresh_sq: f64, max_i
         let Some(h) = homography_dlt(&sub_a, &sub_b) else { continue };
         let mut count = 0;
         for i in 0..n {
-            if transfer_sq(&h, pa[i], pb[i]) < thresh_sq {
+            // The one-sided transfer error carries both points' noise (variance ×2) in
+            // two dimensions, the Sampson distance F is gated by one: equal 95 % points
+            // take 2 × 5.99/3.84 ≈ 3 on the squared threshold. At F's own threshold a
+            // truly planar pair read H/F ≈ 0.63 at 1 px noise, below the 0.8 flag.
+            if transfer_sq(&h, pa[i], pb[i]) < H_GATE_FACTOR * thresh_sq {
                 count += 1;
             }
         }
         if count > best_count {
+            // Local optimisation, as F gets (local_optimize_f): refit H on its inliers
+            // while that keeps more. Without it a clean pair stopped after a few draws
+            // with an H fitted to four noisy points, and under-read its planarity.
+            let mut h_best = h;
+            for _ in 0..LO_ROUNDS {
+                let (ia, ib): (Vec<_>, Vec<_>) = (0..n)
+                    .filter(|&i| transfer_sq(&h_best, pa[i], pb[i]) < H_GATE_FACTOR * thresh_sq)
+                    .map(|i| (pa[i], pb[i]))
+                    .unzip();
+                let Some(h2) = homography_dlt(&ia, &ib) else { break };
+                let c2 = (0..n).filter(|&i| transfer_sq(&h2, pa[i], pb[i]) < H_GATE_FACTOR * thresh_sq).count();
+                if c2 <= count { break; }
+                count = c2;
+                h_best = h2;
+            }
             best_count = count;
             let w = best_count as f64 / n as f64;
             limit = max_iters.min(adaptive_iters(w, 4, RANSAC_CONFIDENCE));
@@ -1195,6 +1217,28 @@ mod tests {
     // key is its truth plus wide noise). PROSAC at the 10,000 cap must find nearly
     // every true inlier, where uniform 8-point sampling at 1,000 rarely does; a clean
     // pair still stops as early as before.
+    // A truly planar pair with 1 px noise: H must explain about as many matches as F
+    // (H/F ≥ 0.9), or its degeneracy flag (0.8) never fires.
+    #[test]
+    fn a_planar_pair_reads_as_planar_at_1px_noise() {
+        let mut rng = Lcg(0x9a9a);
+        let (rb, tb, f, c) = (roty(0.12), [0.6, 0.0, 0.0], 1000.0, 500.0);
+        let ra: M3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let (mut pa, mut pb) = (Vec::new(), Vec::new());
+        let g = |rng: &mut Lcg| (-2.0 * (rng.f() + 1e-12).ln()).sqrt() * (2.0 * std::f64::consts::PI * rng.f()).cos();
+        for _ in 0..400 {
+            let x: V3 = [rng.range(-2.0, 2.0), rng.range(-2.0, 2.0), 6.0];
+            let (ax, ay) = proj(&ra, &[0.0, 0.0, 0.0], x, f, c);
+            let (bx, by) = proj(&rb, &tb, x, f, c);
+            pa.extend_from_slice(&[(ax + g(&mut rng)) as f32, (ay + g(&mut rng)) as f32]);
+            pb.extend_from_slice(&[(bx + g(&mut rng)) as f32, (by + g(&mut rng)) as f32]);
+        }
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0, &[]);
+        let f_inliers = out[10..].iter().filter(|&&v| v > 0.5).count() as f64;
+        let ratio = out[9] as f64 / f_inliers;
+        assert!(ratio >= 0.9, "H/F {ratio:.2} on a planar pair");
+    }
+
     #[test]
     fn prosac_finds_low_inlier_pairs() {
         for &(outliers, need) in &[(0.7, 95), (0.85, 90)] {
