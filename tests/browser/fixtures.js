@@ -21,6 +21,13 @@ export const test = base.extend({
       rmSync(profile, { recursive: true, force: true })
     }
   },
+  // Firefox and WebKit show the "In this browser" warning in the bottom-right corner, over
+  // whatever a test clicks there (the image viewer's zoom readout, above the console).
+  // No test is about the warning, so every page starts with it dismissed.
+  page: async ({ page }, use) => {
+    await page.addInitScript(() => localStorage.setItem('browserWarningDismissed', 'true'))
+    await use(page)
+  },
 })
 
 export { expect }
