@@ -175,6 +175,31 @@ describe('buildLod (out of core)', () => {
     expect(tmp.peak).toBeLessThan(n * 20 * 1.5)
   })
 
+  it('splits a chunk down to the deepest level (cell ids past 2³²)', async () => {
+    // One stray point at the origin makes the cube 10⁶ wide; a tight cluster in its far
+    // corner keeps splitting until level 12, where a cell id is up to 2³⁶.
+    const n = 40
+    const pos = new Float64Array(3 * (n + 2))
+    pos.set([0, 0, 0, 1e6, 1e6, 1e6], 0)
+    for (let i = 0; i < n; i++) pos.set([1e6 - 5 - i * 1e-3, 1e6 - 5 - i * 1e-3, 1e6 - 5 - i * 1e-3], 6 + 3 * i)
+    const src = {
+      count: n + 2,
+      bounds: { min: [0, 0, 0], max: [1e6, 1e6, 1e6] },
+      colour: false,
+      attributes: [],
+      async *batches() {
+        yield { count: n + 2, pos }
+      },
+    }
+    const { tmp } = memoryStores()
+    const state = await distributeLod(src, tmp, {
+      chunkMax: 4,
+      layout: { offset: [0, 0, 0], scale: [1e-3, 1e-3, 1e-3] },
+    })
+    expect(state.chunks.reduce((sum, c) => sum + c.count, 0)).toBe(n + 2)
+    expect(Math.max(...state.chunks.map((c) => c.key[0]))).toBe(12)
+  })
+
   it('builds the chunks apart (the pool) into the same octree', async () => {
     const n = 200000,
       c = cloud(n)

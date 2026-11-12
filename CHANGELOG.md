@@ -156,6 +156,11 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Huge clouds with stray points import again.** Importing or editing a very large cloud
+  whose extent is far larger than its data (a few stray points at 0, 0, 0 in a UTM
+  cloud, or millions of points in one spot) no longer fails with "Cannot read properties
+  of undefined (reading 'idx')". The octree build numbered its deepest cells past what
+  its index could hold; a unit test splits a cluster down to the deepest level.
 - **A run that fails at its start no longer locks the project.** If a Reconstruct or Tools
   run failed before it got going, its progress window now closes and the error is
   logged. Before, the window could stay open, and opening, switching or deleting

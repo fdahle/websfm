@@ -130,7 +130,8 @@ function columns(layout, capacity) {
 function groupByCube(pts, root, level) {
   const per = 2 ** level,
     cs = root.size / per
-  const cell = new Uint32Array(pts.count)
+  // Float64: the id reaches per³ = 2³⁶ at MAX_CHUNK_LEVEL 12 (exact below 2⁵³).
+  const cell = new Float64Array(pts.count)
   const counts = new Map()
   for (let i = 0; i < pts.count; i++) {
     const cx = Math.min(per - 1, Math.max(0, Math.floor((pts.pos[3 * i] - root.min[0]) / cs)))
