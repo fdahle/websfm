@@ -138,6 +138,21 @@ describe('createGpuMatchRun', () => {
     expect(rec).toMatchObject({ backend: 'gpu→wasm', fallbacks: 2, disabledReason: null, firstError: 'device lost' })
   })
 
+  it('after three GPU errors in a row the rest of the run stops trying the GPU', async () => {
+    const { client, calls } = fakeClient({
+      gpu: (args, n) => {
+        if (n > 1) throw new Error('device lost')
+        return { matches: [], count: 0, validation: PASS }
+      },
+    })
+    const run = await createGpuMatchRun({ client, log: vi.fn(), cacheBudgetBytes: 2 ** 30 })
+    for (let k = 0; k < 10; k++) await run.match(D, D, opts())
+    // The validator, then three failures; the six pairs after go straight to WASM.
+    expect(calls).toHaveLength(4)
+    expect(client.cpuMatch).toHaveBeenCalledTimes(9)
+    expect((await run.finish()).disabledReason).toMatch(/3 GPU errors in a row/)
+  })
+
   it('a GPU error on the validating pair disables the GPU for that run', async () => {
     const { client, calls } = fakeClient({
       gpu: () => {

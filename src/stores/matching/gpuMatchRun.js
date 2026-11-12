@@ -46,6 +46,9 @@ function describeValidation(kind, v) {
  * @returns {Promise<null | { match: Function, finish: Function }>} null when the GPU
  *   is unavailable (already logged) — the caller then matches on WASM as before.
  */
+// Consecutive GPU errors after which a run stops trying the GPU (a lost device).
+const GPU_ERRORS_TO_DISABLE = 3
+
 export async function createGpuMatchRun({
   client,
   log,
@@ -78,6 +81,8 @@ export async function createGpuMatchRun({
   const validation = { full: null, gate: null }
   const counts = { full: 0, gate: 0 }
   let fallbacks = 0
+  // GPU errors since its last success (GPU_ERRORS_TO_DISABLE moves the run to WASM).
+  let errorsInARow = 0
   let resends = 0
   let firstError = null
   let disabledReason = null
@@ -164,16 +169,22 @@ export async function createGpuMatchRun({
         validated[kind] = true
       }
       if (res.backend !== 'wasm') counts[kind]++
+      errorsInARow = 0
       return res
     } catch (err) {
       checkCancel()
       fallbacks++
+      errorsInARow++
       const msg = err?.message ?? String(err)
       if (!firstError) {
         firstError = msg
         log(`Matching: GPU error (${msg}) — this pair falls back to WASM; later errors are counted, not logged`, 'warn')
       }
       if (validator) disable(`GPU failed on its first ${kind === 'gate' ? 'subset-gate' : 'full'} match`)
+      // A lost device fails every later call too: after a few in a row, stop trying it
+      // for this run rather than paying a failed GPU call before each pair's WASM match.
+      else if (errorsInARow >= GPU_ERRORS_TO_DISABLE)
+        disable(`${errorsInARow} GPU errors in a row (the device may have been lost; last: ${msg})`)
       return await cpu()
     } finally {
       release?.()
