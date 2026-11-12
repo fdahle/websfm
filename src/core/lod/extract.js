@@ -85,8 +85,11 @@ export async function extractPoints(
       if (cls && !classes.has(cls[i])) continue
       keep[n++] = i
     }
+    // Only the kept points are held past this node: a box read near the point budget
+    // otherwise held every node's full decode (positions and all attributes) until the
+    // end, about twice the data.
     if (n) {
-      parts.push({ pts, keep: keep.subarray(0, n) })
+      parts.push(compactNode(pts, keep.subarray(0, n), { wantCol, attrs }))
       total += n
     }
     onProgress?.(read, plan.estimate)
@@ -105,19 +108,32 @@ export async function extractPoints(
   }
   const attributes = Object.fromEntries(attrs.map((a) => [a.name, new T[a.type](total)]))
   let o = 0
-  for (const { pts, keep } of parts) {
-    for (let k = 0; k < keep.length; k++, o++) {
-      const i = keep[k]
-      pos[3 * o] = pts.pos[3 * i]
-      pos[3 * o + 1] = pts.pos[3 * i + 1]
-      pos[3 * o + 2] = pts.pos[3 * i + 2]
-      if (col) {
-        col[3 * o] = pts.col[3 * i]
-        col[3 * o + 1] = pts.col[3 * i + 1]
-        col[3 * o + 2] = pts.col[3 * i + 2]
-      }
-      for (const a of attrs) attributes[a.name][o] = pts.attributes[a.name][i]
-    }
+  for (const part of parts) {
+    pos.set(part.pos, 3 * o)
+    if (col) col.set(part.col, 3 * o)
+    for (const a of attrs) attributes[a.name].set(part.attributes[a.name], o)
+    o += part.count
   }
   return { count: total, pos, ...(col ? { col } : {}), attributes }
+}
+
+// A node's kept points as arrays of their own, so the full decode can be collected.
+function compactNode(pts, keep, { wantCol, attrs }) {
+  const n = keep.length
+  const pos = new Float64Array(3 * n)
+  const col = wantCol ? new Uint8Array(3 * n) : null
+  const attributes = Object.fromEntries(attrs.map((a) => [a.name, new pts.attributes[a.name].constructor(n)]))
+  for (let k = 0; k < n; k++) {
+    const i = keep[k]
+    pos[3 * k] = pts.pos[3 * i]
+    pos[3 * k + 1] = pts.pos[3 * i + 1]
+    pos[3 * k + 2] = pts.pos[3 * i + 2]
+    if (col) {
+      col[3 * k] = pts.col[3 * i]
+      col[3 * k + 1] = pts.col[3 * i + 1]
+      col[3 * k + 2] = pts.col[3 * i + 2]
+    }
+    for (const a of attrs) attributes[a.name][k] = pts.attributes[a.name][i]
+  }
+  return { count: n, pos, col, attributes }
 }
