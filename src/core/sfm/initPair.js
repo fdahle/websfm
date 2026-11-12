@@ -1,4 +1,5 @@
-import { fundamentalToEssential, recoverPose, triangulateDlt } from './reconstruction.js'
+import { fundamentalToEssential, recoverPose, triangulateDlt, solvePnp } from './reconstruction.js'
+import { twinByAttitude, twinByPositions, flattestTwin } from './planarTwin.js'
 import { ransacEssential } from './essential.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { asPairList } from './matchCodec.js'
@@ -21,8 +22,12 @@ import { pluralize } from '../textFormat.js'
 //   { status: 'error' }                             — pose recovery failed for all
 //   { status: 'ok', best, perPairInitReproj }       — commit `best` to the model
 // where `best` carries { entry, iA, iB, cA, cB, points, angle, esv, inliers, … }.
+// `evidence` (optional) settles a planar twin (planarTwin.js): attitudeOf(uuid) → the
+// photo's survey-frame rotation (object → camera) or null, positionOf(uuid) → [x, y, z]
+// in the survey frame or null, sceneType ('aerial' | …), and preferTwinFor — a seed pair
+// key whose open ambiguity a retry resolves the other way.
 export async function selectInitPair(
-  { donePairs, Kmap, settings, imageByUuid, numStats, projDepth },
+  { donePairs, Kmap, settings, imageByUuid, numStats, projDepth, evidence = {} },
   { onLog, onProgress } = {},
 ) {
   const log = onLog ?? (() => {})
@@ -120,6 +125,70 @@ export async function selectInitPair(
     return init
   }
 
+  // The planar twins of one pair, settled by the strongest evidence there is
+  // (planarTwin.js): the photos' attitude, a third photo's camera position, an aerial
+  // project's downward view; else the depth rule, the ambiguity reported open.
+  const upOf = (uuid) => {
+    const R = evidence.attitudeOf?.(uuid)
+    return R ? [R[0][2], R[1][2], R[2][2]] : null
+  }
+  async function settleTwin(entry, twins) {
+    const att = twinByAttitude(twins, { upA: upOf(entry.idA), upB: upOf(entry.idB) })
+    if (att) return { pick: att.pick, by: 'attitude' }
+    const posA = evidence.positionOf?.(entry.idA),
+      posB = evidence.positionOf?.(entry.idB)
+    if (posA && posB) {
+      const byPos = await twinByPositions(twins, {
+        posA,
+        posB,
+        solve: solvePnp,
+        thirdsFor: (tw) => thirdViews(entry, tw.points),
+      })
+      if (byPos) return { pick: byPos.pick, by: 'positions' }
+    }
+    const flat = flattestTwin(twins)
+    if (evidence.sceneType === 'aerial') return { pick: flat, by: 'aerial' }
+    if (evidence.preferTwinFor === pairKeyOf(entry)) {
+      const other = twins.filter((t) => t !== flat).reduce((a, b) => (b.eInliers > a.eInliers ? b : a))
+      return { pick: other, by: 'retry' }
+    }
+    return { pick: flat, by: 'open' }
+  }
+  const TWIN_BY = {
+    attitude: "the photos' attitude",
+    positions: "a third photo's camera position",
+    aerial: 'the depth rule (aerial project)',
+    retry: 'the other twin (seed retry)',
+    open: 'the depth rule, ambiguity open',
+  }
+  const pairKeyOf = (e) => (e.idA < e.idB ? `${e.idA}--${e.idB}` : `${e.idB}--${e.idA}`)
+
+  // Up to three photos with a camera position that share matches with photo A of the
+  // seed, each with the pixels of the seed points it sees (planarTwin.js twinByPositions).
+  function thirdViews(entry, points) {
+    if (!evidence.positionOf) return []
+    const out = []
+    for (const e of donePairs) {
+      const other = e.idA === entry.idA ? e.idB : e.idB === entry.idA ? e.idA : null
+      if (!other || other === entry.idB) continue
+      const position = evidence.positionOf(other),
+        img = imageByUuid(other),
+        K = Kmap.get(other)
+      if (!position || !img || !K) continue
+      const m = asPairList(e.matches)
+      const aIsA = e.idA === entry.idA
+      const toC = new Map()
+      for (let i = 0; i < m.length; i++) toC.set(aIsA ? m.a(i) : m.b(i), aIsA ? m.b(i) : m.a(i))
+      const obs = []
+      points.forEach((p, pointIndex) => {
+        const kc = toC.get(p.views.get(entry.idA))
+        if (kc != null && hasKp(img.kp, kc)) obs.push({ pointIndex, x: kpX(img.kp, kc), y: kpY(img.kp, kc) })
+      })
+      if (obs.length >= 12) out.push({ position, K, obs })
+    }
+    return out.sort((a, b) => b.obs.length - a.obs.length).slice(0, 3)
+  }
+
   async function tryInitPair(entry) {
     const iA = imageByUuid(entry.idA)
     const iB = imageByUuid(entry.idB)
@@ -170,11 +239,10 @@ export async function selectInitPair(
         c.reproj.median <= 1.5 * best.reproj.median + 1,
     )
     if (twins.length > 1) {
-      const flat = twins.reduce((a, b) => (b.depthCv < a.depthCv ? b : a))
-      if (flat !== best) {
-        flat.twinOf = { eSource: best.eSource, depthCv: best.depthCv, reproj: best.reproj.median }
-        best = flat
-      }
+      const { pick, by } = await settleTwin(entry, twins)
+      if (pick !== best) pick.twinOf = { eSource: best.eSource, depthCv: best.depthCv, reproj: best.reproj.median }
+      pick.twinChoice = by
+      best = pick
     }
     best.fEsv = essentialSingularValues(fromF)
     return best
@@ -425,7 +493,8 @@ export async function selectInitPair(
         `candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, ` +
           `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, ` +
           `init reproj median ${init.reproj.median.toFixed(2)}px (E from ${init.eSource}` +
-          `${init.twinOf ? `, planar twin of ${init.twinOf.eSource}: depth spread ${init.depthCv.toFixed(3)} vs ${init.twinOf.depthCv.toFixed(3)}` : ''}), ` +
+          `${init.twinChoice ? `, planar twin settled by ${TWIN_BY[init.twinChoice]}` : ''}` +
+          `${init.twinOf ? ` over ${init.twinOf.eSource}: depth spread ${init.depthCv.toFixed(3)} vs ${init.twinOf.depthCv.toFixed(3)}` : ''}), ` +
           `KᵀFK σ2/σ1 ${candRatio.toFixed(2)}, ` +
           `graph degree ${pairDegree(entry)} (median ${medianDegree}) ` +
           `⇒ score ${init.score.toFixed(1)} (parallax ×${parallaxHealth(init.angle).toFixed(2)}, ` +

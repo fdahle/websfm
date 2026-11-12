@@ -23,6 +23,20 @@ const inverseM3 = (m) => {
   ]
 }
 
+// A photo's rotation in the survey frame in the solver's convention (object → camera,
+// x right, y down, axis +z), from its omega/phi/kappa: D·Mᵀ (D below).
+export function surveyRotationFromOpk(omega, phi, kappa) {
+  const M = opkMatrix(omega, phi, kappa)
+  return mulM3(
+    [
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 0, -1],
+    ],
+    transposeM3(M),
+  )
+}
+
 // Convert an imported photogrammetric OPK pose to the solver's camera frame.
 // opkMatrix is photo → object, with photo axes (x right, y up, optical axis -z);
 // BA uses object → camera with pixel axes (x right, y down, optical axis +z).

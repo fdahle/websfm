@@ -165,6 +165,9 @@ export async function reconstruct(input, hooks = {}) {
   // Images any attempt registered: a retry seeds where none of them reached
   // (initPair.js exploredInitImages), so the retries explore the match graph.
   const explored = new Set(primary.cameras.map((c) => c.uuid))
+  // A seed whose planar twin no evidence could settle (initPair.js settleTwin 'open'):
+  // the first retry seeds the same pair with the other twin.
+  let twinRetry = primary.summary?.initPair?.twin === 'open' ? initialKey : null
   attempts.seeds.push({
     attempt: 0,
     pair: primary.summary?.initPair ? `${primary.summary.initPair.nameA} ↔ ${primary.summary.initPair.nameB}` : null,
@@ -189,8 +192,13 @@ export async function reconstruct(input, hooks = {}) {
         settings: {
           ...(input.settings || {}),
           secondaryModels: false,
-          excludedInitPairs: [...excluded],
-          exploredInitImages: [...explored],
+          ...(twinRetry
+            ? {
+                excludedInitPairs: [...excluded].filter((k) => k !== twinRetry),
+                exploredInitImages: [],
+                preferTwinFor: twinRetry,
+              }
+            : { excludedInitPairs: [...excluded], exploredInitImages: [...explored] }),
         },
       },
       {
@@ -206,6 +214,10 @@ export async function reconstruct(input, hooks = {}) {
       },
     )
     attempts.retriesRun = attempt + 1
+    if (twinRetry) {
+      log(`seed retry ${attempt + 1} tried the other planar twin of the first seed`, 'info', 'Reconstruction')
+      twinRetry = null
+    }
     if (candidate.status !== 'done') {
       // A failed retry has no summary, but it may have committed to a seed before it
       // failed (`seedPair`): exclude that too, or every later retry repeats it.

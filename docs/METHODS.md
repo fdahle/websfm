@@ -261,7 +261,17 @@ the most inliers are probed, each:
   (Nistér 2004, `core/sfm/essential.js`; `initFivePoint`, on by default, 1.5 px) on the
   K-normalised matches, each of its solutions a candidate. On a near-planar scene the
   uncalibrated F is undetermined and its pose wrong; the calibrated problem has no planar
-  degeneracy.
+  degeneracy, but it has a **planar twin**: a second solution that explains the matches
+  as well, moving along the plane's normal and tilting it. Two views cannot tell them
+  apart, so outside evidence settles it, strongest first (`core/sfm/planarTwin.js`): the
+  photos' attitude (omega/phi/kappa or gimbal angles give the ground's up in the camera
+  frame; the twin whose plane normal agrees within 20°, every rival at least 10° further);
+  a third photo's camera position (each twin places it by PnP against its own points, and
+  only the true motion gives the centres the positions' shape); in an aerial project the
+  more uniform depth, right when the photos look down. Otherwise the depth rule stands, the
+  ambiguity is logged as open, and the first seed retry seeds the same pair with the other
+  twin. The depth rule alone fails for a camera moving towards where it looks, pitched less
+  than about 45° below the horizon over flat ground: there the twin is the flatter one.
 - **pose recovery** by essential-matrix decomposition (`recoverPose`), resolving the
   4-fold ambiguity by cheirality;
 - **DLT triangulation**, keeping points in front of both cameras;

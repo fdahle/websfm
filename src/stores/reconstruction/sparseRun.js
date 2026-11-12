@@ -615,6 +615,8 @@ export function createSparseRun({
         // GCP anchors + camera priors in one survey frame (surveyConstraintInput).
         gcps: survey.gcps,
         cameraPriors: survey.cameraPriors,
+        // An aerial project's photos look down: the planar seed twin's fallback rule.
+        sceneType: projects.currentSceneType ?? null,
         ...(demHold ? { demHold } : {}),
         settings,
         // The model to add to: its points are the live cloud's buffers, so they are

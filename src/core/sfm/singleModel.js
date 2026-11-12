@@ -52,6 +52,7 @@ import {
   assembleSummary,
 } from './runRecord.js'
 import { pluralize } from '../textFormat.js'
+import { surveyRotationFromOpk } from './cameraPriors.js'
 import { sparseSnapshot, createSnapshotPacer } from './liveSnapshot.js'
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
@@ -143,6 +144,25 @@ async function recheckRegistrations({
 
 export async function reconstructSingleModel(input, hooks = {}) {
   const { images, pairs, settings = {}, gcps = [], cameraPriors = [], base = null, demHold = null } = input
+  // What settles a planar seed twin (initPair.js, planarTwin.js): each photo's attitude
+  // and position from its camera prior, in the survey frame, and the project's kind.
+  const twinEvidence = () => {
+    const byUuid = new Map(cameraPriors.map((p) => [p.uuid, p]))
+    return {
+      sceneType: input.sceneType ?? null,
+      preferTwinFor: settings.preferTwinFor ?? null,
+      attitudeOf: (uuid) => {
+        const p = byUuid.get(uuid)
+        return p && [p.omega, p.phi, p.kappa].every(Number.isFinite)
+          ? surveyRotationFromOpk(p.omega, p.phi, p.kappa)
+          : null
+      },
+      positionOf: (uuid) => {
+        const p = byUuid.get(uuid)
+        return p && [p.x, p.y, p.z].every(Number.isFinite) ? [p.x, p.y, p.z] : null
+      },
+    }
+  }
   // GCP marks arrive in the viewer's pixel-edge convention; keypoints, K and every
   // projection use pixel centres (displayFrame.js markToCentrePx). Convert once, before
   // the film remap and the distortion moves below treat them exactly like keypoints.
@@ -452,7 +472,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       report('initPair', 1, `Model: ${pluralize(cameras.size, 'camera')}`, { done: cameras.size, total: imgs.length })
     } else {
       const initSel = await selectInitPair(
-        { donePairs, Kmap, settings: cfg, imageByUuid, numStats, projDepth },
+        { donePairs, Kmap, settings: cfg, imageByUuid, numStats, projDepth, evidence: twinEvidence() },
         {
           onLog: log,
           onProgress: onProgress

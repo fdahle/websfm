@@ -378,6 +378,9 @@ export function assembleSummary({
             // what evidence, and how close the runner-up was.
             angleDeg: best.angle,
             inliers: best.inliers,
+            // How a planar twin was settled (initPair.js settleTwin), when there was one:
+            // 'open' lets a seed retry try the other twin (sfm.js).
+            ...(best.twinChoice ? { twin: best.twinChoice } : {}),
             points: seedPointCount,
             score: best.score ?? null,
             // Graph degree + PnP-ready third views come from the candidate table (the

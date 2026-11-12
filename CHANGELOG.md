@@ -156,6 +156,17 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Oblique forward flights over flat ground start from the right camera pose.** Reconstruct
+  now uses the photos' recorded attitude, or a third photo's camera position, to choose
+  between the two poses a pair of photos of flat ground allows, and in aerial projects
+  falls back to the photos looking down. Before, it always took the pose that put the
+  ground at the more uniform depth, which is the wrong one for a camera flying towards
+  where it looks at less than about 45° below the horizon (low oblique drone flights, video
+  along the view, vehicle cameras over fields, water or roads), and every seed pair made the
+  same mistake. When no evidence decides, the log says so and a seed retry tries the other
+  pose. Unit tests on flat ground at 30° pitch, forward flight: the old rule picks a
+  baseline 94° off; the attitude picks the true one at 80°, 45°, 30° and 20° pitch, and a
+  third photo's position at 30°. The SfM golden scenes keep their seeds and models.
 - **A single flight strip is no longer georeferenced at a random tilt.** Placed by camera
   positions alone, a single strip or corridor now takes its roll about the flight line
   from the photos looking down (aerial projects) or from imported omega, phi, kappa;
