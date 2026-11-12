@@ -293,7 +293,10 @@ The essential-matrix conditioning σ2/σ1 (well below 1 ⇒ wrong focal) is logg
 - **P3P after Lambda-Twist** (Persson & Nordberg 2018) as the minimal solver: depths along
   the bearing rays, then a rigid **Procrustes** fit to world. It follows the paper's
   formulation but solves every real root of the cubic and skips its Gauss–Newton
-  refinement of λ; it is exact on noise-free data, and the pose is refined afterwards. An all-negative λ is negated, not
+  refinement of λ; it is exact on noise-free data, and the pose is refined afterwards. The
+  three points are centred and scaled to unit spread before the solve (and the pose mapped
+  back), since its degeneracy tests are absolute: a frame scaled small would otherwise
+  find no pose. An all-negative λ is negated, not
   discarded (each conic root's depth direction is sign-ambiguous), and the 3×3 SVD treats
   singular values as zero relative to the largest. Chosen over DLT resection because it is
   far more stable on the **near-planar** geometry of aerial and terrain scenes.

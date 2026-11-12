@@ -16,6 +16,21 @@ use crate::par::{for_each_index, SyncPtr};
 // to the world points with a rigid Procrustes fit. Far more stable than DLT on
 // near-planar scenes — the reason aerial cameras now register.
 pub(crate) fn p3p_lambda_twist(world: &[V3; 3], bearings: &[V3; 3]) -> Vec<(M3, V3)> {
+    // The solver's degeneracy tests are absolute while its coefficients scale with the
+    // cube of the squared distances: points a few hundredths of a unit apart found no
+    // pose. Solve for the three points centred and scaled to unit spread, then map back:
+    // x_cam = R·(X − c)/s + t'  ⇒  in the caller's units, t = s·t' − R·c.
+    let c = [0, 1, 2].map(|k| (world[0][k] + world[1][k] + world[2][k]) / 3.0);
+    let spread = (world.iter().map(|x| (0..3).map(|k| (x[k] - c[k]).powi(2)).sum::<f64>()).sum::<f64>() / 3.0).sqrt();
+    if !(spread > 0.0) || !spread.is_finite() { return vec![]; }
+    let unit: [V3; 3] = [0, 1, 2].map(|i| [0, 1, 2].map(|k| (world[i][k] - c[k]) / spread));
+    p3p_lambda_twist_unit(&unit, bearings).into_iter().map(|(r, t)| {
+        let rc = mat3_vec(&r, &c);
+        (r, [spread * t[0] - rc[0], spread * t[1] - rc[1], spread * t[2] - rc[2]])
+    }).collect()
+}
+
+fn p3p_lambda_twist_unit(world: &[V3; 3], bearings: &[V3; 3]) -> Vec<(M3, V3)> {
     let (b1, b2, b3) = (bearings[0], bearings[1], bearings[2]);
     let (x1, x2, x3) = (world[0], world[1], world[2]);
 

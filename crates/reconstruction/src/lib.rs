@@ -130,6 +130,37 @@ mod tests {
         assert!(ok as f64 >= 0.995 * n as f64, "P3P recovered {ok}/{n} random poses");
     }
 
+    // The same sweep with the whole scene (points and camera distance) scaled from 1e-4
+    // to 1e4: the pose is scale-free, so every scale must solve as scale 1 does. Before
+    // P3P conditioned its inputs, scale 0.01 at a narrow field of view found nothing.
+    #[test]
+    fn p3p_solves_at_any_scene_scale() {
+        for &scale in &[1e-4, 1e-2, 1.0, 1e2, 1e4] {
+            let mut rng = Lcg(19);
+            let (mut ok, mut n) = (0, 0);
+            for _ in 0..600 {
+                let r_true = so3_exp(&[rng.sym(1.5), rng.sym(1.5), rng.sym(1.5)]);
+                // A narrow (about 20°) field of view: points 0.5 apart, 8 away.
+                let t_true = [rng.sym(0.2) * scale, rng.sym(0.2) * scale, (8.0 + rng.f()) * scale];
+                let world: [V3; 3] = [0, 1, 2].map(|_| [rng.sym(1.0), rng.sym(1.0), rng.sym(1.0)].map(|v| v * scale));
+                let e1 = [world[1][0] - world[0][0], world[1][1] - world[0][1], world[1][2] - world[0][2]];
+                let e2 = [world[2][0] - world[0][0], world[2][1] - world[0][1], world[2][2] - world[0][2]];
+                if norm3(&cross3(&e1, &e2)) < 0.5 * scale * scale { continue; }
+                let mut bearings = [[0.0; 3]; 3];
+                for i in 0..3 {
+                    let p = mat3_vec(&r_true, &world[i]);
+                    bearings[i] = normalize3(&[p[0] + t_true[0], p[1] + t_true[1], p[2] + t_true[2]]);
+                }
+                n += 1;
+                let best = p3p_lambda_twist(&world, &bearings).iter()
+                    .map(|(r, t)| mat_diff(r, &r_true) + vec_diff(t, &t_true) / scale)
+                    .fold(f64::INFINITY, f64::min);
+                if best < 1e-6 { ok += 1; }
+            }
+            assert!(ok as f64 >= 0.995 * n as f64, "scale {scale}: P3P recovered {ok}/{n} poses");
+        }
+    }
+
     #[test]
     fn procrustes_recovers_random_rigid_triples() {
         let mut rng = Lcg(11);
