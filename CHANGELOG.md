@@ -173,6 +173,11 @@ Notable changes to websfm. The format follows
   exactly the same. Depth Maps on ETH3D courtyard (38 photos, Full, Medium): 147 → 135 s
   (−9 %, both passes −10 %), the same depth-map digest; the filter alone 340 → 200 ms per
   2.6 MP map.
+- **Reading a large streamed cloud takes half the memory.** A tool that reads points from a
+  large cloud now keeps only the points it needs as each octree node arrives, so its peak
+  is those points plus one node, not about twice the cloud's data. A failed or cancelled
+  read or export frees its LAZ decoder's memory, and the viewer keeps at most four
+  decoders open.
 
 ### Fixed
 - **The time left is not inflated by a run's start-up.** The progress window now measures
@@ -188,6 +193,35 @@ Notable changes to websfm. The format follows
   seconds without a word, and the time left counted that wait as map time: Firefox showed
   an hour for the example. Measured on the example without a GPU (42 maps at 600 px):
   Chrome 278 s, Firefox 244 s, both on 19 threads, about 7 s of it starting the threads.
+- **Switching projects no longer writes into the wrong one.** Opening another project while
+  one was open could save a piece of the old project's state (a camera pose, a layer's
+  visibility) into the new project's folder, if a save fired during the switch. Saves now
+  wait until the switch is done. "Project opened" shows only when the project did open.
+- **A crashed worker no longer spoils the rest of the session.** When a worker's
+  WebAssembly crashes, WebSfM replaces that worker and fails only the jobs it held; before,
+  later calls ran on the broken instance. A worker that cannot load fails with its cause
+  after three tries instead of retrying without end, and a message a worker cannot read
+  fails its job instead of leaving it waiting.
+- **Matching moves to the CPU when the GPU is lost.** After three GPU errors in a row, Match
+  Features matches the remaining pairs on the CPU and says so in its summary. Before, every
+  later pair first paid a failed GPU call.
+- **Detect Targets can be cancelled.** Cancel stops the run (markers already placed stay),
+  and a failure is reported instead of the progress bar simply closing.
+- **Photos register at any model scale.** Registering a photo (P3P) solved poorly when the
+  model's points lay very close together in its units: points a hundredth of a unit apart
+  found no pose. The solver now centres and scales them, and works the same from 10⁻⁴ to
+  10⁴.
+- **A raised Min matches no longer lets false pairs in as weak.** A pair whose matches pile
+  onto a few spots in one photo is rejected, also when Min matches is above the weak-pair
+  floor; before, it could be kept as a weak pair. The match log now also labels a flat
+  scene's pairs as planar, as it was meant to.
+- **A part of a streamed cloud that fails to load is tried again.** The viewer retries it
+  after 1 s and 2 s and logs the failure, instead of leaving a hole until the page was
+  reloaded.
+- **Very large buffers count against the memory budget.** A buffer of 2–4 GiB was recorded
+  as 0 bytes, so a run could plan beyond its memory budget.
+- **Dialogs close on Escape.** Shortcuts, What's New, Reseau and Panoramic now close on
+  Escape also when the focus is outside them.
 - **Guided track extension follows the rolling shutter.** With Rolling shutter on, guided
   track extension now looks for a point where the rolling-shutter model puts it. Before, it
   searched at the global-shutter projection, so near the top and bottom of a photo taken
