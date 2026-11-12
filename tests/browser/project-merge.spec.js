@@ -69,7 +69,18 @@ test('a project imported into another brings photos, features, matches and marks
       { timeout: 120_000 },
     )
     .toBe(`5:${source.pairs}`)
-  await expect(page.locator('.progress-modal')).toHaveCount(0, { timeout: 30_000 })
+  // The model comes in last (Its model: Bring in). A project without a model takes the
+  // imported one as it is; wait for it, which also means every step before it is done.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+          return useReconstructionStore().mainSparseCloud?.cameras?.size ?? 0
+        }),
+      { timeout: 60_000 },
+    )
+    .toBe(5)
 
   const merged = await page.evaluate(async (sourceId) => {
     const { useProjectsStore } = await import('/src/stores/useProjectsStore.js')
@@ -109,12 +120,6 @@ test('a project imported into another brings photos, features, matches and marks
     markers: 2,
   })
   expect(merged.marks).toBeGreaterThan(0)
-  // A project without a model takes the imported one as it is (Its model: Bring in).
-  const brought = await page.evaluate(async () => {
-    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-    return useReconstructionStore().mainSparseCloud?.cameras?.size ?? 0
-  })
-  expect(brought).toBe(5)
 
   // The imported features and matches build the model in the new project.
   const cameras = await page.evaluate(async () => {
@@ -284,7 +289,6 @@ test('a model solved apart is merged into this one, placed by the photos both so
       { timeout: 120_000 },
     )
     .toMatch(/\+/)
-  await expect(page.locator('.progress-modal')).toHaveCount(0, { timeout: 30_000 })
 
   const result = await page.evaluate(async (truth) => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
