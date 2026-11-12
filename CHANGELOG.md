@@ -40,6 +40,9 @@ Notable changes to websfm. The format follows
   factorisation added no measurable time (Reconstruct 80 s either way).
 
 ### Changed
+- **The example opens where its walkthrough starts.** Opening the Aukerman example now
+  brings the ribbon's Reconstruct tab to the front, and the console is open the first time
+  you start WebSfM (Other ▸ Console closes it, and it stays as you leave it).
 - **Weak photo pairs are verified, not dropped at random.** Match Features now tries the
   best-scoring matches first when it checks a pair's geometry (PROSAC), and tries up to
   10,000 samples instead of 1,000 (RANSAC iterations). A pair whose good matches are a

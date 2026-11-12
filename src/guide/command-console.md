@@ -5,9 +5,10 @@ summary: Type commands instead of clicking: every ribbon command, plus running s
 category: Start here
 order: 6
 ---
-The console at the bottom of the window shows the log and has a command line. Open it
-with **Other ▸ Console**, **Ctrl+`**, or **Ctrl+K** (**⌘K** on a Mac), which also puts
-the cursor in the prompt. **↑** and **↓** recall earlier commands, and **Tab** completes
+The console at the bottom of the window shows the log and has a command line. It is open
+when you first start WebSfM, and stays as you leave it. Open or close it with
+**Other ▸ Console** or **Ctrl+`**; **Ctrl+K** (**⌘K** on a Mac) opens it and puts the
+cursor in the prompt. **↑** and **↓** recall earlier commands, and **Tab** completes
 a command, a setting name, a stage or an image name; when several fit, it completes
 as far as they agree and lists them.
 

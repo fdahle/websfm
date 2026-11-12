@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures.js'
 
+// The console (open by default) shortens the 3D view, and these tests click at fixed
+// points in it.
+test.beforeEach(({ page }) => page.addInitScript(() => localStorage.setItem('consoleOpen', 'false')))
+
 // Tools ▸ Model ▾ (Region, Orient model) and Point Cloud ▾ ▸ Align by point pairs:
 // tools whose interaction lives in a floating toolbox over the 3D view, driven by
 // real clicks (point picking) against the full application.

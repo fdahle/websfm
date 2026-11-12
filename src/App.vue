@@ -561,9 +561,13 @@ const {
   clearViewerScene: () => viewerRef.value?.clearReconstructionData(),
   isBusy,
   onProjectOpened: (id) => offerStoppedRuns(id),
+  onExampleOpened: () => ribbonRef.value?.showTab('reconstruct'),
 })
+const ribbonRef = ref(null)
 
-const consoleOpen = ref(localStorage.getItem('consoleOpen') === 'true')
+// Open until the user closes it: a new user sees what a run is doing (and the log a bug
+// report needs) without first finding the toggle.
+const consoleOpen = ref(localStorage.getItem('consoleOpen') !== 'false')
 watch(consoleOpen, (v) => localStorage.setItem('consoleOpen', v))
 const devConsoleRef = ref(null)
 // Cmd/Ctrl-K: open the console (if closed) and put the cursor in its prompt.
@@ -1234,6 +1238,7 @@ provideSidebar(sidebarContext)
     <ToastStack />
     <UpdatePrompt :busy="workInFlight" />
     <Ribbon
+      ref="ribbonRef"
       :active-view="activeView"
       :state="commandState"
       :view-state="ribbonViewState"

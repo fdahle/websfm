@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures.js'
 
+// The console (open by default) shortens the 3D view, and these tests click at fixed
+// points in it.
+test.beforeEach(({ page }) => page.addInitScript(() => localStorage.setItem('consoleOpen', 'false')))
+
 // Measure in 3D: clicks on a mesh pick points on its surface (ray cast, not just
 // corners), and the toolbox reports distance and area in the project's unit.
 test('measures a distance and an area on a mesh in the 3D view', async ({ page }) => {

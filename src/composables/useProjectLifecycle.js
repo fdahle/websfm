@@ -47,7 +47,13 @@ import { releaseIdleWorkers } from '../workers/computeClient.js'
 //   clearViewerScene  — blank the Three.js scene (viewerRef.clearReconstructionData)
 //   isBusy            — true while a compute run or workflow is in flight
 //   onProjectOpened   — called with the id once a project has opened (useStoppedRuns)
-export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = () => false, onProjectOpened = null }) {
+export function useProjectLifecycle({
+  resetToViewer,
+  clearViewerScene,
+  isBusy = () => false,
+  onProjectOpened = null,
+  onExampleOpened = null,
+}) {
   const { log } = useLog()
   const projectsStore = useProjectsStore()
   const { projects, currentProjectId, currentProjectName } = storeToRefs(projectsStore)
@@ -425,6 +431,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       'Project',
     )
     await imagesStore.addImages(files)
+    // The walkthrough's first steps are on the Reconstruct tab.
+    onExampleOpened?.(id)
     if (example.tutorial) useGuideStore().openOp(example.tutorial)
   }
 

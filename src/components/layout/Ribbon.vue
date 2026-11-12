@@ -57,6 +57,13 @@ const rasterTab = computed(() => buildRasterTab(props.activeRaster))
 const measureCtx = computed(() => props.activeRaster ?? (props.activeView === 'map' ? props.mapMeasure : null))
 
 const activeTab = ref('view')
+// App brings a tab to the front for the user (an example project opens on Reconstruct,
+// where its walkthrough starts).
+defineExpose({
+  showTab(id) {
+    if (allTabs.value.some((t) => t.id === id)) activeTab.value = id
+  },
+})
 
 watch(
   () => !!props.activeImageId,

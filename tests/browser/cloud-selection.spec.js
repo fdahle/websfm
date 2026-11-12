@@ -1,5 +1,9 @@
 import { test, expect } from './fixtures.js'
 
+// The console (open by default) shortens the 3D view, and these tests click at fixed
+// points in it.
+test.beforeEach(({ page }) => page.addInitScript(() => localStorage.setItem('consoleOpen', 'false')))
+
 // 3D-viewer rectangle/lasso selection (tool chosen in the ribbon's Tools ▸ Point
 // Cloud ▾, acted on from the floating toolbox) → Delete / Keep only through the
 // cloud-edit worker path, against the real Viewer3D, store, worker and OPFS
