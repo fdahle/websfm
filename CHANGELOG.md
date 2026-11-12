@@ -156,6 +156,9 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Continuing a stopped matching run matches every pair.** Continue now matches again the
+  pairs that failed or were cut off by Cancel before the stop. Before, such a pair could be
+  counted as done although it had no saved result, and was then never matched.
 - **Huge clouds with stray points import again.** Importing or editing a very large cloud
   whose extent is far larger than its data (a few stray points at 0, 0, 0 in a UTM
   cloud, or millions of points in one spot) no longer fails with "Cannot read properties

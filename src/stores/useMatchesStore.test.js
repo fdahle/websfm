@@ -388,3 +388,57 @@ it('re-points at the copy when the file it read from went away (a storage move)'
   expect(refetch).toHaveBeenCalledWith('match-test', { name: 'm', bytes: blob.size })
   expect(store.getMatch('a', 'b').src.file).toBe(blob)
 })
+
+it('Continue matches a pair that errored before the stop', async () => {
+  vi.spyOn(opfs, 'saveMatchDocument').mockResolvedValue({ files: {} })
+  const journals = []
+  vi.spyOn(opfs, 'saveRunJournal').mockImplementation(async (_p, j) => journals.push(structuredClone(j)))
+  const kps = (dx) => Array.from({ length: 50 }, (_, i) => ({ x: i * 10 + dx, y: (i * 7) % 300, nx: 0, ny: 0 }))
+  const imgs = ['a', 'b', 'c'].map((u, k) => ({ ...withKeypoints(u, kps(k)), name: `${u}.jpg` }))
+  // Each image's rows are one unit vector (e0, e1, e2), so a call says which pair it is.
+  const rows = (k) => Float32Array.from({ length: 50 * 128 }, (_, i) => (i % 128 === k ? 1 : 0))
+  vi.spyOn(opfs, 'loadDescriptors').mockImplementation(async (_p, uuid) => rows({ a: 0, b: 1, c: 2 }[uuid]))
+  const which = (d) => [0, 1, 2].find((k) => d[k] > 0)
+  // Pair a–c fails in the worker (a crash, or Cancel terminating the pool).
+  let failAC = true
+  const match = vi.spyOn(workers, 'matchDescriptors').mockImplementation(async (dA, dB) => {
+    if (failAC && [which(dA), which(dB)].sort().join() === '0,2') throw new Error('worker lost')
+    return { matches: Array.from({ length: 20 }, (_, i) => ({ ia: i, ib: i, dist: 1 })) }
+  })
+  vi.spyOn(workers, 'verifyPointPairs').mockResolvedValue({
+    F: [
+      [0, -0.3, 0.2],
+      [0.4, 0, -1.1],
+      [-0.25, 0.9, 0.05],
+    ],
+    inlierMask: new Float32Array(20).fill(1),
+    inlierCount: 20,
+    hInlierCount: 0,
+  })
+  const store = useMatchesStore()
+  const settings = { strategy: 'exhaustive', subsetGate: false, _journalMs: 0 }
+  await store.matchAll(
+    imgs,
+    settings,
+    () => {},
+    () => false,
+  )
+  expect(store.getMatch('a', 'c')?.status).toBe('error')
+  // No checkpoint ever lists the failed pair as done.
+  const listed = new Set(journals.filter((j) => j.phase === 'pairs').flatMap((j) => j.done))
+  expect(listed.size).toBeLessThanOrEqual(2)
+  // Continue from a save that (as before the fix) listed every pair: the one without a
+  // stored result is matched again, the others keep theirs.
+  const stopped = { ...journals.find((j) => j.phase === 'pairs'), done: [0, 1, 2] }
+  failAC = false
+  match.mockClear()
+  await store.matchAll(
+    imgs,
+    settings,
+    () => {},
+    () => false,
+    { resume: stopped },
+  )
+  expect(match).toHaveBeenCalledTimes(1)
+  expect(store.getMatch('a', 'c')?.status).toBe('done')
+})

@@ -664,7 +664,12 @@ export function createMatchAll({
       else log(`Matching: the stopped run cannot continue (${verdict.why}); starting again`, 'warn', 'Matching')
     }
     // Pairs a continued run keeps: those its last save held, or all once the loop was done.
-    const kept = new Set(journal ? (journal.phase === 'pairs' ? journal.done : pairs.map((_, i) => i)) : [])
+    // Only those with a stored result: a pair that errored or was cancelled in flight
+    // has none, whatever an older journal listed, and is matched again.
+    const isDone = (i) => matchStore.value.get(pairId(pairs[i][0].uuid, pairs[i][1].uuid))?.status === 'done'
+    const kept = new Set(
+      (journal ? (journal.phase === 'pairs' ? journal.done : pairs.map((_, i) => i)) : []).filter(isDone),
+    )
     // Match only new pairs: a pair with a result keeps it (re-detecting an image removes
     // its pairs' results, so a kept one belongs to the current features).
     let keptAsMatched = 0
@@ -756,7 +761,9 @@ export function createMatchAll({
         descCache.release(a.uuid)
         descCache.release(b.uuid)
         done++
-        finished.push(i)
+        // A pair that errored, or that Cancel cut off, has no saved result: the journal
+        // must not list it, or Continue would skip it.
+        if (isDone(i)) finished.push(i)
         progress(done, pairs.length, pairSpan)
         checkpoint()
       }
