@@ -10,7 +10,7 @@
 
 import { encodeLasPoints, writeLasHeader, extraBytesVlr, LAS_RECORD_F2 } from '../io/las.js'
 import { LASZIP_VLR_USER_ID, LASZIP_VLR_RECORD_ID } from '../io/laz.js'
-import { cloudToPlyParts } from '../products/exporters.js'
+import { cloudToPlyParts, FLOAT32_EXACT_ABS } from '../products/exporters.js'
 import { cloudToXyzParts } from '../io/cloudText.js'
 
 // The standard LAS fields a streamed cloud's attributes can go in, with their range;
@@ -133,6 +133,11 @@ export function lodToLas(reader, lod, { onProgress, compressor = null } = {}) {
 export async function* lodToText(reader, lod, { format, color = true, onProgress } = {}) {
   let written = 0,
     first = true
+  // One position type for the whole file (each node is written by its own call):
+  // doubles when the cloud's bounds hold CRS-sized coordinates.
+  const b = lod.bounds
+  const positions =
+    b && Math.max(...b.min.map(Math.abs), ...b.max.map(Math.abs)) >= FLOAT32_EXACT_ABS ? 'double' : 'float'
   for await (const pts of nodes(reader)) {
     const cloud = { count: pts.count, pos: pts.pos, ...(pts.col ? { col: pts.col } : {}), attributes: pts.attributes }
     if (format === 'xyz') {
@@ -152,7 +157,7 @@ export async function* lodToText(reader, lod, { format, color = true, onProgress
         headless = true
       }
     } else {
-      const it = cloudToPlyParts(cloud, { binary: true, color })
+      const it = cloudToPlyParts(cloud, { binary: true, color, positions })
       const head = it.next().value
       // One header for the whole file: this node's, with the cloud's count.
       if (first)

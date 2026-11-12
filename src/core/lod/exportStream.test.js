@@ -157,8 +157,22 @@ describe('streamed cloud export', () => {
     const text = new TextDecoder().decode(new Uint8Array(await blob.slice(0, 600).arrayBuffer()))
     expect(text.match(/element vertex (\d+)/g)).toEqual([`element vertex ${n}`])
     const headerBytes = text.indexOf('end_header\n') + 'end_header\n'.length
-    const stride = 12 + 3 + 2 + 1 + 1 + 1
+    // UTM-sized positions: doubles, so they read back to the millimetre.
+    expect(text).toContain('property double x')
+    const stride = 24 + 3 + 2 + 1 + 1 + 1
     expect(blob.size - headerBytes).toBe(n * stride)
+    const { parsePly } = await import('../io/ply.js')
+    const back = parsePly(new Uint8Array(await blob.arrayBuffer()))
+    const seen = new Set()
+    for (let i = 0; i < n; i++) {
+      // The writer reorders by node; each written position is one of the input grid's.
+      const gx = (back.pos[3 * i] - 650000) / 0.25,
+        gy = (back.pos[3 * i + 1] - 5100000) / 0.25
+      expect(Math.abs(gx - Math.round(gx))).toBeLessThan(0.004)
+      expect(Math.abs(gy - Math.round(gy))).toBeLessThan(0.004)
+      seen.add(Math.round(gy) * 400 + Math.round(gx))
+    }
+    expect(seen.size).toBe(n)
     const xyz = []
     for await (const p of lodToText(reader, lod, { format: 'xyz' })) xyz.push(p)
     expect(xyz.join('').trim().split('\n').length).toBe(n)

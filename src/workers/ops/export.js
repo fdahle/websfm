@@ -6,6 +6,7 @@ import {
   meshToObjParts,
   meshToStlParts,
   meshToGlbParts,
+  meshExportShift,
   objMaterialLibrary,
 } from '../../core/products/exporters.js'
 import { zipParts } from '../../utils/zip.js'
@@ -137,9 +138,24 @@ export function makeExportOps({ lazCodec = null } = {}) {
       : []
     let blob,
       ext = format === 'glb' || format === 'obj' || format === 'stl' ? format : 'ply'
+    // GLB and STL hold Float32 only: CRS-sized positions go relative to a shift (GLB
+    // keeps it as the node's translation; STL names it in its header).
+    const shift = format === 'glb' || format === 'stl' ? meshExportShift(src) : null
+    if (shift)
+      onLog(
+        format === 'glb'
+          ? `GLB: positions relative to (${shift.join(', ')}), stored as the node translation`
+          : `STL: positions relative to (${shift.join(', ')}); add it back to place the mesh (also in the file header)`,
+        'info',
+      )
     if (format === 'glb') {
       blob = partsToBlob(
-        meshToGlbParts(src, { color, texture: textured ? { pages, groups: texture.groups } : null }),
+        meshToGlbParts(src, {
+          color,
+          texture: textured ? { pages, groups: texture.groups } : null,
+          origin: shift,
+          translation: shift,
+        }),
         'model/gltf-binary',
       )
     } else if (format === 'obj' && textured) {
@@ -161,7 +177,7 @@ export function makeExportOps({ lazCodec = null } = {}) {
       )
       ext = 'zip'
     } else if (format === 'obj') blob = partsToBlob(meshToObjParts(src, { color }), 'text/plain;charset=utf-8')
-    else if (format === 'stl') blob = partsToBlob(meshToStlParts(src), 'model/stl')
+    else if (format === 'stl') blob = partsToBlob(meshToStlParts(src, { shift }), 'model/stl')
     else {
       const binary = format !== 'ply-ascii'
       blob = partsToBlob(

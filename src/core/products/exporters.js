@@ -11,6 +11,50 @@ import { applySimilarity } from './georef.js'
 import { createVoxelAccumulator } from '../dense/voxelAccumulator.js'
 import { PART_BYTES, PART_CHARS, lineParts, recordParts, lazyArray } from '../io/parts.js'
 
+// ── Float32 and CRS-sized coordinates ────────────────────────────────────────
+// Float32 spacing passes 1 mm at |x| ≥ 2¹³ (0.5 m at a UTM northing). Past that a
+// binary writer keeps positions exact: PLY in doubles, STL and GLB (Float32 only)
+// relative to a shift that the caller reports (GLB carries it as the node translation).
+export const FLOAT32_EXACT_ABS = 8192
+
+/** Largest |coordinate| over n positions read through the three axis getters. */
+export function maxAbsCoord(n, getX, getY, getZ) {
+  let m = 0
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(Math.abs(getX(i)), Math.abs(getY(i)), Math.abs(getZ(i)))
+    if (a > m) m = a
+  }
+  return m
+}
+
+// 'double' | 'float' | 'auto' (double when float32 would lose a millimetre).
+function doublePositions(positions, n, getX, getY, getZ) {
+  if (positions === 'double') return true
+  if (positions === 'float') return false
+  return maxAbsCoord(n, getX, getY, getZ) >= FLOAT32_EXACT_ABS
+}
+
+/**
+ * The shift a Float32-only format (STL, GLB) subtracts from a mesh's positions so they
+ * stay exact: the bounding-box centre rounded to 100 units, or null when the positions
+ * are small enough as they are.
+ */
+export function meshExportShift(mesh) {
+  const pos = mesh.pos
+  const n = mesh.nVerts ?? pos.length / 3
+  if (!n) return null
+  const lo = [Infinity, Infinity, Infinity],
+    hi = [-Infinity, -Infinity, -Infinity]
+  for (let i = 0; i < n; i++)
+    for (let k = 0; k < 3; k++) {
+      const v = pos[i * 3 + k]
+      if (v < lo[k]) lo[k] = v
+      if (v > hi[k]) hi[k] = v
+    }
+  if (Math.max(...lo.map(Math.abs), ...hi.map(Math.abs)) < FLOAT32_EXACT_ABS) return null
+  return lo.map((v, k) => Math.round((v + hi[k]) / 2 / 100) * 100)
+}
+
 // ── Export preprocessing: georeference + voxel downsample ────────────────────
 // Applies (in this order — the cell size is in target-CRS units) an optional
 // similarity transform (the stored Horn georef fit) and an optional voxel
@@ -262,6 +306,8 @@ export function* cloudToPlyParts(
     color = true,
     normals = true,
     attributes = true,
+    // 'auto': doubles when float32 would lose a millimetre (CRS coordinates).
+    positions = 'auto',
     partBytes = PART_BYTES,
     partChars = PART_CHARS,
   } = {},
@@ -280,8 +326,10 @@ export function* cloudToPlyParts(
     ? (i) => [flat.nrm[i * 3], flat.nrm[i * 3 + 1], flat.nrm[i * 3 + 2]]
     : (i) => points[i].normal || [0, 0, 0]
   const fields = attributes && flat ? plyAttributeFields(flat.attributes, n) : []
+  const dbl = binary && doublePositions(positions, n, getX, getY, getZ)
+  const xyzType = dbl ? 'double' : 'float'
   const props =
-    'property float x\nproperty float y\nproperty float z\n' +
+    `property ${xyzType} x\nproperty ${xyzType} y\nproperty ${xyzType} z\n` +
     (hasNrm ? 'property float nx\nproperty float ny\nproperty float nz\n' : '') +
     (color ? 'property uchar red\nproperty uchar green\nproperty uchar blue\n' : '') +
     fields.map((f) => `property ${f.type} ${f.name}\n`).join('')
@@ -317,28 +365,35 @@ export function* cloudToPlyParts(
   }
 
   yield new TextEncoder().encode(header)
-  // 3×f32 xyz (12) [+ 3×f32 normals (12)] [+ 3×u8 rgb (3)] [+ attributes].
+  // 3×f32 or 3×f64 xyz [+ 3×f32 normals (12)] [+ 3×u8 rgb (3)] [+ attributes].
+  const XYZ = dbl ? 24 : 12
   const NRM = hasNrm ? 12 : 0
-  const ATTR = color ? 12 + NRM + 3 : 12 + NRM
+  const ATTR = color ? XYZ + NRM + 3 : XYZ + NRM
   const STRIDE = ATTR + fields.reduce((sum, f) => sum + f.size, 0)
   yield* recordParts(
     n,
     STRIDE,
     (dv, o, i) => {
-      dv.setFloat32(o, getX(i), true)
-      dv.setFloat32(o + 4, getY(i), true)
-      dv.setFloat32(o + 8, getZ(i), true)
+      if (dbl) {
+        dv.setFloat64(o, getX(i), true)
+        dv.setFloat64(o + 8, getY(i), true)
+        dv.setFloat64(o + 16, getZ(i), true)
+      } else {
+        dv.setFloat32(o, getX(i), true)
+        dv.setFloat32(o + 4, getY(i), true)
+        dv.setFloat32(o + 8, getZ(i), true)
+      }
       if (hasNrm) {
         const nn = getN(i)
-        dv.setFloat32(o + 12, nn[0], true)
-        dv.setFloat32(o + 16, nn[1], true)
-        dv.setFloat32(o + 20, nn[2], true)
+        dv.setFloat32(o + XYZ, nn[0], true)
+        dv.setFloat32(o + XYZ + 4, nn[1], true)
+        dv.setFloat32(o + XYZ + 8, nn[2], true)
       }
       if (color) {
         const c = getC(i) || [200, 200, 200]
-        dv.setUint8(o + 12 + NRM, byte(c[0]))
-        dv.setUint8(o + 13 + NRM, byte(c[1]))
-        dv.setUint8(o + 14 + NRM, byte(c[2]))
+        dv.setUint8(o + XYZ + NRM, byte(c[0]))
+        dv.setUint8(o + XYZ + 1 + NRM, byte(c[1]))
+        dv.setUint8(o + XYZ + 2 + NRM, byte(c[2]))
       }
       let a = o + ATTR
       for (const f of fields) {
@@ -410,13 +465,16 @@ const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 // triangles (list: uchar count=3 + 3×int vertex indices).
 export function* meshToPlyParts(
   mesh,
-  { binary = true, color = true, partBytes = PART_BYTES, partChars = PART_CHARS } = {},
+  { binary = true, color = true, positions = 'auto', partBytes = PART_BYTES, partChars = PART_CHARS } = {},
 ) {
   const nV = mesh.nVerts ?? mesh.pos.length / 3
   const nF = mesh.count ?? mesh.idx.length / 3
   const hasCol = color && !!mesh.col
+  const [getX, getY, getZ] = flatAxes(mesh)
+  const dbl = binary && doublePositions(positions, nV, getX, getY, getZ)
+  const xyzType = dbl ? 'double' : 'float'
   const vprops =
-    'property float x\nproperty float y\nproperty float z\n' +
+    `property ${xyzType} x\nproperty ${xyzType} y\nproperty ${xyzType} z\n` +
     (hasCol ? 'property uchar red\nproperty uchar green\nproperty uchar blue\n' : '')
   const header =
     'ply\n' +
@@ -447,18 +505,25 @@ export function* meshToPlyParts(
   }
 
   yield new TextEncoder().encode(header)
-  const vStride = 12 + (hasCol ? 3 : 0)
+  const XYZ = dbl ? 24 : 12
+  const vStride = XYZ + (hasCol ? 3 : 0)
   yield* recordParts(
     nV,
     vStride,
     (dv, o, i) => {
-      dv.setFloat32(o, mesh.pos[i * 3], true)
-      dv.setFloat32(o + 4, mesh.pos[i * 3 + 1], true)
-      dv.setFloat32(o + 8, mesh.pos[i * 3 + 2], true)
+      if (dbl) {
+        dv.setFloat64(o, mesh.pos[i * 3], true)
+        dv.setFloat64(o + 8, mesh.pos[i * 3 + 1], true)
+        dv.setFloat64(o + 16, mesh.pos[i * 3 + 2], true)
+      } else {
+        dv.setFloat32(o, mesh.pos[i * 3], true)
+        dv.setFloat32(o + 4, mesh.pos[i * 3 + 1], true)
+        dv.setFloat32(o + 8, mesh.pos[i * 3 + 2], true)
+      }
       if (hasCol) {
-        dv.setUint8(o + 12, byte(mesh.col[i * 3]))
-        dv.setUint8(o + 13, byte(mesh.col[i * 3 + 1]))
-        dv.setUint8(o + 14, byte(mesh.col[i * 3 + 2]))
+        dv.setUint8(o + XYZ, byte(mesh.col[i * 3]))
+        dv.setUint8(o + XYZ + 1, byte(mesh.col[i * 3 + 1]))
+        dv.setUint8(o + XYZ + 2, byte(mesh.col[i * 3 + 2]))
       }
     },
     partBytes,
@@ -558,11 +623,17 @@ export function objMaterialLibrary(pageFiles) {
 // from the cross product), 3 vertices f32×3, u16 attribute (0). No colour (STL
 // vertex colour is non-standard). A degenerate triangle yields a zero normal
 // rather than NaN. Yields Uint8Array parts.
-export function* meshToStlParts(mesh, { partBytes = PART_BYTES } = {}) {
+//
+// STL has only Float32: `shift` (meshExportShift; null for none) is subtracted from
+// every vertex and named in the 80-byte header ("shift x y z"), and the caller reports
+// it, so a CRS-sized mesh keeps its millimetres.
+export function* meshToStlParts(mesh, { shift = null, partBytes = PART_BYTES } = {}) {
   const nF = mesh.count ?? mesh.idx.length / 3
   const head = new Uint8Array(84)
   // 80-byte header (zeroed) then triangle count.
-  new TextEncoder().encodeInto('WebSfM binary STL', head.subarray(0, 80))
+  const title = shift ? `WebSfM binary STL shift ${shift.join(' ')}` : 'WebSfM binary STL'
+  new TextEncoder().encodeInto(title.slice(0, 80), head.subarray(0, 80))
+  const [sx, sy, sz] = shift ?? [0, 0, 0]
   new DataView(head.buffer).setUint32(80, nF, true)
   yield head
   yield* recordParts(
@@ -572,15 +643,15 @@ export function* meshToStlParts(mesh, { partBytes = PART_BYTES } = {}) {
       const a = mesh.idx[f * 3],
         b = mesh.idx[f * 3 + 1],
         c = mesh.idx[f * 3 + 2]
-      const ax = mesh.pos[a * 3],
-        ay = mesh.pos[a * 3 + 1],
-        az = mesh.pos[a * 3 + 2]
-      const bx = mesh.pos[b * 3],
-        by = mesh.pos[b * 3 + 1],
-        bz = mesh.pos[b * 3 + 2]
-      const cx = mesh.pos[c * 3],
-        cy = mesh.pos[c * 3 + 1],
-        cz = mesh.pos[c * 3 + 2]
+      const ax = mesh.pos[a * 3] - sx,
+        ay = mesh.pos[a * 3 + 1] - sy,
+        az = mesh.pos[a * 3 + 2] - sz
+      const bx = mesh.pos[b * 3] - sx,
+        by = mesh.pos[b * 3 + 1] - sy,
+        bz = mesh.pos[b * 3 + 2] - sz
+      const cx = mesh.pos[c * 3] - sx,
+        cy = mesh.pos[c * 3 + 1] - sy,
+        cz = mesh.pos[c * 3 + 2] - sz
       // Face normal = (b−a)×(c−a), normalized; (0,0,0) for a degenerate triangle.
       const ux = bx - ax,
         uy = by - ay,

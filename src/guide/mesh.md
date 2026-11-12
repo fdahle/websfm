@@ -95,6 +95,11 @@ GLB and OBJ keep a texture ([Texture Mesh](guide:texture-mesh)); OBJ vertex colo
 works only where the application supports it; STL is geometry only. Check the target
 application's axes and units.
 
+A georeferenced mesh keeps its map coordinates exactly: PLY writes them in double
+precision, GLB stores a rounded offset as its node translation, and STL, which has no
+place for one, is written relative to an offset that the log and the file header name
+("shift x y z"). Add it back to place an STL in the map.
+
 ## Cleaning, simplifying and measuring
 **Tools ▸ Mesh ▾** works on any mesh, built or imported, and adds a new mesh each time.
 Clean, Smooth and Decimate are also [Workflow Builder](guide:workflow-builder) blocks.

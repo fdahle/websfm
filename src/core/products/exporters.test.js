@@ -14,6 +14,7 @@ import {
   prepareCloudForExport,
   prepareMeshForExport,
   objMaterialLibrary,
+  meshExportShift,
 } from './exporters.js'
 import { joinParts, jsonParts } from '../io/parts.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
@@ -597,5 +598,70 @@ describe('demSupportToGeoTiff', () => {
 
   it('refuses a DEM built before support was recorded', async () => {
     await expect(demSupportToGeoTiff({ width: 1, height: 1, mask: Uint8Array.of(1) })).rejects.toThrow(/support/)
+  })
+})
+
+describe('CRS-sized coordinates in binary exports', () => {
+  // A UTM-sized position: float32 spacing at 5.4e6 is 0.5 m.
+  const P = [
+    [512345.678, 5432109.876, 312.345],
+    [512346.789, 5432110.987, 313.456],
+    [512344.567, 5432111.098, 311.234],
+  ]
+  const cloud = { count: 3, pos: new Float64Array(P.flat()), col: new Uint8Array(9).fill(100) }
+  const mesh = { nVerts: 3, count: 1, pos: new Float64Array(P.flat()), idx: new Uint32Array([0, 1, 2]) }
+  const close = (got, want) => {
+    for (let k = 0; k < want.length; k++) expect(Math.abs(got[k] - want[k])).toBeLessThan(1e-3)
+  }
+
+  it('binary cloud PLY reads back to the millimetre', async () => {
+    const { parsePly } = await import('../io/ply.js')
+    const bytes = cloudToPly(cloud)
+    expect(new TextDecoder().decode(bytes.subarray(0, 200))).toContain('property double x')
+    const back = parsePly(bytes)
+    close(Array.from(back.pos), P.flat())
+    expect(Array.from(back.col)).toEqual(Array.from(cloud.col))
+  })
+
+  it('binary mesh PLY reads back to the millimetre', async () => {
+    const { parsePly } = await import('../io/ply.js')
+    const back = parsePly(meshToPly(mesh, { color: false }))
+    close(Array.from(back.pos), P.flat())
+    expect(Array.from(back.idx)).toEqual([0, 1, 2])
+  })
+
+  it('a local-frame cloud stays float', () => {
+    const local = { count: 1, pos: new Float64Array([1.5, -2.25, 3]) }
+    expect(new TextDecoder().decode(cloudToPly(local, { color: false }))).toContain('property float x')
+  })
+
+  it('STL writes relative to the shift it names in its header', () => {
+    const shift = meshExportShift(mesh)
+    expect(shift).toEqual([512300, 5432100, 300])
+    const bytes = meshToStl(mesh, { shift })
+    expect(new TextDecoder().decode(bytes.subarray(0, 80))).toContain('shift 512300 5432100 300')
+    const dv = new DataView(bytes.buffer, bytes.byteOffset)
+    const v = [0, 1, 2].map((k) => [0, 1, 2].map((a) => dv.getFloat32(84 + 12 + k * 12 + a * 4, true) + shift[a]))
+    close(v.flat(), P.flat())
+  })
+
+  it('GLB positions plus the node translation give the CRS position', () => {
+    const shift = meshExportShift(mesh)
+    const bytes = meshToGlb(mesh, { color: false, origin: shift, translation: shift })
+    const dv = new DataView(bytes.buffer, bytes.byteOffset)
+    const jsonLen = dv.getUint32(12, true)
+    const gltf = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLen)))
+    const binStart = 20 + jsonLen + 8
+    const acc = gltf.accessors[gltf.meshes[0].primitives[0].attributes.POSITION]
+    const view = gltf.bufferViews[acc.bufferView]
+    const t = gltf.nodes[0].translation
+    const off = binStart + (view.byteOffset ?? 0) + (acc.byteOffset ?? 0)
+    const v = []
+    for (let i = 0; i < 9; i++) v.push(dv.getFloat32(off + i * 4, true) + t[i % 3])
+    close(v, P.flat())
+  })
+
+  it('a small mesh needs no shift', () => {
+    expect(meshExportShift({ nVerts: 1, pos: new Float64Array([1, 2, 3]) })).toBeNull()
   })
 })

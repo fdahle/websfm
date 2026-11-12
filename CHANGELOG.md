@@ -156,6 +156,15 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Georeferenced PLY, STL and GLB exports keep their millimetres.** A cloud or mesh
+  exported in map coordinates now reads back where it was: binary PLY writes the
+  positions in double precision, GLB keeps a rounded offset as its node translation, and
+  STL is written relative to an offset named in its header and the log. Before, all
+  three stored map coordinates in single precision, which rounds a UTM northing to
+  0.5 m. LAS, LAZ, COPC, ASCII PLY, XYZ and OBJ were already exact. A local-frame export
+  is unchanged. Unit tests export points at (512345.678, 5432109.876, 312.345) through
+  each writer, including the streamed PLY export of a large cloud, and read them back
+  within 1 mm.
 - **A failed rerun no longer loses the saved model.** When Reconstruct unloads the old
   model to make room and the run then fails or is cancelled, WebSfM now reads the saved
   model back. Before, the next ordinary action (hiding a layer, renaming a cloud) saved
