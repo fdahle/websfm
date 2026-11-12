@@ -146,7 +146,7 @@ export function useDetectTargets() {
     return named.find((g) => g.enabled !== false) ?? named[0] ?? null
   }
 
-  async function runTags(settings, planned, onProgress) {
+  async function runTags(settings, planned, onProgress, shouldCancel) {
     const n = planned.photos.length
     const workers = Math.max(1, Math.min(POOL_SIZE, n))
     let found = 0,
@@ -159,6 +159,7 @@ export function useDetectTargets() {
     onProgress?.(0, n, `Looking for ${label} markers in ${pluralize(n, 'photo')}…`)
     let offPrediction = 0
     await mapConcurrent(planned.photos, workers, async ({ img, predicted }) => {
+      if (shouldCancel()) return
       await imagesStore.whenComputeReady(img)
       const { tags } = await detectTagsInPhoto(computeSourceOf(img), dict)
       // How far a tag may sit from where the model puts its GCP: a window, a solar cell
@@ -207,8 +208,16 @@ export function useDetectTargets() {
     return { found, tried: n }
   }
 
-  async function run(settings, planned, onProgress) {
-    if (isTagKind(settings.kind)) return runTags(settings, planned, onProgress)
+  // `shouldCancel()`: true once the user pressed Cancel; no photo starts after it, and
+  // the result says `cancelled` (marks placed before stay).
+  async function run(settings, planned, onProgress, shouldCancel = () => false) {
+    const result = isTagKind(settings.kind)
+      ? await runTags(settings, planned, onProgress, shouldCancel)
+      : await runTargets(settings, planned, onProgress, shouldCancel)
+    return shouldCancel() ? { ...result, cancelled: true } : result
+  }
+
+  async function runTargets(settings, planned, onProgress, shouldCancel) {
     let found = 0,
       tried = 0,
       done = 0
@@ -217,6 +226,7 @@ export function useDetectTargets() {
     const t0 = performance.now()
     onProgress?.(0, n, `Looking for targets in ${pluralize(n, 'photo')}…`)
     await mapConcurrent(planned.photos, workers, async ({ img, predictions }) => {
+      if (shouldCancel()) return
       await imagesStore.whenComputeReady(img)
       const { results } = await workerDetectTargets(
         computeSourceOf(img),

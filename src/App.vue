@@ -17,6 +17,8 @@ import { useStoppedRuns } from './composables/useStoppedRuns.js'
 import { useProjectMerge } from './composables/useProjectMerge.js'
 import { useDetectTargets } from './composables/useDetectTargets.js'
 import { showToast } from './composables/useToasts.js'
+import { useLog } from './composables/useLog.js'
+import { cancelRun as cancelWorkerRun, isAbort } from './workers/computeClient.js'
 import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
 import UnsavedChangesCard from './components/layout/UnsavedChangesCard.vue'
@@ -338,10 +340,14 @@ async function onImportProject(sourceId, options = {}) {
 const detectTargets = useDetectTargets()
 async function onDetectTargetsRun({ settings, plan }) {
   useModalsStore().toolModal = null
-  exportProgress.open('Detecting Targets', plan.photos.length, () => {}, { unit: 'photos' })
+  // Cancel stops taking photos and ends the workers' current ones (computeClient cancelRun).
+  exportProgress.open('Detecting Targets', plan.photos.length, () => cancelWorkerRun('target detection cancelled'), {
+    unit: 'photos',
+  })
   let ok = false
   try {
-    const r = await detectTargets.run(settings, plan, exportProgress.report)
+    const r = await detectTargets.run(settings, plan, exportProgress.report, () => exportProgress.aborted.value)
+    if (r.cancelled) return
     ok = r.found > 0
     showToast(r.found ? `${r.found} target marks placed` : 'No target found', {
       detail: r.found
@@ -352,6 +358,12 @@ async function onDetectTargetsRun({ settings, plan }) {
           : 'Try a larger search radius or a lower minimum score.',
       kind: r.found ? 'success' : 'warn',
     })
+  } catch (err) {
+    if (!isAbort(err)) {
+      const detail = String(err?.message ?? err)
+      useLog().log(`Detect targets failed: ${detail}`, 'error', 'GCP')
+      showToast('Detect targets failed', { detail, kind: 'error', ms: 6000 })
+    }
   } finally {
     await exportProgress.close(ok)
   }
