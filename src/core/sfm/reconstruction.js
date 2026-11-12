@@ -69,6 +69,16 @@ function threadedWasm(cap) {
 let threadedThreads = 0
 let threadedModule = null
 
+/**
+ * Start the threaded build's pool now rather than inside the first call that uses it,
+ * so a caller can say so while it starts (the depth maps' first map otherwise sat
+ * seconds at 0 % with no word). Resolves to the pool's thread count, 0 when the build
+ * cannot run here or failed to start (the calls then take one thread).
+ */
+export async function startThreadPool(cap) {
+  return (await threadedWasm(cap)) ? threadedThreads : 0
+}
+
 // Undistort the keypoints of several images through one Brown bag in the crate
 // (crates/reconstruction/src/distort.rs): the same bits as distortion.js undistortPixel,
 // on the thread pool once the bundle adjustment has started it. Synchronous, for the

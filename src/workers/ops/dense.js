@@ -32,6 +32,7 @@ import {
   resampleRgbaMarked,
   FISHEYE_DENSE_MAX_DEG,
 } from '../../core/products/undistort.js'
+import { startThreadPool } from '../../core/sfm/reconstruction.js'
 import { scaleAxes } from '../../core/sfm/geometry.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { isGpuAvailable, ensureDevice } from '../gpu/device.js'
@@ -621,6 +622,22 @@ export function makeDenseOps({ rasterize }) {
     }
     const total = order.length
     const loopFraction = (v) => (total > 0 ? loopShare * (v / total) : 0)
+    if (!backend && cpuThreads) {
+      // Start the pool before the first map, and say so: it takes seconds (each thread
+      // instantiates the module), and the run otherwise sat at 0 % without a word. A pool
+      // that does not start leaves one thread per map, many times slower: a warning.
+      emit('progress', [0, total, 'Starting the CPU threads…', 0])
+      const t0 = performance.now()
+      const threads = await startThreadPool(cpuThreads)
+      const secs = ((performance.now() - t0) / 1000).toFixed(1)
+      if (threads > 0) emit('log', [`Depth maps: ${threads} threads (started in ${secs} s)`, 'info', 'Dense'])
+      else
+        emit('log', [
+          'Depth maps: the threaded build did not start here, so each map runs on one thread (much slower)',
+          'warn',
+          'Dense',
+        ])
+    }
     // The geometric-consistency pass (ACMP's last stage): given `input.geomFrom`, the run's
     // first-pass maps as saved file entries, this call runs each image again against its
     // neighbours' first-pass depths (core/dense/depthMap.js geomDepthMapForImage) and emits

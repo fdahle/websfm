@@ -13,7 +13,7 @@ const props = defineProps({
   // remain the numeric readout only — they may re-count within a run.
   fraction: { type: Number, default: 0 },
   // The stage's current phase, when it names one (usePipeline progressPhase). The ETA
-  // is measured afresh from each phase's start (see the estimator below).
+  // is measured afresh from each phase's first advance (see the estimator below).
   phase: { type: String, default: '' },
   // The run's steps and the ids that have reported (usePipeline progressSteps /
   // progressSeen): a list under the bar, the running step with its own count and bar.
@@ -142,13 +142,19 @@ const cardStyle = computed(() => {
 // blended rate is the raw estimate, eased into `smoothedEta` so the countdown glides.
 const lastStamp = ref(0) // wall-clock of the most recent advance
 const lastFraction = ref(0)
-// Where the current phase began. A stage in phases (fusion: plan, then the slab pass)
+// Where the current phase's measurement began (its first advance, below). A stage in phases (fusion: plan, then the slab pass)
 // gives each a fixed share of the bar, and the time a phase really takes varies with
 // the data (four times the pixels at step 1, the same plan). The cumulative rate since
 // the run started would carry the plan's rate into the slab pass, so it counts from
 // the phase start instead; a stage with no phases has one, from the start.
 const phaseAt = ref(0)
 const phaseFraction = ref(0)
+// The rate is measured from the phase's FIRST advance, not its start. The wait for the
+// first result is start-up (workers loading WASM, the GPU compiling its shaders), paid
+// once, not per item: on the example's detection the first image of each worker took
+// 8–12 s and every later one 2 s, so a rate from the start put "6 minutes" on a 21 s run
+// (on a cold browser, 20 minutes).
+const anchored = ref(false)
 const emaRate = ref(0) // exponential moving average of fraction per second
 const smoothedEta = ref(null)
 const EMA_ALPHA = 0.25 // weight of the newest sample in the EMA
@@ -177,6 +183,7 @@ watch(
   () => {
     phaseAt.value = Date.now()
     phaseFraction.value = props.fraction
+    anchored.value = false
     lastStamp.value = 0
     emaRate.value = 0
     smoothedEta.value = null
@@ -193,7 +200,12 @@ watch(
     if (!(val > lastFraction.value)) return
     advances.value++
     const t = Date.now()
-    if (lastStamp.value) {
+    if (!anchored.value) {
+      // The phase's first result: start-up ends here, the measured rate starts here.
+      anchored.value = true
+      phaseAt.value = t
+      phaseFraction.value = val
+    } else if (lastStamp.value) {
       const dt = (t - lastStamp.value) / 1000
       if (dt > 0) {
         const rate = (val - lastFraction.value) / dt
@@ -310,9 +322,14 @@ const etaText = computed(() => {
 // "5 minutes" every tick. Hold a shown value for at least this long before replacing
 // it — the displayed number is then wrong by at most one bucket for a few seconds,
 // which is far cheaper than a countdown that never stands still.
+// The hold is against twitching between neighbouring buckets only: an estimate that has
+// halved or doubled since it was shown is news, and replaces it at once (a held "20
+// minutes" outlived a run that took 20 s).
 const ETA_HOLD_MS = 15000
+const ETA_NEWS_FACTOR = 2
 const eta = ref(null)
 let etaShownAt = 0
+let etaShownSecs = 0
 
 // Driven by the ticker as well as the estimate: a suppressed change must still land
 // once the hold expires, and by then the candidate string may have stopped changing
@@ -326,13 +343,17 @@ watch(
       if (v !== eta.value) {
         eta.value = v
         etaShownAt = Date.now()
+        etaShownSecs = smoothedEta.value ?? 0
       }
       return
     }
     if (v === eta.value) return
-    if (Date.now() - etaShownAt < ETA_HOLD_MS) return
+    const secs = smoothedEta.value ?? 0
+    const news = secs * ETA_NEWS_FACTOR < etaShownSecs || secs > etaShownSecs * ETA_NEWS_FACTOR
+    if (!news && Date.now() - etaShownAt < ETA_HOLD_MS) return
     eta.value = v
     etaShownAt = Date.now()
+    etaShownSecs = secs
   },
   { immediate: true },
 )

@@ -175,6 +175,19 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **The time left is not inflated by a run's start-up.** The progress window now measures
+  how fast a run goes from its first finished photo, pair or map, and a time left that has
+  halved replaces the one shown at once. On the example's Detect Features, each worker's
+  first photo took 8–12 s (loading and compiling) and every later one about 2 s; measured
+  from the start, the estimate said 6 minutes for a 21 s run (and up to 20 minutes on a
+  cold browser), and held it on screen for 15 s.
+- **Depth maps without a GPU say when they are starting.** On the CPU, Build Depth Maps now
+  shows "Starting the CPU threads…" before its first map, the console says how many threads
+  started and how long it took, and warns when the threaded build cannot start (each map
+  then runs on one thread, many times slower). Before, the run sat at 0 % for several
+  seconds without a word, and the time left counted that wait as map time: Firefox showed
+  an hour for the example. Measured on the example without a GPU (42 maps at 600 px):
+  Chrome 278 s, Firefox 244 s, both on 19 threads, about 7 s of it starting the threads.
 - **Guided track extension follows the rolling shutter.** With Rolling shutter on, guided
   track extension now looks for a point where the rolling-shutter model puts it. Before, it
   searched at the global-shutter projection, so near the top and bottom of a photo taken
