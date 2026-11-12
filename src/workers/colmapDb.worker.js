@@ -4,6 +4,13 @@
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm'
 import { asKeypoints } from '../core/features/keypoints.js'
 import {
+  toColmapPx,
+  fundamentalFromColmapPx,
+  fundamentalToColmapPx,
+  homographyFromColmapPx,
+  homographyToColmapPx,
+} from '../core/io/colmapModel.js'
+import {
   decodeColmapCamera,
   decodeColmapDescriptors,
   decodeColmapKeypoints,
@@ -14,6 +21,7 @@ import {
 
 let sqlitePromise
 let db = null
+const fromPx = (m, convert) => (m ? convert(m) : null)
 let filename = null
 
 const sqlite = () => (sqlitePromise ??= sqlite3InitModule())
@@ -155,9 +163,10 @@ function readSelected(options = {}) {
         imageIds: pairIdToImageIds(Number(r.pair_id)),
         matches: decodeColmapMatches(r),
         verified,
-        F: verified ? decodeColmapMatrix(r.F, `pair ${r.pair_id} F`) : null,
+        // F and H relate COLMAP pixels (centres at +½); E normalized rays, unchanged.
+        F: verified ? fromPx(decodeColmapMatrix(r.F, `pair ${r.pair_id} F`), fundamentalFromColmapPx) : null,
         E: verified ? decodeColmapMatrix(r.E, `pair ${r.pair_id} E`) : null,
-        H: verified ? decodeColmapMatrix(r.H, `pair ${r.pair_id} H`) : null,
+        H: verified ? fromPx(decodeColmapMatrix(r.H, `pair ${r.pair_id} H`), homographyFromColmapPx) : null,
         config: verified ? Number(r.config) : null,
       }))
     }
@@ -222,8 +231,8 @@ async function exportDatabase(bundle) {
       const kps = asKeypoints(f.keypoints)
       const xy = new Float32Array(kps.length * 2)
       for (let i = 0; i < kps.length; i++) {
-        xy[i * 2] = kps.x(i)
-        xy[i * 2 + 1] = kps.y(i)
+        xy[i * 2] = toColmapPx(kps.x(i))
+        xy[i * 2 + 1] = toColmapPx(kps.y(i))
       }
       outDb.exec({
         sql: 'INSERT INTO keypoints(image_id,rows,cols,data) VALUES(?,?,2,?)',
@@ -248,9 +257,9 @@ async function exportDatabase(bundle) {
           pairId,
           matchRows(p.matches),
           data,
-          p.F ? f64Blob(p.F.flat()) : null,
+          p.F ? f64Blob(fundamentalToColmapPx(p.F).flat()) : null,
           p.E ? f64Blob(p.E.flat()) : null,
-          p.H ? f64Blob(p.H.flat()) : null,
+          p.H ? f64Blob(homographyToColmapPx(p.H).flat()) : null,
         ],
       })
     }

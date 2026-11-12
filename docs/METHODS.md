@@ -37,6 +37,12 @@ projected (non-WGS84) CRSs and scanned-film interior orientation are first-class
   whole lens, so self-calibration solves the lens itself (§4.6).
 - **Normalised coordinates**: `x = (u − cx)/fx`, `y = (v − cy)/fy`. Distortion and the
   essential matrix live here.
+- **Pixel centres** are at integers: the top-left pixel's centre is (0, 0), as in OpenCV.
+  COLMAP, OpenSfM and transforms.json (nerfstudio, instant-ngp) put it at (0.5, 0.5), so
+  their principal points, observations, keypoints and two-view F and H shift by half a
+  pixel on import and export (`colmapModel.js` `COLMAP_PX`); Metashape's XML does the same
+  (`metashapeXml.js`). GCP marks are clicked in pixel-edge coordinates and converted
+  (`markToCentrePx`).
 - **Units**: reprojection error in pixels; parallax and triangulation angles in degrees;
   GCP and CRS residuals in project CRS units.
 

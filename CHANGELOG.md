@@ -156,6 +156,14 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **COLMAP, OpenSfM and transforms.json line up with their images.** Models, cameras,
+  keypoints and matches exchanged with COLMAP, OpenSfM and nerfstudio's transforms.json
+  now take the half-pixel difference in where these tools put a pixel's centre into
+  account. Before, an exported model was half a pixel off its photos in every image, about
+  a pixel between strips flown in opposite directions in COLMAP dense or a Gaussian
+  splatting trainer, and an imported one had the mirror error. Unit tests check that a
+  centred principal point exports as COLMAP writes it and comes back exactly, and that a
+  fundamental matrix and a homography keep the same points on them.
 - **Camera positions in a foot-based CRS are weighed in metres.** In a project whose CRS
   is in feet (a US state plane), RTK camera positions are now recognised as survey-grade,
   positions without an accuracy get the 5 m default, and the GNSS antenna offset is

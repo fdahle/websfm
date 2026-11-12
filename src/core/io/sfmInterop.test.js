@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { cameraToWorldGl } from './transforms.js'
-import { parseNvm, parseTransformsJson, buildNvmParts, buildOpenMvg, parseBundler, parseSfmText } from './sfmInterop.js'
+import {
+  parseNvm,
+  parseTransformsJson,
+  parseOpenSfm,
+  buildNvmParts,
+  buildOpenMvg,
+  parseBundler,
+  parseSfmText,
+} from './sfmInterop.js'
 import { joinParts, jsonParts } from './parts.js'
 
 describe('SfM interop readers', () => {
@@ -22,6 +30,17 @@ describe('SfM interop readers', () => {
     })
     expect(parsed.images[0].R.flat()).toEqual(R.flat())
     expect(parsed.images[0].t).toEqual(t)
+    // Its pixel centres are at +½, WebSfM's at 0.
+    expect(parsed.images[0].K).toMatchObject({ cx: 399.5, cy: 299.5 })
+  })
+
+  it('reads an OpenSfM principal point in WebSfM pixels', () => {
+    const parsed = parseOpenSfm({
+      cameras: { cam: { width: 800, height: 600, focal: 1, c_x: 0, c_y: 0 } },
+      shots: { 'a.jpg': { camera: 'cam', rotation: [0, 0, 0], translation: [0, 0, 0] } },
+    })
+    // A centred OpenSfM principal point is the image centre: ((w − 1)/2, (h − 1)/2).
+    expect(parsed.images[0].K).toMatchObject({ cx: 399.5, cy: 299.5 })
   })
 
   it('reads an NVM camera and measurement', () => {

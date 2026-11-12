@@ -55,7 +55,7 @@ describe('COLMAP database adapters', () => {
       focal: 900,
       fx: 900,
       fy: 910,
-      cx: 500,
+      cx: 499.5, // COLMAP's pixel centres are at +½
       k1: 0.1,
       distortionModel: 'brown',
     })
@@ -140,14 +140,15 @@ describe('COLMAP database adapters', () => {
     expect(
       decodeColmapKeypoints({ image_id: 1, rows: 2, cols: 4, data: blob(Float32Array, [1, 2, 3, 4, 5, 6, 7, 8]) }),
     ).toEqual([
-      expect.objectContaining({ x: 1, y: 2, scale: 3, orientation: 4 }),
-      expect.objectContaining({ x: 5, y: 6, scale: 7, orientation: 8 }),
+      // COLMAP's pixel centres are at +½, WebSfM's at 0.
+      expect.objectContaining({ x: 0.5, y: 1.5, scale: 3, orientation: 4 }),
+      expect.objectContaining({ x: 4.5, y: 5.5, scale: 7, orientation: 8 }),
     ])
     const d = decodeColmapDescriptors({ image_id: 1, rows: 1, cols: 128, data: new Uint8Array(128).fill(128) })
     expect(d.compatible).toBe(true)
     expect(d.descriptors[0]).toBeCloseTo(0.25)
     expect(decodeColmapKeypoints({ image_id: 2, rows: 1, cols: 2, data: blob(Float32Array, [7, 8]) })[0]).toMatchObject(
-      { x: 7, y: 8 },
+      { x: 6.5, y: 7.5 },
     )
     expect(
       decodeColmapKeypoints({ image_id: 3, rows: 1, cols: 6, data: blob(Float32Array, [1, 2, 3, 4, 5, 6]) })[0].affine,

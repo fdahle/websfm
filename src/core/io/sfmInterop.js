@@ -64,7 +64,8 @@ export function parseTransformsJson(data) {
       name: frame.file_path,
       width: v.w,
       height: v.h,
-      K: { fx: v.fl_x, fy: v.fl_y ?? v.fl_x, cx: v.cx, cy: v.cy },
+      // nerfstudio and instant-ngp put pixel centres at +½, WebSfM at 0.
+      K: { fx: v.fl_x, fy: v.fl_y ?? v.fl_x, cx: v.cx - 0.5, cy: v.cy - 0.5 },
       R,
       t,
     }
@@ -181,8 +182,9 @@ export function parseOpenSfm(data) {
       K: {
         fx: f,
         fy: (c.focal_y ?? c.focal ?? 0) * scale,
-        cx: (c.c_x ?? 0) * scale + c.width / 2,
-        cy: (c.c_y ?? 0) * scale + c.height / 2,
+        // OpenSfM normalises (x + ½ − w/2)/max(w, h): its pixel centres sit at +½.
+        cx: (c.c_x ?? 0) * scale + c.width / 2 - 0.5,
+        cy: (c.c_y ?? 0) * scale + c.height / 2 - 0.5,
       },
       R,
       t: shot.translation,

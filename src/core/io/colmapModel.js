@@ -561,6 +561,28 @@ export function parseColmapModelBin(files) {
   }
 }
 
+// ── Pixel convention ──────────────────────────────────────────────────────────
+// COLMAP puts the top-left pixel's centre at (0.5, 0.5), WebSfM at (0, 0) (as OpenCV
+// does). Every pixel quantity crossing to or from COLMAP shifts by half a pixel: the
+// principal point, observations and keypoints, and the two-view F and H (x_c = T·x_w,
+// T the +½ translation). Without it an exported model is half a pixel off its images.
+export const COLMAP_PX = 0.5
+export const toColmapPx = (v) => v + COLMAP_PX
+export const fromColmapPx = (v) => v - COLMAP_PX
+const mul3 = (A, B) => A.map((r) => [0, 1, 2].map((j) => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]))
+const tr3 = (A) => [0, 1, 2].map((i) => [0, 1, 2].map((j) => A[j][i]))
+const shift = (d) => [
+  [1, 0, d],
+  [0, 1, d],
+  [0, 0, 1],
+]
+/** F in COLMAP pixels → WebSfM pixels (Tᵀ·F·T), and back. */
+export const fundamentalFromColmapPx = (F) => mul3(tr3(shift(COLMAP_PX)), mul3(F, shift(COLMAP_PX)))
+export const fundamentalToColmapPx = (F) => mul3(tr3(shift(-COLMAP_PX)), mul3(F, shift(-COLMAP_PX)))
+/** H in COLMAP pixels → WebSfM pixels (T⁻¹·H·T), and back. */
+export const homographyFromColmapPx = (H) => mul3(shift(-COLMAP_PX), mul3(H, shift(COLMAP_PX)))
+export const homographyToColmapPx = (H) => mul3(shift(COLMAP_PX), mul3(H, shift(-COLMAP_PX)))
+
 // ── websfm ↔ ColmapModel adapters (pure; caller injects resolved pixels) ─────
 
 // Build a ColmapModel from websfm sparse data. One COLMAP camera per image
@@ -579,7 +601,7 @@ export function buildColmapModel({ images, points }) {
     const kps = asKeypoints(im.keypoints ?? [])
     points2D.set(
       im.uuid,
-      Array.from({ length: kps.length }, (_, k) => [kps.x(k), kps.y(k), -1]),
+      Array.from({ length: kps.length }, (_, k) => [toColmapPx(kps.x(k)), toColmapPx(kps.y(k)), -1]),
     )
   })
 
@@ -593,8 +615,9 @@ export function buildColmapModel({ images, points }) {
       const requested = Number(v.featureIdx)
       const point2dIdx =
         Number.isInteger(requested) && requested >= 0 && requested < arr.length ? requested : arr.length
-      if (point2dIdx === arr.length) arr.push([v.x, v.y, point3dId])
-      else arr[point2dIdx] = [v.x, v.y, point3dId]
+      const px = [toColmapPx(v.x), toColmapPx(v.y), point3dId]
+      if (point2dIdx === arr.length) arr.push(px)
+      else arr[point2dIdx] = px
       track.push([imageId, point2dIdx])
     }
     return {
@@ -611,7 +634,7 @@ export function buildColmapModel({ images, points }) {
     model: 'PINHOLE',
     width: im.width,
     height: im.height,
-    params: [im.K.fx, im.K.fy, im.K.cx, im.K.cy],
+    params: [im.K.fx, im.K.fy, toColmapPx(im.K.cx), toColmapPx(im.K.cy)],
   }))
 
   const colmapImages = images.map((im, i) => ({
@@ -649,7 +672,7 @@ export function readColmapModel(model) {
       name: im.name,
       width: cam?.width ?? 0,
       height: cam?.height ?? 0,
-      K: { fx: K.fx, fy: K.fy, cx: K.cx, cy: K.cy },
+      K: { fx: K.fx, fy: K.fy, cx: fromColmapPx(K.cx), cy: fromColmapPx(K.cy) },
       R: quatToRotation(im.q),
       t: [...im.t],
       lens,
@@ -665,7 +688,7 @@ export function readColmapModel(model) {
         const im = imgById.get(imageId)
         const obs = im?.points2D[point2dIdx]
         if (!im || !obs) return null
-        return { imageId, name: im.name, x: obs[0], y: obs[1] }
+        return { imageId, name: im.name, x: fromColmapPx(obs[0]), y: fromColmapPx(obs[1]) }
       })
       .filter(Boolean),
   }))

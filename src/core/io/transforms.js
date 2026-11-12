@@ -53,8 +53,9 @@ export function buildTransformsJson({ images }) {
   const intrinsics = (im) => ({
     fl_x: im.K.fx,
     fl_y: im.K.fy,
-    cx: im.K.cx,
-    cy: im.K.cy,
+    // nerfstudio and instant-ngp cast rays through pixel centres at +½, WebSfM's are at 0.
+    cx: im.K.cx + 0.5,
+    cy: im.K.cy + 0.5,
     w: im.width,
     h: im.height,
     k1: 0,

@@ -205,7 +205,7 @@ describe('COLMAP binary — non-PINHOLE cameras keep their lens', () => {
     expect(parsed.cameras[0].model).toBe('RADIAL')
     expect(parsed.cameras[0].params).toEqual([900, 500, 400, 0.01, -0.002])
     const { images, droppedDistortion } = readColmapModel(parsed)
-    expect(images[0].K).toEqual({ fx: 900, fy: 900, cx: 500, cy: 400 })
+    expect(images[0].K).toEqual({ fx: 900, fy: 900, cx: 499.5, cy: 399.5 }) // COLMAP centres at +½
     expect(images[0].lens).toEqual({ k1: 0.01, k2: -0.002, k3: 0, p1: 0, p2: 0 })
     expect(droppedDistortion).toEqual([])
   })
@@ -268,7 +268,8 @@ describe('buildColmapModel / readColmapModel', () => {
   it('builds a valid model with 1 camera per image and correct tracks', () => {
     const m = buildColmapModel({ images, points })
     expect(m.cameras).toHaveLength(2)
-    expect(m.cameras[0]).toMatchObject({ cameraId: 1, model: 'PINHOLE', params: [1000, 1000, 320, 240] })
+    // COLMAP puts pixel centres at +½: the principal point and every pixel shift by it.
+    expect(m.cameras[0]).toMatchObject({ cameraId: 1, model: 'PINHOLE', params: [1000, 1000, 320.5, 240.5] })
     // point 1 observed in both images; point 2 only in image ua
     expect(m.points3D[0].track).toEqual([
       [1, 0],
@@ -277,10 +278,45 @@ describe('buildColmapModel / readColmapModel', () => {
     expect(m.points3D[1].track).toEqual([[1, 1]])
     // image ua's POINTS2D holds both of its observations in track order
     expect(m.images[0].points2D).toEqual([
-      [100, 200, 1],
-      [5, 6, 2],
+      [100.5, 200.5, 1],
+      [5.5, 6.5, 2],
     ])
-    expect(m.images[1].points2D).toEqual([[110, 210, 1]])
+    expect(m.images[1].points2D).toEqual([[110.5, 210.5, 1]])
+  })
+
+  it('exports a centred principal point as COLMAP writes it, and round-trips it exactly', () => {
+    // WebSfM's centre of a w × h image is ((w − 1)/2, (h − 1)/2); COLMAP's is (w/2, h/2).
+    const im = { ...images[0], width: 641, height: 481, K: { fx: 1000, fy: 1000, cx: 320, cy: 240 } }
+    const m = buildColmapModel({ images: [im], points: [] })
+    expect(m.cameras[0].params.slice(2)).toEqual([320.5, 240.5])
+    expect(readColmapModel(m).images[0].K).toMatchObject({ cx: 320, cy: 240 })
+  })
+
+  it('maps F and H between the conventions so the same points stay on them', async () => {
+    const { fundamentalFromColmapPx, fundamentalToColmapPx, homographyFromColmapPx } = await import('./colmapModel.js')
+    const F = [
+      [0, -0.002, 0.3],
+      [0.002, 0, -0.7],
+      [-0.25, 0.65, 0.01],
+    ]
+    const a = [123, 45, 1],
+      c = (p) => [p[0] + 0.5, p[1] + 0.5, 1]
+    const line = (M, p) => M.map((r) => r[0] * p[0] + r[1] * p[1] + r[2] * p[2])
+    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2]
+    // x_bᵀ·F_w·x_a equals x_b,cᵀ·F·x_a,c for any pair of WebSfM points.
+    const b = [301, 77, 1]
+    expect(dot(b, line(fundamentalFromColmapPx(F), a))).toBeCloseTo(dot(c(b), line(F, c(a))), 12)
+    const back = fundamentalToColmapPx(fundamentalFromColmapPx(F))
+    back.forEach((r, i) => r.forEach((v, j) => expect(v).toBeCloseTo(F[i][j], 12)))
+    const H = [
+      [1.1, 0.02, 5],
+      [-0.01, 0.95, -3],
+      [1e-4, 2e-5, 1],
+    ]
+    const hw = line(homographyFromColmapPx(H), a),
+      hc = line(H, c(a))
+    expect(hw[0] / hw[2] + 0.5).toBeCloseTo(hc[0] / hc[2], 9)
+    expect(hw[1] / hw[2] + 0.5).toBeCloseTo(hc[1] / hc[2], 9)
   })
 
   it('read(build(x)) recovers geometry, intrinsics and pixel observations', () => {
@@ -337,14 +373,14 @@ describe('buildColmapModel / readColmapModel', () => {
     }
     const back = readColmapModel(model)
     expect(back.droppedDistortion).toEqual([])
-    expect(back.images[0].K).toMatchObject({ fx: 900, fy: 900, cx: 320, cy: 240 })
+    expect(back.images[0].K).toMatchObject({ fx: 900, fy: 900, cx: 319.5, cy: 239.5 })
     const lens = { k1: 0.01, k2: -0.002, k3: 0, p1: 0, p2: 0 }
     expect(back.images[0].lens).toEqual(lens)
     const { points, lensByUuid } = colmapToSparse(back, (name) => ({ 'a.jpg': 'ua', 'b.jpg': 'ub' })[name])
     expect([...lensByUuid.keys()].sort()).toEqual(['ua', 'ub'])
     // The pixel COLMAP recorded, undistorted about its K: the frame the model's K describes.
-    const K = { fx: 900, fy: 900, cx: 320, cy: 240 }
-    const want = undistortPixel(600, 450, K, lens)
+    const K = { fx: 900, fy: 900, cx: 319.5, cy: 239.5 }
+    const want = undistortPixel(599.5, 449.5, K, lens)
     const got = []
     points.forEachPixel(0, (uuid, x, y) => got.push([uuid, x, y]))
     const a = got.find((g) => g[0] === 'ua')

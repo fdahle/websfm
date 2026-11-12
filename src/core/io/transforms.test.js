@@ -77,6 +77,8 @@ describe('buildTransformsJson', () => {
     })
     expect(out.camera_model).toBe('OPENCV')
     expect(out.fl_x).toBe(1000)
+    // nerfstudio's pixel centres are at +½: WebSfM's (320, 240) is its (320.5, 240.5).
+    expect([out.cx, out.cy]).toEqual([320.5, 240.5])
     expect(out.w).toBe(640)
     expect(out.k1).toBe(0)
     expect(out.frames).toHaveLength(2)

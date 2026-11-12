@@ -3,6 +3,7 @@
 
 import { parseDistortionModelName, coeffsForModel } from '../sfm/distortion.js'
 import { pluralize } from '../textFormat.js'
+import { fromColmapPx } from './colmapModel.js'
 
 export const COLMAP_MAX_IMAGE_ID = 2147483647
 
@@ -127,8 +128,9 @@ export function cameraToWebsfmSensor(camera) {
     focalUnit: 'px',
     fx: p.fx ?? p.f ?? null,
     fy: p.fy ?? p.f ?? null,
-    cx: p.cx ?? null,
-    cy: p.cy ?? null,
+    // COLMAP's pixel centres are at +½ (colmapModel.js COLMAP_PX).
+    cx: p.cx == null ? null : fromColmapPx(p.cx),
+    cy: p.cy == null ? null : fromColmapPx(p.cy),
     k1: coeff('k1'),
     k2: coeff('k2'),
     k3: coeff('k3'),
@@ -151,8 +153,8 @@ export function decodeColmapKeypoints(row) {
   for (let i = 0; i < rows; i++) {
     const o = i * cols
     keypoints[i] = {
-      x: values[o],
-      y: values[o + 1],
+      x: fromColmapPx(values[o]),
+      y: fromColmapPx(values[o + 1]),
       scale: cols === 4 ? values[o + 2] : 1,
       orientation: cols === 4 ? values[o + 3] : null,
       affine: cols === 6 ? [values[o + 2], values[o + 3], values[o + 4], values[o + 5]] : null,
