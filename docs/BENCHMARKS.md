@@ -245,15 +245,6 @@ or the LiDAR heights) rather than at any one SfM. Without it, Metashape's and OD
 are the closer to the LiDAR on flat ground: their depth maps are coarser and filtered, which
 suits flat ground.
 
---- | --- | --- | --- | --- |
-| WebSfM, Method Full (default on a GPU) | 41 min | 102 M | 10 cm / – | **2.9 cm** / 91 % |
-| WebSfM, Method Fast | 13 min | 125 M | 10 cm / – | 5.1 cm / 78 % |
-| ODM, defaults | 7 min | 29 M | 9.2 cm / 55 % | **2.2 cm** / 98 % |
-
-Both tools' clouds bend into the same bowl (−0.41 and −0.43 m at the edge), which points at
-what they share (the reference orientations or the LiDAR heights) rather than at either
-SfM. ODM's depth maps are at 1/8 of the photo size and filtered, which suits flat ground.
-
 ---
 
 ## Historical aerial film
