@@ -71,9 +71,14 @@ export function writeGeoTiff(spec) {
     entries.push({ tag, type, count, externIndex: externals.length })
     externals.push(bytes)
   }
-  // A SHORT array is stored inline only when a single value fits the 4-byte field.
+  // TIFF stores a value of 4 bytes or less in the entry itself: one or two SHORTs are
+  // inline (a reader looks for two there, not at an offset), more go out of line.
   const shortField = (tag, vals) =>
-    vals.length === 1 ? inline(tag, TYPE.SHORT, vals[0]) : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
+    vals.length === 1
+      ? inline(tag, TYPE.SHORT, vals[0])
+      : vals.length === 2
+        ? entries.push({ tag, type: TYPE.SHORT, count: 2, inlineBytes: shortArrayBytes(vals) })
+        : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
 
   inline(256, TYPE.LONG, width) // ImageWidth
   inline(257, TYPE.LONG, height) // ImageLength
@@ -182,8 +187,13 @@ export function assembleStripTiff(spec, strips, { parts = false } = {}) {
     externals.push(bytes)
     return e
   }
+  // One or two SHORTs fit the entry's 4-byte value field (see writeGeoTiff).
   const shortField = (tag, vals) =>
-    vals.length === 1 ? inline(tag, TYPE.SHORT, vals[0]) : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
+    vals.length === 1
+      ? inline(tag, TYPE.SHORT, vals[0])
+      : vals.length === 2
+        ? entries.push({ tag, type: TYPE.SHORT, count: 2, inlineBytes: shortArrayBytes(vals) })
+        : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
   const longField = (tag, vals) =>
     vals.length === 1
       ? inline(tag, TYPE.LONG, vals[0])

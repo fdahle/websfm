@@ -97,6 +97,31 @@ describe('writeGeoTiff', () => {
     expect(tags.get(34735).slice(0, 4)).toEqual([1, 1, 0, 2])
   })
 
+  it('writes a two-sample raster that geotiff.js reads back (two SHORTs inline)', async () => {
+    // Gray + alpha: BitsPerSample and SampleFormat hold two SHORTs, 4 bytes, which TIFF
+    // stores in the entry itself, never at an offset.
+    const ga = new Uint8Array([10, 255, 200, 128]) // 2×1
+    const tif = writeGeoTiff({
+      width: 2,
+      height: 1,
+      samples: [1, 2].map(() => ({ bits: 8, format: 1 })),
+      photometric: 1,
+      extraSamples: [2],
+      data: ga,
+      pixelScale: [1, 1, 0],
+      tiepoint: [0, 0, 0, 0, 0, 0],
+      geoKeys: geoKeysForEpsg(null, false),
+    })
+    const img = await (
+      await fromArrayBuffer(tif.buffer.slice(tif.byteOffset, tif.byteOffset + tif.byteLength))
+    ).getImage()
+    expect(img.getSamplesPerPixel()).toBe(2)
+    expect(img.getBitsPerSample(1)).toBe(8)
+    const [gray, alpha] = await img.readRasters()
+    expect([...gray]).toEqual([10, 200])
+    expect([...alpha]).toEqual([255, 128])
+  })
+
   it('writes the Compression tag (1 default, 8 when compressed) with the strip as-is', () => {
     const base = {
       width: 1,
