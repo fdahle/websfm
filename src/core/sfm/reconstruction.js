@@ -430,11 +430,12 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 //                       observations. Omit/empty for plain SfM-only BA.
 //   refineReadout     — refine each camera group's rolling-shutter readout time (the
 //                       cameras' `rs` records, below; bundle.rs `bundle_adjust_rs`).
-//   cameraPriors      — [{ camIdx, target:[x,y,z], weights:[wx,wy,wz],
-//                          targetR?:3×3, orientationPrecision?:3×3 }]
+//   cameraPriors      — [{ camIdx, target:[x,y,z], positionPrecision?:3×3,
+//                          weights?:[wx,wy,wz], targetR?:3×3, orientationPrecision?:3×3 }]
 //                       camera-centre constraints in this same SfM frame. The
-//                       position weights and orientation precision are inverse
-//                       variances (orientation is expressed in radians).
+//                       position precision (in SfM axes; else diag(weights)) and the
+//                       orientation precision are inverse variances (orientation
+//                       in radians).
 // Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace,
 //   anchorRmsAfter, cameraPriorRmsAfter, solver, ms } — `intrinsics` is the refined effective K per camera
 // `{ fx, fy, cx, cy, k1, k2, k3, k4 }` — a pinhole camera's self-calibrated Brown residual
@@ -660,14 +661,12 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
 
   // Row layout is shared with bundle.rs. A zero orientation-precision matrix
   // means position-only (EXIF or an imported row without complete OPK angles).
-  const cameraPriorFlat = new Float32Array(cameraPriors.length * 25)
-  cameraPriors.forEach(({ camIdx, target, weights, targetR, orientationPrecision }, i) => {
+  const cameraPriorFlat = new Float32Array(cameraPriors.length * 31)
+  cameraPriors.forEach(({ camIdx, target, weights, positionPrecision, targetR, orientationPrecision }, i) => {
+    const W = positionPrecision?.flat() ?? [weights[0], 0, 0, 0, weights[1], 0, 0, 0, weights[2]]
     const R = targetR?.flat() ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
     const P = orientationPrecision?.flat() ?? Array(9).fill(0)
-    cameraPriorFlat.set(
-      [camIdx, target[0], target[1], target[2], weights[0], weights[1], weights[2], ...R, ...P],
-      i * 25,
-    )
+    cameraPriorFlat.set([camIdx, target[0], target[1], target[2], ...W, ...R, ...P], i * 31)
   })
 
   // sensor_of_cam: aligned to `cameras`; -1 (own group) where unknown. Empty/all-−1

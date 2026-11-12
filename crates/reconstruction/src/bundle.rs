@@ -817,7 +817,9 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 /// elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
 /// Camera-pose support: `camera_prior_flat` optionally pulls camera centres
 /// `C = -R^T t` and rotations toward known poses in this same SfM frame. Position
-/// rows carry independent inverse-variance weights for X/Y/Z. Orientation uses
+/// rows carry a full 3×3 precision matrix in solver axes: the survey's per-axis σ
+/// (E, N, Up) rotated into the SfM frame, `s²·Rᵀ·diag(1/σ²)·R`, so a vertical σ stays
+/// vertical whatever pair seeded the model. Orientation uses
 /// the tangent residual `Log(R R_target^T)` and a full 3×3 precision matrix,
 /// allowing the caller to transform per-OPK uncertainties into solver axes.
 ///
@@ -831,12 +833,13 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 ///   point (TODO ▸ SC-6).
 /// - `anchor_flat`: n_anchor × 4 doubles `[pt_i, target_x, target_y, target_z, …]`
 /// - `observation_weight`: n_obs × 2 inverse-variance pixel weights (X/Y);
-///   feature observations use 1, GCP marks use their declared pixel variances
+///   tie points use one detection pixel (1/f², baObservations.js tieWeightOf), GCP
+///   marks their declared pixel variances
 /// - `anchor_weight`: n_anchor × 9 floats, row-major 3×3 precision matrices
-/// - `camera_prior_flat`: n_prior × 25 floats
-///   `[cam_i, target_x, target_y, target_z, weight_x, weight_y, weight_z,
-///     target_R(9), orientation_precision(9), …]`. An all-zero orientation
-///   precision matrix makes the row position-only.
+/// - `camera_prior_flat`: n_prior × 31 floats
+///   `[cam_i, target_x, target_y, target_z, position_precision(9),
+///     target_R(9), orientation_precision(9), …]`, matrices row-major. An all-zero
+///   orientation precision matrix makes the row position-only.
 /// - `max_iters`: outer LM iterations
 /// - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
 ///   `< 0` (or a short/empty list) ⇒ that camera is its own group
@@ -1029,20 +1032,26 @@ fn bundle_adjust_impl(
 
     // Camera-pose priors: camera index, target centre, position weights, and an
     // optional (target rotation, full orientation precision) pair.
-    let n_camera_prior = camera_prior_flat.len() / 25;
-    let camera_priors: Vec<(usize, V3, V3, Option<(M3, M3)>)> = (0..n_camera_prior).filter_map(|i| {
-        let b = i * 25;
+    let n_camera_prior = camera_prior_flat.len() / 31;
+    let camera_priors: Vec<(usize, V3, M3, Option<(M3, M3)>)> = (0..n_camera_prior).filter_map(|i| {
+        let b = i * 31;
         let ci = camera_prior_flat[b] as usize;
         let target = [camera_prior_flat[b+1] as f64, camera_prior_flat[b+2] as f64,
                       camera_prior_flat[b+3] as f64];
-        let weight = [camera_prior_flat[b+4] as f64, camera_prior_flat[b+5] as f64,
-                      camera_prior_flat[b+6] as f64];
+        let mut weight: M3 = [0,1,2].map(|row| [0,1,2].map(|col|
+            camera_prior_flat[b + 4 + 3*row + col] as f64));
+        for row in 0..3 { for col in (row+1)..3 {
+            let v = 0.5 * (weight[row][col] + weight[col][row]);
+            weight[row][col] = v; weight[col][row] = v;
+        }}
+        let wdet2 = weight[0][0]*weight[1][1] - weight[0][1]*weight[1][0];
         if ci >= n_cam || target.iter().any(|v| !v.is_finite())
-            || weight.iter().any(|v| !v.is_finite() || *v <= 0.0) { return None; }
+            || weight.iter().flatten().any(|v| !v.is_finite())
+            || !(weight[0][0] > 0.0 && wdet2 > 0.0 && det3(&weight) > 0.0) { return None; }
         let target_r: M3 = [0,1,2].map(|row| [0,1,2].map(|col|
-            camera_prior_flat[b + 7 + 3*row + col] as f64));
+            camera_prior_flat[b + 13 + 3*row + col] as f64));
         let mut precision: M3 = [0,1,2].map(|row| [0,1,2].map(|col|
-            camera_prior_flat[b + 16 + 3*row + col] as f64));
+            camera_prior_flat[b + 22 + 3*row + col] as f64));
         for row in 0..3 { for col in (row+1)..3 {
             let v = 0.5 * (precision[row][col] + precision[col][row]);
             precision[row][col] = v; precision[col][row] = v;
@@ -1146,7 +1155,8 @@ fn bundle_adjust_impl(
     let camera_prior_sse = |cams: &Vec<(M3, V3)>| -> f64 {
         camera_priors.iter().map(|&(ci, target, weight, orientation)| {
             let c = camera_center(&cams[ci]);
-            let position = (0..3).map(|k| weight[k] * (c[k] - target[k]).powi(2)).sum::<f64>();
+            let d = [c[0] - target[0], c[1] - target[1], c[2] - target[2]];
+            let position = dot3(&d, &mat3_vec(&weight, &d));
             let rotation = orientation.map(|(target_r, precision)| {
                 let e = orientation_residual(&cams[ci].0, &target_r);
                 let pe = mat3_vec(&precision, &e);
@@ -1612,11 +1622,17 @@ fn bundle_adjust_impl(
             let residual = [centre[0] - target[0], centre[1] - target[1], centre[2] - target[2]];
             let off = 6 * slot[ci];
             let dc = pattern.diag_at[slot[ci]];
+            // Jᵀ·W·r and Jᵀ·W·J with the full position precision W.
+            let wr = mat3_vec(&weight, &residual);
+            let mut wj = [[0.0f64; 6]; 3];
+            for row in 0..3 { for a in 0..6 {
+                wj[row][a] = (0..3).map(|k| weight[row][k] * j[k][a]).sum::<f64>();
+            }}
             for a in 0..6 {
-                for axis in 0..3 { gr[off+a] += weight[axis] * j[axis][a] * residual[axis]; }
+                for axis in 0..3 { gr[off+a] += j[axis][a] * wr[axis]; }
                 for b in 0..6 {
                     for axis in 0..3 {
-                        smat[dc + a*6 + b] += weight[axis] * j[axis][a] * j[axis][b];
+                        smat[dc + a*6 + b] += j[axis][a] * wj[axis][b];
                     }
                 }
             }
@@ -2496,8 +2512,8 @@ mod reduced_solve_tests {
             assert!(seen > 0);
             pts.extend_from_slice(&[(x + 0.01 * rng.next()) as f32, (y + 0.01 * rng.next()) as f32, (z + 0.01 * rng.next()) as f32]);
         }
-        let mut prior = vec![0f32; 25];
-        prior[3] = -10.0; prior[4] = 1e4; prior[5] = 1e4; prior[6] = 1e4;
+        let mut prior = vec![0f32; 31];
+        prior[3] = -10.0; prior[4] = 1e4; prior[8] = 1e4; prior[12] = 1e4;
         let policy = [f32::NAN, 1e-6, 200.0, 1.0, 1e-6, f32::NAN, 1.0];
         let t = std::time::Instant::now();
         let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 30, &[], 0, &policy, &[], &[]);
@@ -2733,8 +2749,8 @@ mod reduced_solve_tests {
             pts.extend_from_slice(&[(x + 0.02 * rng.next()) as f32, (y + 0.02 * rng.next()) as f32, (z + 0.02 * rng.next()) as f32]);
         }
         // The first camera's pose anchors the gauge loosely through a prior.
-        let mut prior = vec![0f32; 25];
-        prior[1] = 0.0; prior[2] = 0.0; prior[3] = -10.0; prior[4] = 1e4; prior[5] = 1e4; prior[6] = 1e4;
+        let mut prior = vec![0f32; 31];
+        prior[1] = 0.0; prior[2] = 0.0; prior[3] = -10.0; prior[4] = 1e4; prior[8] = 1e4; prior[12] = 1e4;
         let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 10, &[], 0, &[], &[], &[]);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
         let (before, after) = (out[base], out[base + 1]);
@@ -3193,7 +3209,8 @@ mod lens_sigma_tests {
                 let c = mat3_vec(&mat3_transpose(r), t);
                 prior_flat.push(ci as f32);
                 for k in 0..3 { prior_flat.push((-c[k] + sc * rng.gauss()) as f32); }
-                for _ in 0..3 { prior_flat.push((1.0 / (sc * sc)) as f32); }
+                let w = (1.0 / (sc * sc)) as f32;
+                prior_flat.extend_from_slice(&[w, 0.0, 0.0, 0.0, w, 0.0, 0.0, 0.0, w]);
                 prior_flat.extend(std::iter::repeat(0f32).take(18));
             }
         }

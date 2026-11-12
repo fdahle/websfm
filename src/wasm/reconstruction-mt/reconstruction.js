@@ -125,7 +125,9 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  * elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
  * Camera-pose support: `camera_prior_flat` optionally pulls camera centres
  * `C = -R^T t` and rotations toward known poses in this same SfM frame. Position
- * rows carry independent inverse-variance weights for X/Y/Z. Orientation uses
+ * rows carry a full 3×3 precision matrix in solver axes: the survey's per-axis σ
+ * (E, N, Up) rotated into the SfM frame, `s²·Rᵀ·diag(1/σ²)·R`, so a vertical σ stays
+ * vertical whatever pair seeded the model. Orientation uses
  * the tangent residual `Log(R R_target^T)` and a full 3×3 precision matrix,
  * allowing the caller to transform per-OPK uncertainties into solver axes.
  *
@@ -139,12 +141,13 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  *   point (TODO ▸ SC-6).
  * - `anchor_flat`: n_anchor × 4 doubles `[pt_i, target_x, target_y, target_z, …]`
  * - `observation_weight`: n_obs × 2 inverse-variance pixel weights (X/Y);
- *   feature observations use 1, GCP marks use their declared pixel variances
+ *   tie points use one detection pixel (1/f², baObservations.js tieWeightOf), GCP
+ *   marks their declared pixel variances
  * - `anchor_weight`: n_anchor × 9 floats, row-major 3×3 precision matrices
- * - `camera_prior_flat`: n_prior × 25 floats
- *   `[cam_i, target_x, target_y, target_z, weight_x, weight_y, weight_z,
- *     target_R(9), orientation_precision(9), …]`. An all-zero orientation
- *   precision matrix makes the row position-only.
+ * - `camera_prior_flat`: n_prior × 31 floats
+ *   `[cam_i, target_x, target_y, target_z, position_precision(9),
+ *     target_R(9), orientation_precision(9), …]`, matrices row-major. An all-zero
+ *   orientation precision matrix makes the row position-only.
  * - `max_iters`: outer LM iterations
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group

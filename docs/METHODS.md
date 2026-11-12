@@ -839,7 +839,10 @@ horizontally. Without a projected CRS the fit is the plain grid fit.
 
 **Camera-position priors.** After sparse SfM the centres are Horn-fit to the positions, and
 the inverse maps each position into the SfM frame. The solver adds `C − target`
-(`C = −Rᵀt`, Jacobian `[−Rᵀ | −Rᵀ[t]×]`), X/Y/Z weighted by inverse variance. Two rounds let
+(`C = −Rᵀt`, Jacobian `[−Rᵀ | −Rᵀ[t]×]`), weighted by the positions' inverse variances.
+Those are per survey axis (E, N, Up); the solver gets them as a full precision matrix in
+SfM axes, `s²·Rᵀ·diag(1/σ²)·R` (the fit `dst = s·R·src + t`), so an RTK block's loose
+height stays vertical whatever pair seeded the model. Two rounds let
 the fit settle; a bounded reprojection-increase guard rejects what noisy positions would
 buy at the images' expense.
 

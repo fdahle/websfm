@@ -571,7 +571,7 @@ mod tests {
             let centre = mat3_vec(&mat3_transpose(r), &[-t[0], -t[1], -t[2]]);
             prior_flat.extend_from_slice(&[
                 ci as f32, centre[0] as f32, centre[1] as f32, centre[2] as f32,
-                1e4, 1e4, 1e4,
+                1e4, 0.0, 0.0, 0.0, 1e4, 0.0, 0.0, 0.0, 1e4,
                 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0,
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             ]);
@@ -625,7 +625,7 @@ mod tests {
             let centre = mat3_vec(&mat3_transpose(&initial_r), &[-t[0], -t[1], -t[2]]);
             prior_flat.extend_from_slice(&[
                 ci as f32, centre[0] as f32, centre[1] as f32, centre[2] as f32,
-                1e-9, 1e-9, 1e-9,
+                1e-9, 0.0, 0.0, 0.0, 1e-9, 0.0, 0.0, 0.0, 1e-9,
             ]);
             for row in target_r { for &v in row { prior_flat.push(v as f32); } }
             prior_flat.extend_from_slice(&[

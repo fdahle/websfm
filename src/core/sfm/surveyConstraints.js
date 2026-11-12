@@ -19,6 +19,14 @@ import { isGroundControl } from '../io/gcp.js'
 
 const centreTarget = (antenna, arm) => (arm ? antenna.map((v, i) => v - arm[i]) : antenna)
 
+// Rᵀ·diag(w)·R: per-axis inverse variances in the survey frame as a precision matrix in
+// the SfM frame, R the SfM → survey rotation of the fit.
+export function surveyToSfmPrecision(w, R) {
+  return [0, 1, 2].map((i) =>
+    [0, 1, 2].map((j) => R[0][i] * w[0] * R[0][j] + R[1][i] * w[1] * R[1][j] + R[2][i] * w[2] * R[2][j]),
+  )
+}
+
 const priorSigma = (p) => [p.accuracyX, p.accuracyY, p.accuracyZ].map((v) => (Number.isFinite(v) && v > 0 ? v : 5))
 
 /**
@@ -77,13 +85,21 @@ export function buildCameraPriorConstraints({ cameras, cameraPriors, uuidList, m
   }
   if (!fit) return null
   const frame = reference?.frame ?? frameFromSimilarity(fit, 'camera-prior')
-  const priors = usable.map((p) => ({
-    camIdx: camIdxOf.get(p.uuid),
-    target: centreTarget(frame.toSfm([p.x, p.y, p.z]), armInSfm(p, fit.scale)),
-    // sigma_sfm = sigma_project / scale, hence inverse variance scales by s².
-    weights: priorSigma(p).map((v) => (fit.scale * fit.scale) / (v * v)),
-    ...(orientationPriorInSfm(p, fit.R) ?? {}),
-  }))
+  const priors = usable.map((p) => {
+    // sigma_sfm = sigma_project / scale, hence inverse variance scales by s². The σ are
+    // per SURVEY axis (E, N, Up): `weights` keeps them so (the DEM hold reads the
+    // vertical one), and the solver gets them turned into SfM axes,
+    // P = s²·Rᵀ·diag(1/σ²)·R with dst = s·R·src + t, so an RTK block's loose height
+    // stays vertical whatever pair seeded the model.
+    const weights = priorSigma(p).map((v) => (fit.scale * fit.scale) / (v * v))
+    return {
+      camIdx: camIdxOf.get(p.uuid),
+      target: centreTarget(frame.toSfm([p.x, p.y, p.z]), armInSfm(p, fit.scale)),
+      weights,
+      positionPrecision: surveyToSfmPrecision(weights, fit.R),
+      ...(orientationPriorInSfm(p, fit.R) ?? {}),
+    }
+  })
   return { fit, priors }
 }
 
