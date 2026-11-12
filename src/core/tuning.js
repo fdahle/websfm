@@ -397,6 +397,12 @@ export const DENSE_TUNING = {
   // command for about 2 s (Windows TDR): long commands froze the display on Intel
   // laptops. A dedicated GPU runs a whole pass within this and is not slowed.
   gpuBandMs: 30,
+  // Bands are queued until this many of the browser's fixed waits for finished GPU work
+  // (measured per device) are reached before one wait, when that is more than gpuBandMs:
+  // Firefox answers on a 100 ms timer, so it queues 400 ms of 30 ms bands per wait.
+  gpuWaitsPerQueue: 4,
+  // A fixed wait shorter than this (ms) is left out of the band timing.
+  gpuWaitMinMs: 1,
   // A first GPU map slower than this (ms) has the second map computed on the CPU to
   // compare, and the run continues on the faster of the two (workers/ops/dense.js).
   gpuProbeMs: 8000,

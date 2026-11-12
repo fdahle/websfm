@@ -36,7 +36,7 @@ import { startThreadPool } from '../../core/sfm/reconstruction.js'
 import { scaleAxes } from '../../core/sfm/geometry.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { isGpuAvailable, ensureDevice } from '../gpu/device.js'
-import { computeDepthMapGPU } from '../gpu/depthMapGpu.js'
+import { computeDepthMapGPU, prepareDepthMapGPU } from '../gpu/depthMapGpu.js'
 import {
   createMemLedger,
   projectDensePeakBytes,
@@ -622,6 +622,30 @@ export function makeDenseOps({ rasterize }) {
     }
     const total = order.length
     const loopFraction = (v) => (total > 0 ? loopShare * (v / total) : 0)
+    if (backend) {
+      // Compile the GPU shader and measure the browser's fixed wait for finished GPU work
+      // before the first map (depthMapGpu.js getPipeline), so neither counts as map time.
+      // A shader that does not compile: the CPU.
+      emit('progress', [0, total, 'Preparing the GPU…', 0])
+      const t0 = performance.now()
+      try {
+        const { waitMs } = (await prepareDepthMapGPU()) ?? { waitMs: 0 }
+        const secs = ((performance.now() - t0) / 1000).toFixed(1)
+        emit('log', [
+          `Depth maps: GPU shader ready in ${secs} s; the browser reports finished GPU work after ${waitMs.toFixed(1)} ms`,
+          'info',
+          'Dense',
+        ])
+      } catch (err) {
+        emit('log', [
+          `Depth maps: the GPU shader did not compile (${err?.message ?? err}) — running on the CPU (WASM)`,
+          'warn',
+          'Dense',
+        ])
+        backend = undefined
+        gpuFallbacks++
+      }
+    }
     if (!backend && cpuThreads) {
       // Start the pool before the first map, and say so: it takes seconds (each thread
       // instantiates the module), and the run otherwise sat at 0 % without a word. A pool

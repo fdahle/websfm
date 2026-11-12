@@ -190,9 +190,18 @@ Notable changes to websfm. The format follows
   shows "Starting the CPU threads…" before its first map, the console says how many threads
   started and how long it took, and warns when the threaded build cannot start (each map
   then runs on one thread, many times slower). Before, the run sat at 0 % for several
-  seconds without a word, and the time left counted that wait as map time: Firefox showed
-  an hour for the example. Measured on the example without a GPU (42 maps at 600 px):
+  seconds without a word, and the time left counted that wait as map time. Measured on the
+  example without a GPU (42 maps at 600 px):
   Chrome 278 s, Firefox 244 s, both on 19 threads, about 7 s of it starting the threads.
+- **Depth maps on the GPU in Firefox take seconds, not minutes.** Firefox reports finished
+  GPU work on a 100 ms timer, and Build Depth Maps took each of those waits for a slow GPU:
+  it cut every map into ever smaller commands, each followed by another wait. It now
+  measures the browser's wait before the first map ("Preparing the GPU…") and queues
+  several short commands per wait; a laptop GPU still gets commands of at most 30 ms. On
+  the example in Firefox with WebGPU (42 maps at 600 px, both passes; Quadro RTX 5000):
+  about 115 s per map, which would have been some 80 minutes for the stage and made the
+  run move to the CPU after its second map, now 1 s per map and 77 s for the stage.
+  Chrome, whose wait is 0.2 ms, runs as before (29.7 and 29.2 s before, 27.1 s after).
 - **Switching projects no longer writes into the wrong one.** Opening another project while
   one was open could save a piece of the old project's state (a camera pose, a layer's
   visibility) into the new project's folder, if a save fired during the switch. Saves now

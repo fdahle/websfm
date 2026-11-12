@@ -18,17 +18,53 @@ import { DENSE_TUNING } from '../../core/tuning.js'
 const workCost = new WeakMap() // GPUDevice → Map(mode → ms per workgroup per source)
 import shaderSrc from './patchmatch.wgsl?raw'
 
-const pipelineCache = new WeakMap()
+const pipelineCache = new WeakMap() // GPUDevice → Promise<{ pipeline, sampler }>
 
+// The shader is compiled once per device, asynchronously, and awaited before the first
+// map, so its compile never counts as map time in the band timing below. With it, the
+// browser's fixed wait for finished GPU work (`waitMs`) is measured: Chrome answers in
+// a fraction of a millisecond, Firefox on its 100 ms polling timer.
 function getPipeline(device) {
   let cached = pipelineCache.get(device)
   if (cached) return cached
   const module = device.createShaderModule({ code: shaderSrc })
-  const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } })
-  const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' })
-  cached = { pipeline, sampler }
+  const desc = { layout: 'auto', compute: { module, entryPoint: 'main' } }
+  cached = (
+    device.createComputePipelineAsync
+      ? device.createComputePipelineAsync(desc)
+      : Promise.resolve(device.createComputePipeline(desc))
+  )
+    // The queue answers after the GPU process has handled the pipeline, so the first wait
+    // also covers a compile the promise above did not wait for; the median of the next
+    // three is the browser's fixed wait.
+    .then(async (pipeline) => {
+      await device.queue.onSubmittedWorkDone()
+      const waits = []
+      for (let i = 0; i < 3; i++) {
+        const t0 = performance.now()
+        await device.queue.onSubmittedWorkDone()
+        waits.push(performance.now() - t0)
+      }
+      waits.sort((a, b) => a - b)
+      const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' })
+      return { pipeline, sampler, waitMs: waits[1] }
+    })
+  // A failed compile is not cached: the run falls back to the CPU, and the next may retry.
+  cached.catch(() => pipelineCache.delete(device))
   pipelineCache.set(device, cached)
   return cached
+}
+
+/**
+ * Compile the depth-map shader on this worker's GPU before the first map.
+ * @returns {Promise<{ waitMs: number } | null>} the browser's fixed wait for finished GPU
+ *   work, in ms, or null without a GPU. Rejects when the shader does not compile.
+ */
+export async function prepareDepthMapGPU() {
+  const state = await ensureDevice()
+  if (!state) return null
+  const { waitMs } = await getPipeline(state.device)
+  return { waitMs }
 }
 
 function uploadGray(device, gray, w, h) {
@@ -142,7 +178,10 @@ async function depthMapOnDevice(state, own, scopes, refGray, refW, refH, refK, s
   if (maxSide > texCap) {
     throw new Error(`image ${maxSide}px exceeds GPU texture limit ${texCap}px — lower maxDim (working resolution)`)
   }
-  const { pipeline, sampler } = getPipeline(device)
+  const { pipeline, sampler, waitMs: measuredWaitMs } = await getPipeline(device)
+  // The band timing allows for a wait of a millisecond or more (Firefox's 100 ms); a
+  // shorter one (Chrome's 0.2 ms) is left out, and the bands run exactly as before.
+  const waitMs = measuredWaitMs >= DENSE_TUNING.gpuWaitMinMs ? measuredWaitMs : 0
 
   // Capture allocation/validation failures over the whole setup + first dispatch.
   // WebGPU surfaces these asynchronously (an oversized or invalid resource doesn't
@@ -355,6 +394,10 @@ async function depthMapOnDevice(state, own, scopes, refGray, refW, refH, refK, s
   // One workgroup row's work in the cost unit: its workgroups times the sources it reads.
   const rowUnits = gx * Math.max(1, nSrc)
   const targetMs = DENSE_TUNING.gpuBandMs
+  // Work queued before a wait: a band's worth, or four times the browser's fixed wait
+  // where that is longer (Firefox's 100 ms), in bands of targetMs each, so the wait is
+  // paid once per 400 ms of work instead of once per band.
+  const queueMs = Math.max(targetMs, DENSE_TUNING.gpuWaitsPerQueue * waitMs)
   // The work submitted since the last wait: one kind of pass, its rows, its start.
   let batchRows = 0,
     batchStart = 0,
@@ -363,7 +406,12 @@ async function depthMapOnDevice(state, own, scopes, refGray, refW, refH, refK, s
   const settle = async () => {
     if (!batchRows) return
     await device.queue.onSubmittedWorkDone()
-    const perUnit = (performance.now() - batchStart) / (batchRows * rowUnits)
+    // The GPU's own time: the elapsed time less the browser's fixed wait, which a batch
+    // pays however small it is. Counted as work, it made Firefox's bands ever shorter
+    // (one row, a 100 ms wait each: about 1,100 waits and 2 minutes a map). At least a
+    // tenth of the elapsed time, so a batch lost in the wait's jitter cannot read as free.
+    const elapsed = performance.now() - batchStart
+    const perUnit = Math.max(elapsed - waitMs, 0.1 * elapsed) / (batchRows * rowUnits)
     const known = costs.get(batchMode)
     // A moving estimate: one slow batch (a busy screen) does not halve the next band.
     costs.set(batchMode, known ? 0.5 * known + 0.5 * perUnit : perUnit)
@@ -390,7 +438,7 @@ async function depthMapOnDevice(state, own, scopes, refGray, refW, refH, refK, s
       batchRows += rows
       batchMode = mode
       queuedMs += perRow ? perRow * rows : Infinity
-      if (queuedMs >= targetMs) await settle()
+      if (queuedMs >= queueMs) await settle()
       row += rows
     }
   }
