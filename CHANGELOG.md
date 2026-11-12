@@ -156,6 +156,17 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Camera-position accuracies stay on their axes.** The bundle adjustment now applies a
+  camera position's horizontal and vertical accuracy in the directions they belong to,
+  whatever pair of photos started the model. Before, they were applied along the model's
+  own axes, which match the survey's only when the model was started from a nadir pair: in
+  an oblique or terrestrial block an RTK position's loose height could act sideways and its
+  tight horizontal along the vertical. A unit test solves one block in two model frames 90°
+  apart with σ 1 / 1 / 100 cm and one position 0.5 m off in height: the camera centres
+  agree to 6 mm (32 cm before). Nadir blocks change only within noise: quarry with RTK
+  checkpoints H / V 4.59 / 21.6 → 4.67 / 21.9 cm, cameras against RTK 6.32 / 4.42 → 6.26 /
+  4.39 cm; GeoScan PUTI with RTK checkpoints 3.70 / 7.76 → 3.71 / 7.74 cm, cameras 0.55 /
+  0.89 cm both.
 - **Detect Targets places fewer false ArUco markers.** A 4×4 ArUco marker must now read
   exactly, and once a model exists, a marker found far from where its GCP should appear is
   left out and counted in the log. Before, one wrong cell was corrected, so about one random
