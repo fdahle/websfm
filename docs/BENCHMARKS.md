@@ -249,9 +249,13 @@ suits flat ground.
 
 ## Historical aerial film
 
-The Grenoble historical-image benchmark: scanned film with GCPs and a modern reference
-DEM. Every fourth GCP is a checkpoint, with the same split for every tool. Checkpoints in
-metres (H / V RMS); DEM coverage is the share of the reference area the DEM covers.
+Casa Grande and Iceland are two of the image sets of
+[HistoriX](https://isprs-archives.copernicus.org/articles/XLIX-B2-2026/9/2026/), the
+Historical Images for Surface Topography Reconstruction Intercomparison eXperiment
+(Dehecq et al., 2026, ISPRS Archives XLIX-B2-2026, 9–16): scanned film with GCPs and a
+modern reference DEM. Every fourth GCP is a checkpoint, with the same split for every
+tool. Checkpoints in metres (H / V RMS); DEM coverage is the share of the reference area
+the DEM covers.
 WebSfM and Metashape (2.2.2 at its defaults: High, 40,000 / 4,000 points) were run on the
 same day, 2026-11-10, and both put the GCPs into their bundle adjustment. COLMAP and the
 raw-scan run are from 2026-10-13/14. COLMAP has no GCPs in its adjustment, so its block

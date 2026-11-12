@@ -1,5 +1,5 @@
 """COLMAP reference run for a historical aerial / satellite frame set with surveyed GCPs
-(Grenoble benchmark layout: preprocessed_images/, image_mask.tif, gcp.csv,
+(HistoriX benchmark layout: preprocessed_images/, image_mask.tif, gcp.csv,
 camera_model_intrinsics.csv), scored the same way as websfm and Metashape:
 
   features (masked) → matching → mapper → GCP similarity (7-parameter Helmert from the

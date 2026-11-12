@@ -387,7 +387,7 @@ That archive is the release asset for that benchmark date. The ETH3D tables are 
 
 ## Historical blocks (`hist`)
 
-`hist/` scores film and satellite frame blocks (the Grenoble benchmark layout:
+`hist/` scores film and satellite frame blocks (the HistoriX benchmark layout:
 `preprocessed_images/`, `image_mask.tif`, `gcp.csv`, `camera_model_intrinsics.csv`,
 reference DEMs) the same way for WebSfM, COLMAP and Metashape:
 

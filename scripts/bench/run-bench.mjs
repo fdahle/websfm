@@ -848,7 +848,7 @@ try {
     }
   }
   // After the dem stage: <out>.dem.tif, scored against `hist.refDem` (score_dem.py,
-  // the Grenoble evaluation's protocol) when one is given.
+  // the HistoriX evaluation's protocol) when one is given.
   const exportDem = async (tag) => {
     const size = await page.evaluate(() => window.bench.demTiffSize())
     if (!size) {

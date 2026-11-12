@@ -2,7 +2,7 @@
 
 Renders a strip of frame-camera scans of a fractal terrain on the WGS84 ellipsoid, the
 way a KH-9 mapping camera saw it (304.8 mm, 46 x 23 cm film, ~170 km), and writes the
-inputs in the Grenoble benchmark layout, so histSetup.mjs / run-bench.mjs / score_dem.py
+inputs in the HistoriX benchmark layout, so histSetup.mjs / run-bench.mjs / score_dem.py
 run on it unchanged:
 
     <out>/images/S01.tif ...                  gray uint8 scans, tiled + deflate (BigTIFF if needed)

@@ -1,4 +1,4 @@
-"""Plain Metashape reference run for a historical frame set with surveyed GCPs (Grenoble
+"""Plain Metashape reference run for a historical frame set with surveyed GCPs (HistoriX
 benchmark layout), with Metashape's own defaults so it sits beside websfm and COLMAP as a
 method comparison: High accuracy matching (40k key / 4k tie points, generic
 preselection, masks), alignment, GCP markers from gcp.csv as control, optimisation

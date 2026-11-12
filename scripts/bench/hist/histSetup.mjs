@@ -1,4 +1,4 @@
-// Bench config `hist`: a historical film / satellite frame block in the Grenoble
+// Bench config `hist`: a historical film / satellite frame block in the HistoriX
 // benchmark layout (see README.md here), turned into what the bench page sets up.
 //
 //   "hist": {

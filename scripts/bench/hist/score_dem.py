@@ -1,4 +1,4 @@
-"""Score a DEM GeoTIFF against a reference DEM, the way the Grenoble historical-image
+"""Score a DEM GeoTIFF against a reference DEM, the way the HistoriX historical-image
 benchmark evaluation did it (historic_sfm ▸ dem_diff.json): the test DEM is resampled
 bilinearly onto the reference grid over their overlap, and dem - ref is summarised over
 every cell valid in both.
