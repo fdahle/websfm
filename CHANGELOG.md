@@ -40,6 +40,17 @@ Notable changes to websfm. The format follows
   factorisation added no measurable time (Reconstruct 80 s either way).
 
 ### Changed
+- **Weak photo pairs are verified, not dropped at random.** Match Features now tries the
+  best-scoring matches first when it checks a pair's geometry (PROSAC), and tries up to
+  10,000 samples instead of 1,000 (RANSAC iterations). A pair whose good matches are a
+  minority, such as a side-lap bridge or a wide baseline, used to be found only by chance:
+  on synthetic pairs with 30 % true matches, 31 of 100 were found, now 100 of 100 (15 %:
+  1 → 98). A pair with nothing in common still gives up after 1,000 samples. On blocks whose
+  pairs overlap well nothing changes but a little time: quarry and GeoScan PUTI with RTK
+  keep their accepted pairs (6,589 / 6,591 and 2,625 / 2,626) and checkpoints, matching
+  149 → 154 s and 120 → 125 s; Iceland 1980 and Casa Grande 1978 film register the same
+  123 and 37 photos (GCP fit 1.03 → 1.04 m). The Strict matching preset no longer lowers
+  the sample count.
 - **Cancel stops only the run.** Cancelling a Reconstruct or Tools run now stops just the
   workers that run was using: importing photos, building their previews, map and DEM
   previews and the segmentation tool carry on, and a worker that was idle keeps what it
