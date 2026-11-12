@@ -20,22 +20,29 @@ pub(crate) fn for_each_index<F: Fn(usize)>(n: usize, f: F) {
 }
 
 /// A raw pointer that may cross threads. Whoever writes through it must make sure no
-/// two threads touch the same element (the callers give every element one owner).
-pub(crate) struct SyncPtr<T>(pub *mut T);
+/// two threads touch the same element (the callers give every element one owner). It
+/// keeps the slice's length, so a debug build (the Rust tests) checks every index.
+pub(crate) struct SyncPtr<T> { ptr: *mut T, len: usize }
 impl<T> Clone for SyncPtr<T> { fn clone(&self) -> Self { *self } }
 impl<T> Copy for SyncPtr<T> {}
 unsafe impl<T> Send for SyncPtr<T> {}
 unsafe impl<T> Sync for SyncPtr<T> {}
 impl<T> SyncPtr<T> {
-    pub(crate) fn of(v: &mut [T]) -> Self { SyncPtr(v.as_mut_ptr()) }
+    pub(crate) fn of(v: &mut [T]) -> Self { SyncPtr { ptr: v.as_mut_ptr(), len: v.len() } }
     /// # Safety
     /// `i` is in bounds and no other thread accesses element `i` meanwhile.
     #[inline(always)]
-    pub(crate) unsafe fn at<'a>(self, i: usize) -> &'a mut T { &mut *self.0.add(i) }
+    pub(crate) unsafe fn at<'a>(self, i: usize) -> &'a mut T {
+        debug_assert!(i < self.len, "SyncPtr index {i} out of {}", self.len);
+        &mut *self.ptr.add(i)
+    }
     /// # Safety
     /// `i..i + len` is in bounds and no other thread accesses it meanwhile.
     #[inline(always)]
-    pub(crate) unsafe fn slice<'a>(self, i: usize, len: usize) -> &'a mut [T] { std::slice::from_raw_parts_mut(self.0.add(i), len) }
+    pub(crate) unsafe fn slice<'a>(self, i: usize, len: usize) -> &'a mut [T] {
+        debug_assert!(i.checked_add(len).is_some_and(|e| e <= self.len), "SyncPtr range {i}+{len} out of {}", self.len);
+        std::slice::from_raw_parts_mut(self.ptr.add(i), len)
+    }
 }
 
 /// Items per task for the per-observation and per-point loops: big enough that the pool's

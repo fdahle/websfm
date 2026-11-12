@@ -84,6 +84,9 @@ pub fn undistort_brown_pixels(xy: &[f64], starts: &[u32], k: &[f64], d: &[f64], 
     let n_img = starts.len().saturating_sub(1);
     let mut out = vec![f64::NAN; xy.len()];
     if n_img == 0 || k.len() < 4 * n_img || d.len() < 8 { return out; }
+    // Each image writes its own range of `out` from its thread, so the ranges must not
+    // overlap: `starts` from the caller must not decrease. Refuse it otherwise.
+    if starts.windows(2).any(|w| w[1] < w[0]) { return out; }
     let bag: [f64; 8] = [d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]];
     let p = SyncPtr::of(&mut out);
     for_each_index(n_img, |im| {

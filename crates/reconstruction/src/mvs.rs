@@ -630,7 +630,7 @@ pub fn compute_depth_map(
         (SyncPtr::of(&mut depth), SyncPtr::of(&mut nx), SyncPtr::of(&mut ny), SyncPtr::of(&mut nz), SyncPtr::of(&mut cost));
     let psel = SyncPtr::of(&mut sel_view);
     // SAFETY (rd / wr): in bounds; see above for who writes what when.
-    #[inline(always)] fn rd<T: Copy>(p: SyncPtr<T>, i: usize) -> T { unsafe { *p.0.add(i) } }
+    #[inline(always)] fn rd<T: Copy>(p: SyncPtr<T>, i: usize) -> T { unsafe { *p.at(i) } }
     #[inline(always)] fn wr<T>(p: SyncPtr<T>, i: usize, v: T) { unsafe { *p.at(i) = v } }
 
     // A reasonable random unit normal facing the camera (nz < 0 in camera frame

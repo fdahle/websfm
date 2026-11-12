@@ -483,9 +483,9 @@ impl LazDecoder {
 
     fn decode_impl(&self, compressed: &[u8], first: u32, count: u32, num_points: u32) -> Result<Vec<u8>, String> {
         let (first, count) = (first as usize, count as usize);
-        let run = self
-            .entries
-            .get(first..first + count)
+        let run = first
+            .checked_add(count)
+            .and_then(|end| self.entries.get(first..end))
             .ok_or_else(|| "lazcodec: chunk range outside the table".to_string())?;
         let bytes: u64 = run.iter().map(|e| e.byte_count).sum();
         if bytes != compressed.len() as u64 {
