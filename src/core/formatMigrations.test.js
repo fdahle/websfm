@@ -290,6 +290,20 @@ describe('version 3 → 4: each sparse model keeps its own lens', () => {
       expect(c.calibration).toBeUndefined()
   })
 
+  it('migrates the fixture to exactly the calibration first recorded for it', () => {
+    // Pinned: the step's output must never change once released (core/migrations/v3to4.js
+    // is a frozen copy; tests/fixtures/projects/v3/aukerman-5.v4-calibration.json is its
+    // output when it was frozen).
+    const out = step.migrate(structuredClone(fixtureDocs()))
+    const got = out['reconstruction/reconstruction.json'].clouds
+      .filter((c) => c.kind === 'sparse')
+      .map((c) => ({ id: c.id, calibration: c.calibration }))
+    const want = JSON.parse(
+      readFileSync(new URL('../../tests/fixtures/projects/v3/aukerman-5.v4-calibration.json', import.meta.url), 'utf8'),
+    )
+    expect(got).toEqual(want)
+  })
+
   it('marks a model that is not the main one: its lens was not recorded for it', () => {
     const docs = fixtureDocs()
     const recon = docs['reconstruction/reconstruction.json']

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "cloud-1793801626832-0",
+    "calibration": {
+      "groups": [
+        {
+          "sensorId": "7779ca35-19bc-4f3f-ae3c-bde9386634d8",
+          "dist": null,
+          "selfCal": {
+            "k1": 0.00580191967173417,
+            "k2": 0,
+            "k3": 0
+          }
+        }
+      ],
+      "fiducialTransforms": [],
+      "source": "migrated"
+    }
+  }
+]
