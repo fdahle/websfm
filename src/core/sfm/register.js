@@ -373,8 +373,8 @@ export async function registerImages(ctx) {
       const xyz = pts3.map((p) => ({ x: tracks.x(p), y: tracks.y(p), z: tracks.z(p) }))
       const pnp = await solvePnp(xyz, pts2, K, { ransacThreshPx: pnpThresh, maxIters: 200 })
       if (!pnp) {
-        // Diagnostic: the solver returns nothing when it can't gather ≥6 inliers
-        // at the gate. Re-probe at looser thresholds — if a 2×/4× gate suddenly
+        // Diagnostic: the solver returns nothing when no P3P hypothesis gathers its
+        // 4 inliers at the gate (solvePnp itself refuses fewer than 6 correspondences). Re-probe at looser thresholds — if a 2×/4× gate suddenly
         // finds inliers, the pose is recoverable and the model points are just
         // noisier than the gate (the interim BA should tighten it on a later pass).
         // If even 4× finds nothing, the correspondences themselves are wrong.
@@ -391,7 +391,7 @@ export async function registerImages(ctx) {
         log(`${reason} for ${img.name}`, 'warn', 'Reconstruction')
         continue
       }
-      // R1: honest acceptance. The solver only needs ≥6 inliers to return a pose,
+      // R1: honest acceptance. The solver only needs 4 inliers to return a pose,
       // but a pose supported by a handful of its correspondences (IMG_4315: 6/137
       // = 4% on baseline B1) is a coincidence fit that poisons the model. Require
       // both an absolute floor AND a fraction of the correspondences; deferring is

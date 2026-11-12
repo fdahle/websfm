@@ -66,7 +66,7 @@ function sample({ data, width, height }, x, y) {
 // The four quadrants' mean brightness around (x, y) at distances r/3 … r, the quadrants
 // taken about the strongest pair of opposite directions; → { contrast (0–1), ok }.
 export function quadrantTest(gray, x, y, r) {
-  // Mean along 16 rays, then the best split of the circle into 4 quarters.
+  // Mean along N = 32 rays, then the best split of the circle into 4 quarters.
   const N = 32
   const ray = new Float64Array(N)
   for (let k = 0; k < N; k++) {
