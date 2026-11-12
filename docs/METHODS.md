@@ -158,7 +158,11 @@ mutual nearest neighbour (cross-check) and the **Lowe ratio test** `d1/d2 < rati
 connects weakly overlapping blocks; verification removes the extra false matches.
 LightGlue (Lindenberger et al. 2023) is an attention-based learned matcher.
 
-**Geometric verification** (`core/features/verify.js`, both matcher paths):
+**Geometric verification** (`core/features/verify.js`, both matcher paths) runs on the
+recorded keypoints unless the image's sensor has a known lens (Brown, rational or fisheye):
+then in its pinhole frame, the putatives undistorted with the K and lens SfM ingest uses
+(`core/features/verifyFrame.js`), since a lens bends epipolar lines past the gate in the
+outer ring of the frame. An unknown lens, the usual drone case, is verified as recorded.
 1. **Fundamental-matrix RANSAC** (`verify_matches_hf`, normalised 8-point of Hartley 1997,
    in `crates/matching`) → inlier mask. Each new best sample gets a **local optimisation**:
    refit F on its inliers and recount, up to four rounds while the set changes, keeping a

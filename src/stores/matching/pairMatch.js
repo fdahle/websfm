@@ -77,12 +77,13 @@ export function createPairMatcher({
   // `gpuRun` (optional): matchAll's WebGPU router (stores/matching/gpuMatchRun.js);
   // null ⇒ brute-force runs on the WASM pool exactly as before.
   // The pinhole-frame mapper an image's putatives are verified through, or null
-  // (core/features/verifyFrame.js): only fisheye sensors get one. Same K and lens
-  // as SfM ingest (resolveK + distortionOf), so the verified F is that frame's.
+  // (core/features/verifyFrame.js): a sensor with a known lens gets one. Same K and lens
+  // as SfM ingest (resolveK + distortionOf), so the verified F is that frame's. Film
+  // keypoints are scan pixels; their frame comes from the fiducials at ingest.
   function verifyMapperFor(img) {
     const sensor = img?.sensorId ? useSensorsStore().sensors.find((s) => s.id === img.sensorId) : null
     const dist = distortionOf(sensor)
-    if (!dist?.fisheye || sensor.kind === 'film') return null
+    if (!dist || sensor.kind === 'film') return null
     return makeVerifyMapper(resolveK(img.meta, sensor), dist)
   }
 

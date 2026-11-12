@@ -156,6 +156,14 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Matches near the frame edge survive verification when the lens is known.** Photos whose
+  camera group has a lens calibration (imported, or entered in the Sensors table) now have
+  their matches verified with the lens taken out, as fisheye photos already were. A wide
+  lens bends the epipolar lines past the 2 px gate in the outer ring of the frame, so
+  verification threw those matches away; they are the ones that fix k2 and k3 and tie
+  strips together. Synthetic pair through an assumed 94° lens (k1 −0.13, k2 0.11), 80 %
+  forward overlap: true matches kept beyond ¾ of the half-diagonal below 50 % → at least
+  98 %, in every band. Photos without a known lens are verified as before.
 - **Camera-position accuracies stay on their axes.** The bundle adjustment now applies a
   camera position's horizontal and vertical accuracy in the directions they belong to,
   whatever pair of photos started the model. Before, they were applied along the model's

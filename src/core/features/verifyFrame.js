@@ -1,20 +1,22 @@
 // The frame geometric verification runs in (pure).
 //
-// F-RANSAC assumes straight epipolar lines, which only a pinhole camera has. A mild
-// Brown lens bends them by a few pixels and verification has always run on the raw
-// keypoints (SfM ingest re-fits F afterwards — ingest.js refitMovedPairs). A fisheye
-// bends them by hundreds: on raw keypoints the epipolar fit throws away most good
-// matches outside the image centre. So a fisheye image's putatives are undistorted
-// into its pinhole frame before RANSAC, with the same K and lens SfM ingest will
-// use; a putative too far off-axis for that frame (distortion.js
-// FISHEYE_MAX_RAY_DEG) is left out of the fit and counts as an outlier.
+// F-RANSAC assumes straight epipolar lines, which only a pinhole camera has. A lens
+// bends them: a wide Brown lens by more than the 2 px gate in the outer ring of the
+// frame (with an assumed 94° lens, 96 % of the true matches beyond ¾ of the half-
+// diagonal were lost), a fisheye by hundreds of pixels. Those outer matches are the
+// ones that fix k2 and k3 in self-calibration and tie strips together. So an image whose
+// sensor has a known lens (Brown, rational or fisheye) has its putatives undistorted
+// into its pinhole frame before RANSAC, with the same K and lens SfM ingest will use; a
+// fisheye putative too far off-axis for that frame (distortion.js FISHEYE_MAX_RAY_DEG)
+// is left out of the fit and counts as an outlier. SfM ingest re-fits F on the stored
+// inliers in the frame it solves in (ingest.js refitMovedPairs).
 
 import { undistortKeypoint } from '../sfm/distortion.js'
 
-// Pixel map for one image, or null when its putatives are verified as recorded
-// (no lens, or a Brown/rational lens). `K` = { fx, fy, cx, cy }, `dist` a lens bag.
+// Pixel map for one image, or null when its putatives are verified as recorded (no
+// lens known). `K` = { fx, fy, cx, cy }, `dist` a lens bag (distortion.js distortionOf).
 export function makeVerifyMapper(K, dist) {
-  if (!K || !dist?.fisheye) return null
+  if (!K || !dist) return null
   return (x, y) => undistortKeypoint(x, y, K, dist)
 }
 
