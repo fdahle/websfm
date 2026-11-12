@@ -52,14 +52,20 @@ export function makeTiles3dOps({ lazCodec = null } = {}) {
       ;({ reader, lod } = memoryLodReader(input.cloud))
     }
     const out = zipBlob()
-    const res = await lodToTiles(reader, lod, {
-      sim,
-      origin,
-      color,
-      transform,
-      emit: out.emit,
-      onProgress: (done, total) => emit('progress', [done, total, 'Writing tiles', done / Math.max(1, total)]),
-    })
+    let res
+    try {
+      res = await lodToTiles(reader, lod, {
+        sim,
+        origin,
+        color,
+        transform,
+        emit: out.emit,
+        onProgress: (done, total) => emit('progress', [done, total, 'Writing tiles', done / Math.max(1, total)]),
+      })
+    } finally {
+      // A streamed source holds a LASzip decoder (WASM memory) until closed.
+      reader.close?.()
+    }
     const blob = out.finish(res.tileset, res.external)
     let levels = 0
     for (const n of reader.nodes.values()) levels = Math.max(levels, n.key[0] + 1)

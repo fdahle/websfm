@@ -448,14 +448,20 @@ export function makeLodOps({ lazCodec = null } = {}) {
       fields = 'all',
     } = input
     const reader = await openSource(lod, { data, hierarchy })
-    const plan = planExtract(reader.nodes, lod, { box, maxPoints, minSpacing })
-    const cloud = await extractPoints(reader, plan, lod, {
-      box,
-      classes: classes ? new Set(classes) : null,
-      fields,
-      onProgress: (done, total) => emit('progress', [done, total, 'Reading points', done / Math.max(1, total)]),
-    })
-    reader.close()
+    // Closed on every path: a failed or cancelled read must not keep the LASzip decoder's
+    // WASM memory in this worker.
+    let plan, cloud
+    try {
+      plan = planExtract(reader.nodes, lod, { box, maxPoints, minSpacing })
+      cloud = await extractPoints(reader, plan, lod, {
+        box,
+        classes: classes ? new Set(classes) : null,
+        fields,
+        onProgress: (done, total) => emit('progress', [done, total, 'Reading points', done / Math.max(1, total)]),
+      })
+    } finally {
+      reader.close()
+    }
     const transfer = [
       cloud.pos.buffer,
       ...(cloud.col ? [cloud.col.buffer] : []),
@@ -472,6 +478,13 @@ export function makeLodOps({ lazCodec = null } = {}) {
     const { lod, data, hierarchy, format, color = true } = input
     const t0 = performance.now()
     const reader = await openSource(lod, { data, hierarchy })
+    try {
+      return await writeLodExport(reader, { lod, format, color, emit, t0 })
+    } finally {
+      reader.close()
+    }
+  }
+  async function writeLodExport(reader, { lod, format, color, emit, t0 }) {
     const onProgress = (done, total) => emit('progress', [done, total, 'Writing points', done / Math.max(1, total)])
     // Parts gathered into a Blob in batches (the browser keeps large Blobs on disk).
     let blob = null,
@@ -537,7 +550,6 @@ export function makeLodOps({ lazCodec = null } = {}) {
       for await (const p of lodToText(reader, lod, { format, color, onProgress })) add(p)
       blob = new Blob([...(blob ? [blob] : []), ...batch], { type })
     }
-    reader.close()
     emit('log', [
       `${format.toUpperCase()} written: ${lod.points.toLocaleString()} points from the octree, ` +
         `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
