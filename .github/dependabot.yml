@@ -1,19 +1,52 @@
-# Weekly update pull requests for the npm packages, the Rust crates and the GitHub
-# Actions. Each one runs the usual checks; a crate update also needs `npm run
-# build:wasm` and the regenerated src/wasm/ committed with it (CONTRIBUTING.md).
+# Update pull requests for the npm packages, the Rust crates and the GitHub Actions:
+# minor and patch updates only, grouped into one pull request per ecosystem. A major
+# version is an upgrade done on purpose, with its changes read, not a weekly bump.
+# Security fixes come grouped the same way, so there are at most two open pull
+# requests (and branches) per ecosystem; GitHub deletes a branch once it is merged.
+# Each one runs the usual checks; a crate update also needs `npm run build:wasm` and
+# the regenerated src/wasm/ committed with it (CONTRIBUTING.md), so CI fails on a crate
+# pull request until that is pushed to its branch, and those come monthly.
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
+    open-pull-requests-limit: 2
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ['*']
+      npm-security:
+        applies-to: security-updates
+        patterns: ['*']
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: cargo
     directory: /crates
+    open-pull-requests-limit: 2
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    groups:
+      crates:
+        patterns: ['*']
+      crates-security:
+        applies-to: security-updates
+        patterns: ['*']
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
+    open-pull-requests-limit: 2
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+      actions-security:
+        applies-to: security-updates
+        patterns: ['*']
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
