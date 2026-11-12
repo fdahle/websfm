@@ -49,7 +49,9 @@ Notable changes to websfm. The format follows
   1.54 / 0.97), Casa Grande 1978 1.25 / 1.18 → 1.09 / 1.01 m; quarry with RTK checkpoints
   6.4 / 30.2 → 4.6 / 21.6 cm and cameras against RTK 10.4 / 5.4 → 6.3 / 4.4 cm; PUTI with
   RTK checkpoints 3.4 / 11.1 → 3.5 / 9.2 cm, cameras 1.8 / 1.2 → 0.55 / 0.88 cm (Metashape
-  0.5 / 1.0). Tie-point residuals, registered cameras and run times are unchanged. With
+  0.5 / 1.0). The DEMs follow: Iceland against its reference DEM NMAD 2.44 → 1.28 m
+  (Metashape 1.38), Casa Grande RMSE / NMAD 1.41 / 0.68 → 1.38 / 0.59 m, coverage
+  unchanged. Tie-point residuals, registered cameras and run times are unchanged. With
   consumer GPS (PUTI's RTK positions given 2 / 2 / 4 m of noise at the 10 / 20 m default
   accuracy) the block's shape stays the same (26.5 / 14.6 → 26.6 / 15.2 cm), and a run
   without positions or GCPs solves exactly as before.

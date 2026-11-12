@@ -91,11 +91,19 @@ less than 1 mm, so it gets no row of its own.
   are level with it on PUTI. Before 11-11 the gap was 5–12 cm, and quarry's cameras were
   10.4 / 5.4 cm off: a tie point counted 5–6 times what it measured against the RTK
   positions (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly).
-- **Both tools put the ground too high on both blocks**, by the same pattern: WebSfM's
-  focal comes out shorter (quarry 4,403.5 against 4,404.0 px, PUTI 5,671.8 against
-  5,675.3). A flat nadir block with RTK alone barely fixes the focal, and the
-  heights follow it. On PUTI, the lens shape, the lever arm and the tie points were ruled
-  out. Metashape itself moves 6 cm when it is given one more lens term.
+- **Both tools put the ground too high on both blocks; WebSfM 2–4 cm more.** On quarry the
+  two solve the same focal (4,403.5 px). On PUTI WebSfM's is shorter: 5,671.8 against
+  Metashape's 5,675.3 and 5,676.9 in GeoScan's own project with its GCPs as control, whose
+  cameras sit on the RTK positions (mean height −0.1 cm), so the RTK file is sound. Most of
+  PUTI's gap is the decentring terms: WebSfM keeps p1, p2 only where they lower the
+  photos-alone RMS by 1 %, and on PUTI they lower it by 0.0 % because the principal point
+  stands in for them, 2.8 px off. Kept, they come out as Metashape's (0.00019 / −0.00006
+  against 0.00017 / −0.00007) and the checkpoints go to 3.7 / 7.8 cm, mean +5.5 (11-12).
+  Nothing the solve sees tells this lens from the already undistorted photos of South
+  Building, ETH3D and UseGeo, where freeing p1, p2 moves the cameras away from the
+  reference: not the RMS, not |p|/σ (PUTI 27, South Building 30), not the fit to the RTK
+  positions. Detecting at 4,000 or 6,000 px instead of 2,400 does not close it either
+  (8.4 and 10.3 cm). Metashape itself moves 6 cm when it is given one more lens term.
 - **Most of the quarry's height offset is shared by both tools** (+18 cm in Metashape).
   The GCPs come in LV03 / LN02 and are converted to ETRS89 with swisstopo's CHENyx06 and
   CHGeo2004 grids. The camera heights are the drone's ellipsoidal RTK heights. A datum
@@ -261,8 +269,8 @@ keeps its bend; it is shown with a GCP similarity fit.
 
 | run | cameras | checkpoints | DEM vs reference RMSE / NMAD | DEM coverage |
 | --- | --- | --- | --- | --- |
-| WebSfM, preprocessed scans (11-11) | **37/37** | 1.09 / 1.01 m | — | — |
-| WebSfM, preprocessed scans, before tie weighting | **37/37** | 1.25 / 1.18 m | **1.41 / 0.68 m** | 41 % |
+| WebSfM, preprocessed scans (11-11; DEM 11-12) | **37/37** | 1.09 / 1.01 m | **1.38 / 0.59 m** | 41 % |
+| WebSfM, preprocessed scans, before tie weighting | **37/37** | 1.25 / 1.18 m | 1.41 / 0.68 m | 41 % |
 | WebSfM, raw scans + fiducials (10-13) | **37/37** | **1.05 / 0.96 m** | — | — |
 | COLMAP (10-13) | **37/37** | 1.18 / 14.1 m | 13.0 / 13.5 m | — |
 | Metashape defaults | 32/37 | 1.20 / 0.95 m (9 checks) | 9.06 / 0.82 m | **69 %** |
@@ -276,20 +284,21 @@ the cell empty rather than interpolating.
 
 | run | cameras | checkpoints | DEM vs reference RMSE / NMAD | DEM coverage |
 | --- | --- | --- | --- | --- |
-| WebSfM (11-11) | 123/125 | 1.74 / 1.02 m (18 checks) | — | — |
-| WebSfM, before tie weighting | 123/125 | 1.97 / 2.46 m (18 checks) | **20.0** / 2.44 m | 27 % |
+| WebSfM (11-11; DEM 11-12) | 123/125 | 1.74 / 1.02 m (18 checks) | **20.0** / **1.28 m** | 27 % |
+| WebSfM, before tie weighting | 123/125 | 1.97 / 2.46 m (18 checks) | 20.0 / 2.44 m | 27 % |
 | WebSfM (10-13) | 121/125 | 2.03 / 2.09 m (17 checks) | — | — |
 | WebSfM (10-13), detection at Auto resolution | 124/125 | 1.74 / 1.98 m | — | — |
 | COLMAP (10-13) | **125/125** | 3.94 / 103 m | — | — |
-| Metashape defaults | **125/125** | **1.54 / 0.97 m** | 153.6 / **1.38 m** | **62 %** |
+| Metashape defaults | **125/125** | **1.54 / 0.97 m** | 153.6 / 1.38 m | **62 %** |
 
 Metashape leads here:
 - **Height error:** level since 11-11 (1.02 against 0.97 m). Before, a tie point detected
   at a fifth of the scan's size counted 23 times what it measured against the GCPs
   (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly), and WebSfM's height
   error was two and a half times Metashape's. Horizontal, Metashape is 0.2 m ahead.
-- **DEM:** Metashape's is sharper (NMAD) and covers twice the area. Its RMSE comes from
-  outliers that WebSfM leaves out.
+- **DEM:** since the tie weighting WebSfM's is the sharper one (NMAD 1.28 against 1.38 m,
+  2.44 m before), but Metashape's covers twice the area. Its RMSE comes from outliers that
+  WebSfM leaves out.
 - **Tracks:** WebSfM's are short. 65 % of its points are seen in three or more photos,
   and its reprojection median is 1.38 px.
 - **October to 11-10:** the heights looked 0.37 m worse (2.46 against 2.09 m), but the two runs
