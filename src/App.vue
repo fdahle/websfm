@@ -369,6 +369,9 @@ async function onDetectTargetsRun({ settings, plan }) {
   }
 }
 
+// Work in flight (a run's progress modal, or a workflow): open, switch and delete wait.
+const isBusy = () => progressOpen.value || workflowRunning.value
+
 // A run a dead tab did not finish: offered again when its project opens.
 const { offerStoppedRuns } = useStoppedRuns({
   runs: {
@@ -376,7 +379,7 @@ const { offerStoppedRuns } = useStoppedRuns({
     match: { label: 'Matching', start: (settings, opts) => runMatch(settings, opts) },
     depth: { label: 'Depth maps', start: (settings, opts) => runComputeDepthMaps(settings, opts) },
   },
-  isBusy: () => progressOpen.value || workflowRunning.value,
+  isBusy,
 })
 
 // ── Derived state ──────────────────────────────────────────────────────────────
@@ -556,7 +559,7 @@ const {
 } = useProjectLifecycle({
   resetToViewer,
   clearViewerScene: () => viewerRef.value?.clearReconstructionData(),
-  isBusy: () => progressOpen.value || workflowRunning.value,
+  isBusy,
   onProjectOpened: (id) => offerStoppedRuns(id),
 })
 
