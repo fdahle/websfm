@@ -66,6 +66,46 @@ async function terrainLod(n) {
 const settle = () => new Promise((r) => setTimeout(r, 20))
 
 describe('level-of-detail layer', () => {
+  it('retries a node that failed once, and says so once', async () => {
+    const { lod, open } = await terrainLod(60000)
+    let failOnce = true
+    const errors = []
+    const flaky = async () => {
+      const reader = await open()
+      const read = reader.read
+      reader.read = async (node, opts) => {
+        if (failOnce && node.key[0] > 0) {
+          failOnce = false
+          throw new Error('worker lost')
+        }
+        return read(node, opts)
+      }
+      return reader
+    }
+    const layer = createLodLayer(
+      { id: 'f', name: 'flaky', count: 60000, lod, style: null },
+      { open: flaky, material: new THREE.PointsMaterial(), onChange: () => {}, onError: (m) => errors.push(m) },
+    )
+    const camera = new THREE.PerspectiveCamera(60, 1, 1, 1e5)
+    camera.position.set(1500, 1500, 300)
+    camera.lookAt(1500, 2300, 0)
+    while (!layer.ready) await settle()
+    const shownAt = async (n) => {
+      for (let k = 0; k < n; k++) {
+        layer.update(camera, 1000, 1e6)
+        await settle()
+      }
+      return layer.visiblePoints
+    }
+    const before = await shownAt(20)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatch(/worker lost/)
+    // After its pause the node loads: more is shown than with the hole.
+    await new Promise((r) => setTimeout(r, 1200))
+    expect(await shownAt(20)).toBeGreaterThan(before)
+    layer.dispose()
+  }, 30000)
+
   it('shows coarse to fine within the budget, nearest nodes first', async () => {
     const { lod, open } = await terrainLod(300000)
     let changes = 0

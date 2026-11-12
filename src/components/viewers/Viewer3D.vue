@@ -5,6 +5,7 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
+import { useLog } from '../../composables/useLog.js'
 import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
 import CloudLegend from './CloudLegend.vue'
 import FloatingToolbox from './FloatingToolbox.vue'
@@ -399,6 +400,7 @@ function init() {
 // Selecting and index picking need every point drawn: while either is active, a cloud
 // whose points are in memory is drawn whole again (a streamed one cannot be).
 const reconStore = useReconstructionStore()
+const { log } = useLog()
 const needsAllPoints = () => !!selectTool.value || !!props.pickMode
 // A cloud past 178 M points (its positions in shared memory, core/bigArray.js) cannot be
 // drawn whole: the GPU copy would be one Float32 buffer over the browser's 2 GiB. It is
@@ -414,6 +416,7 @@ function createLodCloudLayer(cloud) {
   const layer = createLodLayer(cloud, {
     open: (c) => reconStore.openCloudLod(c),
     material,
+    onError: (message) => log(message, 'warn', 'Viewer'),
     onChange: () => {
       // The root node gives better framing bounds than the octree's box.
       if (layer.rootPoints && !layer.rootBounds && cloudLayers.get(cloud.id) === layer) {

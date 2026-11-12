@@ -63,9 +63,10 @@ function heap() {
 /**
  * cloud: a cloud with `lod` metadata. open(cloud) → Promise<reader | null>
  * (core/lod/reader.js); material: the layer's PointsMaterial; onChange(): something
- * loaded (redraw, which walks again).
+ * loaded (redraw, which walks again); onError(message): a node failed to load (logged
+ * once per node).
  */
-export function createLodLayer(cloud, { open, material, onChange }) {
+export function createLodLayer(cloud, { open, material, onChange, onError = () => {} }) {
   const lod = cloud.lod
   const offset = lod.layout.offset
   const group = new THREE.Group()
@@ -74,6 +75,10 @@ export function createLodLayer(cloud, { open, material, onChange }) {
   const cache = new Map() // key → { key, node, pts, object, lastUsed }
   const loading = new Set()
   const failed = new Set()
+  // A node that failed to load: { n, until }. It is retried after 1 s, then 2 s (a worker
+  // crash or a momentary file error), and only after the third failure left out for the
+  // session: a hole no pan or zoom repairs.
+  const failures = new Map()
   let reader = null,
     disposed = false,
     frame = 0,
@@ -152,8 +157,18 @@ export function createLodLayer(cloud, { open, material, onChange }) {
       cache.set(key, e)
       layer.loadedPoints += pts.count
       if (node.key[0] === 0) layer.rootPoints = pts
-    } catch {
-      failed.add(key) // a missing or short file: never asked for again this session
+    } catch (err) {
+      const f = failures.get(key) ?? { n: 0, until: 0 }
+      f.n++
+      if (f.n === 1)
+        onError(`Cloud "${cloud.name ?? cloud.id}": node ${key} could not be read (${err?.message ?? err})`)
+      if (f.n >= 3) failed.add(key)
+      else {
+        const wait = 1000 * 2 ** (f.n - 1)
+        f.until = performance.now() + wait
+        setTimeout(() => !disposed && onChange(), wait)
+      }
+      failures.set(key, f)
     } finally {
       loading.delete(key)
       if (!disposed) onChange()
@@ -200,7 +215,7 @@ export function createLodLayer(cloud, { open, material, onChange }) {
       if (!frustum.intersectsBox(box)) continue
       if (points > 0 && points + node.count > budget) break
       const key = keyString(node.key)
-      if (failed.has(key)) continue
+      if (failed.has(key) || (failures.get(key)?.until ?? 0) > performance.now()) continue
       const e = cache.get(key)
       if (!e) {
         missing.push({ node, key, weight: w })
