@@ -8,6 +8,44 @@ export default [
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: globals.browser },
     rules: { 'no-undef': 'error', 'no-unreachable': 'error', 'constructor-super': 'error', 'getter-return': 'error' },
   },
+  // src/core/ is pure (AGENTS.md): no Vue, Pinia, stores, OPFS or other browser I/O, so it
+  // runs in a worker and in Node tests alike. Inject I/O instead (verticalDatum.loadGeoid
+  // takes its fetch). The files listed under `ignores` still do I/O and are to be moved
+  // out or given injected I/O (dev/handover-review.md ▸ C1); add nothing to that list.
+  {
+    files: ['src/core/**/*.js'],
+    ignores: [
+      'src/core/**/*.test.js',
+      'src/core/**/*.testutil.js',
+      'src/core/crs.js', // epsg.io lookup, CRS definitions cached in OPFS
+      'src/core/crsRegistry.js', // fetches the CRS catalog
+      'src/core/examples.js', // downloads an example project
+      'src/core/io/folderProject.js', // showDirectoryPicker detection
+      'src/core/mask.js', // canvas I/O section
+      'src/core/terrainHeights.js', // fetches terrain tiles
+      'src/core/verticalDatum.js', // geoid grid fetch (injectable, fetch by default)
+      'src/core/models/modelCache.js', // Cache API for model weights
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: ['**/utils/**', '**/stores/**', '**/composables/**', '**/components/**', 'vue', 'pinia'] },
+      ],
+      'no-restricted-globals': [
+        'error',
+        'fetch',
+        'document',
+        'window',
+        'localStorage',
+        'sessionStorage',
+        'caches',
+        'indexedDB',
+        'OffscreenCanvas',
+        'createImageBitmap',
+        'XMLHttpRequest',
+      ],
+    },
+  },
   {
     files: ['**/*.test.js', 'scripts/**/*.mjs', '*.config.js', 'tests/**/*.js'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
