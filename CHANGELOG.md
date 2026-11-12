@@ -156,6 +156,10 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **A run that fails at its start no longer locks the project.** If a Reconstruct or Tools
+  run failed before it got going, its progress window now closes and the error is
+  logged. Before, the window could stay open, and opening, switching or deleting
+  projects was refused until the page was reloaded.
 - **Workflow Builder's Dense Model block replaces the main dense cloud when asked.** With
   *Replace the main dense cloud* on, a workflow now replaces it as the Build Dense Cloud
   dialog does, instead of adding "Dense cloud 2, 3, …" on every run. The Depth Maps, Dense,

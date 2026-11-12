@@ -228,6 +228,24 @@ export function usePipeline({
     return cancelled ? refused('Cancelled', true) : { ok, cancelled: false, ...(reason ? { reason } : {}) }
   }
 
+  // Open the progress modal, run `body`, and always close it again. Most store runs
+  // catch their own errors, but some await before their `try` (a frame lookup, a
+  // model read): a rejection there would skip finishRun, leave the modal open and
+  // isBusy() true, and refuse open, switch and delete until a reload. `body` returns
+  // the run's result (usually finishRun's); a throw becomes { ok: false } with the
+  // message, logged (as a cancel when the user pressed Cancel).
+  async function withProgress(title, total, onCancel, opts, body) {
+    openProgress(title, total, onCancel, opts)
+    try {
+      return await body()
+    } catch (err) {
+      const message = String(err?.message ?? err)
+      if (aborted.value) useLog().log(`${title}: cancelled`, 'info', 'Pipeline')
+      else useLog().log(`${title} failed: ${message}`, 'error', 'Pipeline')
+      return finishRun(false, message)
+    }
+  }
+
   // `opts.resume`: continue a run a dead tab stopped (useStoppedRuns).
   async function runDetect(settings, opts = {}) {
     const only = settings.onlyIds?.length ? new Set(settings.onlyIds) : null
@@ -253,12 +271,19 @@ export function usePipeline({
     // worker call (a learned detector on CPU WASM, or a tiled native-res run), so Cancel
     // also hard-terminates the pool — the in-flight detect rejects, detectOne
     // reverts that image, and the batch loop exits on the aborted flag.
-    openProgress('Detecting Features', pending.length, () => terminateAll('detection cancelled'), { unit: 'images' })
-    // No per-image overlay callback: the keypoint overlay is a global toggle gated on
-    // the image's own kpStatus, so it lights up reactively as each detection lands.
-    await detectAll(settings, null, report, shouldCancel, opts)
-    const ok = pending.every((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
-    return finishRun(ok, ok ? '' : 'Feature detection failed for one or more images')
+    return withProgress(
+      'Detecting Features',
+      pending.length,
+      () => terminateAll('detection cancelled'),
+      { unit: 'images' },
+      async () => {
+        // No per-image overlay callback: the keypoint overlay is a global toggle gated on
+        // the image's own kpStatus, so it lights up reactively as each detection lands.
+        await detectAll(settings, null, report, shouldCancel, opts)
+        const ok = pending.every((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
+        return finishRun(ok, ok ? '' : 'Feature detection failed for one or more images')
+      },
+    )
   }
 
   // `opts.resume`: continue a run a dead tab stopped (useStoppedRuns).
@@ -278,9 +303,16 @@ export function usePipeline({
     // promise rejects, matchPair catches it and marks the pair, and the drain
     // loops exit on the aborted flag. Cost: worker 0 drops its cached ORT/LightGlue
     // session (~model reload next run); acceptable for an explicit user cancel.
-    openProgress('Matching Features', 0, () => terminateAll('matching cancelled'), { unit: 'pairs' })
-    await matchAll(images.value, settings, report, shouldCancel, opts)
-    return finishRun()
+    return withProgress(
+      'Matching Features',
+      0,
+      () => terminateAll('matching cancelled'),
+      { unit: 'pairs' },
+      async () => {
+        await matchAll(images.value, settings, report, shouldCancel, opts)
+        return finishRun()
+      },
+    )
   }
 
   async function runReconstruct(settings) {
@@ -288,56 +320,90 @@ export function usePipeline({
     if (ready.length < 2) return refused('Sparse reconstruction requires at least two images with keypoints')
     // Reconstruct is a single worker call — cancel by terminating the worker
     // (the store catches the resulting rejection and resets its status).
-    openProgress('Sparse Reconstruction', ready.length, () => terminateAll('reconstruction cancelled'), {
-      steps: SPARSE_STEPS,
-    })
-    await reconstruct(settings, report)
-    return finishRun()
+    return withProgress(
+      'Sparse Reconstruction',
+      ready.length,
+      () => terminateAll('reconstruction cancelled'),
+      { steps: SPARSE_STEPS },
+      async () => {
+        await reconstruct(settings, report)
+        return finishRun()
+      },
+    )
   }
 
   // Dense Stage A — Build Depth Maps (PatchMatch MVS). Single worker call; cancel
   // by terminating the worker (the store catches the rejection and resets status).
   // `opts.resume`: continue a run a dead tab stopped (useStoppedRuns).
   async function runComputeDepthMaps(settings, opts = {}) {
-    openProgress('Building Depth Maps', images.value.length, () => terminateAll('depth maps cancelled'), {
-      unit: 'images',
-    })
-    await computeDepthMaps(settings, report, opts)
-    return finishRun()
+    return withProgress(
+      'Building Depth Maps',
+      images.value.length,
+      () => terminateAll('depth maps cancelled'),
+      { unit: 'images' },
+      async () => {
+        await computeDepthMaps(settings, report, opts)
+        return finishRun()
+      },
+    )
   }
 
   // Dense Stage B — fuse the depth maps into the dense cloud.
   async function runDensify(settings) {
-    openProgress('Building Dense Cloud', 1, () => terminateAll('densify cancelled'), {
-      indeterminate: true,
-      unit: 'maps',
-      steps: FUSION_STEPS,
-    })
-    await densify(settings, report)
-    return finishRun()
+    return withProgress(
+      'Building Dense Cloud',
+      1,
+      () => terminateAll('densify cancelled'),
+      { indeterminate: true, unit: 'maps', steps: FUSION_STEPS },
+      async () => {
+        await densify(settings, report)
+        return finishRun()
+      },
+    )
   }
 
   // Products — DEM (rasterise a height grid). Single worker call; cancel by
   // terminating the worker (the store catches the rejection and resets status).
   async function runGenerateDem(settings) {
-    openProgress('Building DEM', 1, () => terminateAll('DEM cancelled'), { indeterminate: true })
-    await generateDem(settings, report)
-    return finishRun()
+    return withProgress(
+      'Building DEM',
+      1,
+      () => terminateAll('DEM cancelled'),
+      { indeterminate: true },
+      async () => {
+        await generateDem(settings, report)
+        return finishRun()
+      },
+    )
   }
 
   // Products — orthophoto (reproject the DEM through the cached depth maps).
   async function runGenerateOrtho(settings) {
-    openProgress('Building Orthophoto', 1, () => terminateAll('orthophoto cancelled'), { indeterminate: true })
-    await generateOrtho(settings, report)
-    return finishRun()
+    return withProgress(
+      'Building Orthophoto',
+      1,
+      () => terminateAll('orthophoto cancelled'),
+      { indeterminate: true },
+      async () => {
+        await generateOrtho(settings, report)
+        return finishRun()
+      },
+    )
   }
 
   // Products — mesh (screened Poisson over the dense cloud). Single worker call;
   // cancel by terminating the worker (the store catches the rejection).
   async function runGenerateMesh(settings) {
-    openProgress('Building Mesh', 1, () => terminateAll('mesh cancelled'), { indeterminate: true })
-    await generateMesh(settings, report)
-    return finishRun()
+    return withProgress(
+      'Building Mesh',
+      1,
+      () => terminateAll('mesh cancelled'),
+      { indeterminate: true },
+      async () => {
+        await generateMesh(settings, report)
+        return finishRun()
+      },
+    )
   }
 
   // Tools — cloud editing (crop / filter / merge / 3D-viewer selection). Single worker call, same
@@ -363,22 +429,34 @@ export function usePipeline({
       'mesh-crop': 'Cropping Mesh',
       'mesh-sample': 'Sampling Mesh',
     }
-    openProgress(titles[request.mode] ?? 'Editing Cloud', 1, () => terminateAll('cloud edit cancelled'), {
-      indeterminate: true,
-    })
-    // ok ⇔ the store committed a result (it returns null for a refusal, an empty
-    // result, a superseded run or an error) — callers act on the outcome, not on
-    // a status flag a no-op leaves at its previous value.
-    const cloud = await editClouds(request, report)
-    return finishRun(!!cloud)
+    return withProgress(
+      titles[request.mode] ?? 'Editing Cloud',
+      1,
+      () => terminateAll('cloud edit cancelled'),
+      { indeterminate: true },
+      async () => {
+        // ok ⇔ the store committed a result (it returns null for a refusal, an empty
+        // result, a superseded run or an error) — callers act on the outcome, not on
+        // a status flag a no-op leaves at its previous value.
+        const cloud = await editClouds(request, report)
+        return finishRun(!!cloud)
+      },
+    )
   }
 
   // Tools — mesh texture (reconstruction/meshTexture.js). One worker call with real
   // progress (visibility, selection, bake); cancel by terminating the worker.
   async function runTextureMesh(request) {
-    openProgress('Texturing Mesh', 100, () => terminateAll('texture cancelled'))
-    const cloud = await textureMesh(request, report)
-    return finishRun(!!cloud)
+    return withProgress(
+      'Texturing Mesh',
+      100,
+      () => terminateAll('texture cancelled'),
+      {},
+      async () => {
+        const cloud = await textureMesh(request, report)
+        return finishRun(!!cloud)
+      },
+    )
   }
 
   return {
