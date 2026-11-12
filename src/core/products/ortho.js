@@ -56,6 +56,11 @@ import {
 } from './orthoMosaic.js'
 import { blockGroups, chooseGroupSize, ownersFromCut, unionMaps, viewBytes, visitSequence } from './orthoPlan.js'
 import { fillArray } from '../bigArray.js'
+import { orthoRunSettings } from '../runSettings.js'
+
+// What an option left out means: the user defaults in run units (core/runSettings.js),
+// never a second copy of them here.
+const RUN_DEFAULTS = orthoRunSettings()
 
 // The highest matching cost left in the depth maps, given the settings of the run that
 // built them (the Stage A summary's `settings`). The cross-view filter's Minimum NCC
@@ -70,7 +75,8 @@ export function orthoCostCeiling(depthSettings) {
 // Sample the colour for one ground point P (SfM world coords) by reprojecting it
 // into every map, testing occlusion against each map's depth plane, and combining
 // the visible views.
-//   opts: { depthTolRel=0.02, blend='best'|'average', maxCost=Infinity }
+//   opts: { depthTolRel, blend ('best' | 'average'; 'mosaic' picks as 'best'), maxCost },
+//   each defaulting to ORTHO_DEFAULTS in run units (RUN_DEFAULTS)
 // Returns [r,g,b] (0..255) or null when no view sees the point.
 export function sampleOrtho(P, maps, opts = {}) {
   return pickOrthoView(P, maps, opts)?.rgb ?? null
@@ -79,7 +85,7 @@ export function sampleOrtho(P, maps, opts = {}) {
 // sampleOrtho plus the index of the map that supplied the colour (`mi`, the label;
 // -1 for 'average', which mixes every visible view).
 function pickOrthoView(P, maps, opts) {
-  const { depthTolRel = 0.02, blend = 'best', maxCost = Infinity } = opts
+  const { depthTolRel = RUN_DEFAULTS.depthTolRel, blend = RUN_DEFAULTS.blend, maxCost = RUN_DEFAULTS.maxCost } = opts
   let best = null // { score, rgb, mi }
   let wsum = 0,
     r = 0,
@@ -403,7 +409,7 @@ function gridProjection({ width, height, gsd, originX, originY }, toSfm, zLo, zH
 function colourFromMap(win, grid, m, photo, mi, affine, toSfm, opts, scratch) {
   const { x0, y0, w, h, data, mask, rgba, scores, sums, labels } = win
   const { gsd, originX, originY } = grid
-  const { depthTolRel = 0.02, maxCost = Infinity } = opts
+  const { depthTolRel = RUN_DEFAULTS.depthTolRel, maxCost = RUN_DEFAULTS.maxCost } = opts
   const { P, px } = scratch
   for (let r = 0; r < h; r++)
     for (let c = 0; c < w; c++) {
@@ -554,8 +560,8 @@ function maxWindow(W, H, B, halo, align) {
 export function orthoTiledWorkingBytes({
   width,
   height,
-  blend = 'best',
-  fillRadius = 2,
+  blend = RUN_DEFAULTS.blend,
+  fillRadius = RUN_DEFAULTS.fillRadius,
   seamWidth = 0,
   seamline = 'nadir',
   seamBlend = 'feather',
@@ -1290,7 +1296,7 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
       a.eff = eff
       a.mbox = box
     }
-    const { depthTolRel = 0.02, maxCost = Infinity } = opts
+    const { depthTolRel = RUN_DEFAULTS.depthTolRel, maxCost = RUN_DEFAULTS.maxCost } = opts
     const usersOf = union.map((mi) => active.filter((a) => a.st.slot[mi] >= 0 && a.mbox[4 * a.st.slot[mi] + 2] >= 0))
     planPhotos(union.filter((_, u) => usersOf[u].length))
     for (const [u, mi] of union.entries()) {
