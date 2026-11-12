@@ -108,6 +108,10 @@ const ops = {
   ...makeReflectanceOps(),
 }
 
+// A job that could not be deserialized has no readable id: say so, and the client fails
+// this worker's jobs instead of leaving one waiting forever (computeClient.js).
+self.onmessageerror = () => self.postMessage({ messageError: true })
+
 self.onmessage = async (e) => {
   const { id, op, args } = e.data
   const handler = ops[op]

@@ -103,3 +103,33 @@ describe('cancelRun', () => {
     expect(bgDone).toBe(false)
   })
 })
+
+describe('a worker that errors', () => {
+  it('is respawned on its next call, at most three times in a row, then calls fail with the cause', async () => {
+    client.terminateAll('reset for this test')
+    const job = client.matchGpuBegin({}).catch((e) => e)
+    const slot = client.GPU_MATCH_WORKER
+    let w = made.at(-client.POOL_SIZE + slot)
+    for (let k = 0; k < 3; k++) {
+      if (k) w = made.at(-1)
+      w.onerror({ message: 'module script failed' })
+      expect(w.dead).toBe(true)
+      const n = made.length
+      if (k < 2) {
+        // Nothing respawns by itself; the next call to the slot does.
+        client.matchGpuBegin({}).catch(() => {})
+        expect(made.length).toBe(n + 1)
+      }
+    }
+    expect((await job).message).toBe('module script failed')
+    await expect(client.matchGpuBegin({})).rejects.toThrow(/failed 3 times in a row \(module script failed\)/)
+    expect(slot).toBe(0)
+  })
+
+  it('fails its jobs when a reply cannot be read, instead of leaving them pending', async () => {
+    client.terminateAll('reset for this test')
+    const job = client.matchGpuBegin({}).catch((e) => e)
+    made.at(-client.POOL_SIZE + client.GPU_MATCH_WORKER).onmessageerror()
+    expect((await job).message).toMatch(/could not be read/)
+  })
+})

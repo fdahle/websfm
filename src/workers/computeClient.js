@@ -25,9 +25,14 @@ let nextId = 1
 const pending = new Map()
 
 function handleMessage(e) {
-  const { id, ok, result, error, ev, args, fatal } = e.data
+  const { id, ok, result, error, ev, args, fatal, messageError } = e.data
+  // The worker could not read a message it was sent (worker-side onmessageerror): which
+  // job is unknown, so every job on that worker fails rather than wait forever.
+  if (messageError) return failWorkerJobs(e.target, new Error('a compute worker could not read its job'))
   const entry = pending.get(id)
   if (!entry) return
+  const slot = workers?.indexOf(entry.worker) ?? -1
+  if (slot >= 0) startFailures[slot] = 0
   // Intermediate streaming event (e.g. reconstruct log/progress) — not terminal.
   if (ev) {
     entry.onEvent?.(ev, args)
@@ -58,6 +63,22 @@ function retireWorker(w, error) {
   if (index >= 0) workers[index] = spawn(index)
 }
 
+function failWorkerJobs(w, err) {
+  for (const [id, entry] of pending) {
+    if (entry.worker !== w) continue
+    pending.delete(id)
+    entry.reject(err)
+  }
+}
+
+// Worker-level errors per slot since its last answered job. A slot whose worker errors
+// is left empty and respawned on its next call (not at once: a worker that cannot load
+// would respawn in a loop); after MAX_START_FAILURES in a row, calls to it fail with
+// the cause instead.
+const MAX_START_FAILURES = 3
+const startFailures = []
+const lastFailure = []
+
 function spawn(index) {
   const w = new Worker(new URL('./compute.worker.js', import.meta.url), {
     type: 'module',
@@ -67,23 +88,31 @@ function spawn(index) {
   w.onerror = (e) => {
     // A worker-level error has no request id. Pending entries retain their worker,
     // so only jobs on this failed slot are rejected; healthy slots keep running.
-    const err = new Error(e.message || 'compute worker error')
-    for (const [id, entry] of pending) {
-      if (entry.worker !== w) continue
-      pending.delete(id)
-      entry.reject(err)
-    }
+    const message = e.message || 'compute worker error'
+    failWorkerJobs(w, new Error(message))
     if (workers?.[index] === w) {
       w.terminate()
-      workers[index] = spawn(index)
+      workers[index] = null
+      startFailures[index] = (startFailures[index] ?? 0) + 1
+      lastFailure[index] = message
     }
   }
+  // A reply that could not be deserialized: its job is unknown, fail the worker's jobs.
+  w.onmessageerror = () => failWorkerJobs(w, new Error('a reply from a compute worker could not be read'))
   return w
 }
 
 function getPool() {
   if (!workers) workers = Array.from({ length: POOL_SIZE }, (_, index) => spawn(index))
   return workers
+}
+
+// The worker in `slot`, respawned if an error left it empty.
+function workerAt(pool, slot) {
+  if (pool[slot]) return pool[slot]
+  if ((startFailures[slot] ?? 0) >= MAX_START_FAILURES)
+    throw new Error(`compute worker ${slot} failed ${MAX_START_FAILURES} times in a row (${lastFailure[slot]})`)
+  return (pool[slot] = spawn(slot))
 }
 
 // A rejection a Cancel caused, not a failure: its name is 'AbortError' (isAbort), so a
@@ -113,7 +142,7 @@ const BACKGROUND_OPS = new Set([
 export function terminateAll(reason = 'cancelled') {
   const oldWorkers = workers
   workers = null
-  if (oldWorkers) for (const w of oldWorkers) w.terminate()
+  if (oldWorkers) for (const w of oldWorkers) w?.terminate()
   for (const [id, entry] of pending) {
     pending.delete(id)
     entry.reject(abortError(reason))
@@ -156,7 +185,7 @@ export function releaseIdleWorkers({ keep = [] } = {}) {
     if (pending.size) return false
     const oldWorkers = workers
     workers = null
-    if (oldWorkers) for (const w of oldWorkers) w.terminate()
+    if (oldWorkers) for (const w of oldWorkers) w?.terminate()
     rr = 0
     return true
   }
@@ -166,7 +195,7 @@ export function releaseIdleWorkers({ keep = [] } = {}) {
   for (const entry of pending.values()) if (replaced.has(entry.worker)) return false
   workers = workers.map((w, i) => {
     if (kept.has(i)) return w
-    w.terminate()
+    w?.terminate()
     return spawn(i)
   })
   return true
@@ -194,7 +223,7 @@ export function configureWorkerPoolSize(value) {
   if (pending.size) return false
   const oldWorkers = workers
   workers = null
-  if (oldWorkers) for (const worker of oldWorkers) worker.terminate()
+  if (oldWorkers) for (const worker of oldWorkers) worker?.terminate()
   rr = 0
   POOL_SIZE = next
   return true
@@ -226,7 +255,12 @@ function call(op, args, { transfer = [], onEvent, onTiming, worker: pinned, avoi
   // `avoid` (a worker busy with pinned work, e.g. GPU matching) when there is any
   // other worker to use.
   const slot = pinned != null ? pinned % pool.length : leastLoadedSlot(pool, avoid)
-  const worker = pool[slot]
+  let worker
+  try {
+    worker = workerAt(pool, slot)
+  } catch (err) {
+    return Promise.reject(err)
+  }
   const id = nextId++
   return new Promise((resolve, reject) => {
     const entry = {

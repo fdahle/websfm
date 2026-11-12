@@ -39,7 +39,9 @@ describe('compute worker crash recovery', () => {
     instances[0].onerror({ message: 'worker crashed' })
     await expect(failedJob).rejects.toThrow('worker crashed')
     expect(instances[0].terminated).toBe(true)
-    expect(instances).toHaveLength(3)
+    // The slot respawns on its next call, not at once (a worker that cannot load
+    // would otherwise respawn in a loop).
+    expect(instances).toHaveLength(2)
 
     const healthyRequest = instances[1].messages[0]
     instances[1].onmessage({
