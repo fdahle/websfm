@@ -1411,7 +1411,7 @@ fn bundle_adjust_impl(
         if es.is_empty() { return 1.0; }
         // The median by selection: the same element a full sort puts there.
         let mid = es.len() / 2;
-        let (_, m, _) = es.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        let (_, m, _) = es.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
         (2.5 * *m).max(1.0)
     };
     // SolverOpts::huber: a fixed threshold, or none (a δ no residual reaches: an
@@ -2100,7 +2100,7 @@ fn bundle_adjust_impl(
             let far = free_cams.iter().copied().filter(|&b| b != anchor_pb)
                 .max_by(|&a, &b| {
                     let d = |x: usize| { let c = camera_center(&cams[x]); (0..3).map(|i| (c[i] - ca[i]).powi(2)).sum::<f64>() };
-                    d(a).partial_cmp(&d(b)).unwrap()
+                    d(a).total_cmp(&d(b))
                 });
             if let Some(b) = far {
                 // dC = −Rᵀ·dt, so the scale's motion (C − C_a) is R·(C − C_a) in −dt.

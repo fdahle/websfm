@@ -5,9 +5,12 @@ const made = []
 class FakeWorker {
   constructor() {
     this.dead = false
+    this.sent = []
     made.push(this)
   }
-  postMessage() {}
+  postMessage(msg) {
+    this.sent.push(msg)
+  }
   terminate() {
     this.dead = true
   }
@@ -52,5 +55,25 @@ describe('releaseIdleWorkers', () => {
     // An idle slot: its worker goes, one fresh worker takes its place.
     expect(client.recycleWorker(idle)).toBe(true)
     expect([made.length, dead()]).toEqual([n0 + 1, d0 + 1])
+  })
+})
+
+describe('a worker whose WebAssembly trapped', () => {
+  it('is replaced, its other jobs fail, and the next call goes to a fresh worker', async () => {
+    client.terminateAll('reset for this test')
+    // Two jobs pinned to the GPU match slot; the first traps.
+    const a = client.matchGpuBegin({}).catch((e) => e)
+    const b = client.matchGpuBegin({}).catch((e) => e)
+    const w = made.at(-client.POOL_SIZE + client.GPU_MATCH_WORKER)
+    expect(w.sent).toHaveLength(2)
+    w.onmessage({ data: { id: w.sent[0].id, ok: false, error: 'RuntimeError: unreachable', fatal: true } })
+    expect((await a).message).toContain('unreachable')
+    expect((await b).message).toMatch(/restarted/)
+    expect(w.dead).toBe(true)
+    // The next call on the slot is posted to a fresh worker.
+    client.matchGpuBegin({}).catch(() => {})
+    const fresh = made.at(-1)
+    expect(fresh).not.toBe(w)
+    expect(fresh.sent).toHaveLength(1)
   })
 })

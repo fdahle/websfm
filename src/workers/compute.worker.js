@@ -124,6 +124,14 @@ self.onmessage = async (e) => {
     const { result, transfer } = await handler(args, { emit })
     self.postMessage({ id, ok: true, result, workerMs: performance.now() - started }, transferList(transfer))
   } catch (err) {
-    self.postMessage({ id, ok: false, error: err?.message ?? String(err) })
+    // A WebAssembly trap (a Rust panic: the crates build with panic = "abort") leaves the
+    // instance undefined (stack pointer not restored, borrows held), so the pool must not
+    // send this worker anything more: `fatal` has it replaced (computeClient.js).
+    self.postMessage({
+      id,
+      ok: false,
+      error: err?.message ?? String(err),
+      fatal: err instanceof WebAssembly.RuntimeError,
+    })
   }
 }

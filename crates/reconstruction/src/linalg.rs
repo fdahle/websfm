@@ -175,7 +175,7 @@ pub(crate) fn svd3(a: &M3) -> (M3, [f64; 3], M3) {
     let mut sv: [(f64, usize); 3] = [(ata[0][0].max(0.0).sqrt(), 0),
                                       (ata[1][1].max(0.0).sqrt(), 1),
                                       (ata[2][2].max(0.0).sqrt(), 2)];
-    sv.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    sv.sort_by(|a, b| b.0.total_cmp(&a.0));
 
     let mut s = [0f64; 3];
     let mut v = [[0f64; 3]; 3];
@@ -248,7 +248,7 @@ pub(crate) fn null4(rows: &[[f64; 4]]) -> [f64; 4] {
     // find column of v with smallest eigenvalue
     let eigs = [ata[0][0], ata[1][1], ata[2][2], ata[3][3]];
     let min_idx = eigs.iter().enumerate()
-        .min_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+        .min_by(|a, b| a.1.total_cmp(b.1))
         .map(|(i, _)| i)
         .unwrap_or(3);
     [v[0][min_idx], v[1][min_idx], v[2][min_idx], v[3][min_idx]]

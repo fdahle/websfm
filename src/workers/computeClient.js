@@ -25,7 +25,7 @@ let nextId = 1
 const pending = new Map()
 
 function handleMessage(e) {
-  const { id, ok, result, error, ev, args } = e.data
+  const { id, ok, result, error, ev, args, fatal } = e.data
   const entry = pending.get(id)
   if (!entry) return
   // Intermediate streaming event (e.g. reconstruct log/progress) — not terminal.
@@ -41,6 +41,21 @@ function handleMessage(e) {
   })
   if (ok) entry.resolve(result)
   else entry.reject(new Error(error))
+  if (fatal) retireWorker(entry.worker, error)
+}
+
+// A worker whose WebAssembly trapped: its other jobs fail with the same cause, and a
+// fresh worker takes its slot, so no later call runs on the broken instance.
+function retireWorker(w, error) {
+  const err = new Error(`${error} (a compute worker failed and was restarted)`)
+  for (const [id, entry] of pending) {
+    if (entry.worker !== w) continue
+    pending.delete(id)
+    entry.reject(err)
+  }
+  const index = workers?.indexOf(w) ?? -1
+  w.terminate()
+  if (index >= 0) workers[index] = spawn(index)
 }
 
 function spawn(index) {
