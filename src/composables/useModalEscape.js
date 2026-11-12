@@ -37,6 +37,10 @@ export function useModalEscape({
     projectSettingsOpen,
     aboutOpen,
     systemInfoOpen,
+    shortcutsOpen,
+    whatsNewOpen,
+    reseauOpen,
+    panoramicOpen,
     projectPickerOpen,
     newProjectOpen,
     newProjectCanCancel,
@@ -383,6 +387,18 @@ export function useModalEscape({
         },
       ],
       [
+        reseauOpen.value,
+        () => {
+          reseauOpen.value = false
+        },
+      ],
+      [
+        panoramicOpen.value,
+        () => {
+          panoramicOpen.value = false
+        },
+      ],
+      [
         autoMaskOpen.value,
         () => {
           autoMaskOpen.value = false
@@ -422,6 +438,18 @@ export function useModalEscape({
         projectSettingsOpen.value,
         () => {
           projectSettingsOpen.value = false
+        },
+      ],
+      [
+        shortcutsOpen.value,
+        () => {
+          shortcutsOpen.value = false
+        },
+      ],
+      [
+        whatsNewOpen.value,
+        () => {
+          whatsNewOpen.value = false
         },
       ],
       [
