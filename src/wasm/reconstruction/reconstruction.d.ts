@@ -16,7 +16,7 @@ export class GuidedSearch {
      */
     constructor(pos: Float64Array, ref_start: Uint32Array, refs: Uint8Array, view_start: Uint32Array, view_img: Uint32Array, cell_start: Uint32Array, cell_pts: Uint32Array, gate_px: number, tau2: number, ratio2: number);
     /**
-     * Search a group of cameras. Per camera c: `imgs[c]`, its image index; `p[16c..]`,
+     * Search a group of cameras. Per camera c: `imgs[c]`, its image index; `p[CAM_STRIDE·c..]`,
      * R (row-major), t, fx, fy, cx, cy; `kp_start`, its keypoints in `xy` (n_cams + 1
      * offsets, in keypoints); `desc_start`, its descriptors in `desc` (in bytes; a
      * keypoint past the camera's share has none); `used`, 1 per keypoint already in a

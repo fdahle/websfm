@@ -172,6 +172,9 @@ function frustumCells(tracks, camList) {
 
 // The search in JS: the reference for the crate's (crates/reconstruction/src/guided.rs),
 // and the path when its wasm is not loaded.
+// Floats per camera in the packed poses (guided.rs CAM_STRIDE).
+const CAM_STRIDE = 21
+
 function searchJs({
   camList,
   cellsOfCam,
@@ -239,8 +242,27 @@ function searchJs({
         // cameras, and each allocated its result). Same arithmetic, same order.
         const zc = P[6] * px + P[7] * py + P[8] * pz + P[11]
         if (!(zc > 1e-9)) continue
-        const u = P[12] * ((P[0] * px + P[1] * py + P[2] * pz + P[9]) / zc) + P[14]
-        const v = P[13] * ((P[3] * px + P[4] * py + P[5] * pz + P[10]) / zc) + P[15]
+        let u = P[12] * ((P[0] * px + P[1] * py + P[2] * pz + P[9]) / zc) + P[14]
+        let v = P[13] * ((P[3] * px + P[4] * py + P[5] * pz + P[10]) / zc) + P[15]
+        // A rolling-shutter camera sees the point from where it was when its row was read
+        // (geometry.js projectRollingShutter, the same steps; guided.rs mirrors them).
+        if (P[20] > 0) {
+          let seen = true
+          for (let it = 0; it < 4; it++) {
+            const k = (P[19] * (v - P[15])) / P[20]
+            const qx = px - k * P[16],
+              qy = py - k * P[17],
+              qz = pz - k * P[18]
+            const z = P[6] * qx + P[7] * qy + P[8] * qz + P[11]
+            if (!(Number.isFinite(z) && Math.abs(z) >= 1e-9)) {
+              seen = false
+              break
+            }
+            u = P[12] * ((P[0] * qx + P[1] * qy + P[2] * qz + P[9]) / z) + P[14]
+            v = P[13] * ((P[3] * qx + P[4] * qy + P[5] * qz + P[10]) / z) + P[15]
+          }
+          if (!seen) continue
+        }
         if (u < g.minX || u > g.maxX || v < g.minY || v > g.maxY) continue
         const p = ptId[j]
         if (tracks.viewKp(p, img) >= 0) continue
@@ -358,14 +380,14 @@ function searchCrate({ GuidedSearch }, s, descriptorsAt) {
       w0 = w1
       const m = group.length
       const imgs = new Uint32Array(m),
-        P = new Float64Array(16 * m),
+        P = new Float64Array(CAM_STRIDE * m),
         kpStart = new Uint32Array(m + 1),
         descStart = new Uint32Array(m + 1),
         ccStart = new Uint32Array(m + 1)
       group.forEach(({ ci, desc }, c) => {
         const { img, P: pm, grid } = camList[ci]
         imgs[c] = img
-        P.set(pm, 16 * c)
+        P.set(pm, CAM_STRIDE * c)
         kpStart[c + 1] = kpStart[c] + grid.n
         descStart[c + 1] = descStart[c] + desc.length
         ccStart[c + 1] = ccStart[c] + cellsOfCam[ci].length
@@ -464,7 +486,9 @@ export function guidedExtendTracks({
       if (x > maxX) maxX = x
       if (y > maxY) maxY = y
     }
-    // The pose and K flat, for the projection inlined below.
+    // The pose, K and the rolling shutter (velocity, τ, rows; rows 0 for a global
+    // shutter) flat, for the projection inlined below (crates guided.rs CAM_STRIDE).
+    const rs = cam.rs?.h > 0 ? cam.rs : null
     const P = Float64Array.of(
       cam.R[0][0],
       cam.R[0][1],
@@ -482,6 +506,11 @@ export function guidedExtendTracks({
       cam.K.fy,
       cam.K.cx,
       cam.K.cy,
+      rs ? rs.v[0] : 0,
+      rs ? rs.v[1] : 0,
+      rs ? rs.v[2] : 0,
+      rs ? (rs.tau ?? 0) : 0,
+      rs ? rs.h : 0,
     )
     camList.push({ img, cam, P, grid: { xy, n: kps.n, minX, minY, maxX, maxY } })
   }

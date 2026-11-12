@@ -54,7 +54,7 @@ export class GuidedSearch {
         return this;
     }
     /**
-     * Search a group of cameras. Per camera c: `imgs[c]`, its image index; `p[16c..]`,
+     * Search a group of cameras. Per camera c: `imgs[c]`, its image index; `p[CAM_STRIDE·c..]`,
      * R (row-major), t, fx, fy, cx, cy; `kp_start`, its keypoints in `xy` (n_cams + 1
      * offsets, in keypoints); `desc_start`, its descriptors in `desc` (in bytes; a
      * keypoint past the camera's share has none); `used`, 1 per keypoint already in a

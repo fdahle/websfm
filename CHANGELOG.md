@@ -161,6 +161,12 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Guided track extension follows the rolling shutter.** With Rolling shutter on, guided
+  track extension now looks for a point where the rolling-shutter model puts it. Before, it
+  searched at the global-shutter projection, so near the top and bottom of a photo taken
+  at speed (about 5 px at 10 m/s, a 30 ms readout and 2.7 cm GSD) the keypoint was outside
+  the search window and the observation was lost. A unit test with a 30 px shift at the
+  frame edges: 20 of 20 points extended (4 before), in JS and in the WebAssembly search.
 - **Long corridors keep their sub-pixel fit.** The bundle adjustment now works about the
   cameras' centre, so a block far from where the model started (a long corridor, a seed
   with a short baseline) no longer gains a reprojection floor from number rounding. A

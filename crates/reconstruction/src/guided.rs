@@ -51,6 +51,10 @@ pub struct GuidedSearch {
     ratio2: f64,
 }
 
+/// Floats per camera in `p`: R (9, row-major), t (3), fx, fy, cx, cy, then the rolling
+/// shutter: velocity (3), readout time τ, rows h (h = 0: a global shutter).
+pub(crate) const CAM_STRIDE: usize = 21;
+
 #[wasm_bindgen]
 impl GuidedSearch {
     /// `pos`: x, y, z per point; `ref_start`/`refs`: each point's reference descriptors
@@ -72,7 +76,7 @@ impl GuidedSearch {
         }
     }
 
-    /// Search a group of cameras. Per camera c: `imgs[c]`, its image index; `p[16c..]`,
+    /// Search a group of cameras. Per camera c: `imgs[c]`, its image index; `p[CAM_STRIDE·c..]`,
     /// R (row-major), t, fx, fy, cx, cy; `kp_start`, its keypoints in `xy` (n_cams + 1
     /// offsets, in keypoints); `desc_start`, its descriptors in `desc` (in bytes; a
     /// keypoint past the camera's share has none); `used`, 1 per keypoint already in a
@@ -92,7 +96,7 @@ impl GuidedSearch {
             let d0 = desc_start[c] as usize;
             let d1 = desc_start[c + 1] as usize;
             let r = self.camera(
-                imgs[c], &p[16 * c..16 * c + 16], &xy[2 * k0..2 * k1], &desc[d0..d1], &used[k0..k1],
+                imgs[c], &p[CAM_STRIDE * c..CAM_STRIDE * (c + 1)], &xy[2 * k0..2 * k1], &desc[d0..d1], &used[k0..k1],
                 &cc[cc_start[c] as usize..cc_start[c + 1] as usize], c as f64,
             );
             // SAFETY: camera c alone writes element c.
@@ -161,8 +165,22 @@ impl GuidedSearch {
                 let (px, py, pz) = (self.pos[3 * j], self.pos[3 * j + 1], self.pos[3 * j + 2]);
                 let zc = pm[6] * px + pm[7] * py + pm[8] * pz + pm[11];
                 if !(zc > 1e-9) { continue; }
-                let u = pm[12] * ((pm[0] * px + pm[1] * py + pm[2] * pz + pm[9]) / zc) + pm[14];
-                let v = pm[13] * ((pm[3] * px + pm[4] * py + pm[5] * pz + pm[10]) / zc) + pm[15];
+                let mut u = pm[12] * ((pm[0] * px + pm[1] * py + pm[2] * pz + pm[9]) / zc) + pm[14];
+                let mut v = pm[13] * ((pm[3] * px + pm[4] * py + pm[5] * pz + pm[10]) / zc) + pm[15];
+                // A rolling-shutter camera sees the point from where it was when its row
+                // was read (geometry.js projectRollingShutter, the same steps).
+                if pm[20] > 0.0 {
+                    let mut seen = true;
+                    for _ in 0..4 {
+                        let k = (pm[19] * (v - pm[15])) / pm[20];
+                        let (qx, qy, qz) = (px - k * pm[16], py - k * pm[17], pz - k * pm[18]);
+                        let z = pm[6] * qx + pm[7] * qy + pm[8] * qz + pm[11];
+                        if !(z.is_finite() && z.abs() >= 1e-9) { seen = false; break; }
+                        u = pm[12] * ((pm[0] * qx + pm[1] * qy + pm[2] * qz + pm[9]) / z) + pm[14];
+                        v = pm[13] * ((pm[3] * qx + pm[4] * qy + pm[5] * qz + pm[10]) / z) + pm[15];
+                    }
+                    if !seen { continue; }
+                }
                 if u < min_x || u > max_x || v < min_y || v > max_y { continue; }
                 if self.view_img[self.view_start[j] as usize..self.view_start[j + 1] as usize].contains(&img) { continue; }
                 let cx = floor_div(u, gate);

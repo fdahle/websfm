@@ -513,7 +513,9 @@ the effect: every camera moves alike, so the row offsets become a consistent she
 block at sub-pixel residuals.
 
 Every JS projection of a camera with `rs: { v, h, tau }` (`geometry.js projectPoint`)
-follows the same model by a short fixed point on the row. **Products** use the principal
+follows the same model by a short fixed point on the row, and so does guided track
+extension's window search, in JS and in the crate (`guidedExtension.js`, `guided.rs`,
+the same four steps). **Products** use the principal
 row's pose: the sample map (`displayFrame.js makeSampleMap`, option `rs`;
 `rollingShutterPixel`) places each pixel's ray on the plane fitted to the photo's sparse
 points and projects X_cam − τ·s·R·v, iterated on the row, before the lens and film

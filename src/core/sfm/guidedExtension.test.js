@@ -221,3 +221,63 @@ describe('auditGuidedAdditions', () => {
     expect(a).toMatchObject({ proposed: 20, survived: 15, medianPx: 2, restMedianPx: 0.5 })
   })
 })
+
+describe('guided extension with a rolling shutter', () => {
+  // Camera c reads its rows over 30 ms while moving: a point seen at the top or bottom
+  // row sits 30 px from its global-shutter projection, ten gates away. The search must
+  // look where the rolling-shutter model (geometry.js projectPoint) puts it, in JS and
+  // in the crate alike.
+  async function liftedWith(crate) {
+    const { projectPoint } = await import('./geometry.js')
+    if (crate) {
+      const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
+      await initRecon({ module_or_path: await readFile(fileURLToPath(wasmUrl)) })
+      await loadReconstructionWasm()
+    }
+    let sd = 5
+    const r = () => (sd = (sd * 16807) % 2147483647) / 2147483647
+    const desc = () => Uint8Array.from({ length: 128 }, () => Math.floor(r() * 200))
+    const rsCams = new Map([
+      ['a', { R: I, t: [0, 0, 0], K }],
+      ['b', { R: I, t: [-0.5, 0, 0], K }],
+      ['c', { R: I, t: [0.5, 0, 0], K, rs: { v: [10, 0, 0], h: 800, tau: 0.03 } }],
+    ])
+    const images = new Map(['a', 'b', 'c'].map((u) => [u, { keypoints: [], desc: [] }]))
+    const add = (u, kp, d) => images.get(u).keypoints.push(kp) - 1 + (images.get(u).desc.push(d) && 0)
+    const points = []
+    for (let i = 0; i < 40; i++) {
+      // Rows from the top to the bottom of c's frame.
+      const p = { x: (i % 8) / 4 - 1, y: (Math.floor(i / 8) - 2) * 0.35, z: 5 }
+      const d = desc()
+      const views = new Map()
+      for (const u of ['a', 'b', 'c']) {
+        const q = projectPoint(rsCams.get(u), p.x, p.y, p.z)
+        const k = add(u, { x: q.u, y: q.v }, d)
+        if (u !== 'c' || i < 20) views.set(u, k)
+      }
+      points.push({ ...p, views })
+    }
+    const { tracks, ids } = tracksFrom(points, ['a', 'b', 'c'])
+    const flat = new Map(
+      [...images].map(([u, im]) => {
+        const arr = new Uint8Array(im.desc.length * 128)
+        im.desc.forEach((dd, i) => arr.set(dd, i * 128))
+        return [u, arr]
+      }),
+    )
+    const stats = guidedExtendTracks({
+      tracks,
+      ids,
+      cameras: rsCams,
+      keypointsAt: (img) => keypointSetFrom(images.get(ids.uuid(img)).keypoints),
+      descOf: (img, k) => ({ arr: flat.get(ids.uuid(img)), off: k * 128 }),
+      descriptorsAt: crate ? (img) => flat.get(ids.uuid(img)) : undefined,
+      gatePx: 3,
+    })
+    return stats.lifted
+  }
+  it('finds the points at the top and bottom rows, in JS and in the crate', async () => {
+    expect(await liftedWith(false)).toBe(20)
+    expect(await liftedWith(true)).toBe(20)
+  })
+})
