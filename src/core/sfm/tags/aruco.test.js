@@ -95,12 +95,26 @@ describe('detecting ArUco markers', () => {
     expect(tag).toMatchObject({ id: 200, hamming: 1 })
     expect(detectTags(img, { family: TAG36H11 })).toEqual([])
     expect(detectTags(img, { family: arucoFamily('4x4_50') })).toEqual([])
-    // 4x4_50 tells codes apart by 4: a wrong bit is corrected, never two.
+    // A 4×4 dictionary reads exactly: its 16 bits leave too little room to correct one
+    // without turning random patterns into ids.
     const small = arucoFamily('4x4_50')
-    expect(detectTags(renderMarker(small, 3, { flips: [5] }), { family: small })[0]).toMatchObject({
-      id: 3,
-      hamming: 1,
-    })
-    expect(detectTags(renderMarker(small, 3, { flips: [5, 10] }), { family: small }).map((t) => t.id)).not.toContain(3)
+    expect(detectTags(renderMarker(small, 3, {}), { family: small })[0]).toMatchObject({ id: 3, hamming: 0 })
+    expect(detectTags(renderMarker(small, 3, { flips: [5] }), { family: small }).map((t) => t.id)).not.toContain(3)
+  })
+
+  it('rarely reads a random pattern inside a dark ring as a 4×4 tag', () => {
+    // 300 random interiors (each bit flipped with probability ½): with one bit corrected,
+    // about 5 % decoded to some id of 4x4_50; read exactly, about 1 in 330.
+    const small = arucoFamily('4x4_50')
+    let seed = 17
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0), seed / 2 ** 32)
+    let read = 0
+    for (let k = 0; k < 300; k++) {
+      const flips = Array.from({ length: small.NBITS }, (_, i) => i).filter(() => rnd() < 0.5)
+      const tags = detectTags(renderMarker(small, 0, { flips }), { family: small })
+      // The pattern is the code of id 0 with `flips` changed: reading 0 back is correct.
+      if (tags.some((t) => t.id !== 0)) read++
+    }
+    expect(read).toBeLessThanOrEqual(4)
   })
 })

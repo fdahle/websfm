@@ -17,6 +17,7 @@ import { detectTargets as workerDetectTargets, detectTagsInPhoto, POOL_SIZE } fr
 import { computeSourceOf } from '../utils/image.js'
 import { mapConcurrent } from '../utils/concurrency.js'
 import { pluralize } from '../core/textFormat.js'
+import { TAG_DETECT_TUNING } from '../core/tuning.js'
 
 // Tools ▸ Images ▸ Detect targets (core/sfm/targetPredict.js, targetDetect.js): plan where
 // every GCP's checker mat should appear in every registered photo, then find its centre
@@ -40,9 +41,30 @@ export function useDetectTargets() {
   const { log } = useLog()
 
   async function plan(settings) {
-    if (isTagKind(settings.kind)) return planTags()
+    if (isTagKind(settings.kind)) return planTags(settings)
     const cams = recon.mainSparseCloud?.cameras
     if (!cams?.size) return { photos: [], counts: { predictions: 0, photos: 0, gcps: 0, unplaced: 0, halfPx: null } }
+    const { photos, halves, seen } = await predict(settings, { pad: settings.searchPx / 2 })
+    halves.sort((a, b) => a - b)
+    const placeable = gcpsStore.gcps.filter((x) => x.enabled !== false).length
+    return {
+      photos,
+      counts: {
+        predictions: photos.reduce((n, p) => n + p.predictions.length, 0),
+        photos: photos.length,
+        gcps: seen.size,
+        unplaced: Math.max(0, placeable - seen.size),
+        halfPx: halves.length ? halves[Math.floor(halves.length / 2)] : null,
+      },
+    }
+  }
+
+  // Where each GCP should appear in each registered photo (core/sfm/targetPredict.js):
+  // from its other marks, or from its surveyed position through the georeference. Only
+  // predictions `pad` px or more inside the photo. → { photos: [{ img, predictions }],
+  // halves, seen }.
+  async function predict(settings, { pad = 0 } = {}) {
+    const cams = recon.mainSparseCloud?.cameras
     const frameModel = makeFrameModelResolver({
       calibration: recon.mainSparseCloud?.calibration ? toRaw(recon.mainSparseCloud.calibration) : null,
       summary: toRaw(recon.summary),
@@ -87,7 +109,6 @@ export function useDetectTargets() {
       })) {
         const m = toMark(p.u, p.v)
         // Fully inside the photo, with the search window.
-        const pad = settings.searchPx / 2
         if (!(m.x > pad && m.y > pad && m.x < W - pad && m.y < H - pad)) continue
         predictions.push({ ...p, x: markToCentrePx(m.x), y: markToCentrePx(m.y) })
         if (p.halfPx) halves.push(p.halfPx)
@@ -95,22 +116,20 @@ export function useDetectTargets() {
       }
       if (predictions.length) photos.push({ img, predictions })
     }
-    halves.sort((a, b) => a - b)
-    const placeable = gcpsStore.gcps.filter((x) => x.enabled !== false).length
-    return {
-      photos,
-      counts: {
-        predictions: photos.reduce((n, p) => n + p.predictions.length, 0),
-        photos: photos.length,
-        gcps: seen.size,
-        unplaced: Math.max(0, placeable - seen.size),
-        halfPx: halves.length ? halves[Math.floor(halves.length / 2)] : null,
-      },
-    }
+    return { photos, halves, seen }
   }
 
-  function planTags() {
-    const photos = imagesStore.images.filter((im) => im.enabled !== false).map((img) => ({ img }))
+  // Tags are found anywhere by their number; with a model, each GCP's predicted place in
+  // a photo is kept beside it, so a misread tag far from its GCP is not placed (runTags).
+  async function planTags(settings) {
+    const predicted = new Map()
+    if (recon.mainSparseCloud?.cameras?.size) {
+      for (const { img, predictions } of (await predict({ ...settings, replaceDetected: true })).photos)
+        predicted.set(img.id, new Map(predictions.map((p) => [p.gcpId, p])))
+    }
+    const photos = imagesStore.images
+      .filter((im) => im.enabled !== false)
+      .map((img) => ({ img, predicted: predicted.get(img.id) ?? null }))
     return {
       photos,
       counts: {
@@ -138,13 +157,24 @@ export function useDetectTargets() {
     const label = tagLabel(settings)
     const dict = settings.kind === 'aruco' ? settings.arucoDict : null
     onProgress?.(0, n, `Looking for ${label} markers in ${pluralize(n, 'photo')}…`)
-    await mapConcurrent(planned.photos, workers, async ({ img }) => {
+    let offPrediction = 0
+    await mapConcurrent(planned.photos, workers, async ({ img, predicted }) => {
       await imagesStore.whenComputeReady(img)
       const { tags } = await detectTagsInPhoto(computeSourceOf(img), dict)
+      // How far a tag may sit from where the model puts its GCP: a window, a solar cell
+      // or a misread can decode to a real GCP's number, a placement error cannot be this large.
+      const W = img.meta?.width ?? 0,
+        H = img.meta?.height ?? 0
+      const gate = Math.max(TAG_DETECT_TUNING.gateMinPx, TAG_DETECT_TUNING.gateFrac * Math.max(W, H))
       for (const t of tags) {
         let g = gcpForTag(t.id)
         if (!g && !settings.addMarkers) {
           unknown.add(t.id)
+          continue
+        }
+        const p = g && predicted?.get(g.id)
+        if (p && Math.hypot(t.x - p.x, t.y - p.y) > gate) {
+          offPrediction++
           continue
         }
         if (!g) {
@@ -167,6 +197,9 @@ export function useDetectTargets() {
         `${pluralize(workers, 'worker')} in ${((performance.now() - t0) / 1000).toFixed(1)} s` +
         (added.length ? `; new markers ${added.join(', ')}` : '') +
         (unknown.size ? `; tags no GCP is named after: ${[...unknown].sort((a, b) => a - b).join(', ')}` : '') +
+        (offPrediction
+          ? `; ${pluralize(offPrediction, 'tag')} left out, far from where the model puts that GCP (misread or a lookalike)`
+          : '') +
         '; check them in Edit GCPs',
       found ? 'success' : 'warn',
       'GCP',

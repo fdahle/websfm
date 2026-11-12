@@ -156,6 +156,12 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Detect Targets places fewer false ArUco markers.** A 4×4 ArUco marker must now read
+  exactly, and once a model exists, a marker found far from where its GCP should appear is
+  left out and counted in the log. Before, one wrong cell was corrected, so about one random
+  pattern in 20 inside a dark square (a window, a solar cell) read as a marker of the
+  default 4X4_50 dictionary and became a mark of a real GCP. A unit test reads 300 random
+  patterns: at most 4 decode (about 15 before).
 - **Oblique forward flights over flat ground start from the right camera pose.** Reconstruct
   now uses the photos' recorded attitude, or a third photo's camera position, to choose
   between the two poses a pair of photos of flat ground allows, and in aerial projects

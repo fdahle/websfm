@@ -38,8 +38,9 @@ detection is experimental: review the detected marks in Edit GCPs.
 ArUco: the dictionary the markers were printed from, as OpenCV and most generators name
 it (DICT_4X4_50 is 4X4_50). Choose the smallest that holds your numbers: a smaller
 dictionary tells its markers apart by more cells, so a misread cell is corrected and a
-stray pattern is not taken for a marker. 4×4 cells read from farthest away, 6×6 most
-safely.
+stray pattern is not taken for a marker. 4×4 cells read from farthest away but must read
+exactly, and windows or solar panels can still pass for one; 5×5 and 6×6 read most safely.
+Once a model exists, a marker far from where its GCP should appear is left out.
 
 ## Target size
 <!-- param: sizeM  default: 0.6 m -->

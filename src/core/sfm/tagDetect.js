@@ -356,6 +356,10 @@ export function detectTags(
 ) {
   const TAG = family
   maxHamming = Math.min(maxHamming, Math.floor((TAG.MIN_HAMMING - 1) / 2))
+  // A 16-bit code (ArUco 4×4) reads exactly: with one bit corrected, one random pattern
+  // in 20 inside a dark ring decodes to some id of 4x4_50 (1 in 4 for 4x4_250); read
+  // exactly, one in 330 (1 in 66).
+  if (TAG.NBITS <= 16) maxHamming = 0
   const darkMax = TAG.DARK_MAX ?? 0.85
   const { width, height } = gray
   const r = window ?? Math.max(7, Math.round(minSide / 2))

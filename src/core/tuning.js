@@ -884,5 +884,11 @@ export const TAG_DETECT_TUNING = {
   // Larger tags are found in the photo downscaled to `tile` px.
   minSide: 16,
   // Wrong bits a tag may have (tag36h11 tells codes apart by 11; 2 keeps false tags out).
+  // A 4×4 ArUco dictionary reads exactly (tagDetect.js): with one bit corrected, 5 % of
+  // random patterns inside a dark ring decode to some id of 4x4_50.
   maxHamming: 2,
+  // With a model, a tag farther than max(gateMinPx, gateFrac × the photo's long side)
+  // from its GCP's predicted place is not placed (useDetectTargets.js runTags).
+  gateMinPx: 40,
+  gateFrac: 0.02,
 }

@@ -1013,7 +1013,11 @@ score (11 − 2·errors)/11.
 detector with another family (`core/sfm/tags/aruco.js`): an (n + 2)-cell box, n × n data
 cells read row-major, correctable bits min(2, ⌊(d − 1)/2⌋) with d the dictionary's
 smallest distance over all pairs and rotations (`familyDistance.js`, as OpenCV's
-`maxCorrectionBits`).
+`maxCorrectionBits`), but none for a 4×4 dictionary: with one bit corrected, a random
+pattern inside a dark ring decodes to some id of 4x4_50 one time in 20 (4x4_250: one in
+4); read exactly, one in 330. With a model, a tag farther than max(40 px, 2 % of the
+photo's long side) from where its GCP projects (from its other marks, or its surveyed
+position through the georeference; `targetPredict.js`) is not placed.
 
 The centre is the homography's image of the box centre (under perspective not the corners'
 mean). Photos are read in 2048-px tiles overlapping by 400 px, large tags in a 2048-px
