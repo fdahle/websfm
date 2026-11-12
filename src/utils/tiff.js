@@ -407,16 +407,3 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
   timings.totalMs = performance.now() - t0
   return { displayBlob, computeBlob, width, height, timings, srcInfo }
 }
-
-// Convenience: given a File/Blob (+ optional name for restore Blobs), return a
-// browser-displayable object URL — transcoding TIFF, passing everything else
-// straight through URL.createObjectURL. Skips the transcode when the engine
-// can already decode the TIFF itself.
-export async function displayUrlFor(blob, name = null) {
-  if (isTiff(name ?? blob)) {
-    if (await canDecodeTiffNatively(blob)) return URL.createObjectURL(blob)
-    const { displayBlob } = await tiffToDisplayBlob(blob)
-    return URL.createObjectURL(displayBlob)
-  }
-  return URL.createObjectURL(blob)
-}

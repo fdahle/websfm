@@ -485,7 +485,6 @@ export async function importProjectArchive({ file, projectId, onProgress = null,
     onProgress?.({ done: entryCount, total: entries.length - 1, label: e.name })
   }
 
-  if (!manifest) throw new Error('not a WebSfM project file (no manifest.json)')
   if (skipped) log(`Skipped ${skipped} archive ${skipped === 1 ? 'entry' : 'entries'} with unsafe paths`, 'warn')
   log(`Loaded ${entryCount} files (${formatBytes(bytes)}) from project file`)
   return { manifest, entryCount, bytes }
