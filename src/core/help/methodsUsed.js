@@ -40,8 +40,8 @@ export function methodsUsed(f = {}) {
       method:
         f.verifier === 'magsac'
           ? 'MAGSAC++ on the fundamental matrix (normalised eight-point)'
-          : 'RANSAC on the fundamental matrix (normalised eight-point)',
-      refs: [f.verifier === 'magsac' ? 'barath2020' : 'fischler1981', 'hartley1997'],
+          : 'RANSAC on the fundamental matrix (normalised eight-point, PROSAC sampling)',
+      refs: f.verifier === 'magsac' ? ['barath2020', 'hartley1997'] : ['fischler1981', 'chum2005', 'hartley1997'],
     })
   }
   if (f.sparse) {

@@ -206,3 +206,14 @@ describe('inlierSpread (positional degeneracy)', () => {
     expect(s.extentA).toBe(0)
   })
 })
+
+describe('qualityOrder', () => {
+  it('ranks nearest-neighbour matches by distance and LightGlue matches by confidence', async () => {
+    const { qualityOrder } = await import('./verify.js')
+    expect([...qualityOrder([{ dist: 0.5 }, { dist: 0.1 }, { dist: 0.3 }])]).toEqual([1, 2, 0])
+    expect([...qualityOrder([{ score: 0.2 }, { score: 0.9 }, { score: 0.5 }])]).toEqual([1, 2, 0])
+    // Over the rows sent (a fisheye pair leaves some out): row r is putative keep[r].
+    expect([...qualityOrder([{ dist: 9 }, { dist: 0.5 }, { dist: 0.1 }], Int32Array.from([0, 2]))]).toEqual([1, 0])
+    expect(qualityOrder([{ ia: 0, ib: 0 }])).toBeNull()
+  })
+})

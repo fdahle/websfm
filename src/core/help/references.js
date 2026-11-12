@@ -64,6 +64,13 @@ export const REFERENCES = {
     venue: 'Communications of the ACM 24(6), 381–395',
     doi: '10.1145/358669.358692',
   },
+  chum2005: {
+    authors: ['Ondřej Chum', 'Jiří Matas'],
+    year: 2005,
+    title: 'Matching with PROSAC – progressive sample consensus',
+    venue: 'IEEE Conference on Computer Vision and Pattern Recognition (CVPR)',
+    doi: '10.1109/CVPR.2005.221',
+  },
   barath2020: {
     authors: ['Daniel Barath', 'Jana Noskova', 'Maksym Ivashechkin', 'Jiří Matas'],
     year: 2020,

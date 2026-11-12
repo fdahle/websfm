@@ -156,7 +156,13 @@ LightGlue (Lindenberger et al. 2023) is an attention-based learned matcher.
 1. **Fundamental-matrix RANSAC** (`verify_matches_hf`, normalised 8-point of Hartley 1997,
    in `crates/matching`) → inlier mask. Each new best sample gets a **local optimisation**:
    refit F on its inliers and recount, up to four rounds while the set changes, keeping a
-   refit only if it explains at least as many points. A homography is also fitted, for an
+   refit only if it explains at least as many points. Samples are drawn **best match
+   first** (PROSAC, Chum & Matas 2005; the order is the descriptor distance, or LightGlue's
+   confidence): from a small, growing set of the best matches, so a pair whose good matches
+   are a minority finds a clean sample in about a hundred draws. It stops by PROSAC's rule
+   (the best model's inliers among the n best points, against what a wrong model would
+   gather by chance), after at least 100 draws, gives up after 1,000 when no model beats
+   chance, and is capped at 10,000 (COLMAP's cap). A homography is also fitted, for an
    **H-vs-F** degeneracy signal. It is logged and flags the pair (`entry.degenerate`), but
    no gate reads it: seed selection (§4.2) guards against planar and low-parallax pairs by
    its parallax floor and the calibrated five-point solve instead.
@@ -1759,6 +1765,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Brown, M. & Lowe, D. G. (2007). Automatic panoramic image stitching using invariant features. International Journal of Computer Vision 74(1), 59–73. https://doi.org/10.1007/s11263-006-0002-3
 - Burt, P. J. & Adelson, E. H. (1983). A multiresolution spline with application to image mosaics. ACM Transactions on Graphics 2(4), 217–236. https://doi.org/10.1145/245.247
 - Chen, Y. & Medioni, G. (1992). Object modelling by registration of multiple range images. Image and Vision Computing 10(3), 145–155. https://doi.org/10.1016/0262-8856(92)90066-C
+- Chum, O. & Matas, J. (2005). Matching with PROSAC – progressive sample consensus. IEEE Conference on Computer Vision and Pattern Recognition (CVPR). https://doi.org/10.1109/CVPR.2005.221
 - DeTone, D., Malisiewicz, T. & Rabinovich, A. (2018). SuperPoint: self-supervised interest point detection and description. CVPR Workshops. https://arxiv.org/abs/1712.07629
 - Fischler, M. A. & Bolles, R. C. (1981). Random sample consensus: a paradigm for model fitting with applications to image analysis and automated cartography. Communications of the ACM 24(6), 381–395. https://doi.org/10.1145/358669.358692
 - Galliani, S., Lasinger, K. & Schindler, K. (2015). Massively parallel multiview stereopsis by surface normal diffusion. IEEE International Conference on Computer Vision (ICCV). https://doi.org/10.1109/ICCV.2015.106

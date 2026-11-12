@@ -50,6 +50,27 @@ export function packMatchedPoints(kpsA, kpsB, matches) {
 }
 
 /**
+ * The putatives best first, for PROSAC sampling in the F-RANSAC (crates/matching
+ * `verify_matches_hf`): by descriptor distance (lower first; nearest-neighbour matching)
+ * or by the matcher's confidence (higher first; LightGlue). `keep` (verifyFrame.js
+ * mapVerifyPoints) lists the rows sent when some were left out. → Uint32Array of row
+ * indices, or null when the matches carry neither (uniform sampling).
+ */
+export function qualityOrder(matches, keep = null) {
+  const n = keep ? keep.length : matches.length
+  const at = (r) => matches[keep ? keep[r] : r]
+  const key = new Float64Array(n)
+  for (let r = 0; r < n; r++) {
+    const m = at(r)
+    if (Number.isFinite(m?.dist)) key[r] = m.dist
+    else if (Number.isFinite(m?.score)) key[r] = -m.score
+    else return null
+  }
+  const order = Uint32Array.from({ length: n }, (_, r) => r)
+  return order.sort((a, b) => key[a] - key[b] || a - b)
+}
+
+/**
  * `verifyMatches` over pre-packed putative coordinates (see `packMatchedPoints`).
  * Same result shape; `inlierMask[i]` refers to point pair i.
  */
@@ -61,13 +82,22 @@ export async function verifyPointPairs(ptsA, ptsB, options = {}) {
   // verifier: 'ransac' (RANSAC + local optimisation) or 'magsac' (MAGSAC++,
   // crates/matching/src/magsac.rs) — both for F and the H-vs-F homography, with the
   // inliers taken within ransacThreshPx of the model either way.
-  const { ransacThreshPx = 2.0, maxIters = 1000, hSkipBelow = 0, verifier = 'ransac' } = options
+  // order: the rows best first (qualityOrder), for PROSAC sampling; null ⇒ uniform.
+  const { ransacThreshPx = 2.0, maxIters = 10000, hSkipBelow = 0, verifier = 'ransac', order = null } = options
   await ensureWasm()
 
   if (ptsA.length / 2 < 8) return null
 
   // Layout: [F00..F22, hInlierCount, inlier_0, inlier_1, …] (see verify_matches_hf).
-  const raw = verify_matches_hf(ptsA, ptsB, ransacThreshPx, maxIters, hSkipBelow, VERIFIER_CODE[verifier] ?? 0)
+  const raw = verify_matches_hf(
+    ptsA,
+    ptsB,
+    ransacThreshPx,
+    maxIters,
+    hSkipBelow,
+    VERIFIER_CODE[verifier] ?? 0,
+    order ?? new Uint32Array(0),
+  )
   if (raw.length === 0) return null
 
   const F = [

@@ -1,9 +1,9 @@
 ---
 id: ransac
 title: RANSAC
-aliases: random sample consensus, MSAC
+aliases: random sample consensus, MSAC, PROSAC
 summary: A robust algorithm that fits a geometric model to data full of outliers by finding the model the most points agree with.
-refs: fischler1981
+refs: fischler1981, chum2005
 ---
 **RANSAC** (Random Sample Consensus) is a robust estimation algorithm used
 throughout WebSfM to fit a clean geometric model to data that is contaminated
@@ -27,6 +27,8 @@ handful of bad correspondences can't skew the reconstruction. WebSfM applies
 this idea in two places: verifying pairwise matches via the fundamental matrix
 during [Epipolar Geometry](help:epipolar-geometry) checking, and estimating each
 camera's pose during registration (using MSAC, a variant that scores inliers by
-how well they fit rather than a hard in/out count). Pair verification can use
+how well they fit rather than a hard in/out count). Pair verification draws its
+subsets from the best matches first (PROSAC, by descriptor distance or the matcher's
+confidence), so a pair whose good matches are a minority is still found quickly. It can use
 [MAGSAC++](help:magsac) instead, which also drops the single hard threshold when it
 scores and refines a model.

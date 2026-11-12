@@ -3,7 +3,7 @@
 // acceptance gate, and the entry it leaves in the match store. Split out of
 // useMatchesStore; `deps` are the store's own state and helpers.
 import { matchDescriptors, matchLightGlue, verifyPointPairs, GPU_MATCH_WORKER } from '../../workers/computeClient.js'
-import { inlierSpread, packMatchedPoints } from '../../core/features/verify.js'
+import { inlierSpread, packMatchedPoints, qualityOrder } from '../../core/features/verify.js'
 import { makeVerifyMapper, mapVerifyPoints, expandInlierMask } from '../../core/features/verifyFrame.js'
 import { distortionOf } from '../../core/sfm/distortion.js'
 import { resolveK } from '../../core/sfm/reconstruction.js'
@@ -400,6 +400,9 @@ export function createPairMatcher({
             // regardless of H, so the H/F degeneracy label is never consulted (see
             // verify_matches_hf). minMatches is the one un-overridable accept gate.
             hSkipBelow: minMatches,
+            // Best first, for PROSAC sampling: a weak pair's few good matches are
+            // found in a few hundred samples instead of being missed.
+            order: qualityOrder(raw, keep),
           },
           { ...timing('verificationMs'), avoidWorker },
         )

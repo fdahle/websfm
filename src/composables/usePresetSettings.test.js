@@ -26,7 +26,7 @@ const setup = (defaults, presets, cards, extra = {}) => {
 
 describe('presetOwnedKeys / sameSettingValue', () => {
   it('unions the keys every preset patches', () => {
-    expect(presetOwnedKeys(MATCH_PRESETS).sort()).toEqual(['maxIters', 'minInlierRatio', 'ratioThreshold'])
+    expect(presetOwnedKeys(MATCH_PRESETS).sort()).toEqual(['minInlierRatio', 'ratioThreshold'])
     expect(presetOwnedKeys(MESH_PRESETS)).toEqual(['depth', 'leafSpacings', 'maxTriangles'])
     expect(presetOwnedKeys({})).toEqual([])
   })
@@ -71,10 +71,9 @@ describe('usePresetSettings', () => {
     })
     expect(p.activePreset.value).toBe('high')
     expect(p.baseId.value).toBe('high')
-    // Back to Balanced restores the owned keys Strict changed — including maxIters,
-    // which only Strict patches.
+    // Back to Balanced restores the owned keys Strict changed.
     p.selectPreset('medium')
-    expect(p.settings.value.maxIters).toBe(MATCH_DEFAULTS.maxIters)
+    expect(p.settings.value.minInlierRatio).toBe(MATCH_DEFAULTS.minInlierRatio)
     expect(p.settings.value.ratioThreshold).toBe(MATCH_DEFAULTS.ratioThreshold)
     expect(p.settings.value.lgTiled).toBe(true)
   })

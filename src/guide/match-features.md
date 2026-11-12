@@ -179,9 +179,10 @@ images detected smaller need no change. 1–2 px suits most images; raise it if 
 with visible overlap are rejected, lower it if wrong pairs are accepted.
 
 ## RANSAC iterations
-<!-- param: maxIters  default: 1000 -->
-How many samples RANSAC tries. Raise it only for hard pairs with many outliers; time
-grows linearly.
+<!-- param: maxIters  default: 10000 -->
+The most samples RANSAC tries on one pair. It samples the best matches first (PROSAC), so a
+pair with real overlap usually stops after a hundred or so, and a pair with none gives up
+after 1,000. Lower it only to cap the time spent on very hard pairs.
 
 ## Min matches per pair
 <!-- param: minMatches  default: 15 -->

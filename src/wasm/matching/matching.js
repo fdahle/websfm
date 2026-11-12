@@ -64,6 +64,9 @@ export function verify_matches(pts_a, pts_b, ransac_thresh_px, max_iters) {
  * H/F ratio of 0 (= "non-degenerate") can never mislabel a pair that survives.
  * Pass 0 (or ≤8) to disable the skip and reproduce the pre-adaptive behaviour.
  *
+ * `order`: the correspondences best first (a permutation of 0..n), for PROSAC
+ * sampling in the RANSAC path; empty (or not a permutation) ⇒ uniform sampling.
+ *
  * Output layout: `[F00..F22, h_inlier_count, inlier_0, inlier_1, ...]` — the
  * fundamental matrix (9), then the homography inlier count (1), then the F
  * inlier flags (n). Empty if < 8 correspondences or RANSAC finds no F.
@@ -73,17 +76,20 @@ export function verify_matches(pts_a, pts_b, ransac_thresh_px, max_iters) {
  * @param {number} max_iters
  * @param {number} h_skip_below
  * @param {number} verifier
+ * @param {Uint32Array} order
  * @returns {Float32Array}
  */
-export function verify_matches_hf(pts_a, pts_b, ransac_thresh_px, max_iters, h_skip_below, verifier) {
+export function verify_matches_hf(pts_a, pts_b, ransac_thresh_px, max_iters, h_skip_below, verifier, order) {
     const ptr0 = passArrayF32ToWasm0(pts_a, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(pts_b, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.verify_matches_hf(ptr0, len0, ptr1, len1, ransac_thresh_px, max_iters, h_skip_below, verifier);
-    var v3 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    const ptr2 = passArray32ToWasm0(order, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.verify_matches_hf(ptr0, len0, ptr1, len1, ransac_thresh_px, max_iters, h_skip_below, verifier, ptr2, len2);
+    var v4 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v3;
+    return v4;
 }
 function __wbg_get_imports() {
     const import0 = {
@@ -117,6 +123,21 @@ function getFloat32ArrayMemory0() {
     return cachedFloat32ArrayMemory0;
 }
 
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
+}
+
+function passArray32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getUint32ArrayMemory0().set(arg, ptr / 4);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
 function passArrayF32ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 4, 4) >>> 0;
     getFloat32ArrayMemory0().set(arg, ptr / 4);
@@ -132,6 +153,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedFloat32ArrayMemory0 = null;
+    cachedUint32ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;
 }

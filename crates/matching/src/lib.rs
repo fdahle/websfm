@@ -596,11 +596,120 @@ fn adaptive_iters(w: f64, s: u32, p: f64) -> usize {
 // minimal set). 0.99 is the COLMAP/OpenCV default.
 const RANSAC_CONFIDENCE: f64 = 0.99;
 
+// PROSAC's T_N: the draws after which its sampling set holds every correspondence
+// (the paper's 200,000). Most draws before that come from the best few dozen.
+const PROSAC_T_N: usize = 200_000;
+// PROSAC's stop looks at prefixes of at least this many points, after at least this
+// many draws: with fewer, an early model on the very best matches stopped the run
+// before local optimisation had grown it to the whole inlier set.
+const PROSAC_MIN_PREFIX: usize = 20;
+const PROSAC_MIN_DRAWS: usize = 100;
+// A pair whose best model still explains no prefix beyond chance after this many draws
+// has no geometry PROSAC can find: stop, as the 1,000-draw cap of uniform sampling
+// did, rather than spend the whole cap on a pair that matched nothing real.
+const PROSAC_GIVE_UP: usize = 1000;
+
+// PROSAC (Chum & Matas 2005): with the correspondences ranked best first, the early
+// samples are drawn from a small, growing set of the best ones, so a pair whose good
+// matches are a minority still finds a clean 8-point sample in a few hundred draws.
+// The set grows on the schedule T_n (the expected draws a uniform RANSAC spends on
+// samples within the first n), reaching all n points after `t_n_max` draws, and from
+// there it samples uniformly, as RANSAC does.
+struct Prosac {
+    order: Vec<usize>,
+    n: usize,   // size of the current sampling set
+    t_n: f64,   // T_n, the expected draws inside the first n
+    t_n_prime: usize,
+}
+
+impl Prosac {
+    const M: usize = 8;
+    fn new(order: Vec<usize>, t_n_max: usize) -> Self {
+        let total = order.len();
+        // T_m = T_N · Π_{i<m} (m − i)/(N − i), the draws a uniform sampler of T_N
+        // draws spends on samples within the best m.
+        let mut t_n = t_n_max as f64;
+        for i in 0..Self::M {
+            t_n *= (Self::M - i) as f64 / (total - i) as f64;
+        }
+        Prosac { order, n: Self::M, t_n, t_n_prime: 1 }
+    }
+    fn sample(&mut self, rng: &mut Xorshift, t: usize) -> [usize; 8] {
+        let total = self.order.len();
+        if t >= self.t_n_prime && self.n < total {
+            // T_{n+1} = T_n · (n + 1)/(n + 1 − m)
+            let next = self.t_n * (self.n + 1) as f64 / (self.n + 1 - Self::M) as f64;
+            self.t_n_prime += (next - self.t_n).ceil().max(1.0) as usize;
+            self.t_n = next;
+            self.n += 1;
+        }
+        let local = if self.t_n_prime < t || self.n >= total {
+            // Past the schedule (or the whole set): uniform within the first n.
+            sample8(rng, self.n)
+        } else {
+            // The n-th best point and 7 from the n − 1 better ones.
+            let mut s = sample8(rng, self.n - 1);
+            s[7] = self.n - 1;
+            s
+        };
+        local.map(|i| self.order[i])
+    }
+
+    // PROSAC's stop (maximality under non-randomness): for each prefix n* of the order,
+    // the inliers I_{n*} the best model has among the n* best points. A prefix whose
+    // count no wrong model would reach by chance (I ≥ I_min(n*), from the chance β that
+    // an unrelated point falls within the threshold of a wrong model) gives the draws
+    // k(n*) after which a better model within it would have been found with confidence
+    // `RANSAC_CONFIDENCE`; the run may stop at the smallest such k.
+    fn stop_after(&self, mask: &[bool], beta: f64) -> usize {
+        let m = Self::M as f64;
+        let mut best = usize::MAX;
+        let mut inl = 0usize;
+        for (k, &i) in self.order.iter().enumerate() {
+            if mask[i] { inl += 1; }
+            let n = k + 1;
+            // A handful of points that agree says little about the rest: judge prefixes
+            // of at least PROSAC_MIN_PREFIX (all of them on a smaller pair).
+            if n < PROSAC_MIN_PREFIX.min(self.order.len()) { continue; }
+            let free = (n - Self::M) as f64;
+            // Normal approximation of the binomial tail at ψ ≈ 1 % (χ = 2.33).
+            let i_min = m + beta * free + 2.33 * (beta * (1.0 - beta) * free).sqrt();
+            if (inl as f64) < i_min { continue; }
+            best = best.min(adaptive_iters(inl as f64 / n as f64, 8, RANSAC_CONFIDENCE));
+        }
+        best
+    }
+}
+
+// The chance that an unrelated point falls within `thresh` of a wrong epipolar line: the
+// band's area (2·thresh wide, the image's diagonal long) over the image's area, the
+// image taken as the second view's points' bounding box.
+fn chance_inlier(pb: &[(f64, f64)], thresh_sq: f64) -> f64 {
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for &(x, y) in pb {
+        x0 = x0.min(x); y0 = y0.min(y); x1 = x1.max(x); y1 = y1.max(y);
+    }
+    let (w, h) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
+    (2.0 * thresh_sq.sqrt() * w.hypot(h) / (w * h)).clamp(1e-4, 0.5)
+}
+
+// `order`: the correspondences best first (a ratio-test score, or the matcher's
+// confidence), for PROSAC sampling; empty ⇒ uniform sampling.
 fn ransac_fundamental(
     pa: &[(f64, f64)],
     pb: &[(f64, f64)],
     thresh_sq: f64,
     max_iters: usize,
+) -> Option<(M3, Vec<bool>, usize)> {
+    ransac_fundamental_ordered(pa, pb, thresh_sq, max_iters, &[])
+}
+
+fn ransac_fundamental_ordered(
+    pa: &[(f64, f64)],
+    pb: &[(f64, f64)],
+    thresh_sq: f64,
+    max_iters: usize,
+    order: &[u32],
 ) -> Option<(M3, Vec<bool>, usize)> {
     let n = pa.len().min(pb.len());
     if n < 8 {
@@ -610,14 +719,27 @@ fn ransac_fundamental(
     let mut best_count = 0usize;
     let mut best_mask = vec![false; n];
     let mut best_f: Option<M3> = None;
+    // A valid permutation of 0..n, or uniform sampling.
+    let mut prosac = {
+        let mut seen = vec![false; n];
+        let ok = order.len() == n
+            && order.iter().all(|&i| (i as usize) < n && !std::mem::replace(&mut seen[i as usize], true));
+        ok.then(|| Prosac::new(order.iter().map(|&i| i as usize).collect(), PROSAC_T_N))
+    };
+    let beta = if prosac.is_some() { chance_inlier(&pb[..n], thresh_sq) } else { 0.0 };
 
     // Adaptive termination: `limit` starts at the cap and shrinks as the best inlier
     // ratio improves. Monotone (best_count only grows), so recompute on each new best.
     let mut limit = max_iters;
     let mut iters = 0usize;
+    let mut beyond_chance = false;
     while iters < limit {
+        if prosac.is_some() && !beyond_chance && iters >= PROSAC_GIVE_UP { break; }
         iters += 1;
-        let idx = sample8(&mut rng, n);
+        let idx = match prosac.as_mut() {
+            Some(p) => p.sample(&mut rng, iters),
+            None => sample8(&mut rng, n),
+        };
         let sub_a: Vec<_> = idx.iter().map(|&i| pa[i]).collect();
         let sub_b: Vec<_> = idx.iter().map(|&i| pb[i]).collect();
         let Some(f) = fundamental_8pt(&sub_a, &sub_b) else { continue };
@@ -629,7 +751,19 @@ fn ransac_fundamental(
             best_mask = mask;
             best_f = Some(f);
             let w = best_count as f64 / n as f64;
-            limit = max_iters.min(adaptive_iters(w, 8, RANSAC_CONFIDENCE));
+            let stop = match prosac.as_ref() {
+                Some(p) => {
+                    // Beyond chance over the whole set, judged strictly (4β, χ = 3): a
+                    // model fitted to 8 random points often clears a lax test on some
+                    // prefix, and the give-up must not wait on those.
+                    let free = (n - 8) as f64;
+                    let b4 = (4.0 * beta).min(0.5);
+                    beyond_chance |= best_count as f64 >= 8.0 + b4 * free + 3.0 * (b4 * (1.0 - b4) * free).sqrt();
+                    p.stop_after(&best_mask, beta).min(adaptive_iters(w, 8, RANSAC_CONFIDENCE)).max(PROSAC_MIN_DRAWS)
+                }
+                None => adaptive_iters(w, 8, RANSAC_CONFIDENCE),
+            };
+            limit = max_iters.min(stop);
         }
     }
 
@@ -855,6 +989,9 @@ pub fn verify_matches(
 /// H/F ratio of 0 (= "non-degenerate") can never mislabel a pair that survives.
 /// Pass 0 (or ≤8) to disable the skip and reproduce the pre-adaptive behaviour.
 ///
+/// `order`: the correspondences best first (a permutation of 0..n), for PROSAC
+/// sampling in the RANSAC path; empty (or not a permutation) ⇒ uniform sampling.
+///
 /// Output layout: `[F00..F22, h_inlier_count, inlier_0, inlier_1, ...]` — the
 /// fundamental matrix (9), then the homography inlier count (1), then the F
 /// inlier flags (n). Empty if < 8 correspondences or RANSAC finds no F.
@@ -866,6 +1003,7 @@ pub fn verify_matches_hf(
     max_iters: u32,
     h_skip_below: u32,
     verifier: u32,
+    order: &[u32],
 ) -> Vec<f32> {
     let n = pts_a.len() / 2;
     if n != pts_b.len() / 2 || n < 8 {
@@ -881,7 +1019,7 @@ pub fn verify_matches_hf(
     let fit = if use_magsac {
         magsac(Model::Fundamental, &pa, &pb, thresh_sq, max_iters as usize)
     } else {
-        ransac_fundamental(&pa, &pb, thresh_sq, max_iters as usize)
+        ransac_fundamental_ordered(&pa, &pb, thresh_sq, max_iters as usize, order)
     };
     let Some((f, mask, _iters)) = fit else {
         return vec![];
@@ -969,7 +1107,7 @@ mod tests {
     #[test]
     fn homography_dominates_on_planar_scene() {
         let (pa, pb) = scene(true);
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0, &[]);
         assert!(!out.is_empty(), "verification should succeed on a planar scene");
         let h = out[9];
         let f_inliers: f32 = out[10..].iter().sum();
@@ -979,7 +1117,7 @@ mod tests {
     #[test]
     fn homography_underfits_general_scene() {
         let (pa, pb) = scene(false);
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0, &[]);
         assert!(!out.is_empty(), "verification should succeed on a general scene");
         let h = out[9];
         let f_inliers: f32 = out[10..].iter().sum();
@@ -1048,6 +1186,37 @@ mod tests {
                 assert!(worst < 1e-10 * scale, "A·v ≠ λ·v at scale {scale}: {worst}");
             }
         }
+    }
+
+    // Weak pairs (inlier ratio 0.3 and 0.15) with a quality order that ranks the true
+    // matches only loosely ahead of the outliers (a ratio-test score: each match's rank
+    // key is its truth plus wide noise). PROSAC at the 10,000 cap must find nearly
+    // every true inlier, where uniform 8-point sampling at 1,000 rarely does; a clean
+    // pair still stops as early as before.
+    #[test]
+    fn prosac_finds_low_inlier_pairs() {
+        for &(outliers, need) in &[(0.7, 95), (0.85, 90)] {
+            let mut found = 0;
+            for seed in 0..100u64 {
+                let mut rng = Lcg(0xbeef + seed);
+                let (a, b, truth) = noisy_scene(&mut rng, 300, 0.5, outliers);
+                let key: Vec<f64> = truth.iter().map(|&t| if t { 1.0 } else { 0.0 } + rng.range(0.0, 1.6)).collect();
+                let mut order: Vec<u32> = (0..a.len() as u32).collect();
+                order.sort_by(|&i, &j| key[j as usize].total_cmp(&key[i as usize]));
+                let (_, mask, _) = ransac_fundamental_ordered(&a, &b, 4.0, 10_000, &order).unwrap_or(([[0.0; 3]; 3], vec![], 0));
+                let true_n = truth.iter().filter(|&&t| t).count();
+                let kept = mask.iter().zip(&truth).filter(|(&m, &t)| m && t).count();
+                if kept as f64 >= 0.8 * true_n as f64 { found += 1; }
+            }
+            assert!(found >= need, "outliers {outliers}: {found}/100 pairs recovered");
+        }
+        // A clean pair: no more draws than uniform sampling needs.
+        let mut rng = Lcg(0x5eed);
+        let (a, b, _) = noisy_scene(&mut rng, 300, 0.5, 0.2);
+        let order: Vec<u32> = (0..a.len() as u32).collect();
+        let (_, _, uniform) = ransac_fundamental(&a, &b, 4.0, 10_000).unwrap();
+        let (_, _, ordered) = ransac_fundamental_ordered(&a, &b, 4.0, 10_000, &order).unwrap();
+        assert!(ordered <= uniform.max(50) * 2, "clean pair: {ordered} draws with PROSAC, {uniform} without");
     }
 
     // Noisy general-motion scene with a fraction of random outliers.
@@ -1192,11 +1361,11 @@ mod tests {
     #[test]
     fn magsac_homography_label_matches_ransac() {
         let (pa, pb) = scene(true);
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 1);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 1, &[]);
         let f_inliers: f32 = out[10..].iter().sum();
         assert!(out[9] / f_inliers > 0.9, "planar H/F ratio too low: {} / {f_inliers}", out[9]);
         let (pa, pb) = scene(false);
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 1);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 1, &[]);
         let f_inliers: f32 = out[10..].iter().sum();
         assert!(f_inliers > 40.0, "general F should fit most points: {f_inliers}");
         assert!(out[9] / f_inliers < 0.8, "general H/F ratio too high: {} / {f_inliers}", out[9]);
@@ -1435,18 +1604,18 @@ mod tests {
     #[test]
     fn h_skip_below_suppresses_homography_on_weak_pairs() {
         let (pa, pb) = scene(true); // planar → strong H
-        let full = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0);
+        let full = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0, &[]);
         let f_inliers: f32 = full[10..].iter().sum();
         assert!(full[9] > 0.0, "baseline H should be non-zero on a planar pair");
 
         // Floor just above this pair's F-inlier count ⇒ H skipped ⇒ reported 0.
-        let skipped = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32 + 1, 0);
+        let skipped = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32 + 1, 0, &[]);
         assert_eq!(skipped[9], 0.0, "H should be skipped below the floor");
         // F side is untouched by the skip.
         assert_eq!(&skipped[10..], &full[10..], "skip must not affect F inliers");
 
         // Floor at/below the count ⇒ H still computed.
-        let kept = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32, 0);
+        let kept = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32, 0, &[]);
         assert!(kept[9] > 0.0, "H should run when F inliers meet the floor");
     }
 }

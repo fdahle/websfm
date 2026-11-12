@@ -158,7 +158,10 @@ export const MATCH_DEFAULTS = {
   // of 15–40-inlier pairs is what carries its 3.6 mean track length vs our 2.6. 0.15 keeps
   // a guard against the ~0.06 spurious fits while re-admitting the tail.
   minInlierRatio: 0.15,
-  maxIters: 1000, // F-RANSAC iterations
+  // F-RANSAC sample cap. Samples are drawn best match first (PROSAC), so a pair with
+  // geometry stops after about a hundred; one that finds none beyond chance gives up at
+  // 1,000 (crates/matching ransac_fundamental_ordered). The cap is COLMAP's.
+  maxIters: 10000,
   // Robust estimator for the F (and H-vs-F) fit: 'ransac' — inlier count + local
   // optimisation — or 'magsac' — MAGSAC++ (σ-marginalised loss, IRLS polish;
   // crates/matching/src/magsac.rs). Inliers are within ransacThreshPx either way.
@@ -202,7 +205,7 @@ export const MATCH_DEFAULTS = {
 export const MATCH_PRESETS = {
   low: { ratioThreshold: 0.85, minInlierRatio: 0.1 },
   medium: {},
-  high: { ratioThreshold: 0.75, minInlierRatio: 0.25, maxIters: 2000 },
+  high: { ratioThreshold: 0.75, minInlierRatio: 0.25 },
 }
 export const MATCH_PRESET_META = [
   { id: 'low', label: 'Lenient', blurb: 'More matches, looser verification' },

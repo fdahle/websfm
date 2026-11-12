@@ -337,7 +337,7 @@ const numbers = computed(() => {
       when: bf && gate.value.active,
     },
     ransacThreshPx: { label: 'RANSAC threshold', min: 0.5, max: 8, when: verify },
-    maxIters: { label: 'RANSAC iterations', min: 100, max: 5000, integer: true, when: verify },
+    maxIters: { label: 'RANSAC iterations', min: 100, max: 100000, integer: true, when: verify },
     minMatches: { label: 'Min matches per pair', min: 4, max: 100, integer: true },
     minInlierRatio: { label: 'Min inlier ratio', min: 0, max: 0.9, when: verify },
   })
@@ -826,8 +826,8 @@ provideStepLayout('match-features')
               :aria-invalid="numbers.bad.maxIters"
               type="number"
               min="100"
-              max="5000"
-              step="100"
+              max="100000"
+              step="1000"
               class="field-input"
             />
           </SettingsField>
