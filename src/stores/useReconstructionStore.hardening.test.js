@@ -259,3 +259,43 @@ it('saves nothing while a rerun has released the model, and reads the saved one 
   await vi.waitFor(() => expect(save).toHaveBeenCalled())
   for (const spy of [...spies, save]) spy.mockRestore()
 })
+
+it('holds saves while switching projects, until the old project is cleared', async () => {
+  setActivePinia(createPinia())
+  const projects = useProjectsStore()
+  projects.persistenceAvailable = true
+  projects.projects = [
+    { id: 'old', name: 'Old' },
+    { id: 'new', name: 'New' },
+  ]
+  projects.currentProjectId = 'old'
+  const lease = await import('../utils/projectLease.js')
+  const spies = [
+    vi.spyOn(lease, 'acquireProjectLease').mockResolvedValue(() => {}),
+    vi
+      .spyOn(opfs, 'readProject')
+      .mockResolvedValue({
+        formatVersion: (await import('../core/projectFormat.js')).PROJECT_FORMAT_VERSION,
+        images: [],
+      }),
+    vi.spyOn(opfs, 'readIndex').mockResolvedValue({ projects: [] }),
+    vi.spyOn(opfs, 'writeIndex').mockResolvedValue(),
+  ]
+  const store = useReconstructionStore()
+  const save = vi.spyOn(opfs, 'saveReconstruction').mockResolvedValue({ ok: true, files: {} })
+  store.importCloud({ count: 1, pos: new Float64Array([1, 2, 3]) }, 'old.las')
+  await vi.waitFor(() => expect(save).toHaveBeenCalled())
+  save.mockClear()
+  // The new id is committed; the old project's cloud is still in memory.
+  await projects.switchProject('new')
+  expect(projects.currentProjectId).toBe('new')
+  expect(projects.isPersisting).toBe(false)
+  store.setCloudVisible(store.clouds[0].id, false)
+  await new Promise((r) => setTimeout(r, 10))
+  // Nothing of the old project reached the new project's folder.
+  expect(save).not.toHaveBeenCalled()
+  store.clear()
+  projects.endSwitch()
+  expect(projects.isPersisting).toBe(true)
+  for (const spy of [...spies, save]) spy.mockRestore()
+})

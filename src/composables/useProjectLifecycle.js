@@ -54,6 +54,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   const {
     createProject,
     switchProject,
+    endSwitch,
     takeFormatNotes,
     deleteProjectById,
     exportProject,
@@ -218,87 +219,101 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       })
       return false
     }
-    await withLoadingOverlay('Loading project…', async () => {
-      const timings = []
-      const timed = async (phase, fn) => {
-        const started = performance.now()
-        const result = await fn()
-        timings.push({ phase, ms: performance.now() - started })
-        return result
-      }
-      if (projectData.crs) {
-        await timed('projection', () => ensureProjection(projectData.crs).catch(() => {}))
-      }
-      // The destination is reachable and readable; only now is it safe to tear
-      // down the project being left.
-      resetInMemoryProject()
-      for (const note of takeFormatNotes(id)) log(`Project upgraded: ${note}`, 'info', 'Project')
-      // Let the overlay actually paint before the synchronous restore work runs.
-      await nextTick()
-      await new Promise((r) => requestAnimationFrame(() => r()))
-      // Restore sensors before images: EXIF auto-grouping reacts to the image list,
-      // so the saved sensors must already be in place or it would mint duplicates
-      // and clobber manual sensor assignments. Both have bespoke restore signatures,
-      // so they stay manual; every other project-scoped store restores through the
-      // registry below (matches, reconstruction, GCPs, footprints, poses).
-      await timed('sensors', () => restoreSensors(id))
-      // Sensors restore outside the registry (images depend on them); same rule as
-      // restoreProjectStores: a read that finished after a switch must not stay.
-      if (currentProjectId.value !== id) clearSensors()
-      // restoreImages publishes the image list (ids + names) synchronously before
-      // its first await; only previews and keypoints load after that. The registry
-      // stores need the list, never the pixels, so both phases run concurrently.
-      // Both phases feed one overlay view (utils/loadProgress.js), refreshed at most
-      // once per frame: match restore reports once per pair file.
-      let imagesState = { done: 0, total: projectData.images?.length ?? 0, label: '' }
-      const storeStates = new Map()
-      let refreshQueued = false
-      const refreshProgress = () => {
-        refreshQueued = false
-        if (projectLoading.value && currentProjectId.value === id) {
-          projectLoadingProgress.value = loadProgressView(imagesState, storeStates)
+    // endSwitch runs inside once the old project is cleared; the finally covers a
+    // failure before that, so saving is never left held.
+    try {
+      await loadInto()
+    } finally {
+      endSwitch()
+    }
+    async function loadInto() {
+      return withLoadingOverlay('Loading project…', async () => {
+        const timings = []
+        const timed = async (phase, fn) => {
+          const started = performance.now()
+          const result = await fn()
+          timings.push({ phase, ms: performance.now() - started })
+          return result
         }
-      }
-      const queueProgress = () => {
-        if (refreshQueued) return
-        refreshQueued = true
-        requestAnimationFrame(refreshProgress)
-      }
-      const imagesDone = timed('images', () =>
-        restoreImages(
-          projectData.images || [],
-          id,
-          (done, total, label) => {
-            imagesState = { done, total, label }
-            queueProgress()
-          },
-          { groups: projectData.imageGroups },
-        ),
-      ).then(() => {
-        imagesState = null
-        refreshProgress()
+        if (projectData.crs) {
+          await timed('projection', () => ensureProjection(projectData.crs).catch(() => {}))
+        }
+        // The destination is reachable and readable; only now is it safe to tear
+        // down the project being left. Saves resume after (switchProject held them).
+        resetInMemoryProject()
+        endSwitch()
+        for (const note of takeFormatNotes(id)) log(`Project upgraded: ${note}`, 'info', 'Project')
+        // Let the overlay actually paint before the synchronous restore work runs.
+        await nextTick()
+        await new Promise((r) => requestAnimationFrame(() => r()))
+        // Restore sensors before images: EXIF auto-grouping reacts to the image list,
+        // so the saved sensors must already be in place or it would mint duplicates
+        // and clobber manual sensor assignments. Both have bespoke restore signatures,
+        // so they stay manual; every other project-scoped store restores through the
+        // registry below (matches, reconstruction, GCPs, footprints, poses).
+        await timed('sensors', () => restoreSensors(id))
+        // Sensors restore outside the registry (images depend on them); same rule as
+        // restoreProjectStores: a read that finished after a switch must not stay.
+        if (currentProjectId.value !== id) clearSensors()
+        // restoreImages publishes the image list (ids + names) synchronously before
+        // its first await; only previews and keypoints load after that. The registry
+        // stores need the list, never the pixels, so both phases run concurrently.
+        // Both phases feed one overlay view (utils/loadProgress.js), refreshed at most
+        // once per frame: match restore reports once per pair file.
+        let imagesState = { done: 0, total: projectData.images?.length ?? 0, label: '' }
+        const storeStates = new Map()
+        let refreshQueued = false
+        const refreshProgress = () => {
+          refreshQueued = false
+          if (projectLoading.value && currentProjectId.value === id) {
+            projectLoadingProgress.value = loadProgressView(imagesState, storeStates)
+          }
+        }
+        const queueProgress = () => {
+          if (refreshQueued) return
+          refreshQueued = true
+          requestAnimationFrame(refreshProgress)
+        }
+        const imagesDone = timed('images', () =>
+          restoreImages(
+            projectData.images || [],
+            id,
+            (done, total, label) => {
+              imagesState = { done, total, label }
+              queueProgress()
+            },
+            { groups: projectData.imageGroups },
+          ),
+        ).then(() => {
+          imagesState = null
+          refreshProgress()
+        })
+        const storesDone = timed('project stores', () =>
+          restoreProjectStores({
+            projectId: id,
+            projectData,
+            isCurrent: () => currentProjectId.value === id,
+            onProgress: (store, state) => {
+              storeStates.set(store, state)
+              queueProgress()
+            },
+          }),
+        )
+        const [, storeTimings] = await Promise.all([imagesDone, storesDone])
+        const detail = [...timings, ...storeTimings.map(({ store, ms }) => ({ phase: store, ms }))]
+          .sort((a, b) => b.ms - a.ms)
+          .map(({ phase, ms }) => `${phase} ${Math.round(ms)} ms`)
+          .join(' · ')
+        log(
+          `Project load timing: ${Math.round(performance.now() - loadStarted)} ms total — ${detail}`,
+          'info',
+          'Project',
+        )
+        preloadDialogSettings(id)
+        logHeapInventory()
+        // restore() sets selectedCloud, which the watcher pushes into the viewer.
       })
-      const storesDone = timed('project stores', () =>
-        restoreProjectStores({
-          projectId: id,
-          projectData,
-          isCurrent: () => currentProjectId.value === id,
-          onProgress: (store, state) => {
-            storeStates.set(store, state)
-            queueProgress()
-          },
-        }),
-      )
-      const [, storeTimings] = await Promise.all([imagesDone, storesDone])
-      const detail = [...timings, ...storeTimings.map(({ store, ms }) => ({ phase: store, ms }))]
-        .sort((a, b) => b.ms - a.ms)
-        .map(({ phase, ms }) => `${phase} ${Math.round(ms)} ms`)
-        .join(' · ')
-      log(`Project load timing: ${Math.round(performance.now() - loadStarted)} ms total — ${detail}`, 'info', 'Project')
-      preloadDialogSettings(id)
-      logHeapInventory()
-      // restore() sets selectedCloud, which the watcher pushes into the viewer.
-    })
+    }
     // Not awaited: what follows the open (the Continue prompt of a stopped run) waits
     // for the user, and the open itself is done.
     if (currentProjectId.value === id) onProjectOpened?.(id)

@@ -65,7 +65,15 @@ export const useProjectsStore = defineStore('projects', () => {
   // True when there is an open project AND OPFS is usable — the single gate every
   // project-scoped store checks before reading/writing persistence. Hoisted here
   // (was duplicated as a local `isPersisting()` in each store).
-  const isPersisting = computed(() => persistenceAvailable.value && !!currentProjectId.value)
+  // True from the moment switchProject commits a new id until the open sequence has
+  // cleared the project being left (endSwitch, useProjectLifecycle.js openProject): a
+  // saver that fired in between would write the old project's state into the new
+  // project's folder, since savers read the id when they write.
+  const switching = ref(false)
+  const isPersisting = computed(() => persistenceAvailable.value && !!currentProjectId.value && !switching.value)
+  const endSwitch = () => {
+    switching.value = false
+  }
 
   function setPersistenceAvailable(available) {
     persistenceAvailable.value = available
@@ -230,11 +238,14 @@ export const useProjectsStore = defineStore('projects', () => {
     }
     const previousId = currentProjectId.value
     const previousModified = p.lastModified
+    // Saves hold off until the caller has cleared the project being left (endSwitch).
+    if (previousId && previousId !== id) switching.value = true
     currentProjectId.value = id
     if (p) p.lastModified = new Date().toISOString()
     try {
       await saveIndex()
     } catch (err) {
+      switching.value = false
       currentProjectId.value = previousId
       discardPersistenceFailure('project-index')
       p.lastModified = previousModified
@@ -709,6 +720,7 @@ export const useProjectsStore = defineStore('projects', () => {
     currentSceneType,
     currentCrs,
     isPersisting,
+    endSwitch,
     setPersistenceAvailable,
     loadIndex,
     saveIndex,
