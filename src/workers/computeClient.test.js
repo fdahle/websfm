@@ -77,3 +77,29 @@ describe('a worker whose WebAssembly trapped', () => {
     expect(fresh.sent).toHaveLength(1)
   })
 })
+
+describe('cancelRun', () => {
+  it('resets only the workers running the run, and rejects its jobs as a cancel', async () => {
+    client.terminateAll('reset for this test')
+    if (client.POOL_SIZE === 1) return
+    // A run job pinned to slot 0, and background work (a DEM window for the map) beside it.
+    const run = client.matchGpuBegin({}).catch((e) => e)
+    const pool = made.slice(-client.POOL_SIZE)
+    let bgDone = false
+    client.readDemWindow({}).then(
+      () => (bgDone = true),
+      () => (bgDone = 'rejected'),
+    )
+    const bgWorker = pool.find((w) => w.sent.some((m) => m.op === 'readDemWindow'))
+    expect(bgWorker).not.toBe(pool[client.GPU_MATCH_WORKER])
+    expect(client.cancelRun('matching cancelled')).toBe(1)
+    const err = await run
+    expect(err.name).toBe('AbortError')
+    expect(client.isAbort(err)).toBe(true)
+    expect(pool[client.GPU_MATCH_WORKER].dead).toBe(true)
+    // The background job's worker runs on, its job still pending.
+    expect(bgWorker.dead).toBe(false)
+    await Promise.resolve()
+    expect(bgDone).toBe(false)
+  })
+})

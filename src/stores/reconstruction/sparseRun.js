@@ -19,7 +19,12 @@ import {
   WASM_SOLVER_LIMIT_BYTES,
   SPARSE_HEAP_FRACTION,
 } from '../../core/sfm/memBudget.js'
-import { terminateAll, reconstruct as workerReconstruct } from '../../workers/computeClient.js'
+import {
+  cancelRun,
+  isAbort,
+  releaseIdleWorkers,
+  reconstruct as workerReconstruct,
+} from '../../workers/computeClient.js'
 import { keypointSetFrom, keypointSetTransfer } from '../../core/sfm/keypointSet.js'
 import { useMatchesStore } from '../useMatchesStore.js'
 import { packMatchPairs, inNameOrder } from '../../core/sfm/matchCodec.js'
@@ -398,7 +403,9 @@ export function createSparseRun({
       if (!plan.decisions.renderer.safe && !base) {
         const released = releaseReplaceableModelForRerun()
         if (released.released) {
-          terminateAll('preparing a clean sparse-reconstruction rerun')
+          // Idle workers' heaps only: photo ingest or a map preview running beside it
+          // keeps its worker (it would refuse while one is busy, which is fine).
+          releaseIdleWorkers()
           log(
             `Released the loaded reconstruction before rerun (${released.cameraCount} cameras, ` +
               `${released.pointCount.toLocaleString()} points). ` +
@@ -691,7 +698,7 @@ export function createSparseRun({
             'error',
             'Compute',
           )
-          terminateAll('reconstruction stopped before browser memory exhaustion')
+          cancelRun('reconstruction stopped before browser memory exhaustion')
         }, 500)
         stopMemoryWatchdog = () => {
           stopped = true
@@ -891,8 +898,13 @@ export function createSparseRun({
         reconStatus.value = result.status === 'error' ? 'error' : 'idle'
       }
     } catch (err) {
-      log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
-      reconStatus.value = 'error'
+      if (isAbort(err)) {
+        log(`Reconstruction cancelled (${err.message})`, 'info', 'Reconstruction')
+        reconStatus.value = 'idle'
+      } else {
+        log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
+        reconStatus.value = 'error'
+      }
     } finally {
       stopMemoryWatchdog()
       liveSparse.value = null

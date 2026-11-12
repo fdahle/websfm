@@ -28,7 +28,7 @@ import {
   fusePlanAnswer as workerFusePlanAnswer,
   depthBackend as workerDepthBackend,
   POOL_SIZE,
-  terminateAll,
+  cancelRun,
   releaseIdleWorkers,
   recycleWorker,
   filterDepthMaps as workerFilterDepthMaps,
@@ -37,6 +37,7 @@ import {
   meshPrepare as workerMeshPrepare,
   meshTile as workerMeshTile,
   meshFinish as workerMeshFinish,
+  isAbort,
 } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
 import { serializeDepthMap } from '../../core/dense/depthMapCodec.js'
@@ -91,6 +92,14 @@ export function createDense({
   withRegion,
   activeRegion,
 }) {
+  // A run's Cancel rejects with an AbortError (computeClient.js cancelRun): a cancel,
+  // logged as one, the status back to idle — not an error.
+  const cancelled = (err, what, area = 'Products') => {
+    if (!isAbort(err)) return false
+    log(`${what} cancelled`, 'info', area)
+    reconStatus.value = 'idle'
+    return true
+  }
   // Dense Stage A — Build Depth Maps. Runs PatchMatch MVS in the worker over the
   // sparse cloud's registered cameras, stores the raw depth maps for fusion, and
   // pushes a display depth image into each image (viewer overlay). Needs a sparse
@@ -412,7 +421,7 @@ export function createDense({
       const run = await beginStreamedDepthMaps({
         onWriteFailure: (err) => {
           writeFailure = err
-          terminateAll(err.message)
+          cancelRun(err.message)
         },
         resume: journal ? (journal.phase === 'pass1' ? journal.done : journal.metas) : kept.length ? kept : null,
       })
@@ -623,6 +632,7 @@ export function createDense({
       // when the project cannot save, which is why this path exists).
       if (!run) await persistDepthMaps(maps, settings)
     } catch (err) {
+      if (!writeFailure && cancelled(err, 'Depth maps', 'Dense')) return
       log(`Depth-map error: ${(writeFailure ?? err)?.message ?? err}`, 'error', 'Dense')
       reconStatus.value = 'error'
     }
@@ -729,7 +739,7 @@ export function createDense({
         ),
       ),
     ).catch((err) => {
-      terminateAll(String(err?.message ?? err))
+      cancelRun(String(err?.message ?? err))
       throw err
     })
     return {
@@ -765,7 +775,7 @@ export function createDense({
           .catch((err) => {
             if (writeFailure) return
             writeFailure = err
-            terminateAll(err.message)
+            cancelRun(err.message)
           }),
       )
     }
@@ -1144,6 +1154,7 @@ export function createDense({
         await save()
       } catch (err) {
         if (!stillCurrent()) return
+        if (cancelled(err, 'Dense cloud', 'Dense')) return
         log(`Dense: error: ${densifyErrorText(err)}`, 'error', 'Dense')
         reconStatus.value = 'error'
       }
@@ -1330,6 +1341,7 @@ export function createDense({
       reconStatus.value = 'done'
       await save()
     } catch (err) {
+      if (cancelled(err, 'Mesh')) return
       log(`Mesh error: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
     }

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { terminateAll } from '../workers/computeClient.js'
+import { cancelRun } from '../workers/computeClient.js'
 import { useModelsStore } from '../stores/useModelsStore.js'
 import { useLog } from './useLog.js'
 import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
@@ -274,7 +274,7 @@ export function usePipeline({
     return withProgress(
       'Detecting Features',
       pending.length,
-      () => terminateAll('detection cancelled'),
+      () => cancelRun('detection cancelled'),
       { unit: 'images' },
       async () => {
         // No per-image overlay callback: the keypoint overlay is a global toggle gated on
@@ -306,7 +306,7 @@ export function usePipeline({
     return withProgress(
       'Matching Features',
       0,
-      () => terminateAll('matching cancelled'),
+      () => cancelRun('matching cancelled'),
       { unit: 'pairs' },
       async () => {
         await matchAll(images.value, settings, report, shouldCancel, opts)
@@ -323,7 +323,7 @@ export function usePipeline({
     return withProgress(
       'Sparse Reconstruction',
       ready.length,
-      () => terminateAll('reconstruction cancelled'),
+      () => cancelRun('reconstruction cancelled'),
       { steps: SPARSE_STEPS },
       async () => {
         await reconstruct(settings, report)
@@ -339,7 +339,7 @@ export function usePipeline({
     return withProgress(
       'Building Depth Maps',
       images.value.length,
-      () => terminateAll('depth maps cancelled'),
+      () => cancelRun('depth maps cancelled'),
       { unit: 'images' },
       async () => {
         await computeDepthMaps(settings, report, opts)
@@ -353,7 +353,7 @@ export function usePipeline({
     return withProgress(
       'Building Dense Cloud',
       1,
-      () => terminateAll('densify cancelled'),
+      () => cancelRun('densify cancelled'),
       { indeterminate: true, unit: 'maps', steps: FUSION_STEPS },
       async () => {
         await densify(settings, report)
@@ -368,7 +368,7 @@ export function usePipeline({
     return withProgress(
       'Building DEM',
       1,
-      () => terminateAll('DEM cancelled'),
+      () => cancelRun('DEM cancelled'),
       { indeterminate: true },
       async () => {
         await generateDem(settings, report)
@@ -382,7 +382,7 @@ export function usePipeline({
     return withProgress(
       'Building Orthophoto',
       1,
-      () => terminateAll('orthophoto cancelled'),
+      () => cancelRun('orthophoto cancelled'),
       { indeterminate: true },
       async () => {
         await generateOrtho(settings, report)
@@ -397,7 +397,7 @@ export function usePipeline({
     return withProgress(
       'Building Mesh',
       1,
-      () => terminateAll('mesh cancelled'),
+      () => cancelRun('mesh cancelled'),
       { indeterminate: true },
       async () => {
         await generateMesh(settings, report)
@@ -432,7 +432,7 @@ export function usePipeline({
     return withProgress(
       titles[request.mode] ?? 'Editing Cloud',
       1,
-      () => terminateAll('cloud edit cancelled'),
+      () => cancelRun('cloud edit cancelled'),
       { indeterminate: true },
       async () => {
         // ok ⇔ the store committed a result (it returns null for a refusal, an empty
@@ -450,7 +450,7 @@ export function usePipeline({
     return withProgress(
       'Texturing Mesh',
       100,
-      () => terminateAll('texture cancelled'),
+      () => cancelRun('texture cancelled'),
       {},
       async () => {
         const cloud = await textureMesh(request, report)

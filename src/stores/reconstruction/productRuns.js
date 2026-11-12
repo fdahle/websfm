@@ -18,6 +18,7 @@ import {
   orthoCogAdd as workerOrthoCogAdd,
   orthoFinish as workerOrthoFinish,
   POOL_SIZE,
+  isAbort,
 } from '../../workers/computeClient.js'
 import { ORTHO_BLOCK } from '../../core/products/ortho.js'
 import { createBlockProgress, createStepProgress, createLogPacer } from '../../utils/blockProgress.js'
@@ -62,6 +63,14 @@ export function createProductRuns({
   validGeoref = null,
   clouds = null,
 }) {
+  // A run's Cancel rejects with an AbortError (computeClient.js cancelRun): a cancel,
+  // logged as one, the status back to idle — not an error.
+  const cancelled = (err, what, area = 'Products') => {
+    if (!isAbort(err)) return false
+    log(`${what} cancelled`, 'info', area)
+    reconStatus.value = 'idle'
+    return true
+  }
   const logLine = log
   // How a DEM run reads its source cloud. A resident cloud whose full copy would be
   // large reads its octree too, when it has one: the grid needs no finer level than half
@@ -245,6 +254,7 @@ export function createProductRuns({
       saveProductRecord(record)
       reconStatus.value = 'done'
     } catch (err) {
+      if (cancelled(err, 'DEM')) return
       log(
         `DEM error: ${bufferFailureText(err?.message ?? err, 'Lower the memory budget (Settings ▸ Compute) or build at a coarser GSD')}`,
         'error',
@@ -574,6 +584,7 @@ export function createProductRuns({
       reconStatus.value = 'done'
     } catch (err) {
       if (!stillCurrent()) return
+      if (cancelled(err, 'Orthophoto')) return
       log(
         `Ortho error: ${bufferFailureText(
           err?.message ?? err,

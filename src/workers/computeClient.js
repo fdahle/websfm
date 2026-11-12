@@ -86,17 +86,59 @@ function getPool() {
   return workers
 }
 
+// A rejection a Cancel caused, not a failure: its name is 'AbortError' (isAbort), so a
+// run's catch logs a cancel, not an error.
+export const abortError = (reason) => Object.assign(new Error(reason), { name: 'AbortError' })
+export const isAbort = (err) => err?.name === 'AbortError'
+
+// Work the app starts on its own while the user works (photo ingest, pyramids, masks,
+// raster previews and windows, segmentation embeddings): a Cancel of a run leaves the
+// workers doing only this alone (cancelRun), with their caches and sessions.
+const BACKGROUND_OPS = new Set([
+  'transcodeTiff',
+  'buildPyramid',
+  'maskFromFile',
+  'restyleRasterPreview',
+  'readRasterWindow',
+  'readDemWindow',
+  'prepareRasterCog',
+  'segmentEncode',
+  'segmentDecode',
+  'segmentForget',
+])
+
 // Hard-cancel: terminate every worker and reject all in-flight requests. The
-// pool respawns lazily on the next call. Used to abort a running op (e.g. a long
-// reconstruct) that can't be interrupted cooperatively mid-call.
+// pool respawns lazily on the next call. For a reset of everything (a project switch);
+// a run's Cancel is cancelRun.
 export function terminateAll(reason = 'cancelled') {
   const oldWorkers = workers
   workers = null
   if (oldWorkers) for (const w of oldWorkers) w.terminate()
   for (const [id, entry] of pending) {
     pending.delete(id)
-    entry.reject(new Error(reason))
+    entry.reject(abortError(reason))
   }
+}
+
+// Cancel the running operation: terminate the workers that hold a job of it (any job not
+// in BACKGROUND_OPS), reject every job on them, and give their slots fresh workers. A
+// worker busy only with background work, or idle, keeps running with its state (the GPU
+// descriptor cache, ORT sessions, segmentation embeddings). → the number of slots reset.
+export function cancelRun(reason = 'cancelled') {
+  if (!workers) return 0
+  const hit = new Set()
+  for (const entry of pending.values()) if (!entry.background) hit.add(entry.worker)
+  for (const [id, entry] of pending) {
+    if (!hit.has(entry.worker)) continue
+    pending.delete(id)
+    entry.reject(abortError(reason))
+  }
+  workers = workers.map((w, i) => {
+    if (!hit.has(w)) return w
+    w.terminate()
+    return spawn(i)
+  })
+  return hit.size
 }
 
 // Drop an idle pool so its workers' memory is returned before a run that needs a lot
@@ -187,7 +229,16 @@ function call(op, args, { transfer = [], onEvent, onTiming, worker: pinned, avoi
   const worker = pool[slot]
   const id = nextId++
   return new Promise((resolve, reject) => {
-    const entry = { resolve, reject, onEvent, onTiming, worker, started: performance.now(), postMessageMs: 0 }
+    const entry = {
+      resolve,
+      reject,
+      onEvent,
+      onTiming,
+      worker,
+      background: BACKGROUND_OPS.has(op),
+      started: performance.now(),
+      postMessageMs: 0,
+    }
     pending.set(id, entry)
     try {
       // A shared buffer (core/bigArray.js) cannot be in the list; it crosses uncopied.

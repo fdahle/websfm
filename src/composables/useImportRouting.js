@@ -19,7 +19,7 @@ import { parseFiducialMarks } from '../core/io/fiducialMarks.js'
 import { sniffCloudFormat, looksLikeXyzText } from '../core/io/cloudImport.js'
 import { looksLikeZipHead, isProjectArchiveName } from '../core/io/projectArchive.js'
 import { applyImportTransform } from '../core/io/cloudImport.js'
-import { parseCloudFile as parseCloudFileWorker, terminateAll } from '../workers/computeClient.js'
+import { parseCloudFile as parseCloudFileWorker, cancelRun } from '../workers/computeClient.js'
 import { lasNeedsStreaming } from '../core/io/lasStream.js'
 import { copcReadsInPlace, COPC_IN_PLACE_MIN_POINTS } from '../core/lod/copc.js'
 import { unzipStore } from '../utils/zip.js'
@@ -449,7 +449,7 @@ export function useImportRouting({
     const route = importStreamedCloud || importCopcCloud ? await lasRoute(file) : null
     const importer = route === 'copc' ? importCopcCloud : route === 'stream' ? importStreamedCloud : null
     if (importer) {
-      progress?.open('Importing point cloud', 100, () => terminateAll('import cancelled'))
+      progress?.open('Importing point cloud', 100, () => cancelRun('import cancelled'))
       const cloud = await importer(file, progress?.report)
       await progress?.close()
       if (cloud) activateTab('viewer')

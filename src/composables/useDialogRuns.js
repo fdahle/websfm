@@ -6,7 +6,7 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { sectionCloud, sectionToCsv, sectionToDxf } from '../core/products/cloudSection.js'
 import { downloadBlob } from '../utils/download.js'
-import { terminateAll } from '../workers/computeClient.js'
+import { cancelRun } from '../workers/computeClient.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
 import { useLog } from './useLog.js'
 import { useDemCoregistration } from './useDemCoregistration.js'
@@ -183,7 +183,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
   // underneath and fills in as the scores land.
   async function onImageQualityEstimate(ids) {
     const total = ids?.length ?? images.value.length
-    exportProgress.open('Scoring Image Quality', total, () => terminateAll('image quality cancelled'), {
+    exportProgress.open('Scoring Image Quality', total, () => cancelRun('image quality cancelled'), {
       unit: 'images',
     })
     try {
@@ -306,7 +306,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
   // Products ▸ Reflectance map: behind the progress bar; the map lands in Reference Data.
   async function onReflectanceRun(settings) {
     toolModal.value = null
-    exportProgress.open('Building Reflectance Map', 1, () => terminateAll('reflectance map cancelled'), {
+    exportProgress.open('Building Reflectance Map', 1, () => cancelRun('reflectance map cancelled'), {
       unit: 'blocks',
     })
     let record = null

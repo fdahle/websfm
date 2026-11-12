@@ -40,6 +40,11 @@ Notable changes to websfm. The format follows
   factorisation added no measurable time (Reconstruct 80 s either way).
 
 ### Changed
+- **Cancel stops only the run.** Cancelling a Reconstruct or Tools run now stops just the
+  workers that run was using: importing photos, building their previews, map and DEM
+  previews and the segmentation tool carry on, and a worker that was idle keeps what it
+  had loaded (the GPU matcher's cache, the learned models). A cancel is logged as a
+  cancel, no longer as an error. Before, Cancel restarted every worker.
 - **Truer heights from RTK-only drone blocks.** With RTK or PPK camera positions in the
   solve, Auto self-calibration now always solves the lens's decentring (p1, p2) instead of
   testing whether it lowers the reprojection error. With the camera heights held, even a
