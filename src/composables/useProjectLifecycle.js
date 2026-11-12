@@ -173,6 +173,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   }
 
   // ── Open ────────────────────────────────────────────────────────────────────
+  // → true when the project is open, false when it was refused, failed or waits on a
+  // folder prompt.
   async function openProject(id) {
     if (refuseWhileBusy('Open project')) return false
     const loadStarted = performance.now()
@@ -192,8 +194,9 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
       return false
     }
     if (plan.action !== 'open') {
+      // Not opened yet: the folder prompt opens it once the user answers.
       folderPrompt.value = { id, action: plan.action, error: '' }
-      return
+      return false
     }
     // A move during a run whose tab closed before the run ended left its browser copy.
     await dropBrowserCopy(id).catch(() => {})
@@ -816,8 +819,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     })
     if (!id) return
     projectPickerOpen.value = false
-    await openProject(id)
-    showToast('Project opened', { detail: currentProjectName.value || '' })
+    // Only when it opened: a failed open has shown its own error.
+    if (await openProject(id)) showToast('Project opened', { detail: currentProjectName.value || '' })
   }
 
   function onProjectFilePick(event) {
