@@ -64,6 +64,13 @@ describe('deviceBudget', () => {
 })
 
 describe('createMemLedger', () => {
+  it('records sizes of 2–4 GiB and beyond', () => {
+    const l = createMemLedger()
+    for (const gib of [1, 2, 3, 4, 6]) {
+      l.track('a', gib * 2 ** 30)
+      expect(l.used()).toBe(gib * 2 ** 30)
+    }
+  })
   it('tracks, releases, and reports live + peak usage', () => {
     const l = createMemLedger()
     expect(l.used()).toBe(0)

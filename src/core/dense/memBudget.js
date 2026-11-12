@@ -109,7 +109,8 @@ export function createMemLedger() {
   let peak = 0
   return {
     track(tag, bytes) {
-      const b = Math.max(0, bytes | 0 || bytes) // tolerate large (non-int32) sizes
+      // Not `bytes | 0`: it wraps 2–4 GiB to a negative number (recorded as 0).
+      const b = Math.max(0, Number(bytes) || 0)
       used += b - (entries.get(tag) || 0)
       entries.set(tag, b)
       if (used > peak) peak = used
