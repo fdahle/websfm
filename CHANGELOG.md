@@ -156,6 +156,15 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Georeference from camera positions applies the GNSS antenna offset.** With a lever
+  arm set in the Sensors table (its GNSS antenna offset), Georeference now
+  fits the model to the antenna's position in each photo, as the bundle adjustment
+  already did. Before, the final fit paired the camera centre with the antenna, so every
+  product of a block placed by RTK or PPK positions without GCPs was shifted by the arm,
+  the full vertical offset on a nadir block (often 5–30 cm on drones), and Evaluate ▸
+  Pose Residuals showed a ± pattern between strips flown in opposite directions. A unit
+  test flies a lawnmower block with a (0.10, 0.05, −0.30) m arm: a ground point now lands
+  within 1 mm of its true position (0.29 m before) and every pose residual is under 1 mm.
 - **Georeferenced PLY, STL and GLB exports keep their millimetres.** A cloud or mesh
   exported in map coordinates now reads back where it was: binary PLY writes the
   positions in double precision, GLB keeps a rounded offset as its node translation, and

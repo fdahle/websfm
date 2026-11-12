@@ -81,6 +81,9 @@ export function createGeoreferencing({
   frameModel = () => null,
   // True while the project's stores are restoring (projectStores.js projectRestoring).
   restoring = ref(false),
+  // () → (imageId → the sensor's GNSS lever arm in metres, camera axes, or null): a
+  // pose of such an image is the antenna's position, at C + Rᵀ·a, not the centre's.
+  leverArms = () => () => null,
 }) {
   const inPinhole = (list) =>
     gcpsInPinholeFrame(list, {
@@ -152,10 +155,16 @@ export function createGeoreferencing({
 
   // 3D-3D correspondences for the SfM→CRS fit: registered sparse camera centres
   // ↔ imported camera poses (both keyed to images; poses are in the project CRS).
-  function georefPairs() {
+  // A pose taken at a GNSS antenna (leverArmFor) pairs with the antenna's point,
+  // C + Rᵀ·a / scale in the SfM frame, as in the bundle adjustment
+  // (core/sfm/surveyConstraints.js) and core/eval/positionCheck.js; `scale` is the
+  // SfM → CRS scale of the fit, null ⇒ the centres (the first round of a fit).
+  function georefPairs(scale = null) {
     const cams = sparseCameras.value
     if (!cams.size) return []
     const imgById = new Map(images.value.map((im) => [im.id, im]))
+    const unitsPerMetre = 1 / (metresPerCrsUnit(currentCrs()) ?? 1)
+    const leverArmFor = leverArms()
     const pairs = []
     for (const p of poses()) {
       if (p.enabled === false || p.imageId == null || !finite3d(p)) continue
@@ -173,14 +182,39 @@ export function createGeoreferencing({
             [0, 0, 1 / sig[2] ** 2],
           ]
         : null
+      const C = cameraCenter(cam)
+      const a = scale > 0 ? leverArmFor(p.imageId) : null
+      const k = a ? unitsPerMetre / scale : 0
+      const R = cam.R
       pairs.push({
-        src: cameraCenter(cam),
+        src: a ? [0, 1, 2].map((i) => C[i] + k * (R[0][i] * a[0] + R[1][i] * a[1] + R[2][i] * a[2])) : C,
         dst: [p.x, p.y, p.z],
         weight: inverseVariance3d(p),
         ...(precision ? { precision } : {}),
       })
     }
     return pairs
+  }
+  const anyLeverArm = () => {
+    const leverArmFor = leverArms()
+    return poses().some((p) => p.enabled !== false && p.imageId != null && leverArmFor(p.imageId))
+  }
+
+  // The pose fit with the antenna offsets: the offset in the SfM frame needs the
+  // scale, which comes from the fit, so fit the centres, then refit the antenna points
+  // at the latest scale (two rounds; each shrinks the scale error by arm / block size).
+  function fitPosePairs(local) {
+    let pairs = georefPairs()
+    let fit = fitGeoreference(pairs, local)
+    if (fit && anyLeverArm()) {
+      for (let it = 0; it < 2; it++) {
+        const next = fitGeoreference(georefPairs(fit.scale), local)
+        if (!next) break
+        fit = next
+      }
+      pairs = georefPairs(fit.scale)
+    }
+    return { fit, pairs }
   }
 
   // Maps needed to resolve a GCP observation's imageId → its registered camera:
@@ -290,7 +324,7 @@ export function createGeoreferencing({
     const held = usingGcps ? null : heldFrame()
     if (held && held.crs === currentCrs()) {
       // How far the camera positions sit from where the DEM-held solve put them.
-      const posePairs = georefPairs()
+      const posePairs = georefPairs(held.sim.scale)
       const sq = posePairs.map((p) => {
         const q = applySimilarity(held.sim, p.src)
         return (q[0] - p.dst[0]) ** 2 + (q[1] - p.dst[1]) ** 2 + (q[2] - p.dst[2]) ** 2
@@ -360,7 +394,7 @@ export function createGeoreferencing({
     }
     const local = await metricFrameFor(pairs.map((p) => p.dst))
     if (evidenceKey.value !== evidenceAtStart) return null
-    const fit = fitGeoreference(pairs, local)
+    const fit = usingGcps ? fitGeoreference(pairs, local) : fitPosePairs(local).fit
     if (!fit) {
       clearFit()
       log('Georeference: fit failed (degenerate configuration)', 'warn', 'Products')
@@ -441,13 +475,21 @@ export function createGeoreferencing({
     const cams = sparseCameras.value
     if (!sim || !cams.size) return []
     const imgById = new Map(images.value.map((im) => [im.id, im]))
+    const leverArmFor = leverArms()
     const out = []
     for (const p of poses()) {
       if (p.enabled === false || p.imageId == null || !finite3d(p)) continue
       const im = imgById.get(p.imageId)
       const cam = im && cams.get(im.uuid)
       if (!cam) continue
-      const fit = applySimilarity(sim, cameraCenter(cam))
+      // The antenna's point when the pose was taken at one (georefPairs).
+      const C = cameraCenter(cam)
+      const a = leverArmFor(p.imageId)
+      const k = a ? 1 / (metresPerCrsUnit(currentCrs()) ?? 1) / sim.scale : 0
+      const src = a
+        ? [0, 1, 2].map((i) => C[i] + k * (cam.R[0][i] * a[0] + cam.R[1][i] * a[1] + cam.R[2][i] * a[2]))
+        : C
+      const fit = applySimilarity(sim, src)
       const dx = fit[0] - p.x,
         dy = fit[1] - p.y,
         dz = fit[2] - p.z
@@ -490,7 +532,7 @@ export function createGeoreferencing({
     const method = validGeoref.value?.method
     const fitPairs =
       method === 'poses'
-        ? georefPairs()
+        ? georefPairs(sim?.scale)
         : method === 'gcps'
           ? controls.map(({ gcp, tri }) => ({
               src: [tri.x, tri.y, tri.z],

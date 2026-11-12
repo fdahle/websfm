@@ -794,6 +794,9 @@ Mahalanobis objective.
 
 Correspondences are **triangulated GCPs ↔ surveyed coordinates** when ≥ 3 GCPs
 triangulate (preferred: GCPs define accuracy), else **camera centres ↔ camera positions**.
+A sensor with a GNSS lever arm (§6.4) gives antenna positions, so its cameras pair as the
+antenna points `C + Rᵀ·a / s`: fitted first with the centres, then twice more at the latest
+scale `s`. The DEM-held placement's RMS and Evaluate ▸ Pose Residuals compare the same points.
 A model held to a reference DEM by its camera positions is not fitted: it is placed in the
 frame of the hold's last round, moved in height between the cameras and the DEM (§6.5).
 `gcpAccuracyReport()` gives the per-GCP CRS residual and per-mark reprojection error.

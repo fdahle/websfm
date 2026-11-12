@@ -39,6 +39,7 @@ import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
 import { useScaleBarsStore } from './useScaleBarsStore.js'
 import { makeFrameModelResolver } from '../core/sfm/displayFrame.js'
+import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { pluralize } from '../core/textFormat.js'
 import { mainOf, nextProductName, outdatedReasons, stampOf } from '../core/products/productSet.js'
 
@@ -1144,6 +1145,12 @@ export const useReconstructionStore = registerProjectStore(
       save,
       log,
       frameModel: () => frameModelFor.value,
+      // The same arms the run's camera priors use (sparseRun.js).
+      leverArms: () => {
+        const armBySensor = new Map(sensors.value.map((s) => [s.id, normalizeLeverArm(s.gnssLeverArm)]))
+        const sensorOf = new Map(images.value.map((im) => [im.id, im.sensorId]))
+        return (imageId) => armBySensor.get(sensorOf.get(imageId)) ?? null
+      },
     })
 
     const { canFitScale, fitScaleBars, scaleBarReport, scaleFitStatus, markerPositions } = createScaling({

@@ -334,3 +334,67 @@ it('keeps a restored georeference while the project is still restoring, then che
   expect(georef.value).toBeNull()
   scope.stop()
 })
+
+it('places a block flown with a GNSS lever arm by its antenna positions', async () => {
+  // Lawnmower nadir block, strips flown in alternate directions (yaw 0° / 180°), in a
+  // metre CRS; the SfM frame is the CRS shrunk 10× about an offset. The poses are the
+  // ANTENNA positions, C + Rᵀ·a with a = (0.10, 0.05, −0.30) m in camera axes.
+  const off = [500000, 5400000, 0]
+  const arm = [0.1, 0.05, -0.3]
+  const nadir = [
+    [1, 0, 0],
+    [0, -1, 0],
+    [0, 0, -1],
+  ]
+  const back = [
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, 0, -1],
+  ]
+  const cams = new Map(),
+    poses = [],
+    images = []
+  for (let strip = 0; strip < 4; strip++)
+    for (let k = 0; k < 6; k++) {
+      const id = `s${strip}k${k}`
+      const Rw = strip % 2 ? back : nadir
+      const C = [off[0] + 40 * k + 3 * strip, off[1] + 30 * strip, 120 + (k % 3)]
+      const Cs = C.map((v, i) => (v - off[i]) / 10)
+      const t = [0, 1, 2].map((i) => -(Rw[i][0] * Cs[0] + Rw[i][1] * Cs[1] + Rw[i][2] * Cs[2]))
+      cams.set(id, { R: Rw, t })
+      const ant = [0, 1, 2].map((i) => C[i] + Rw[0][i] * arm[0] + Rw[1][i] * arm[1] + Rw[2][i] * arm[2])
+      poses.push({ imageId: id, x: ant[0], y: ant[1], z: ant[2] })
+      images.push({ id, uuid: id, sensorId: 'drone' })
+    }
+  const georef = ref(null)
+  const scope = effectScope()
+  const api = scope.run(() =>
+    createGeoreferencing({
+      sparseCameras: ref(cams),
+      images: ref(images),
+      georef,
+      healthDirty: ref(0),
+      poses: () => poses,
+      gcps: () => [],
+      currentCrs: () => 'local',
+      save: vi.fn(),
+      log: vi.fn(),
+      leverArms: () => (imageId) => (images.some((im) => im.id === imageId) ? arm : null),
+    }),
+  )
+  const fitted = await api.georeference()
+  expect(fitted.method).toBe('poses')
+  const { applySimilarity } = await import('../../core/products/georef.js')
+  // A ground point maps to its true CRS position (without the arm: 0.30 m high).
+  const G = [off[0] + 100, off[1] + 45, 12.5]
+  const q = applySimilarity(
+    fitted.sim,
+    G.map((v, i) => (v - off[i]) / 10),
+  )
+  for (let i = 0; i < 3; i++) expect(Math.abs(q[i] - G[i])).toBeLessThan(1e-3)
+  // Pose residuals show no ± pattern from the arm.
+  const rows = api.poseResidualReport()
+  expect(rows).toHaveLength(24)
+  for (const r of rows) expect(r.dTotal).toBeLessThan(1e-3)
+  scope.stop()
+})
