@@ -315,6 +315,10 @@ export function decodeCopcRecords(records, count, lod, { as = 'render' } = {}) {
  * node read elsewhere, e.g. in a worker); hierarchy 'all' | 'lazy': the pages below the
  * root page are read as `read` reaches the nodes above them.
  */
+// More octree nodes than any real cloud has (a 1,000-billion-point cloud at 100 k points
+// per node is 10 M): past it, the hierarchy is taken as broken.
+const COPC_MAX_NODES = 50_000_000
+
 export async function openCopcSource(
   lod,
   source,
@@ -323,14 +327,25 @@ export async function openCopcSource(
   const nodes = new Map()
   const pages = new Map() // keyString → { offset, length }: a page not read yet
   const reading = new Map() // keyString → Promise
+  // A broken or hostile file must fail, not hang: every page is read at most once (two
+  // pages that point at each other re-registered each other forever), an entry has
+  // count ≥ −1 and its bytes inside the file, and the nodes are capped.
+  const visited = new Set()
   async function readPage({ offset, length }) {
-    if (offset + length > source.size || length < ENTRY) throw new Error('COPC: hierarchy page outside the file')
+    if (!(offset >= 0) || !(length >= ENTRY) || offset + length > source.size)
+      throw new Error('COPC: hierarchy page outside the file')
+    if (visited.has(offset)) return
+    visited.add(offset)
     for (const e of parseHierarchyPage(await source.read(offset, offset + length))) {
       const s = keyString(e.key)
+      if (!Number.isInteger(e.count) || e.count < -1) throw new Error(`COPC: node ${s} has point count ${e.count}`)
+      if (e.count !== 0 && !(e.offset >= 0 && e.length >= 0 && e.offset + e.length <= source.size))
+        throw new Error(`COPC: node ${s} points outside the file`)
       if (e.count === -1) {
-        if (!nodes.has(s)) pages.set(s, { offset: e.offset, length: e.length })
+        if (!nodes.has(s) && !visited.has(e.offset)) pages.set(s, { offset: e.offset, length: e.length })
       } else {
         nodes.set(s, { key: e.key, count: e.count, offset: e.offset, length: e.length })
+        if (nodes.size > COPC_MAX_NODES) throw new Error(`COPC: more than ${COPC_MAX_NODES.toLocaleString()} nodes`)
         pages.delete(s)
       }
     }

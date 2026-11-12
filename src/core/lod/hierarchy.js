@@ -29,18 +29,23 @@ export function encodeHierarchy(nodes) {
 }
 
 /** Uint8Array → Map keyString → { key, count, offset, length } (in file order) */
-export function decodeHierarchy(bytes) {
+// `dataSize`: the data file's size; an entry whose bytes lie outside it (a damaged file)
+// throws rather than reaching a read.
+export function decodeHierarchy(bytes, { dataSize = Infinity } = {}) {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength)
   const nodes = new Map()
   for (let o = 0; o + ENTRY <= u8.byteLength; o += ENTRY) {
     const key = [dv.getUint8(o), dv.getUint32(o + 4, true), dv.getUint32(o + 8, true), dv.getUint32(o + 12, true)]
-    nodes.set(keyString(key), {
+    const node = {
       key,
       count: dv.getUint32(o + 16, true),
       offset: dv.getFloat64(o + 20, true),
       length: dv.getUint32(o + 28, true),
-    })
+    }
+    if (node.length && !(Number.isInteger(node.offset) && node.offset >= 0 && node.offset + node.length <= dataSize))
+      throw new Error(`Octree node ${keyString(key)} points outside its data file`)
+    nodes.set(keyString(key), node)
   }
   return nodes
 }

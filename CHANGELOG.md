@@ -156,6 +156,10 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **A broken COPC file is refused instead of hanging.** Importing a COPC file whose
+  hierarchy pages point at each other, or whose entries point outside the file, now stops
+  with an error. Before, the first kind kept a worker busy with the progress stuck until
+  Cancel, and the second reached the reader with impossible sizes.
 - **Matches near the frame edge survive verification when the lens is known.** Photos whose
   camera group has a lens calibration (imported, or entered in the Sensors table) now have
   their matches verified with the lens taken out, as fisheye photos already were. A wide

@@ -250,3 +250,47 @@ describe('COPC as a 3D Tiles source', () => {
     expect(lasEpsg(lod)).toBe(25832)
   })
 })
+
+describe('a broken COPC hierarchy', () => {
+  const entry = (dv, o, key, off, len, cnt) => {
+    key.forEach((k, i) => dv.setInt32(o + 4 * i, k, true))
+    dv.setBigUint64(o + 16, BigInt(off), true)
+    dv.setInt32(o + 24, len, true)
+    dv.setInt32(o + 28, cnt, true)
+  }
+  const open = async (buf) => {
+    const { openCopcSource } = await import('./copc.js')
+    let reads = 0
+    const source = {
+      size: buf.length,
+      read: async (s, e) => {
+        if (++reads > 1000) throw new Error('LOOP')
+        return buf.slice(s, e)
+      },
+    }
+    const lod = {
+      root: { min: [0, 0, 0], size: 1 },
+      spacing: 1,
+      copc: { rootPage: { offset: 0, length: 32 }, lazVlr: new Uint8Array(1) },
+    }
+    return openCopcSource(lod, source, { hierarchy: 'all' })
+  }
+  it('with two pages pointing at each other finishes instead of looping', async () => {
+    const buf = new Uint8Array(96),
+      dv = new DataView(buf.buffer)
+    entry(dv, 0, [1, 0, 0, 0], 32, 32, -1)
+    entry(dv, 32, [1, 1, 0, 0], 64, 32, -1)
+    entry(dv, 64, [1, 0, 0, 0], 32, 32, -1)
+    await expect(open(buf)).resolves.toBeTruthy()
+  })
+  it('with a point count below −1 or points past the file end is refused', async () => {
+    const bad = new Uint8Array(32),
+      dv = new DataView(bad.buffer)
+    entry(dv, 0, [0, 0, 0, 0], 0, 0, -5)
+    await expect(open(bad)).rejects.toThrow(/point count -5/)
+    const past = new Uint8Array(32),
+      dv2 = new DataView(past.buffer)
+    entry(dv2, 0, [0, 0, 0, 0], 16, 9999, 10)
+    await expect(open(past)).rejects.toThrow(/outside the file/)
+  })
+})

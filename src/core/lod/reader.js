@@ -12,7 +12,7 @@ import { nodeCube } from './octree.js'
  * spacing(node), read(node, { as }) → decoded points }
  */
 export async function openLodReader(lod, { data, hierarchy }) {
-  const nodes = decodeHierarchy(new Uint8Array(await hierarchy.arrayBuffer()))
+  const nodes = decodeHierarchy(new Uint8Array(await hierarchy.arrayBuffer()), { dataSize: data.size })
   return {
     nodes,
     root: nodes.get('0-0-0-0') ?? null,
