@@ -1,10 +1,14 @@
 # Response headers for Cloudflare static assets (deploy/cloudflare/). Other hosts
 # ignore this file; deploy/nginx.conf sets the same for nginx.
 
-# Cross-origin isolation → multi-threaded ONNX Runtime (see vite.config.js).
+# Cross-origin isolation → multi-threaded ONNX Runtime (see vite.config.js). The
+# hardening headers and the report-only CSP are deploy/nginx.conf's, explained there.
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' data: blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
 # Content-hashed build output. Everything else keeps Cloudflare's default
 # (max-age=0, must-revalidate), which index.html, sw.js and the manifest need.

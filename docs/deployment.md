@@ -44,6 +44,16 @@ Configure the production host as follows:
   separate model host are all CORS requests), so a host that serves models from
   another origin only needs the `Access-Control-Allow-Origin` above.
 
+- **Security headers.** [`deploy/nginx.conf`](../deploy/nginx.conf) and
+  [`public/_headers`](../public/_headers) send `X-Content-Type-Options: nosniff`, a
+  referrer policy and a Content-Security-Policy in **report-only** mode: scripts only
+  from the app's origin (WebAssembly compiled, never `eval`), workers from the origin or
+  `blob:`, no framing; images and fetches from any `https:` host, since users add their
+  own tile servers. Before enforcing it (rename the header to
+  `Content-Security-Policy`), open the deployed app with the browser console showing,
+  use every feature once (a learned detector and LightGlue, a DEM, an orthophoto,
+  Copernicus DEM, Sentinel-2, a web basemap, video import, export) and check that no
+  report-only violation is logged.
 - **Static file types.** Serve `.wasm` as `application/wasm` and `.mjs` as
   `text/javascript`. An incorrect WASM type disables streaming compilation and an
   incorrect MJS type prevents ONNX Runtime from loading.
