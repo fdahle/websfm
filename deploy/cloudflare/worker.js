@@ -15,7 +15,13 @@ export default {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD' } })
     }
-    const path = decodeURIComponent(new URL(request.url).pathname)
+    let path
+    try {
+      path = decodeURIComponent(new URL(request.url).pathname)
+    } catch {
+      // A malformed escape (a lone %) is the client's error, not the worker's.
+      return new Response('Bad request', { status: 400 })
+    }
     const object = await env.LARGE_FILES.get(path.slice(1), { onlyIf: request.headers })
 
     if (object === null) {
