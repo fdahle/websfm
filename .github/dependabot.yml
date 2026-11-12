@@ -1,0 +1,19 @@
+# Weekly update pull requests for the npm packages, the Rust crates and the GitHub
+# Actions. Each one runs the usual checks; a crate update also needs `npm run
+# build:wasm` and the regenerated src/wasm/ committed with it (CONTRIBUTING.md).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: cargo
+    directory: /crates
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
