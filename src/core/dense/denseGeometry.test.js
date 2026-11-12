@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { unprojectPixel, pixelUnprojector, pixelProjector, project } from './denseGeometry.js'
+import { unprojectPixel, pixelUnprojector } from './denseGeometry.js'
 
 describe('pixelUnprojector', () => {
   it('writes the bits unprojectPixel returns, into the object it is given', () => {

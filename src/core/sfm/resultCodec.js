@@ -227,7 +227,6 @@ export function packSparseCloud(cloud) {
 
 function unpackModel(model) {
   if (!model || model.packedVersion !== PACKED_VERSION) return model
-  const count = model.pointCount ?? 0
   const b = model.buffers || {}
   const pos = new Float64Array(b.pos)
   const col = b.col ? new Uint8Array(b.col) : null

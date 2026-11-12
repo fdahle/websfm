@@ -101,7 +101,6 @@ describe('raster warp', () => {
   })
 
   it("keeps an orthophoto's transparency and blends only between opaque cells", () => {
-    const s = { width: 4, height: 1, gsd: 1, originX: 0, originY: 1 }
     const rgba = Uint8ClampedArray.of(0, 0, 0, 0, 100, 0, 0, 255, 200, 0, 0, 255, 0, 0, 0, 0)
     const out = new Uint8ClampedArray(4 * 4)
     // Positions: between cells 1 and 2 (both opaque), between 0 and 1 (one transparent), on cell 3.

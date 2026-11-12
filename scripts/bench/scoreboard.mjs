@@ -166,7 +166,6 @@ function run(exe, argv, logFile, opts = {}) {
   })
 }
 
-const r = (v, d) => (v == null || !Number.isFinite(v) ? null : Number(v.toFixed(d)))
 const read = async (f) => (existsSync(f) ? JSON.parse(await readFile(f, 'utf8')) : null)
 
 // One tool's result in common terms: lengths in metres, times in seconds.

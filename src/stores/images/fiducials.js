@@ -532,7 +532,6 @@ export function createImageFiducials({
     const { spacingMm, armMm, widthMm } = settings
     const pairs = pairReseauHalves(images.value.filter((img) => img.sensorId === sensor.id))
     if (!pairs.length) throw new Error("No half-frame pairs (<name>_a / <name>_b) among this sensor's scans")
-    const cell = spacingMm / pitchMm
     const opts = {
       pitchMm,
       spacingMm,

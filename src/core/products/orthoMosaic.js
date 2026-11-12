@@ -5,6 +5,7 @@ import { srgbToLinear, linearToSrgb, fitGains, exposurePriors, gainSampleClipped
 import { sampleSurfaceWindow } from './surface.js'
 import { seamGrid, seamSampleCol, createSeamSurvey, addSeamCandidate, solveSeams, SEAM_CUT_CELLS } from './seamCut.js'
 import { MULTIBAND_LEVELS, multibandReach } from './multiband.js'
+import { orthoRunSettings } from '../runSettings.js'
 import {
   NO_LABEL,
   WIN_TILE,
@@ -395,9 +396,12 @@ export function chamferTo(labels, w, x0, y0, x1, y1, target, dist) {
 // region) gets weight (3·seamCells − d) / (3·seamCells), 1 inside; a cell whose
 // smoothed label is not mi but whose pass-1 label is, records mi's colour as its
 // fallback. Sums are in linear light with mi's gains applied.
+const ORTHO_RUN_DEFAULTS = orthoRunSettings()
+
 export function blendFromMap(win, grid, m, photo, mi, gp, toSfm, opts, scratch, box, seam3, gains) {
-  const { x0, y0, w, data, mask, raw, label, dist, sums, fallback, flags } = win
-  const { depthTolRel = 0.02, maxCost = Infinity } = opts
+  const { w, data, mask, raw, label, dist, sums, fallback, flags } = win
+  // Omitted options are the user defaults in run units (core/runSettings.js).
+  const { depthTolRel = ORTHO_RUN_DEFAULTS.depthTolRel, maxCost = ORTHO_RUN_DEFAULTS.maxCost } = opts
   const { P, g, px } = scratch,
     see = mapSight(m, gp.up, depthTolRel, maxCost)
   const g0 = gains ? gains[mi * 3] : 1,

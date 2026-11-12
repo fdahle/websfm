@@ -73,8 +73,6 @@ describe('bundle adjustment held to a reference DEM', () => {
     })
     return Math.sqrt(s / points.length)
   }
-  const georef = (cams) =>
-    fitSimilarity(cams.map((c, i) => ({ src: cameraCenter(c), dst: cameraCenter(truthCams[i]) })))
   function heightError(points, sim) {
     let s = 0
     for (const p of points) {

@@ -847,8 +847,8 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
       for (let v = 0; v < S; v++) {
         for (let u = 0; u < S; u++) {
           // ray (world) = Rᵀ·((u−cx)/fx, (v−cy)/fy, 1); ground z = 0.05·x
+          // (The ray's y does not reach a plane sloped in x only.)
           const dx = (u - K.cx) / K.fx,
-            dy = -(v - K.cy) / K.fy,
             dz = -1
           const s = (0.05 * cx - cz) / (dz - 0.05 * dx)
           const r = rnd(),

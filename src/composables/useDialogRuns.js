@@ -61,7 +61,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     coregisterInitial,
   } = storeToRefs(useModalsStore())
   const demCoregistration = useDemCoregistration()
-  const { imageViewPrefs, patchImageView } = useImageViewSettings()
+  const { patchImageView } = useImageViewSettings()
 
   function onDetectRun(settings) {
     detectFeaturesOpen.value = false

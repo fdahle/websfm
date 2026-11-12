@@ -272,12 +272,10 @@ it('holds saves while switching projects, until the old project is cleared', asy
   const lease = await import('../utils/projectLease.js')
   const spies = [
     vi.spyOn(lease, 'acquireProjectLease').mockResolvedValue(() => {}),
-    vi
-      .spyOn(opfs, 'readProject')
-      .mockResolvedValue({
-        formatVersion: (await import('../core/projectFormat.js')).PROJECT_FORMAT_VERSION,
-        images: [],
-      }),
+    vi.spyOn(opfs, 'readProject').mockResolvedValue({
+      formatVersion: (await import('../core/projectFormat.js')).PROJECT_FORMAT_VERSION,
+      images: [],
+    }),
     vi.spyOn(opfs, 'readIndex').mockResolvedValue({ projects: [] }),
     vi.spyOn(opfs, 'writeIndex').mockResolvedValue(),
   ]

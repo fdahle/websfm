@@ -451,7 +451,7 @@ export function removeIsolated(cloud, { cell = 0, minNeighbors = 2, maxSupport =
   const bounds = cloudBounds(cloud)
   const auto = Math.max(estimateSpacing(bounds, n) * 4, 1e-9)
   const grid = buildSpatialGrid(cloud, bounds, cell > 0 ? cell : auto)
-  const { start, order, keyAt, idOfKey, cellCount, cellOf, gx, gy, gz } = grid
+  const { start, keyAt, idOfKey, cellCount, cellOf, gx, gy, gz } = grid
 
   // One representative point per cell gives us the cell's grid indices.
   const rep = new Int32Array(cellCount)

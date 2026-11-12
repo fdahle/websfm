@@ -30,7 +30,7 @@ import {
   nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
 import { pluralize } from '../../core/textFormat.js'
-import { DETECT_TUNING, IMAGE_QUALITY_TUNING, TAG_DETECT_TUNING } from '../../core/tuning.js'
+import { IMAGE_QUALITY_TUNING, TAG_DETECT_TUNING } from '../../core/tuning.js'
 import { DETECT_SIFT_DEFAULTS } from '../../core/defaults.user.js'
 import { faintRetry } from '../../core/features/faintRetry.js'
 import { findCheckerCorner } from '../../core/sfm/targetDetect.js'

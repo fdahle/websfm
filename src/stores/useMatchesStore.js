@@ -386,7 +386,7 @@ export const useMatchesStore = registerProjectStore(
       return n
     })
 
-    const { verifyMapperFor, matchPairOnce } = createPairMatcher({
+    const { matchPairOnce } = createPairMatcher({
       canonFor,
       holdMatches,
       isPersisting,
@@ -425,7 +425,7 @@ export const useMatchesStore = registerProjectStore(
     const bumpGeneration = () => {
       restoreGeneration++
     }
-    const { positionsByUuid, footprintRingsByUuid, matchAll } = createMatchAll({
+    const { matchAll } = createMatchAll({
       log,
       matchPair,
       matchRun,

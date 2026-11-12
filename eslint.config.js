@@ -6,7 +6,19 @@ export default [
   {
     files: ['**/*.js', '**/*.mjs'],
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: globals.browser },
-    rules: { 'no-undef': 'error', 'no-unreachable': 'error', 'constructor-super': 'error', 'getter-return': 'error' },
+    rules: {
+      'no-undef': 'error',
+      'no-unreachable': 'error',
+      'constructor-super': 'error',
+      'getter-return': 'error',
+      // An import or a binding nothing reads is usually a leftover, sometimes a bug (a
+      // shadowed name: usePipeline's cancel once called itself). Arguments and caught
+      // errors are exempt (signatures), and `_name` marks one kept on purpose.
+      'no-unused-vars': [
+        'error',
+        { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_', ignoreRestSiblings: true },
+      ],
+    },
   },
   // src/core/ is pure (AGENTS.md): no Vue, Pinia, stores, OPFS or other browser I/O, so it
   // runs in a worker and in Node tests alike. Inject I/O instead (verticalDatum.loadGeoid

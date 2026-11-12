@@ -267,7 +267,6 @@ const so3 = (w) => {
     ]
   }
   const u = w.map((v) => v / a),
-    K = skew3(u),
     c = Math.cos(a),
     s = Math.sin(a),
     q = 1 - c

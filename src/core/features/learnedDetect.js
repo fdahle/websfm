@@ -144,7 +144,7 @@ export function classifyOutputs(results, outputNames, dim) {
  * @returns {Promise<{keypoints:{x:number,y:number,score:number}[], descriptors:Float32Array, dim:number}>}
  */
 export async function detectLearned(spec, pixels, w, h, opts = {}) {
-  const { label, descDim: dim, channels } = spec
+  const { label, channels } = spec
   const { maxKeypoints = 5000, model = modelUrl(spec.modelId), modelKey = spec.modelId, onLog } = opts
   let { backend, reason } = await chooseBackend(spec, modelKey, w * h)
   let session = await getSession(label, model, modelKey, backend, onLog, reason)

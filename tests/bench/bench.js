@@ -2434,7 +2434,7 @@ window.bench = {
       targetRatio: DECIMATE_MESH_DEFAULTS.targetRatio,
       preserveBoundary: DECIMATE_MESH_DEFAULTS.preserveBoundary,
     })
-    const smoothed = await run('TOOL03 smoothed', 'mesh-smooth', decimated, { ...SMOOTH_MESH_DEFAULTS })
+    await run('TOOL03 smoothed', 'mesh-smooth', decimated, { ...SMOOTH_MESH_DEFAULTS })
     const closed = await run('TOOL03 closed', 'mesh-clean', cleaned, { ...CLEAN_MESH_DEFAULTS, maxHoleEdges: 0 })
     const t0 = performance.now()
     const m = meshMeasure(closed)

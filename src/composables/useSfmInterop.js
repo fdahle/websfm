@@ -28,11 +28,6 @@ const cleanPath = (path) =>
     .replace(/^\.\//, '')
 const baseName = (path) => cleanPath(path).split('/').pop()
 
-function safeArchivePath(path) {
-  const p = cleanPath(path)
-  return p && !p.startsWith('/') && !p.split('/').includes('..')
-}
-
 function modelSummary(files, name) {
   const binary = !!(files['cameras.bin'] || files['images.bin'] || files['points3D.bin'])
   const complete = binary

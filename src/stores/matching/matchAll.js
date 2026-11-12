@@ -2,7 +2,7 @@
 // footprint), the subset gate, the worker pool and the WebGPU router, progress and
 // one save at the end. Split out of useMatchesStore; `deps` are the store's state
 // and helpers, and `beginBatch` / `endBatch` / `bumpGeneration` its counters.
-import { computed, toRaw } from 'vue'
+import { toRaw } from 'vue'
 import * as opfs from '../../utils/opfs.js'
 import { canContinue, holdingWrites, journalKey, journalSettings, startJournal } from '../../core/runJournal.js'
 import {

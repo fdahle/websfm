@@ -71,7 +71,6 @@ export function useModalEscape({
     toolModal,
     gcpImportOpen,
     gcpImportText,
-    gcpImportName,
     gcpImportGeojson,
     gcpImportCrs,
     footprintImportOpen,

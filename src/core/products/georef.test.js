@@ -20,11 +20,6 @@ function rotZ(theta) {
     [0, 0, 1],
   ]
 }
-const apply = (R, p) => [
-  R[0][0] * p[0] + R[0][1] * p[1] + R[0][2] * p[2],
-  R[1][0] * p[0] + R[1][1] * p[1] + R[1][2] * p[2],
-  R[2][0] * p[0] + R[2][1] * p[1] + R[2][2] * p[2],
-]
 
 describe('fitSimilarity', () => {
   it('recovers a known scale + rotation + translation exactly', () => {

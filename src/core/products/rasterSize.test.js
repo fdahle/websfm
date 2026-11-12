@@ -4,7 +4,6 @@ import {
   orthoGridFor,
   orthoDemSurface,
   demGridFor,
-  DEM_PLANE_MAX,
   MAX_RASTER_SIDE,
   demAutoMaxSide,
 } from './rasterSize.js'

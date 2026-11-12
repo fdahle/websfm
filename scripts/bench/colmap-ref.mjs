@@ -19,7 +19,7 @@
 // Writes bench-out/colmap-<name>-<stamp>/ (database, models, logs) and a JSON summary.
 import { spawnSync } from 'node:child_process'
 import { readFile, writeFile, readdir, mkdir, stat } from 'node:fs/promises'
-import { existsSync, openSync, readSync, closeSync } from 'node:fs'
+import { openSync, readSync, closeSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadReference } from './reference.mjs'
