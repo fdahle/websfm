@@ -6,6 +6,7 @@ import {
   SHORTCUT_GROUPS,
   parseCombo,
   matches,
+  gesture,
   comboLabel,
   shortcutLabel,
   shortcutSections,
@@ -57,12 +58,29 @@ describe('shortcut table', () => {
       .join('\n')
     const matched = new Set([...text.matchAll(/matches\(\s*\w+,\s*'([\w.]+)'/g)].map((m) => m[1]))
     const used = new Set(
-      [...text.matchAll(/(?:matches\(\s*\w+,|shortcutLabel\(|keyLabel\()\s*'([\w.]+)'/g)].map((m) => m[1]),
+      [...text.matchAll(/(?:matches\(\s*\w+,|gesture\(\s*\w+,|shortcutLabel\(|keyLabel\()\s*'([\w.]+)'/g)].map(
+        (m) => m[1],
+      ),
     )
     const ids = new Set(SHORTCUTS.map((s) => s.id))
     for (const id of used) expect(ids.has(id), `unknown shortcut ${id}`).toBe(true)
     for (const s of SHORTCUTS.filter((x) => !x.combos.every((c) => c.mouse)))
       expect(matched.has(s.id), `${s.id} is listed but no handler matches it`).toBe(true)
+  })
+})
+
+describe('gesture', () => {
+  const ptr = (mods = {}) => ({ shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...mods })
+  it('matches a mouse gesture by its exact modifiers', () => {
+    expect(gesture(ptr({ shiftKey: true }), 'select3d.add')).toBe(true)
+    expect(gesture(ptr({ shiftKey: true, altKey: true }), 'select3d.add')).toBe(false)
+    expect(gesture(ptr({ altKey: true }), 'select3d.subtract')).toBe(true)
+    expect(gesture(ptr({ metaKey: true }), 'select3d.subtract')).toBe(true)
+    expect(gesture(ptr(), 'select3d.add')).toBe(false)
+    expect(gesture(ptr({ ctrlKey: true }), 'images.toggle')).toBe(true)
+  })
+  it('never matches a key shortcut', () => {
+    expect(gesture(ptr({ ctrlKey: true }), 'mask.undo')).toBe(false)
   })
 })
 

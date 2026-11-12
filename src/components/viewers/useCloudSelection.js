@@ -3,6 +3,7 @@
 // the viewer's renderer state live; `cloudLayers` is its layer map.
 import * as THREE from 'three'
 import { ref, watch } from 'vue'
+import { gesture } from '../../core/help/shortcuts.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { resolveCloudStyle } from '../../core/products/cloudStyle.js'
 import { screenSelectMask, maskIndices } from '../../core/products/screenSelect.js'
@@ -167,7 +168,7 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     e.preventDefault()
     const [x, y] = pointerPx(e)
     drawing = {
-      op: e.shiftKey ? 'add' : e.altKey || e.ctrlKey || e.metaKey ? 'subtract' : 'replace',
+      op: gesture(e, 'select3d.add') ? 'add' : gesture(e, 'select3d.subtract') ? 'subtract' : 'replace',
       startX: x,
       startY: y,
       pts: [x, y],

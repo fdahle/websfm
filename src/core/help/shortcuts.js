@@ -9,8 +9,8 @@
 // A combo is written 'Mod+Shift+Z': `Mod` is Ctrl, or ⌘ on a Mac (either is accepted
 // on every platform, as before), then Shift / Alt, then the key as `KeyboardEvent.key`
 // names it ('Escape', 'Enter', '[', 'z'). A combo ending in Click or Drag is a mouse
-// gesture: listed in the dialog, never matched here (its handler reads the modifier
-// from the pointer event, see each entry's `where`).
+// gesture: listed in the dialog and tested on the pointer event with `gesture(e, id)`
+// (see each entry's `where`), never by `matches`.
 //
 // Plain control behaviour (Enter / Esc in a rename field, arrow keys in a menu, Tab)
 // is not a shortcut and is not listed.
@@ -24,6 +24,7 @@ export const SHORTCUT_GROUPS = [
   { id: 'region3d', title: '3D view ▸ Region' },
   { id: 'measure2d', title: 'DEM, orthophoto and map ▸ Measure' },
   { id: 'gcpMarks', title: 'GCP marks view ▸ Detected marks' },
+  { id: 'console', title: 'Console' },
 ]
 
 const TABLE = [
@@ -130,6 +131,9 @@ const TABLE = [
     does: 'Pan a DEM or orthophoto',
     where: 'ProductViewer',
   },
+
+  // ── Console (DevConsole.vue) ──
+  { id: 'console.selectAll', group: 'console', keys: ['Mod+A'], does: "Select the console's text, to copy it" },
 ]
 
 const MODIFIERS = new Set(['Mod', 'Shift', 'Alt'])
@@ -171,6 +175,14 @@ function comboMatches(e, c) {
   // with whatever its layout needs ('?' is Shift+/ or Shift+ß), so Shift is not
   // checked there, nor on a named key.
   return !isLetter(c.key) || !!e.shiftKey === c.shift
+}
+
+// Whether pointer event `e` carries the modifiers of mouse gesture `id` (any of its
+// Click / Drag combos), exactly: Shift+Drag is not Shift+Alt+Drag.
+export function gesture(e, id) {
+  return shortcut(id).combos.some(
+    (c) => c.mouse && !!(e.ctrlKey || e.metaKey) === c.mod && !!e.altKey === c.alt && !!e.shiftKey === c.shift,
+  )
 }
 
 // Whether keydown `e` is shortcut `id` (any of its combos).

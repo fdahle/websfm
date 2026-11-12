@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useLog, stripSourcePrefix } from '../../composables/useLog.js'
 import { useLogStore } from '../../stores/useLogStore.js'
+import { matches } from '../../core/help/shortcuts.js'
 import { askConfirm } from '../../composables/useConfirmations.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useCommands } from '../../composables/useCommands.js'
@@ -312,7 +313,7 @@ defineExpose({ focusPrompt: () => promptInput.value?.focus() })
 onMounted(() => promptInput.value?.focus())
 
 function onKeyDown(e) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+  if (matches(e, 'console.selectAll')) {
     e.preventDefault()
     const el = body.value
     if (!el) return

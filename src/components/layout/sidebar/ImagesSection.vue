@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
+import { gesture } from '../../../core/help/shortcuts.js'
 import { useSensorsStore } from '../../../stores/useSensorsStore.js'
 import { usePosesStore } from '../../../stores/usePosesStore.js'
 import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
@@ -235,12 +236,12 @@ function handleItemClick(e, img) {
   // Ranges follow the on-screen order, which differs from list order once
   // images are grouped; an anchor hidden in a collapsed group starts afresh.
   const ids = visibleIds.value
-  if (e.shiftKey && anchor.value !== null && ids.includes(anchor.value)) {
+  if (gesture(e, 'images.range') && anchor.value !== null && ids.includes(anchor.value)) {
     const ai = ids.indexOf(anchor.value)
     const ci = ids.indexOf(img.id)
     const [from, to] = ai <= ci ? [ai, ci] : [ci, ai]
     localSelected.value = ids.slice(from, to + 1)
-  } else if (e.ctrlKey || e.metaKey) {
+  } else if (gesture(e, 'images.toggle')) {
     localSelected.value = selectedSet.value.has(img.id)
       ? localSelected.value.filter((id) => id !== img.id)
       : [...localSelected.value, img.id]
