@@ -224,17 +224,32 @@ export function fitFiducialTransform(pairs, model = 'affine', options = {}) {
   if (clean.length < need) return null
   let h
   if (model === 'conformal') {
-    const rows = [],
-      vals = []
-    for (const p of clean) {
-      rows.push([p.px, -p.py, 1, 0])
-      vals.push(p.xMm)
-      rows.push([p.py, p.px, 0, 1])
-      vals.push(p.yMm)
+    // A similarity, proper or reflected: a certificate in y-up axes against y-down scan
+    // rows is a reflection (METHODS §5.1), which [a −b; b a] (det ≥ 0) cannot hold; its
+    // least squares would collapse towards scale 0. Fit both, keep the closer.
+    const fitSim = (reflect) => {
+      const s = reflect ? -1 : 1
+      const rows = [],
+        vals = []
+      for (const p of clean) {
+        // x = a·px − s·b·py + c,  y = b·px + s·a·py + d
+        rows.push([p.px, -s * p.py, 1, 0])
+        vals.push(p.xMm)
+        rows.push([s * p.py, p.px, 0, 1])
+        vals.push(p.yMm)
+      }
+      const q = leastSquares(rows, vals, 4)
+      if (!q) return null
+      const m = [q[0], -s * q[1], q[2], q[1], s * q[0], q[3], 0, 0, 1]
+      let sse = 0
+      for (const p of clean) {
+        sse += (m[0] * p.px + m[1] * p.py + m[2] - p.xMm) ** 2 + (m[3] * p.px + m[4] * p.py + m[5] - p.yMm) ** 2
+      }
+      return { m, sse }
     }
-    const q = leastSquares(rows, vals, 4)
-    if (!q) return null
-    h = [q[0], -q[1], q[2], q[1], q[0], q[3], 0, 0, 1]
+    const fits = [fitSim(false), fitSim(true)].filter(Boolean)
+    if (!fits.length) return null
+    h = fits.reduce((a, b) => (b.sse < a.sse ? b : a)).m
   } else if (model === 'projective') {
     const rows = [],
       vals = []

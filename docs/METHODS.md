@@ -671,7 +671,9 @@ joined into point pairs, and:
 
 1. **A per-image transform** `scan px → camera mm` is fitted by least squares
    (`fitFiducialTransform`): conformal, affine (default) or projective. It yields pixel
-   pitch and the RMS residual (µm); affine also reports rotation and shear.
+   pitch and the RMS residual (µm); affine also reports rotation and shear. Conformal fits
+   the proper and the reflected similarity and keeps the closer, so a y-up certificate
+   (below) fits it as well as the affine.
 2. **One canonical pixel frame per sensor** (`canonicalFrame`): a virtual grid at the
    median fitted pitch, `fx = fy = focalMm / pitch`, principal point mapped into it, so all
    images of the sensor share **one K** (`resolveK` path 0).

@@ -37,6 +37,22 @@ describe('fiducial calibration', () => {
     })
     expect(fitFiducialTransform(proj, 'projective').rmsUm).toBeLessThan(1e-4)
   })
+  it('fits a y-up certificate with the conformal model (a reflected similarity)', () => {
+    // Scan rows run down, the certificate's y up: scan → mm is a similarity with y flipped.
+    const yUp = points.map((p) => ({
+      ...p,
+      xMm: 0.02 * p.px - 0.003 * p.py + 4,
+      yMm: -(0.003 * p.px + 0.02 * p.py) + 2,
+    }))
+    const fit = fitFiducialTransform(yUp, 'conformal')
+    expect(fit.rmsUm).toBeLessThan(1e-5)
+    const h = fit.forward
+    // det < 0: the ingest's reflection vote (ingest.js applyFiducialFrames) flips y.
+    expect(h[0] * h[4] - h[1] * h[3]).toBeLessThan(0)
+    const q = applyFiducialTransform({ x: 30, y: 70 }, fit)
+    expect(q.x).toBeCloseTo(0.02 * 30 - 0.003 * 70 + 4, 9)
+    expect(q.y).toBeCloseTo(-(0.003 * 30 + 0.02 * 70) + 2, 9)
+  })
   it('validates certificate mapping without modifying detections', () => {
     const image = {
       id: 'i',

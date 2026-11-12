@@ -156,6 +156,12 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Conformal fiducial transform works with y-up certificates.** Film calibration with
+  the *Conformal* transform now fits a calibration certificate whose y axis points up
+  (the usual case) as well as *Affine* does. Before, it could not represent the flip
+  between the certificate and the scan rows, and every keypoint went through a
+  near-singular map (134,722 µm RMS on a synthetic 230 mm frame, now 4.7 µm). *Affine*,
+  the default, and *Projective* were not affected.
 - **Continuing a stopped matching run matches every pair.** Continue now matches again the
   pairs that failed or were cut off by Cancel before the stop. Before, such a pair could be
   counted as done although it had no saved result, and was then never matched.
