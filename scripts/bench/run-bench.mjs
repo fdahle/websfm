@@ -275,12 +275,14 @@ const profileDir = cfg.profile ? resolve(repo, cfg.profile) : `${outPrefix}.prof
 // headless on the CPU; a config's own `headed` and `chromeArgs` are kept.
 const GPU_FLAGS = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--ignore-gpu-blocklist']
 const isFirefox = cfg.browser === 'firefox'
-if (isFirefox) cfg.gpu = false // the flags below are Chrome's; Firefox runs as it ships
+// Firefox needs none of these: its WebGPU is one preference (on unless `"gpu": false`),
+// and reaches the GPU headless too.
 const hasDisplay = !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
-if (cfg.gpu !== false && cfg.headed === undefined && hasDisplay) cfg.headed = true
-if (cfg.gpu !== false && cfg.headed && !(cfg.chromeArgs ?? []).includes('--enable-unsafe-webgpu'))
+const chromeGpu = !isFirefox && cfg.gpu !== false
+if (chromeGpu && cfg.headed === undefined && hasDisplay) cfg.headed = true
+if (chromeGpu && cfg.headed && !(cfg.chromeArgs ?? []).includes('--enable-unsafe-webgpu'))
   cfg.chromeArgs = [...(cfg.chromeArgs ?? []), ...GPU_FLAGS]
-if (cfg.gpu !== false && !cfg.headed)
+if (chromeGpu && !cfg.headed)
   console.warn(`== gpu: ${hasDisplay ? 'headless run' : 'no display'}, so no WebGPU: matching runs on the CPU`)
 
 // Precise heap readings + a callable gc(), so the `== memory` lines below report live
@@ -291,7 +293,7 @@ if (cfg.gpu !== false && !cfg.headed)
 // jsHeapSizeLimit too.
 const jsFlags = ['--expose-gc', ...(cfg.maxOldSpaceMb ? [`--max-old-space-size=${Number(cfg.maxOldSpaceMb)}`] : [])]
 const browser = await (isFirefox ? firefox : chromium).launchPersistentContext(profileDir, {
-  ...(isFirefox ? {} : { channel: 'chrome' }),
+  ...(isFirefox ? { firefoxUserPrefs: { 'dom.webgpu.enabled': cfg.gpu !== false } } : { channel: 'chrome' }),
   headless: !cfg.headed,
   // `chromeArgs`: extra Chrome flags. On Linux, headless Chrome only offers SwiftShader
   // WebGPU; `"headed": true, "chromeArgs": ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"]`

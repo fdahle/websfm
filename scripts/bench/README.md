@@ -55,8 +55,9 @@ project:
 }
 ```
 
-`"browser": "firefox"` runs the same pipeline in Playwright's Firefox (headless, no GPU,
-none of Chrome's memory probes): the way to compare a stage's time between the two.
+`"browser": "firefox"` runs the same pipeline in Playwright's Firefox (headless, none of
+Chrome's memory probes): the way to compare a stage's time between the two. Its WebGPU
+reaches the real GPU headless too; `"gpu": false` turns it off.
 Booleans go in a config file: on the command line `--gpu false` is the string "false".
 
 `reference` fields: see `reference.mjs`. `importPoses` imports the camera file as poses
