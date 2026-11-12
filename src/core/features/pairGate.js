@@ -49,7 +49,9 @@ export function evaluatePairAcceptance({ result, rawCount, spread, settings }) {
   // many-to-one convergence (unique spots ≪ inliers) or epipole degeneracy (all inliers
   // in a pinhead region). Neither is real geometry, so it is a HARD reject — never weak.
   let spreadDegenerate = false
-  if (spread && spread.count >= minMatches) {
+  // From the weak floor up, not from minMatches: a collapsed pair between the two
+  // (minMatches raised by the user) must not slip in as weak.
+  if (spread && spread.count >= Math.min(minMatches, weakMinInliers)) {
     const collapsed = Math.min(spread.uniqueA, spread.uniqueB) < minInlierUniqueFrac * spread.count
     const tiny = Math.min(spread.extentA, spread.extentB) < minInlierSpreadPx
     spreadDegenerate = collapsed || tiny

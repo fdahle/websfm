@@ -67,6 +67,17 @@ describe('evaluatePairAcceptance', () => {
     expect(v.reason).toMatch(/below the 500 absolute floor/)
   })
 
+  it('rejects a collapsed pair under a raised minMatches, where it would otherwise be weak', () => {
+    const v = evaluatePairAcceptance({
+      result: result(40),
+      rawCount: 60,
+      spread: { count: 40, uniqueA: 3, uniqueB: 40, extentA: 500, extentB: 500 },
+      settings: { ...SETTINGS, minMatches: 500 },
+    })
+    expect(v.classification).toBe('reject')
+    expect(v.weak).toBe(false)
+  })
+
   it('rejects (never weak) when inliers collapse positionally', () => {
     const spread = { count: 40, uniqueA: 3, uniqueB: 40, extentA: 500, extentB: 500 } // many→one
     const v = evaluatePairAcceptance({
