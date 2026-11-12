@@ -184,3 +184,78 @@ it('keeps an unreadable saved model on disk instead of saving an empty one over 
   await vi.waitFor(() => expect(save).toHaveBeenCalled())
   for (const spy of [...spies, save]) spy.mockRestore()
 })
+
+it('saves nothing while a rerun has released the model, and reads the saved one back when no model lands', async () => {
+  setActivePinia(createPinia())
+  const projects = useProjectsStore()
+  projects.persistenceAvailable = true
+  projects.currentProjectId = 'big'
+  const store = useReconstructionStore()
+  const { SparsePoints } = await import('../core/sfm/sparsePoints.js')
+  const points = SparsePoints.fromRecords([
+    {
+      x: 0,
+      y: 0,
+      z: 5,
+      views: [
+        ['a', 0],
+        ['b', 0],
+      ],
+    },
+    {
+      x: 1,
+      y: 0,
+      z: 5,
+      views: [
+        ['a', 1],
+        ['b', 1],
+      ],
+    },
+  ])
+  const cam = (tx) => ({ R: [1, 0, 0, 0, 1, 0, 0, 0, 1], t: [tx, 0, 0], K: { f: 1000, cx: 500, cy: 500 } })
+  const cameras = new Map([
+    ['a', cam(0)],
+    ['b', cam(1)],
+  ])
+  store.clouds = [{ id: 's1', kind: 'sparse', name: 'Sparse cloud', createdAt: 1, cameras, points }]
+  store.mainSparseId = 's1'
+  // (A georeference without matching evidence is dropped by its own watcher; the run
+  // summary is released and restored the same way.)
+  store.summary = { cameras: 2, points: 2 }
+  // What a save writes is what the reload reads back.
+  let saved = null
+  const save = vi.spyOn(opfs, 'saveReconstruction').mockImplementation(async (_id, doc) => {
+    // Only the first save, the model on disk; the release must never reach here.
+    saved ??= doc
+    return { ok: true, files: {} }
+  })
+  const spies = [
+    vi.spyOn(opfs, 'loadReconstruction').mockImplementation(async () => saved),
+    vi.spyOn(opfs, 'loadProducts').mockResolvedValue([]),
+    vi.spyOn(opfs, 'loadDepthIndex').mockResolvedValue(null),
+  ]
+  store.setCloudVisible('s1', true)
+  await vi.waitFor(() => expect(save).toHaveBeenCalled())
+  save.mockClear()
+
+  expect(store.releaseReplaceableModelForRerun().released).toBe(true)
+  expect(store.clouds[0].cameras.size).toBe(0)
+  expect(store.summary).toBeNull()
+  // An ordinary action while the placeholder stands must not write it over the model.
+  store.setCloudVisible('s1', false)
+  store.renameCloud('s1', 'Renamed')
+  await new Promise((r) => setTimeout(r, 10))
+  expect(save).not.toHaveBeenCalled()
+
+  // The run failed: the saved model, with what was released alongside, is back, and saving resumes.
+  store.reconStatus = 'error'
+  expect(await store.recoverReleasedModel()).toBe(true)
+  expect(store.mainSparseCloud.cameras.size).toBe(2)
+  expect(store.mainSparseCloud.points.length).toBe(2)
+  expect(store.summary).toEqual({ cameras: 2, points: 2 })
+  expect(store.reconStatus).toBe('error')
+  expect(await store.recoverReleasedModel()).toBe(false)
+  store.setCloudVisible('s1', false)
+  await vi.waitFor(() => expect(save).toHaveBeenCalled())
+  for (const spy of [...spies, save]) spy.mockRestore()
+})

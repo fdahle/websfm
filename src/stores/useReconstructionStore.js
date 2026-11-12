@@ -686,6 +686,11 @@ export const useReconstructionStore = registerProjectStore(
     // Until something is put in its place, an empty save would overwrite that
     // document and collect its buffers — so save() declines it.
     let unreadableProjectId = null
+    // The project whose main sparse model a rerun has swapped for an empty placeholder
+    // (releaseReplaceableModelForRerun). The saved document is then the only copy, so
+    // save() declines until the new model lands (upsertSparseCloud) or the saved one is
+    // read back (recoverReleasedModel).
+    let releasedProjectId = null
 
     // `reuse[i]` (optional) — files to point cloud i at instead of re-serialising it.
     function serialize(reuse = null) {
@@ -723,6 +728,7 @@ export const useReconstructionStore = registerProjectStore(
       if (!isPersisting()) return false
       const projectId = projects.currentProjectId
       if (projectId === unreadableProjectId && clouds.value.length === 0) return false
+      if (releasedProjectId) return false
       try {
         for (const full of [false, true]) {
           const list = clouds.value
@@ -779,6 +785,8 @@ export const useReconstructionStore = registerProjectStore(
       } = opts
       const idx = replaceId ? clouds.value.findIndex((c) => c.id === replaceId && c.kind === 'sparse') : -1
       const prev = idx >= 0 ? clouds.value[idx] : null
+      // A model in the released placeholder's place: saving is safe again.
+      releasedProjectId = null
       const cloud = {
         id: prev?.id ?? makeCloudId(),
         name: name ?? prev?.name ?? 'Sparse cloud',
@@ -806,8 +814,9 @@ export const useReconstructionStore = registerProjectStore(
     // (hundreds of MB at millions of points) resident while constructing the worker input can
     // make the memory preflight reject a run that fits comfortably from a clean state.
     // Replace it with a lightweight placeholder only when headroom is insufficient.
-    // Nothing is persisted here: if the new solve fails, reloading restores the previous
-    // saved reconstruction. The dense clouds, meshes, DEMs and orthophotos stay: they
+    // Nothing is persisted from here until a new model lands: save() declines while the
+    // placeholder stands, and a run that ends without a model reads the saved one back
+    // (recoverReleasedModel). The dense clouds, meshes, DEMs and orthophotos stay: they
     // outlive the rebuild (marked outdated), so dropping them here would lose them at
     // the next save.
     function releaseReplaceableModelForRerun() {
@@ -815,6 +824,7 @@ export const useReconstructionStore = registerProjectStore(
       const replaceId = main?.id ?? null
       const pointCount = main?.points?.length ?? 0
       const cameraCount = main?.cameras?.size ?? 0
+      if (pointCount > 0 || cameraCount > 0) releasedProjectId = projects.currentProjectId
 
       clouds.value = clouds.value.flatMap((cloud) => {
         if (cloud.kind === 'sparse' && cloud.secondary) return []
@@ -835,6 +845,22 @@ export const useReconstructionStore = registerProjectStore(
         selectedCloudId.value = replaceId
 
       return { released: pointCount > 0 || cameraCount > 0, pointCount, cameraCount }
+    }
+
+    // A rerun that released the model and ended without a new one (failed, cancelled,
+    // refused by the memory check): read the saved reconstruction back, so the session
+    // holds the solved model, its georeference and secondary models again, and saving
+    // resumes. A no-op when nothing was released or a model has landed since.
+    async function recoverReleasedModel() {
+      const projectId = releasedProjectId
+      if (!projectId) return false
+      releasedProjectId = null
+      if (projectId !== projects.currentProjectId) return false
+      const status = reconStatus.value
+      await restore({ projectId })
+      if (status === 'error') reconStatus.value = 'error'
+      log('Reloaded the saved reconstruction after the rerun ended without a new model', 'info', 'Reconstruction')
+      return true
     }
 
     // A sparse rebuild changes the coordinate frame and camera solution. The depth maps
@@ -1227,6 +1253,7 @@ export const useReconstructionStore = registerProjectStore(
       projects,
       reconStatus,
       releaseReplaceableModelForRerun,
+      recoverReleasedModel,
       sensors,
       sparseCameras,
       summary,
@@ -1245,6 +1272,7 @@ export const useReconstructionStore = registerProjectStore(
     function clear({ purge = false } = {}) {
       restoreGeneration++
       unreadableProjectId = null
+      releasedProjectId = null
       clouds.value = []
       selectedCloudId.value = null
       mainSparseId.value = null
@@ -1582,6 +1610,9 @@ export const useReconstructionStore = registerProjectStore(
       computeDepthMaps,
       densify,
       restore,
+      // The sparse rerun's memory release and its undo (sparseRun.js).
+      releaseReplaceableModelForRerun,
+      recoverReleasedModel,
       clear,
       clearDerived,
       selectCloud,

@@ -70,6 +70,7 @@ export function createSparseRun({
   projects,
   reconStatus,
   releaseReplaceableModelForRerun,
+  recoverReleasedModel,
   sensors,
   sparseCameras,
   summary,
@@ -401,7 +402,7 @@ export function createSparseRun({
           log(
             `Released the loaded reconstruction before rerun (${released.cameraCount} cameras, ` +
               `${released.pointCount.toLocaleString()} points). ` +
-              'The saved model remains recoverable by reloading until the replacement succeeds.',
+              'Nothing is saved until the new model lands; if the run ends without one, the saved model is read back.',
             'info',
             'Compute',
           )
@@ -894,6 +895,8 @@ export function createSparseRun({
       stopMemoryWatchdog()
       liveSparse.value = null
       sparseRunning.value = false
+      // Released for this run and no model landed: put the saved one back.
+      await recoverReleasedModel()
     }
   }
 

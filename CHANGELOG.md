@@ -156,6 +156,13 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **A failed rerun no longer loses the saved model.** When Reconstruct unloads the old
+  model to make room and the run then fails or is cancelled, WebSfM now reads the saved
+  model back. Before, the next ordinary action (hiding a layer, renaming a cloud) saved
+  the empty placeholder over it, and the solved cameras, the georeference and the
+  secondary models were gone from the project. Nothing is saved while the old model is
+  unloaded; a store test unloads a model, toggles a layer, fails the run and checks that
+  nothing was written and the cameras and points came back.
 - **A georeference survives reopening the project.** A project placed by its photos' GPS
   could lose its georeference when it was opened again, until Georeference ran once more:
   the check that retires a fit whose poses or GCPs changed saw the project half-restored,
