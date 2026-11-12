@@ -1,6 +1,7 @@
 import { cameraCenter, projectWithDepth, triangulationAngle } from './geometry.js'
 import { buildCameraPriorConstraints, qualifyingGcps, buildGcpAnchors } from './surveyConstraints.js'
 import { SFM_TUNING } from '../tuning.js'
+import { tieWeightOf } from './baObservations.js'
 import { distortPixel, undistortPixel } from './distortion.js'
 
 // points: SparsePoints. Per point, as columns (transferable, no object per point):
@@ -66,10 +67,13 @@ export function selectedSparseIndices(metrics, { metric, threshold }) {
 // and accepts it only under the cost rule. `subject` words the refusals for the
 // calling tool ("Selection would…" / "The model has…").
 //
-// `constraints` = { gcps, cameraPriors } in the survey frame (GCP marks in the
-// pinhole frame, keyed by uuid) — the same evidence the solve was held to. Without
-// them a re-solve can only lower the reprojection cost, so the ≤-cost gate always
-// passed while it quietly undid a GCP doming correction.
+// `constraints` = { gcps, cameraPriors, detectScaleFactor } in the survey frame (GCP
+// marks in the pinhole frame, keyed by uuid) — the same evidence the solve was held
+// to. Without them a re-solve can only lower the reprojection cost, so the ≤-cost gate
+// always passed while it quietly undid a GCP doming correction. A tie point weighs as
+// the run weighed it, one detection pixel (tieWeightOf, the run's `detectScaleFactor`
+// from summary.gates): at weight 1 the ties pulled the model back towards its tie-only
+// shape by f² against the GCPs and positions.
 //
 // `lensOf(uuid)` (optional) names the fisheye cameras: their observations go to the
 // solve in the pixels the lens recorded, with the lens on K (bundleSession.js
@@ -79,12 +83,14 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
     cameraIndices = new Map(entries.map(([id], i) => [id, i]))
   const observations = [],
     support = new Uint32Array(entries.length)
+  const tieWeight = tieWeightOf(constraints.detectScaleFactor)
+  const weights = tieWeight === 1 ? {} : { weightX: tieWeight, weightY: tieWeight }
   for (let ptIdx = 0; ptIdx < kept.length; ptIdx++) {
     let n = 0
     kept.forEachPixel(ptIdx, (id, x, y) => {
       const camIdx = cameraIndices.get(id)
       if (camIdx == null || !Number.isFinite(y)) return
-      observations.push({ camIdx, ptIdx, x, y })
+      observations.push({ camIdx, ptIdx, x, y, ...weights })
       support[camIdx]++
       n++
     })

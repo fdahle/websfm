@@ -191,6 +191,32 @@ it('holds the refinement to GCP anchors and camera priors (survey frame = 2×SfM
   expect(result.constraints).toMatchObject({ gcpAnchors: 3, cameraPriors: 3 })
   // The same +0.2 px is a regression when nothing constrains the solve.
   await expect(refineSparseSelection(cams, pts, { metric: 'error', threshold: 3 }, solver)).rejects.toThrow('increased')
+
+  // Detected at a quarter of the size, a tie is one detection pixel = 4 native pixels:
+  // weight 1/16 against the GCPs and positions, as in the run (tieWeightOf). The GCP
+  // marks keep their own accuracy; Optimize cameras weighs ties the same way.
+  const withK = vi.fn(async (c, intr, p) => ({
+    cameras: c,
+    pos: p.slice(),
+    costBefore: 1,
+    costAfter: 1,
+    intrinsics: intr,
+  }))
+  for (const tool of ['selection', 'optimize']) {
+    withK.mockClear()
+    const constraints = { gcps, cameraPriors, detectScaleFactor: 4 }
+    if (tool === 'selection')
+      await refineSparseSelection(cams, pts, { metric: 'error', threshold: 3 }, withK, constraints)
+    else await optimizeCameras(cams, pts, { refine: 'f', sensorOfUuid: { a: 0, b: 0, c: 0 } }, withK, constraints)
+    const [, , , obs, o] = withK.mock.calls[0]
+    const firstAnchor = o.gcpAnchors[0].ptIdx
+    const ties = obs.filter((v) => v.ptIdx < firstAnchor),
+      marks = obs.filter((v) => v.ptIdx >= firstAnchor)
+    expect(ties.length).toBeGreaterThan(0)
+    for (const o of ties) expect([o.weightX, o.weightY]).toEqual([1 / 16, 1 / 16])
+    expect(marks.length).toBe(9)
+    for (const o of marks) expect(o.weightX ?? 1).not.toBe(1 / 16)
+  }
 })
 
 it('optimizeCameras frees focal per sensor, keeps every point and pins the pinhole invariant', async () => {

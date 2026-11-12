@@ -577,7 +577,8 @@ Calibration transforms survive; derived geometry and the georeference are invali
 deletion, freeing the focal length or the focal length and principal point per sensor
 (`OPTIMIZE_CAMERAS_DEFAULTS.refine`); the lens terms stay as the sparse run solved them.
 Both re-solves keep the GCP anchors and camera priors of the original solve (§6.4, through
-`core/sfm/surveyConstraints.js`) and its acceptance rule: an unconstrained solve may not
+`core/sfm/surveyConstraints.js`), its tie weight (one detection pixel, `tieWeightOf` with the
+run's `detectScaleFactor`) and its acceptance rule: an unconstrained solve may not
 raise the reprojection cost, a constrained one may within the survey allowance. Without
 the constraints a re-solve would pass its own gate while undoing a GCP doming correction. A
 focal change over 20 % is refused as a runaway, which a cost gate cannot see (the cost can

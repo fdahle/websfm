@@ -156,6 +156,15 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Optimize cameras and Gradual selection keep GCPs and positions at full weight.**
+  Both tools now weigh a tie point as the reconstruction does, one pixel of the size
+  Detect Features ran at. Before, they re-solved with every tie at one full-size pixel, so
+  on a film or downsampled project Optimize cameras after adding GCPs pulled the model
+  back towards its tie-only shape (by 23× at a detection scale of 1/4.8), partly undoing
+  what the GCPs and RTK positions had corrected. The reprojection error still fell, so
+  the acceptance check could not see it. A unit test checks that both tools hand the
+  solver ties at 1/16 for a project detected at a quarter of the size, and GCP marks at
+  their own accuracy.
 - **Georeference from camera positions applies the GNSS antenna offset.** With a lever
   arm set in the Sensors table (its GNSS antenna offset), Georeference now
   fits the model to the antenna's position in each photo, as the bundle adjustment

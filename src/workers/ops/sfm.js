@@ -59,7 +59,7 @@ export function makeSfmOps() {
     const metrics = sparsePointMetrics(model.cameras, model.points)
     return { result: metrics, transfer: [metrics.error.buffer, metrics.track.buffer, metrics.angle.buffer] }
   }
-  // constraints: { gcps, cameraPriors } — the survey evidence the model was solved
+  // constraints: { gcps, cameraPriors, detectScaleFactor } — the survey evidence the model was solved
   // under (store surveyConstraintInput), so the refinement is held to it too.
   async function refineSparse([packed, settings, constraints = {}]) {
     const model = unpackReconstructionResult(packed)

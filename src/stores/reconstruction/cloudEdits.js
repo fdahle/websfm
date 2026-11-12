@@ -205,7 +205,7 @@ export function createCloudEdits({
   // camera priors), and on success retire every computed dependent (depth maps,
   // dense, DEM/ortho…) through invalidateSparseDependents. A project switch or a
   // set-as-main mid-run supersedes the edit and leaves the model as it was.
-  //   run(packed, { gcps, cameraPriors }) → worker result (packed)
+  //   run(packed, { gcps, cameraPriors, detectScaleFactor }) → worker result (packed)
   //   describe(result) → the log line's middle part
   async function refineMainSparse({ label, sourceId, createdAt, run, describe }) {
     const original = mainSparseCloud.value
@@ -222,7 +222,12 @@ export function createCloudEdits({
         return null
       }
       const result = unpackReconstructionResult(
-        await run(packed, { gcps: survey.gcps, cameraPriors: survey.cameraPriors }),
+        await run(packed, {
+          gcps: survey.gcps,
+          cameraPriors: survey.cameraPriors,
+          // Ties weigh one detection pixel, as in the run (core/sfm/baObservations.js).
+          detectScaleFactor: summary.value?.gates?.detectScaleFactor ?? null,
+        }),
       )
       if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
         // Superseded (project switch / set-as-main mid-run): nothing changed here.
