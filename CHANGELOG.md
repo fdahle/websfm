@@ -5,6 +5,8 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-12
+
 ### Added
 - **Merge blocks that do not overlap.** Import ▸ WebSfM Project now brings the other
   project's solved model too and places it in this one by photos both solved, GCPs and
