@@ -27,7 +27,9 @@ export function surveyToSfmPrecision(w, R) {
   )
 }
 
-const priorSigma = (p) => [p.accuracyX, p.accuracyY, p.accuracyZ].map((v) => (Number.isFinite(v) && v > 0 ? v : 5))
+// A prior without accuracies gets 5 m, in its own unit (buildCameraPriors unitsPerMetre).
+const priorSigma = (p) =>
+  [p.accuracyX, p.accuracyY, p.accuracyZ].map((v) => (Number.isFinite(v) && v > 0 ? v : 5 * (p.unitsPerMetre ?? 1)))
 
 /**
  * Camera-centre (and, when imported, orientation) priors as BA constraints.
@@ -54,7 +56,8 @@ export function buildCameraPriorConstraints({ cameras, cameraPriors, uuidList, m
   const armInSfm = (p, scale) => {
     if (!p.leverArm || !(scale > 0)) return null
     const { R } = cameras.get(p.uuid)
-    const a = p.leverArm
+    // The arm is in metres; the survey frame in the priors' unit.
+    const a = p.leverArm.map((v) => v * (p.unitsPerMetre ?? 1))
     return [0, 1, 2].map((i) => (R[0][i] * a[0] + R[1][i] * a[1] + R[2][i] * a[2]) / scale)
   }
   const pairsAt = (scale) =>

@@ -159,6 +159,10 @@ export function buildCameraPriors(poses, images, crs, { surveyFrame = null, leve
     geographicFrame = buildMetricFrame((xy) => transform(xy, metric, 'EPSG:4326'), 0, 0)
   }
 
+  // The priors' length unit: metres in the geographic (AEQD) frame, else the CRS's own
+  // unit (a ftUS state plane keeps feet). Thresholds and defaults stated in metres, and
+  // the lever arm, are converted with it (surveyGradePositions, surveyConstraints.js).
+  const unitsPerMetre = metricPositions != null ? 1 : 1 / (metresPerCrsUnit(crs) ?? 1)
   return usable.map(({ pose, uuid }, i) => {
     const [gx, gy] = metricPositions?.[i] ?? [pose.x, pose.y]
     const geographic = metricPositions != null
@@ -173,6 +177,7 @@ export function buildCameraPriors(poses, images, crs, { surveyFrame = null, leve
       x,
       y,
       z,
+      ...(unitsPerMetre !== 1 ? { unitsPerMetre } : {}),
       ...(leverArm ? { leverArm } : {}),
       // EXIF poses retain canonical metre uncertainties. Prefer those in the
       // local metric frame; imported geographic-pose accuracies are documented
@@ -194,7 +199,8 @@ export function buildCameraPriors(poses, images, crs, { surveyFrame = null, leve
 
 /**
  * Whether survey-grade camera positions hold the block: at least `minCount` priors, and
- * at least half of all of them, give every axis an accuracy within `maxSigma` (metres).
+ * at least half of all of them, give every axis an accuracy within `maxSigma` (metres;
+ * a prior in feet carries `unitsPerMetre`, buildCameraPriors).
  * RTK and PPK positions do (a few cm); a consumer GNSS (metres) or a prior without
  * accuracies (the 5 m the solve then assumes) does not. Returns
  * `{ held, surveyGrade, total }`.
@@ -202,7 +208,9 @@ export function buildCameraPriors(poses, images, crs, { surveyFrame = null, leve
 export function surveyGradePositions(priors, maxSigma, minCount = 3) {
   const total = priors?.length ?? 0
   const surveyGrade = (priors ?? []).filter((p) =>
-    [p.accuracyX, p.accuracyY, p.accuracyZ].every((v) => Number.isFinite(v) && v > 0 && v <= maxSigma),
+    [p.accuracyX, p.accuracyY, p.accuracyZ].every(
+      (v) => Number.isFinite(v) && v > 0 && v <= maxSigma * (p.unitsPerMetre ?? 1),
+    ),
   ).length
   return { held: surveyGrade >= Math.max(1, minCount) && 2 * surveyGrade >= total, surveyGrade, total }
 }

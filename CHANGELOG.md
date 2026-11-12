@@ -156,6 +156,13 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Camera positions in a foot-based CRS are weighed in metres.** In a project whose CRS
+  is in feet (a US state plane), RTK camera positions are now recognised as survey-grade,
+  positions without an accuracy get the 5 m default, and the GNSS antenna offset is
+  applied at its true length. Before, all three were read in feet: a 0.1 m threshold
+  became 0.1 ft, the default 5 ft, and the lever arm about a third of its length. A unit
+  test builds the same positions in UTM metres and in US survey feet and checks both
+  give the same verdict and the same 5 m default.
 - **Conformal fiducial transform works with y-up certificates.** Film calibration with
   the *Conformal* transform now fits a calibration certificate whose y axis points up
   (the usual case) as well as *Affine* does. Before, it could not represent the flip

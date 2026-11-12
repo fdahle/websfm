@@ -265,3 +265,49 @@ describe('surveyGradePositions', () => {
     expect(surveyGradePositions([], 0.1).held).toBe(false)
   })
 })
+
+describe('priors in a foot-based CRS', () => {
+  it('judge survey grade and default σ in metres, whatever the CRS unit', async () => {
+    const proj4 = (await import('proj4')).default
+    proj4.defs('TEST:UTM32FT', '+proj=utm +zone=32 +datum=WGS84 +units=us-ft +no_defs')
+    const { buildCameraPriorConstraints } = await import('./surveyConstraints.js')
+    const ft = 1200 / 3937 // metres per US survey foot
+    const images = [0, 1, 2, 3].map((i) => ({ id: `i${i}`, uuid: `u${i}` }))
+    const metres = images.map((im, i) => ({ imageId: im.id, x: 500000 + 40 * i, y: 5400000 + 30 * (i % 2), z: 120 }))
+    const run = (crs, toUnit) => {
+      // RTK accuracies of 3 cm, and the same positions without any.
+      const poses = (acc) =>
+        metres.map((p) => ({
+          ...p,
+          x: p.x * toUnit,
+          y: p.y * toUnit,
+          z: p.z * toUnit,
+          ...(acc ? { accuracyX: 0.03 * toUnit, accuracyY: 0.03 * toUnit, accuracyZ: 0.05 * toUnit } : {}),
+        }))
+      const rtk = buildCameraPriors(poses(true), images, crs)
+      const bare = buildCameraPriors(poses(false), images, crs)
+      const cameras = new Map(
+        images.map((im, i) => [
+          im.uuid,
+          {
+            R: [
+              [1, 0, 0],
+              [0, -1, 0],
+              [0, 0, -1],
+            ],
+            t: [-4 * i, 3 * (i % 2), 12],
+          },
+        ]),
+      )
+      const set = buildCameraPriorConstraints({ cameras, cameraPriors: bare, uuidList: images.map((im) => im.uuid) })
+      const sigmaUnit = set.fit.scale / Math.sqrt(set.priors[0].weights[0])
+      return { held: surveyGradePositions(rtk, 0.1).held, sigmaMetres: sigmaUnit / (bare[0].unitsPerMetre ?? 1) }
+    }
+    const m = run('EPSG:32632', 1),
+      f = run('TEST:UTM32FT', 1 / ft)
+    expect(m.held).toBe(true)
+    expect(f.held).toBe(true)
+    expect(m.sigmaMetres).toBeCloseTo(5, 9)
+    expect(f.sigmaMetres).toBeCloseTo(5, 6)
+  })
+})
