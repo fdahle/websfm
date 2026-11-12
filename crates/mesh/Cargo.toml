@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
-nalgebra = "0.33"
+nalgebra = "0.35"
 poisson_reconstruction = { path = "vendor/poisson_reconstruction" }
 # NOTE: the optimized release profile (opt-level 3 / fat LTO / codegen-units 1) lives in
 # the workspace root manifest (crates/Cargo.toml) — Cargo ignores [profile.*] in member
