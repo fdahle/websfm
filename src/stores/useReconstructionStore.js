@@ -108,6 +108,8 @@ export const useReconstructionStore = registerProjectStore(
       mainSparseCloud: () => mainSparseCloud.value,
       log,
     })
+    // A removed photo's depth map goes with it (useImagesStore onImageRemoved).
+    imagesStore.onImageRemoved((uuid) => forgetDepthMap(uuid))
 
     // Georeference: a fitted SfM→CRS similarity (scale + rotation + translation),
     // or null in the local frame. { sim:{scale,R,t}, crs, rms, count, method }.

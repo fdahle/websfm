@@ -16,7 +16,6 @@ import * as opfs from '../utils/opfs.js'
 import { createDocumentSaver } from '../utils/documentSaver.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
-import { useReconstructionStore } from './useReconstructionStore.js'
 import { mapConcurrent } from '../utils/concurrency.js'
 import { normalizeImageGroups } from '../utils/imageGroups.js'
 import { createImageThumbnails } from './images/thumbnails.js'
@@ -57,6 +56,15 @@ async function sourceReadable(source) {
 // bespoke signatures (and a strict ordering relative to sensors), so it is driven
 // directly from App.vue rather than through the project-store registry for now.
 export const useImagesStore = defineStore('images', () => {
+  // What other stores do when a photo is removed (the reconstruction store forgets its
+  // depth map): registered with onImageRemoved, so this store does not import the
+  // stores that import it.
+  const imageRemovedHooks = new Set()
+  /** Run `fn(uuid)` when a photo is removed; returns the unregister. */
+  function onImageRemoved(fn) {
+    imageRemovedHooks.add(fn)
+    return () => imageRemovedHooks.delete(fn)
+  }
   const { log } = useLog()
   const projects = useProjectsStore()
 
@@ -311,7 +319,7 @@ export const useImagesStore = defineStore('images', () => {
     if (selectedId.value === id) selectedId.value = null
     log(`Removed image: ${img.name}`, 'info', 'Images')
     useMatchesStore().removeMatchesForImage(img.uuid)
-    useReconstructionStore().forgetDepthMap(img.uuid)
+    for (const fn of imageRemovedHooks) fn(img.uuid)
     if (isPersisting()) {
       const pid = projects.currentProjectId
       opfs.deleteImage(pid, img.uuid).catch(() => {})
@@ -924,6 +932,7 @@ export const useImagesStore = defineStore('images', () => {
   }
 
   return {
+    onImageRemoved,
     images,
     selectedId,
     imageGroups,
