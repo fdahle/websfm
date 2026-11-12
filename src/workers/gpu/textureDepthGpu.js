@@ -66,13 +66,22 @@ function pipelinesFor(device) {
 
 // One mesh, many views. `P` is the mesh in its local frame (Float64, visibility.js
 // meshGeometry), `idx` the triangles. → { render(cam, grid) → Float32Array, destroy() },
-// or null when WebGPU is unavailable or the mesh exceeds the device's buffer limits.
-export async function createTextureDepthGpu(P, idx) {
+// or null when WebGPU is unavailable or the mesh exceeds the device's buffer limits;
+// `onNull(reason)` then says which, for the log.
+export async function createTextureDepthGpu(P, idx, { onNull = () => {} } = {}) {
   const gpu = await ensureDevice()
-  if (!gpu) return null
+  if (!gpu) {
+    onNull('WebGPU unavailable')
+    return null
+  }
   const { device } = gpu
   const pos = Float32Array.from(P)
-  if (pos.byteLength > device.limits.maxBufferSize || idx.byteLength > device.limits.maxBufferSize) return null
+  const limit = device.limits.maxBufferSize
+  if (pos.byteLength > limit || idx.byteLength > limit) {
+    const mib = (b) => `${Math.round(b / 2 ** 20)} MiB`
+    onNull(`the mesh (${mib(Math.max(pos.byteLength, idx.byteLength))}) exceeds the GPU's ${mib(limit)} buffer limit`)
+    return null
+  }
   const vbuf = device.createBuffer({ size: pos.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(vbuf, 0, pos)
   const ibuf = device.createBuffer({

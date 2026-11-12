@@ -159,10 +159,11 @@ export function makeTextureOps({ rasterize } = {}) {
       if (gpuState === 'off') return null
       try {
         if (gpuState === 'pending') {
-          gpu = await createTextureDepthGpu(geom.P, idx)
+          let why = 'WebGPU unavailable'
+          gpu = await createTextureDepthGpu(geom.P, idx, { onNull: (reason) => (why = reason) })
           if (!gpu) {
             gpuState = 'off'
-            log('Texture: WebGPU unavailable, depth pass on the CPU')
+            log(`Texture: ${why}, depth pass on the CPU`)
             return null
           }
           gpuState = 'check'
