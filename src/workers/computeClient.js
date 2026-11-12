@@ -20,6 +20,8 @@ export let POOL_SIZE =
   storedPoolSize > 0 ? Math.max(1, Math.min(MAX_POOL_SIZE, Math.round(storedPoolSize))) : MAX_POOL_SIZE
 
 let workers = null
+// Workers that have answered at least once (a later error is a crash, not a load failure).
+const answered = new WeakSet()
 let rr = 0
 let nextId = 1
 const pending = new Map()
@@ -31,6 +33,7 @@ function handleMessage(e) {
   if (messageError) return failWorkerJobs(e.target, new Error('a compute worker could not read its job'))
   const entry = pending.get(id)
   if (!entry) return
+  answered.add(entry.worker)
   const slot = workers?.indexOf(entry.worker) ?? -1
   if (slot >= 0) startFailures[slot] = 0
   // Intermediate streaming event (e.g. reconstruct log/progress) — not terminal.
@@ -78,6 +81,13 @@ function failWorkerJobs(w, err) {
 const MAX_START_FAILURES = 3
 const startFailures = []
 const lastFailure = []
+// Listeners for a worker that failed to load at all (useAppUpdate.js: a tab whose
+// version's worker file is gone from the server must reload).
+const workerLoadListeners = new Set()
+export function onWorkerLoadError(fn) {
+  workerLoadListeners.add(fn)
+  return () => workerLoadListeners.delete(fn)
+}
 
 function spawn(index) {
   const w = new Worker(new URL('./compute.worker.js', import.meta.url), {
@@ -90,6 +100,9 @@ function spawn(index) {
     // so only jobs on this failed slot are rejected; healthy slots keep running.
     const message = e.message || 'compute worker error'
     failWorkerJobs(w, new Error(message))
+    // An error before the worker ever answered is a load failure (its script is gone or
+    // not JavaScript), not a crash in a job.
+    if (!answered.has(w)) for (const fn of workerLoadListeners) fn(message)
     if (workers?.[index] === w) {
       w.terminate()
       workers[index] = null
@@ -142,6 +155,8 @@ const BACKGROUND_OPS = new Set([
 export function terminateAll(reason = 'cancelled') {
   const oldWorkers = workers
   workers = null
+  // A fresh pool: the slots' start failures are forgotten too.
+  startFailures.length = 0
   if (oldWorkers) for (const w of oldWorkers) w?.terminate()
   for (const [id, entry] of pending) {
     pending.delete(id)

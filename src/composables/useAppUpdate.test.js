@@ -10,6 +10,18 @@ function setup() {
 }
 
 describe('createAppUpdate', () => {
+  it('a part of the tab that failed to load makes it reload, once its work ends', () => {
+    const reload = vi.fn()
+    const u = createAppUpdate({ reload })
+    u.setBusy(true)
+    u.onStaleCode()
+    expect(u.updateReady.value).toBe(true)
+    expect(u.updateStale.value).toBe(true)
+    expect(reload).not.toHaveBeenCalled()
+    u.setBusy(false)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
   it('shows the prompt for a waiting version and activates it on Reload', () => {
     const { app, reload, apply } = setup()
     app.onNeedRefresh()

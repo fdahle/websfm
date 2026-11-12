@@ -133,3 +133,23 @@ describe('a worker that errors', () => {
     expect((await job).message).toMatch(/could not be read/)
   })
 })
+
+describe('a worker that never loads', () => {
+  it('is reported as a load failure, a crash after it answered is not', async () => {
+    client.terminateAll('reset for this test')
+    const seen = []
+    const off = client.onWorkerLoadError((m) => seen.push(m))
+    client.matchGpuBegin({}).catch(() => {})
+    const w = made.at(-client.POOL_SIZE + client.GPU_MATCH_WORKER)
+    w.onerror({ message: 'Failed to fetch module' })
+    expect(seen).toEqual(['Failed to fetch module'])
+    // A worker that answered once and then errors is a crash, not a stale file.
+    const job = client.matchGpuBegin({}).catch(() => {})
+    const w2 = made.at(-1)
+    w2.onmessage({ data: { id: w2.sent[0].id, ok: true, result: {} } })
+    await job
+    w2.onerror({ message: 'out of memory' })
+    expect(seen).toHaveLength(1)
+    off()
+  })
+})

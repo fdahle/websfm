@@ -3,6 +3,7 @@ import { computed, watch } from 'vue'
 import {
   updateReady,
   updateActive,
+  updateStale,
   reloadIntoUpdate,
   postponeUpdate,
   setUpdateBusy,
@@ -23,6 +24,10 @@ watch(
 )
 
 const detail = computed(() => {
+  if (updateStale.value)
+    return props.busy
+      ? 'Part of this tab could not be loaded because it is on an old version: it reloads once the current task has finished.'
+      : 'Part of this tab could not be loaded because it is on an old version: reload to switch to the new one.'
   if (updateActive.value)
     return 'It is already active in another tab, so this tab reloads once the current task has finished.'
   return props.busy ? 'You can reload once the current task has finished.' : 'Reload to switch to it.'

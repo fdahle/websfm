@@ -16,7 +16,10 @@
   "assets": {
     "directory": "../../dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    // A missing file is a 404, as on nginx (deploy/nginx.conf). The app has no client
+    // routes; an SPA fallback answered a stale tab's missing chunk with index.html under
+    // the /assets/* immutable header (useAppUpdate.js watchForStaleCode).
+    "not_found_handling": "none",
     "run_worker_first": ["/models/*", "/ort/*"],
   },
   "r2_buckets": [{ "binding": "LARGE_FILES", "bucket_name": "websfm-data" }],
@@ -31,7 +34,7 @@
       "assets": {
         "directory": "../../dist",
         "binding": "ASSETS",
-        "not_found_handling": "single-page-application",
+        "not_found_handling": "none",
         "run_worker_first": ["/models/*", "/ort/*"],
       },
       "r2_buckets": [{ "binding": "LARGE_FILES", "bucket_name": "websfm-data" }],

@@ -161,6 +161,12 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **A tab left on an old version says it must reload.** When a tab that kept working
+  through an update later opens a dialog, the 3D view or a worker of the version it
+  started on, and that file is gone, the update prompt now says this tab is out of date
+  and it reloads once its work ends. Before, the run failed with "Failed to fetch
+  dynamically imported module" or a worker error and no hint that a reload fixes it.
+  websfm.app now answers a missing file with 404 instead of the start page.
 - **A broken COPC file is refused instead of hanging.** Importing a COPC file whose
   hierarchy pages point at each other, or whose entries point outside the file, now stops
   with an error. Before, the first kind kept a worker busy with the progress stuck until

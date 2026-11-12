@@ -33,6 +33,9 @@ export function createAppUpdate({ reload = () => window.location.reload() } = {}
   // The new worker already controls this tab (another tab switched): this tab runs
   // old code and has to reload as soon as it can.
   const updateActive = ref(false)
+  // This tab's code failed to load a part of itself (a lazy chunk or a worker of the
+  // version it started on is gone from the server and the cache): it must reload.
+  const updateStale = ref(false)
   let busy = false
   let reloading = false
   let applyUpdate = null
@@ -46,6 +49,14 @@ export function createAppUpdate({ reload = () => window.location.reload() } = {}
   return {
     updateReady,
     updateActive,
+    updateStale,
+    /** A chunk or worker of this tab's version could not be loaded: reload once idle. */
+    onStaleCode() {
+      updateStale.value = true
+      updateActive.value = true
+      updateReady.value = true
+      reloadIfIdle()
+    },
     /** Hand over the plugin's `updateServiceWorker` (sends SKIP_WAITING). */
     setApplyUpdate(fn) {
       applyUpdate = fn
@@ -84,9 +95,21 @@ const app = createAppUpdate()
 
 export const updateReady = app.updateReady
 export const updateActive = app.updateActive
+export const updateStale = app.updateStale
 export const reloadIntoUpdate = app.reloadIntoUpdate
 export const postponeUpdate = app.postponeUpdate
 export const setUpdateBusy = app.setBusy
+
+// A tab left on an old version (a busy tab defers its reload) loses the files of that
+// version once a new one is deployed: a modal, the viewer or a worker it loads later is
+// gone. Vite reports a failed dynamic import as `vite:preloadError`, the compute pool a
+// worker that cannot load (computeClient.js onWorkerLoadError): either way the prompt
+// says the tab must reload, and it does once its work ends.
+export function watchForStaleCode({ onWorkerLoadError } = {}) {
+  if (typeof window === 'undefined') return
+  window.addEventListener('vite:preloadError', () => app.onStaleCode())
+  onWorkerLoadError?.(() => app.onStaleCode())
+}
 
 export async function registerServiceWorker() {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
