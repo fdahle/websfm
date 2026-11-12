@@ -161,6 +161,11 @@ Notable changes to websfm. The format follows
   2.6 MP map.
 
 ### Fixed
+- **Long corridors keep their sub-pixel fit.** The bundle adjustment now works about the
+  cameras' centre, so a block far from where the model started (a long corridor, a seed
+  with a short baseline) no longer gains a reprojection floor from number rounding. A
+  perfect strip 3,000 seed baselines from the start reprojected at 0.09 px from rounding
+  alone; it now stays at 0.0002 px.
 - **A tab left on an old version says it must reload.** When a tab that kept working
   through an update later opens a dialog, the 3D view or a worker of the version it
   started on, and that file is gone, the update prompt now says this tab is out of date

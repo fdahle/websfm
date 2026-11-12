@@ -588,10 +588,36 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const nObs = soa ? observations.n : observations.length
   if (nCam === 0 || nPts === 0 || nObs === 0) return null
 
+  // The solver takes Float32: positions far from the frame's origin (a long corridor, a
+  // short seed baseline) lose precision to rounding, a reprojection noise floor of
+  // 0.02 px at 1,000 baselines. The problem is solved about the cameras' centroid `o`
+  // (a translation changes no residual): points and targets move by −o, a camera's t
+  // by +R·o, and back after.
+  const o = [0, 0, 0]
+  for (const { R, t } of cameras)
+    for (let k = 0; k < 3; k++) o[k] -= (R[0][k] * t[0] + R[1][k] * t[1] + R[2][k] * t[2]) / nCam
+  const Ro = (R) => [0, 1, 2].map((i) => R[i][0] * o[0] + R[i][1] * o[1] + R[i][2] * o[2])
   const camFlat = new Float32Array(nCam * 12)
   cameras.forEach(({ R, t }, c) => {
     const b = c * 12
-    camFlat.set([R[0][0], R[0][1], R[0][2], R[1][0], R[1][1], R[1][2], R[2][0], R[2][1], R[2][2], t[0], t[1], t[2]], b)
+    const s = Ro(R)
+    camFlat.set(
+      [
+        R[0][0],
+        R[0][1],
+        R[0][2],
+        R[1][0],
+        R[1][1],
+        R[1][2],
+        R[2][0],
+        R[2][1],
+        R[2][2],
+        t[0] + s[0],
+        t[1] + s[1],
+        t[2] + s[2],
+      ],
+      b,
+    )
   })
 
   const kFlat = new Float32Array(nCam * 4)
@@ -610,10 +636,12 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     else if (fullLens) fisheyeFlat.set([0, k?.k1 || 0, k?.k2 || 0, k?.k3 || 0, 0, k?.p1 || 0, k?.p2 || 0], at)
   })
 
-  const ptsFlat = flatIn ? Float32Array.from(points3d) : new Float32Array(nPts * 3)
-  if (!flatIn)
+  // Points about the centroid, subtracted in double before the cast.
+  const ptsFlat = new Float32Array(nPts * 3)
+  if (flatIn) for (let i = 0; i < nPts * 3; i++) ptsFlat[i] = points3d[i] - o[i % 3]
+  else
     points3d.forEach(({ x, y, z }, i) => {
-      ptsFlat.set([x, y, z], i * 3)
+      ptsFlat.set([x - o[0], y - o[1], z - o[2]], i * 3)
     })
 
   // Indices as integers, pixels as floats: an f32 index is exact only to 2²⁴, so
@@ -646,7 +674,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const anchorFlat = new Float64Array(gcpAnchors.length * 4)
   const anchorWFlat = new Float32Array(gcpAnchors.length * 9)
   gcpAnchors.forEach(({ ptIdx, target, precision, weights, weight }, i) => {
-    anchorFlat.set([ptIdx, target[0], target[1], target[2]], i * 4)
+    anchorFlat.set([ptIdx, target[0] - o[0], target[1] - o[1], target[2] - o[2]], i * 4)
     const axisWeights = weights ?? [weight, weight, weight]
     const matrix = precision ?? [
       [axisWeights[0], 0, 0],
@@ -666,7 +694,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     const W = positionPrecision?.flat() ?? [weights[0], 0, 0, 0, weights[1], 0, 0, 0, weights[2]]
     const R = targetR?.flat() ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
     const P = orientationPrecision?.flat() ?? Array(9).fill(0)
-    cameraPriorFlat.set([camIdx, target[0], target[1], target[2], ...W, ...R, ...P], i * 31)
+    cameraPriorFlat.set([camIdx, target[0] - o[0], target[1] - o[1], target[2] - o[2], ...W, ...R, ...P], i * 31)
   })
 
   // sensor_of_cam: aligned to `cameras`; -1 (own group) where unknown. Empty/all-−1
@@ -744,26 +772,30 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
 
   const outCameras = cameras.map((_, c) => {
     const b = c * 12
+    const R = [
+      [raw[b], raw[b + 1], raw[b + 2]],
+      [raw[b + 3], raw[b + 4], raw[b + 5]],
+      [raw[b + 6], raw[b + 7], raw[b + 8]],
+    ]
+    const s = Ro(R) // back from the centroid frame: t = t' − R·o
     return {
-      R: [
-        [raw[b], raw[b + 1], raw[b + 2]],
-        [raw[b + 3], raw[b + 4], raw[b + 5]],
-        [raw[b + 6], raw[b + 7], raw[b + 8]],
-      ],
-      t: [raw[b + 9], raw[b + 10], raw[b + 11]],
+      R,
+      t: [raw[b + 9] - s[0], raw[b + 10] - s[1], raw[b + 11] - s[2]],
       // The rolling shutter goes with the camera, at the readout time the solve ended with.
       ...(readout?.[c] != null ? { rs: { ...cameras[c].rs, tau: readout[c] } } : {}),
     }
   })
 
   const ptsBase = nCam * 12
-  const outPos = flatPoints ? Float64Array.from(raw.subarray(ptsBase, ptsBase + nPts * 3)) : null
+  const outPos = flatPoints
+    ? Float64Array.from(raw.subarray(ptsBase, ptsBase + nPts * 3), (v, i) => v + o[i % 3])
+    : null
   const outPoints = flatPoints
     ? null
     : Array.from({ length: nPts }, (_, i) => ({
-        x: raw[ptsBase + i * 3],
-        y: raw[ptsBase + i * 3 + 1],
-        z: raw[ptsBase + i * 3 + 2],
+        x: raw[ptsBase + i * 3] + o[0],
+        y: raw[ptsBase + i * 3 + 1] + o[1],
+        z: raw[ptsBase + i * 3 + 2] + o[2],
       }))
 
   const outIntrinsics = cameras.map((_, c) => {

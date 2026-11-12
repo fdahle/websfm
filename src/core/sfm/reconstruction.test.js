@@ -910,3 +910,54 @@ describe('undistortBrownPixels', () => {
     }
   })
 })
+
+describe('bundleAdjust far from the frame origin', () => {
+  // A perfect nadir strip 3,000 seed baselines from the SfM origin: the Float32 hand-off
+  // to WASM rounded it to a 0.09 px noise floor before the solve was centred on the
+  // cameras; a translation changes no residual, so it must stay at the data's own.
+  it('keeps a perfect model perfect', async () => {
+    let seed = 7
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0), seed / 2 ** 32)
+    const K = { fx: 4400, fy: 4400, cx: 2736, cy: 1824 }
+    const H = 1 / 0.3,
+      offset = 3000
+    const nadir = [
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 0, -1],
+    ]
+    const cams = Array.from({ length: 12 }, (_, i) => {
+      const C = [offset + i, 0.02 * Math.sin(i), H]
+      return { R: nadir, t: [-C[0], C[1], C[2]] }
+    })
+    const pts = [],
+      obs = []
+    for (let j = 0; j < 600; j++) {
+      const X = [offset - 1 + rnd() * 13, (rnd() - 0.5) * 1.6, (rnd() - 0.5) * 0.1]
+      const mine = []
+      cams.forEach((c, ci) => {
+        const xc = X[0] + c.t[0],
+          yc = -X[1] + c.t[1],
+          zc = -X[2] + c.t[2]
+        const u = (K.fx * xc) / zc + K.cx,
+          v = (K.fy * yc) / zc + K.cy
+        if (u >= 0 && u <= 5472 && v >= 0 && v <= 3648) mine.push({ camIdx: ci, ptIdx: pts.length, x: u, y: v })
+      })
+      if (mine.length >= 2) {
+        pts.push({ x: X[0], y: X[1], z: X[2] })
+        obs.push(...mine)
+      }
+    }
+    const r = await bundleAdjust(
+      cams,
+      cams.map(() => K),
+      pts,
+      obs,
+      { maxIters: 30, refineIntrinsics: 'none', solver: { threads: 0 } },
+    )
+    expect(r.costBefore).toBeLessThan(0.002)
+    expect(r.costAfter).toBeLessThan(0.002)
+    // The cameras come back in the caller's frame, where they started.
+    expect(Math.abs(-r.cameras[0].t[0] - offset)).toBeLessThan(1e-3)
+  })
+})
