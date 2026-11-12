@@ -25,8 +25,9 @@
 // the last N images out of the ingest; the stage `ingestRest` adds them later, as photos
 // added to a project are: "detect,match,recon,ingestRest,detect:new,match:new,recon:add"
 // with `detect:new` { overwrite: false }, `match:new` { onlyNewPairs: true } and
-// `recon:add` { addToModel: true }).
-import { chromium } from 'playwright'
+// `recon:add` { addToModel: true }), browser ("chrome", default, or "firefox": the
+// same run in Playwright's Firefox, without Chrome's memory probes or WebGPU flags).
+import { chromium, firefox } from 'playwright'
 import { startWorkerHeapSampler } from './workerHeap.mjs'
 import { loadReference } from './reference.mjs'
 import { spawn } from 'node:child_process'
@@ -273,6 +274,8 @@ const profileDir = cfg.profile ? resolve(repo, cfg.profile) : `${outPrefix}.prof
 // them, and gpuRequired below stops the run if the GPU is not there. `"gpu": false` runs
 // headless on the CPU; a config's own `headed` and `chromeArgs` are kept.
 const GPU_FLAGS = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--ignore-gpu-blocklist']
+const isFirefox = cfg.browser === 'firefox'
+if (isFirefox) cfg.gpu = false // the flags below are Chrome's; Firefox runs as it ships
 const hasDisplay = !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
 if (cfg.gpu !== false && cfg.headed === undefined && hasDisplay) cfg.headed = true
 if (cfg.gpu !== false && cfg.headed && !(cfg.chromeArgs ?? []).includes('--enable-unsafe-webgpu'))
@@ -287,13 +290,13 @@ if (cfg.gpu !== false && !cfg.headed)
 // and report its real peak (TODO ▸ MEM). The app's preflight then sees the raised
 // jsHeapSizeLimit too.
 const jsFlags = ['--expose-gc', ...(cfg.maxOldSpaceMb ? [`--max-old-space-size=${Number(cfg.maxOldSpaceMb)}`] : [])]
-const browser = await chromium.launchPersistentContext(profileDir, {
-  channel: 'chrome',
+const browser = await (isFirefox ? firefox : chromium).launchPersistentContext(profileDir, {
+  ...(isFirefox ? {} : { channel: 'chrome' }),
   headless: !cfg.headed,
   // `chromeArgs`: extra Chrome flags. On Linux, headless Chrome only offers SwiftShader
   // WebGPU; `"headed": true, "chromeArgs": ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"]`
   // reaches the real GPU (scripts/bench/README.md ▸ Linux).
-  args: ['--enable-precise-memory-info', `--js-flags=${jsFlags.join(' ')}`, ...(cfg.chromeArgs ?? [])],
+  args: isFirefox ? [] : ['--enable-precise-memory-info', `--js-flags=${jsFlags.join(' ')}`, ...(cfg.chromeArgs ?? [])],
   acceptDownloads: true, // the export:<tag> stage saves the app's downloads
   // Playwright stages downloads in a temp folder before saveAs copies them: keep that on
   // the run's disk (multi-GB exports, and /tmp may be a quota-limited tmpfs).
@@ -312,7 +315,16 @@ try {
     await page.addInitScript((n) => localStorage.setItem('websfm.compute.workerCount', String(n)), cfg.workers)
   // Worker heap per SfM segment: closed by the solver's `stage "…" took` and
   // `memory mark "…"` debug lines (sfm.js), reported with each recon stage.
-  heap = await startWorkerHeapSampler(page)
+  // (DevTools protocol: Chrome only; Firefox gets an empty one.)
+  heap = isFirefox
+    ? {
+        current: () => [],
+        mark() {},
+        take: () => ({ segments: [], workers: [] }),
+        profile: async () => null,
+        stop: async () => {},
+      }
+    : await startWorkerHeapSampler(page)
   // `procTrace: <seconds>` (Linux): every so often, the resident memory (VmRSS) of this
   // Chrome's renderer processes, found by the profile directory on their command line.
   // Unlike memTrace it counts WebAssembly memory (core/bigArray.js keeps a run's big
