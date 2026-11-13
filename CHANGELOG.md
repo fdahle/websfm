@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Diagrams in the help.** Six glossary entries now show a figure: ground sample
+  distance, lens distortion, baseline and parallax, RANSAC, focal length and field of
+  view, and triangulation. Each is drawn from computed geometry (the distortion from the
+  radial model, the uncertainty ellipses from the rays), not sketched.
 - **Accuracy at the checkpoints in survey terms.** The Quality Report export has a section
   *Accuracy at the checkpoints (ASPRS 2023)* with RMSE_H, RMSE_V and RMSE_3D, the
   checkpoints' declared survey accuracy counted in as the ASPRS Positional Accuracy

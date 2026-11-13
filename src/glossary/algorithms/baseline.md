@@ -17,7 +17,7 @@ as $1/\theta$, so a pair with a narrow angle turns a one-pixel keypoint error
 into a large depth error, and at zero parallax — two photos from the same spot —
 depth is not observable at all.
 
-<!-- TODO(image): assets/baseline-parallax.svg - two side-by-side triangulation diagrams sharing a scene point: a wide baseline with rays crossing sharply and a small uncertainty ellipse, and a narrow baseline with near-parallel rays and a long ellipse smeared along the viewing direction. -->
+![Two triangulations of one point: cameras far apart give sharply crossing rays and a small uncertainty ellipse; cameras close together give near-parallel rays and an ellipse stretched along the viewing direction.](assets/baseline-parallax.svg)
 
 That makes baseline a two-sided trade-off, and it is why an image pair can be
 unusable in either direction:

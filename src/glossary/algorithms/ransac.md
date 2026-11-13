@@ -20,7 +20,7 @@ copes by working iteratively:
    tolerance — these are the **inliers**.
 4. Repeat many times and keep the model with the most inliers.
 
-<!-- TODO(image): assets/ransac.svg - a 2D scatter with a clear linear trend plus scattered outliers, showing a least-squares fit dragged off by the outliers versus the RANSAC fit with its inlier band drawn, and one sampled minimal subset circled. -->
+![A scatter with a linear trend and outliers above it: the least-squares line is dragged toward the outliers, the RANSAC line follows the inliers inside its threshold band, and the two-point sample it was built from is circled.](assets/ransac.svg)
 
 Matches that disagree with the winning model are discarded as outliers, so a
 handful of bad correspondences can't skew the reconstruction. WebSfM applies

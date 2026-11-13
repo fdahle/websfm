@@ -19,7 +19,7 @@ true nonlinear criterion, the sum of squared
 algebraic quantity that is convenient rather than meaningful; the refinement is
 what makes it the geometrically best point.
 
-<!-- TODO(image): assets/triangulation.svg - two camera centres with rays through their respective keypoints not quite meeting, the midpoint of the shortest segment between them marked, and an uncertainty ellipse elongated along the viewing direction; a third camera's ray added to show how the ellipse tightens. -->
+![Two rays through matched keypoints that stop just short of meeting, the midpoint of the gap marked inside an uncertainty ellipse stretched along the viewing direction, and a third camera's ray shrinking it.](assets/triangulation.svg)
 
 Two things decide whether the result is trustworthy:
 

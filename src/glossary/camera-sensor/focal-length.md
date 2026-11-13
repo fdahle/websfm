@@ -25,7 +25,7 @@ so a focal length in millimetres is meaningless for reconstruction until the
 sensor width is known too. $f_x$ and $f_y$ are equal for square pixels, which is
 the normal case; they differ only for anamorphic pixels or a non-square scan.
 
-<!-- TODO(image): assets/focal-length-fov.svg - two pinhole cameras with the same sensor width but short and long focal lengths, showing the field-of-view cones widening and narrowing, plus the f_px = f_mm x width_px / width_mm conversion annotated on the sensor. -->
+![Two pinhole cameras with the same sensor width: a short focal length gives a 98° field of view, a long one 46°; f_px = f_mm × width_px / width_mm.](assets/focal-length-fov.svg)
 
 **Why it matters.** Focal length is the parameter the reconstruction is most
 sensitive to. Get it wrong and the geometry does not simply scale — it *bows*:

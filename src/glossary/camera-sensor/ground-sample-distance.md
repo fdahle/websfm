@@ -19,7 +19,7 @@ units, $\text{GSD} = Z \cdot p / f_{\text{mm}}$ for pixel pitch $p$. Fly twice a
 high and the GSD doubles; the same camera at half the range resolves twice as
 finely.
 
-<!-- TODO(image): assets/gsd.svg - a camera at height Z above terrain with its footprint on the ground, one sensor pixel traced through the lens to the ground patch it covers, GSD = Z / f_px annotated, and a second camera at 2Z showing the doubled ground patch. -->
+![Two cameras over flat ground, one at height Z and one at 2Z; one sensor pixel traced through each lens covers a ground patch twice as wide from 2Z: GSD = Z / f_px.](assets/gsd.svg)
 
 GSD sets sensible defaults everywhere downstream, and asking for finer is asking
 for interpolation rather than information:
