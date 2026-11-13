@@ -16,7 +16,7 @@ import { isDepthIndexStale } from './depthMapCodec.js'
 const MACHINE = new Set(['memBudgetBytes', 'useGpu', 'keepMaps', '_journalMs', '_holdAt'])
 
 // What a run with the dialog's settings `s` computes, as the store resolves it
-// (stores/reconstruction/dense.js): Auto to the method it runs (`onGpu`: a GPU backend
+// (stores/reconstruction/depthRun.js): Auto to the method it runs (`onGpu`: a GPU backend
 // actually there), the view selection and passes that method implies, the working
 // resolution (`maxDim`: the run's own, after a memory step-down; else derived from
 // Quality over the largest original, `nativeLong`), the scene type a blank "Consistent

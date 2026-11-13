@@ -1,6 +1,6 @@
 // What each step of Build Depth Maps does to this project (DepthMapsModal.vue): the
 // one-line effects under its numbered steps, from the same rules the run applies
-// (stores/reconstruction/dense.js resolves Quality with qualityToMaxDim over the
+// (stores/reconstruction/depthRun.js resolves Quality with qualityToMaxDim over the
 // largest original image).
 import { qualityToMaxDim, resolveDepthMethod } from '../dense/depthMap.js'
 import { autoMinConsistent } from '../dense/geomFilter.js'

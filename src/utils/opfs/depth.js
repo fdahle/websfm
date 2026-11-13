@@ -69,7 +69,7 @@ export async function saveDepthPlane(projectId, uuid, buffers) {
   })
 }
 
-// The geometric-consistency pass (stores/reconstruction/dense.js) writes a map's new planes
+// The geometric-consistency pass (stores/reconstruction/depthRun.js) writes a map's new planes
 // beside its first-pass ones, as `<uuid>.g.<key>.bin`: later maps of the same pass still
 // read the first-pass planes (and a File read after its file was rewritten fails). An
 // interrupted run leaves only `<uuid>.g` names, which commitDepthIndex's stale sweep drops.

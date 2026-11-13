@@ -1,4 +1,4 @@
-// Stage A over the worker pool (stores/reconstruction/dense.js). On the CPU path each
+// Stage A over the worker pool (stores/reconstruction/depthRun.js). On the CPU path each
 // depth map is one single-threaded WASM PatchMatch, so a run spreads its images over
 // the pool's workers, each with its share of the memory budget. On the GPU one worker
 // feeds the device, which is the bottleneck there.
