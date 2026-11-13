@@ -1,6 +1,6 @@
 // What each step of Align to Reference does (AlignIcpModal.vue): pair points with
 // their nearest reference point, then solve the motion, iterating
-// (core/products/cloudAlign.js `icpAlign`).
+// (core/products/icp.js `icpAlign`).
 import { fmtCount, fmtLength } from './format.js'
 
 import { STREAMED_ICP_SAMPLE_POINTS } from '../lod/streamed.js'

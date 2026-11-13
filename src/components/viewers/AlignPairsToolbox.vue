@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import FloatingToolbox from './FloatingToolbox.vue'
-import { fitPointPairs, rotationAngle } from '../../core/products/cloudAlign.js'
+import { fitPointPairs, rotationAngle } from '../../core/products/rigidTransform.js'
 import { pluralize } from '../../core/textFormat.js'
 
 // Align by Point Pairs (Tools ▸ Point Cloud ▾): click a point in the cloud to MOVE,

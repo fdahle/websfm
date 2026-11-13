@@ -357,7 +357,7 @@ function seg2(ax, ay, az, bx, by, bz) {
 /**
  * The exact closest-point search over a triangle mesh (the scheme in the file header),
  * built once and queried point by point: C2M distances, and ICP's correspondences on a
- * mesh reference (core/products/cloudAlign.js).
+ * mesh reference (core/products/icp.js).
  * @param {{ nVerts?:number, count?:number, pos, idx:Uint32Array }} mesh
  * @returns {{ nValid, nT, tiers, maxRadius, medianRadius, stats: { candidates, exact },
  *   closest(x, y, z, limit = Infinity, hint = -1, out?: Float64Array(3)) → triangle | -1,

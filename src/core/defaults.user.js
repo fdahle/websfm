@@ -733,7 +733,7 @@ export const SAMPLE_MESH_DEFAULTS = {
   count: 1_000_000,
 }
 
-// ── Tools ▸ Point Cloud ▾ (core/products/cloudNormals.js, cloudAlign.js, …) ──
+// ── Tools ▸ Point Cloud ▾ (core/products/cloudNormals.js, icp.js, …) ──
 
 export const NORMALS_DEFAULTS = {
   k: 16,

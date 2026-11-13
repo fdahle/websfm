@@ -20,7 +20,7 @@ import { anyCloudBounds, isStreamed } from '../../../core/lod/streamed.js'
 import { checkNumberFields } from '../../../utils/numberFields.js'
 
 // Align to Reference (Tools ▸ Point Cloud ▾) — ICP, point-to-plane where the
-// reference has normals (core/products/cloudAlign.js `icpAlign`). It REFINES: the
+// reference has normals (core/products/icp.js `icpAlign`). It REFINES: the
 // two clouds must already overlap within the correspondence radius — do a rough
 // alignment first (Align by point pairs, Transform, or georeferencing). Adds the
 // aligned source as a NEW cloud; the transform and RMS go to the log.

@@ -2027,7 +2027,7 @@ window.bench = {
     sample = 200_000,
   } = {}) {
     const { transformFromEuler, matrixFromTransform, fitPointPairs, rotationAngle } =
-      await import('/src/core/products/cloudAlign.js')
+      await import('/src/core/products/rigidTransform.js')
     const { ICP_DEFAULTS, DISTANCE_DEFAULTS } = await import('/src/core/defaults.user.js')
     const ref = recon.clouds.find((c) => c.kind === 'dense' && c.imported)
     const src = recon.clouds.find((c) => c.kind === 'dense' && !c.imported && !c.derived)

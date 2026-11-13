@@ -5,7 +5,7 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { normalizeRegion, regionFromPositions } from '../core/products/region.js'
 import { normalizeOrientation, upFromPlane } from '../core/products/orientation.js'
 import { planeFromThreePoints } from '../core/products/screenPick.js'
-import { matrixFromTransform } from '../core/products/cloudAlign.js'
+import { matrixFromTransform } from '../core/products/rigidTransform.js'
 import { estimateUpFromCameras, cameraCenter } from '../core/sfm/geometry.js'
 import { useLog } from './useLog.js'
 

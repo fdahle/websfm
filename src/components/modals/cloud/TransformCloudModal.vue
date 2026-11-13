@@ -11,11 +11,11 @@ import NoSourceWarn from '../ui/NoSourceWarn.vue'
 import SourcePicker from '../ui/SourcePicker.vue'
 import { transformCloudEffects } from '../../../core/stepEffects/transformCloud.js'
 import { useSourcePick } from '../../../composables/useSourcePick.js'
-import { transformFromEuler, parseMatrixText, matrixFromTransform } from '../../../core/products/cloudAlign.js'
+import { transformFromEuler, parseMatrixText, matrixFromTransform } from '../../../core/products/rigidTransform.js'
 import { cloudBounds } from '../../../core/products/cloudEdit.js'
 
 // Transform (Tools ▸ Point Cloud ▾) — move, rotate and scale a dense cloud, or apply
-// a 4×4 matrix from another tool (core/products/cloudAlign.js). Adds a NEW cloud;
+// a 4×4 matrix from another tool (core/products/rigidTransform.js). Adds a NEW cloud;
 // positions stay Float64 so survey coordinates survive. Rotation is about fixed
 // world axes, X then Y then Z, around the pivot (right-handed).
 const props = defineProps({

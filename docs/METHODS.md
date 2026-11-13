@@ -1569,7 +1569,7 @@ nothing feeds back into the solve.
 - **Normals** (`cloudNormals.js`): PCA of the 16 nearest neighbours (smallest eigenvector,
   cyclic Jacobi in double precision), each oriented on its own toward the nearest camera
   or +up: no spanning-tree propagation, so the result is deterministic.
-- **Alignment** (`cloudAlign.js`): point pairs use Horn's similarity (§6.3); the rigid
+- **Alignment** (`rigidTransform.js`, `icp.js`): point pairs use Horn's similarity (§6.3); the rigid
   variant keeps Horn's rotation and re-solves the translation. ICP (Besl & McKay 1992) is
   trimmed (90 %) and point-to-plane (Chen & Medioni 1992; a linearised 6-DoF step, damped
   Gaussian elimination, Rodrigues update, re-orthonormalised R) when the reference has

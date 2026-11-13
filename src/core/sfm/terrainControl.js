@@ -13,7 +13,7 @@ import { upperMedian } from '../stats.js'
 /**
  * The prior as a 3D similarity from the orthophoto's frame (x, y, z in its own
  * units) to the reference DEM's CRS: { scale, R, t } with p' = scale·R·p + t (the
- * cloudAlign.js convention), the height offset left at 0 for the DEM to set.
+ * rigidTransform.js convention), the height offset left at 0 for the DEM to set.
  * `prior` maps orthophoto native px to DEM native px; `ortho` { originX, originY,
  * gsd }; `geo` the DEM's geoTransform { originX, originY, scaleX, scaleY } (north up).
  */

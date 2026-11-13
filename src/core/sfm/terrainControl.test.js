@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { terrainInitial, terrainCandidates, terrainPasses, median } from './terrainControl.js'
-import { icpAlign, applyTransform } from '../products/cloudAlign.js'
+import { applyTransform } from '../products/rigidTransform.js'
+import { icpAlign } from '../products/icp.js'
 
 describe('terrainInitial', () => {
   it('maps the frame through the prior exactly as the pixel chain does', () => {

@@ -21,7 +21,8 @@ import { matchLightGlue } from '../../core/features/lightglue.js'
 import { keypointsFromObjects } from '../../core/features/keypoints.js'
 import { planTiles, tileOwns } from '../../core/features/tiling.js'
 import { paddedRect } from '../../core/sfm/referenceMatch.js'
-import { icpAlign, applyTransform } from '../../core/products/cloudAlign.js'
+import { applyTransform } from '../../core/products/rigidTransform.js'
+import { icpAlign } from '../../core/products/icp.js'
 import { median, terrainPasses } from '../../core/sfm/terrainControl.js'
 import {
   coarseHypotheses,

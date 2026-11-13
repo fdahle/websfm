@@ -1,5 +1,5 @@
 // What each step of Transform Cloud does (TransformCloudModal.vue): rotate and scale
-// about the pivot, then move (core/products/cloudAlign.js `transformFromEuler`); or
+// about the pivot, then move (core/products/rigidTransform.js `transformFromEuler`); or
 // the pasted matrix as given.
 
 const PIVOT = { centre: 'the cloud’s centre', origin: 'the coordinate origin' }

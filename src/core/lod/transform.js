@@ -11,7 +11,7 @@
 import { screenSelectMask } from '../products/screenSelect.js'
 import { filterCloud, sorNeighbourMeans, estimateSpacing, outlierLimit } from '../products/cloudEdit.js'
 import { classifyCloudGround } from '../products/groundFilter.js'
-import { transformCloud, applyTransform } from '../products/cloudAlign.js'
+import { transformCloud, applyTransform } from '../products/rigidTransform.js'
 import { planExtract, extractPoints } from './extract.js'
 import { nodeCube } from './octree.js'
 import { arrayOfType } from './nodeCodec.js'
@@ -434,7 +434,7 @@ export function tileOutputsSource(lod, plan, readTileOutput, { limit = null, pro
  * The edited points of a streamed cloud as a build source (core/lod/build.js):
  * mode 'crop' (settings { min, max }: keeps what lies outside), 'mask' ({ selection,
  * keepSelected }), 'classify' ({ selection, classValue }), 'transform' ({ matrix } or
- * { transform }: any form cloudAlign.js accepts), 'filter' (filterCloud's settings) or
+ * { transform }: any form rigidTransform.js accepts), 'filter' (filterCloud's settings) or
  * 'classify-ground' (classifyCloudGround's, in metres).
  */
 export function streamedEditSource(reader, lod, mode, settings = {}, { log = () => {}, progress = null } = {}) {
