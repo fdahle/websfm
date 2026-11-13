@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  projectSparsePeakBytes,
   projectSparsePeakBreakdownBytes,
   sparseMemoryDecision,
   SPARSE_MEMORY_MODEL,
@@ -16,7 +15,6 @@ describe('sparse reconstruction memory guard', () => {
     const small = projectSparsePeakBreakdownBytes({ keypointCount: 10_000, matchCount: 20_000 })
     const large = projectSparsePeakBreakdownBytes({ keypointCount: 100_000, matchCount: 500_000 })
     expect(large.workerBufferBytes).toBeGreaterThan(small.workerBufferBytes * 8)
-    expect(projectSparsePeakBytes({ keypointCount: 100_000, matchCount: 500_000 })).toBe(large.totalBytes)
   })
 
   it('puts the descriptors in buffers and the guided grids in the heap, only when guided', () => {

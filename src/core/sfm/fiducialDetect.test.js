@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   FIDUCIAL_DETECT_TUNING,
   grayFromRgba,
-  extractPatch,
   downscalePatch,
   rotatePatch90,
   rotatePoint90,
@@ -10,6 +9,19 @@ import {
   subpixelPeak,
   detectFiducialsInImage,
 } from './fiducialDetect.js'
+
+// A (2·half+1)² template cut from `gray` around (cx, cy), edge-clamped (the scans
+// here are synthetic, so the fixture cuts its own templates).
+function extractPatch(gray, cx, cy, half) {
+  const x0 = Math.round(cx),
+    y0 = Math.round(cy)
+  const size = 2 * half + 1
+  const data = new Float32Array(size * size)
+  const at = (x, y) =>
+    gray.data[Math.min(gray.height - 1, Math.max(0, y)) * gray.width + Math.min(gray.width - 1, Math.max(0, x))]
+  for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) data[r * size + c] = at(x0 - half + c, y0 - half + r)
+  return { data, size }
+}
 
 // ── synthetic raster helpers ───────────────────────────────────────────────
 
@@ -150,21 +162,6 @@ describe('grayFromRgba', () => {
     const g = grayFromRgba(rgba, 2, 1)
     expect(g.data[0]).toBeCloseTo(255 * 0.299, 4)
     expect(g.data[1]).toBeCloseTo(255 * 0.587, 4)
-  })
-})
-
-describe('extractPatch', () => {
-  it('edge-clamps out-of-bounds source pixels', () => {
-    const img = { data: Float32Array.from([1, 2, 3, 4]), width: 2, height: 2 }
-    const p = extractPatch(img, 0, 0, 1)
-    expect(p.size).toBe(3)
-    // Row 0 clamps up to row 0; column 0 clamps left to column 0.
-    expect(Array.from(p.data)).toEqual([1, 1, 2, 1, 1, 2, 3, 3, 4])
-  })
-
-  it('returns null when the centre is outside the image', () => {
-    const img = { data: new Float32Array(4), width: 2, height: 2 }
-    expect(extractPatch(img, 5, 0, 1)).toBeNull()
   })
 })
 

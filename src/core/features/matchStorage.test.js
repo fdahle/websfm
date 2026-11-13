@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  concatMatchParts,
   matchByteRange,
   packMatchDocument,
   packMatchFlags,
@@ -58,7 +57,15 @@ const entries = () =>
   ])
 
 // The bytes a writer would commit, and a reader's view of one pair from them.
-const column = (doc) => concatMatchParts(doc.matchParts)
+const column = (doc) => {
+  const out = new Uint32Array(doc.matchParts.reduce((n, p) => n + p.length, 0))
+  let o = 0
+  for (const p of doc.matchParts) {
+    out.set(p, o)
+    o += p.length
+  }
+  return out
+}
 const slice = (col, e) => {
   const [s, t] = matchByteRange(e.off, e.nMatches)
   return new Uint32Array(col.buffer.slice(s, t))

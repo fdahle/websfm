@@ -3,16 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import exifr from 'exifr'
 import { fromArrayBuffer } from 'geotiff'
 import { bandMetadata } from '../io/metadata.js'
-import {
-  exposureSeconds,
-  vignetteFn,
-  hasRadiometry,
-  radianceImage,
-  regionStats,
-  panelIrradiance,
-  reflectanceFactor,
-  dlsIrradiance,
-} from './micasense.js'
+import { exposureSeconds, vignetteFn, hasRadiometry, radianceImage, regionStats, dlsIrradiance } from './micasense.js'
 
 const band = {
   bits: 16,
@@ -73,9 +64,6 @@ describe('panel and irradiance', () => {
     ])
     expect(s.count).toBe(15)
     expect(s.mean).toBeCloseTo(4, 12)
-    expect(panelIrradiance(0.1, 0.5)).toBeCloseTo(0.2 * Math.PI, 12)
-    // A panel seen under that irradiance reads back its own albedo.
-    expect(0.1 * reflectanceFactor(panelIrradiance(0.1, 0.5))).toBeCloseTo(0.5, 12)
   })
   it('takes the DLS 2 horizontal irradiance, or rebuilds it where the firmware got it wrong', () => {
     const irradiance = { horizontal: 1.2, direct: 1, scattered: 0.25, solarElevation: Math.PI / 6 }
@@ -111,7 +99,8 @@ describe.skipIf(!existsSync(SAMPLES))('MicaSense sample captures', () => {
       const L = regionStats(radianceImage(dn, w, h, band, model), w, band.panel.corners).mean
       // MicaSense measures on the undistorted image; the panel is even enough not to care.
       expect(Math.abs(L / radiance[b - 1] - 1)).toBeLessThan(0.0015)
-      expect(Math.abs(panelIrradiance(L, 0.49) / irradiance[b - 1] - 1)).toBeLessThan(0.0015)
+      // Its panel irradiance is E = π·L/ρ (panel.py irradiance_mean).
+      expect(Math.abs((Math.PI * L) / 0.49 / irradiance[b - 1] - 1)).toBeLessThan(0.0015)
     }
   })
   it('matches the DLS irradiance of an Altum flight capture', async () => {

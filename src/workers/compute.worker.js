@@ -28,6 +28,7 @@ import { makeIoOps } from './ops/io.js'
 import { makeReferenceGcpOps } from './ops/referenceGcps.js'
 import { makeUndistortOps } from './ops/undistort.js'
 import { makeLazCodec } from './ops/laz.js'
+import { resizeScale } from '../core/sfm/geometry.js'
 import { makeExportOps } from './ops/export.js'
 import { makeLodOps } from './ops/lod.js'
 import { makeTiles3dOps } from './ops/tiles3d.js'
@@ -83,7 +84,7 @@ async function rasterize(url, maxDim) {
   ctx.drawImage(bmp, 0, 0, width, height)
   const { data } = ctx.getImageData(0, 0, width, height)
   bmp.close()
-  return { data, width, height, scale, scaleXY: [width / natW, height / natH], natW, natH }
+  return { data, width, height, scale, scaleXY: resizeScale(width, height, natW, natH), natW, natH }
 }
 
 // Merge every domain's op registry. rasterize is the only worker-local helper the

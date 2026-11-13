@@ -88,17 +88,6 @@ export function orthoGpuAdjustments(style) {
   return out
 }
 
-// One 8-bit channel value through the same pipeline as the shader (for tests and
-// for anything that must bake the adjustment into pixels).
-export function adjustChannel(v, style) {
-  const s = resolveOrthoStyle(style)
-  let x = v / 255
-  x = clamp((s.contrast + 1) * x - s.contrast / 2, 0, 1)
-  x = Math.pow(x, 1 / s.gamma)
-  x = clamp(x + s.brightness, 0, 1)
-  return Math.round(x * 255)
-}
-
 // The SVG <feComponentTransfer> functions for the same pipeline: a linear transfer
 // (slope, intercept) per contrast and brightness step, a gamma transfer (exponent
 // 1/gamma) between them. Each primitive clamps to 0…1, as the shader does.

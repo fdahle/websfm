@@ -123,13 +123,6 @@ export function regionStats(img, w, corners) {
   return { mean, std: count ? Math.sqrt(Math.max(0, sum2 / count - mean * mean)) : NaN, count }
 }
 
-// The irradiance a calibration panel of known reflectance (albedo, 0–1) shows: the
-// radiance it reflects, E = π·L/ρ (panel.py irradiance_mean).
-export const panelIrradiance = (radianceMean, albedo) => (Math.PI * radianceMean) / albedo
-
-// Radiance → reflectance under irradiance E (W/m²/nm).
-export const reflectanceFactor = (irradiance) => Math.PI / irradiance
-
 // Firmware from which the DLS 2's horizontal irradiance is right (metadata.py
 // horizontal_irradiance_valid); RedEdge-P and Altum-PT always are.
 const GOOD_FIRMWARE = { 'Altum': '1.2.3', 'RedEdge': '5.1.7', 'RedEdge-M': '5.1.7' }

@@ -8,7 +8,6 @@ import {
   assembleCog,
   geoKeysForEpsg,
   createCogBuilder,
-  cogRawBytes,
   gdalBandNames,
   assembleStripTiff,
 } from './geotiff.js'
@@ -684,10 +683,6 @@ describe('createCogBuilder (a COG from blocks)', () => {
     ).rejects.toThrow('not on the 32 grid')
     await b.addBlock({ col0: 0, row0: 0, width: 32, height: 32, data: new Uint8Array(32 * 32 * 4) })
     await expect(b.finish()).rejects.toThrow('never arrived')
-  })
-  it('bounds the uncompressed size from the tile grid', () => {
-    expect(cogRawBytes({ width: 512, height: 512, tileSize: 512, bytesPerPixel: 4 })).toBe(512 * 512 * 4 + 65536)
-    expect(cogRawBytes({ width: 1024, height: 512, tileSize: 512, bytesPerPixel: 4 })).toBe(3 * 512 * 512 * 4 + 65536)
   })
 })
 

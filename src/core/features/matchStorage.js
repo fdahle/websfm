@@ -116,19 +116,6 @@ export function packMatchDocument(entries, { matchesOf = (_pid, e) => toMatchArr
   }
 }
 
-/** Concatenate typed match parts into one column (tests, a document with no file behind it). */
-export function concatMatchParts(parts) {
-  let n = 0
-  for (const p of parts) n += p.length
-  const out = new Uint32Array(n)
-  let o = 0
-  for (const p of parts) {
-    out.set(p, o)
-    o += p.length
-  }
-  return out
-}
-
 /** Just the flags buffer, in the same pair order packMatchDocument uses. */
 export function packMatchFlags(keptEntries) {
   const flags = new Uint8Array(keptEntries.length)

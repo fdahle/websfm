@@ -299,6 +299,6 @@ export function meshMeasure(source, { weld = true } = {}) {
 
 export { meshTriangleCount, meshVertexCount, UNTEXTURED, coincidentVertices, meshTopology } from './meshTopology.js'
 export { WELD_REL_BBOX, WELD_REL_EDGE, weldVertices, compactMesh } from './meshWeld.js'
-export { removeSmallComponents, removeLongEdges, fillHoles } from './meshHoles.js'
+export { fillHoles } from './meshHoles.js'
 export { taubinSmooth } from './meshSmooth.js'
 export { sampleMesh } from './meshSample.js'

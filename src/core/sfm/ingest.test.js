@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { gcpObservationMover, undistortAtIngest, refitMovedPairs, resolveIntrinsics } from './ingest.js'
 import { distortPixel } from './distortion.js'
 import { Uint32PairList, packMatchPairs } from './matchCodec.js'
-import { keypointSetFrom, kpColor } from './keypointSet.js'
+import { keypointSetFrom } from './keypointSet.js'
+
+// A keypoint's [r, g, b] as the set stores it, or null without one.
+const rgbOf = (set, k) => (set?.hasColor?.[k] ? Array.from(set.rgb.subarray(3 * k, 3 * k + 3)) : null)
 
 const quiet = () => {}
 
@@ -68,7 +71,7 @@ describe('ingest', () => {
     ideal.forEach((p, i) => {
       expect(imgs[0].kp.xy[2 * i]).toBeCloseTo(p.x, 6)
       expect(imgs[0].kp.xy[2 * i + 1]).toBeCloseTo(p.y, 6)
-      expect(kpColor(imgs[0].kp, i)).toEqual([1, 2, 3])
+      expect(rgbOf(imgs[0].kp, i)).toEqual([1, 2, 3])
     })
     expect(Array.from(imgs[1].kp.xy)).toEqual([900, 700]) // no calibrated distortion: untouched
   })

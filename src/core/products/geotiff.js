@@ -860,8 +860,6 @@ export function createCogBuilder(spec, { blockSize = 2048, compress = null, prev
   return { addBlock, finish, layout }
 }
 
-// Upper bound on a COG's bytes before compression: every level's padded tiles plus
-// headers — what decides whether the classic-TIFF 4 GiB offsets can hold it.
 // GDAL_METADATA naming each band (GDAL, QGIS: the band's description).
 export function gdalBandNames(names) {
   const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -870,11 +868,6 @@ export function gdalBandNames(names) {
     names.map((n, i) => `<Item name="DESCRIPTION" sample="${i}" role="description">${esc(n)}</Item>`).join('') +
     '</GDALMetadata>'
   )
-}
-
-export function cogRawBytes({ width, height, tileSize = 256, bytesPerPixel }) {
-  const { tileCounts } = planCogFromTiles({ width, height, tileSize })
-  return tileCounts.reduce((n, c) => n + c, 0) * tileSize * tileSize * bytesPerPixel + 65536
 }
 
 // What a product's GeoTIFF tags (and .prj) say about its frame: { crs, code,

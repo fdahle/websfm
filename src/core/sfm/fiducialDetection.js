@@ -5,7 +5,7 @@
 // owns only the anonymous-slot policy: declared slots → search centres →
 // accept/review.
 
-import { bestPrototypeHit, clamp, estimateFrameBounds, makeFiducialPrototype } from './fiducialPrimitives.js'
+import { bestPrototypeHit, clamp, estimateFrameBounds } from './fiducialPrimitives.js'
 import { slotsForPositions, slotUnitPoint } from './fiducialModel.js'
 
 export const FIDUCIAL_DETECTION_TUNING = {
@@ -18,11 +18,6 @@ export const FIDUCIAL_DETECTION_TUNING = {
   strokeFrac: 0.1,
   // Native refine search radius, in coarse pixels (nativeRefinePlan).
   refineRadiusCoarsePx: 3,
-}
-
-/** Analytic prototype at this policy's stroke width (thinner than bootstrap's). */
-export function makeDetectionPrototype(family, size, variant = 0) {
-  return makeFiducialPrototype(family, size, variant, { strokeFrac: FIDUCIAL_DETECTION_TUNING.strokeFrac })
 }
 
 /** The film rectangle, measured over this policy's outer band. */

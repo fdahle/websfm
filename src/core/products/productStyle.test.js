@@ -5,7 +5,6 @@ import {
   resolveOrthoStyle,
   isDefaultOrthoStyle,
   orthoGpuAdjustments,
-  adjustChannel,
   orthoFilterSteps,
   demThumbnailGrid,
 } from './productStyle.js'
@@ -94,14 +93,6 @@ describe('orthophoto symbology', () => {
       brightness: 0.1,
       gamma: 2,
     })
-  })
-
-  it('maps channels like the WebGLTile shader: contrast, then gamma, then brightness', () => {
-    expect(adjustChannel(128, null)).toBe(128)
-    expect(adjustChannel(255, { contrast: 0.5 })).toBe(255)
-    expect(adjustChannel(64, { contrast: 1 })).toBe(0)
-    expect(adjustChannel(64, { gamma: 2 })).toBe(Math.round(Math.sqrt(64 / 255) * 255))
-    expect(adjustChannel(200, { brightness: 0.5 })).toBe(255)
   })
 
   it('builds the matching SVG transfer chain', () => {

@@ -22,20 +22,6 @@ export function matMul3(A, B) {
   return C
 }
 
-export function matT3(A) {
-  return [
-    [A[0][0], A[1][0], A[2][0]],
-    [A[0][1], A[1][1], A[2][1]],
-    [A[0][2], A[1][2], A[2][2]],
-  ]
-}
-
-// Geodesic angle (deg) of a rotation matrix from identity: θ = acos((tr R − 1)/2).
-export function rotAngleDeg(R) {
-  const tr = R[0][0] + R[1][1] + R[2][2]
-  return (Math.acos(Math.max(-1, Math.min(1, (tr - 1) / 2))) * 180) / Math.PI
-}
-
 // Eigenvalues of a symmetric 3×3 matrix, descending (analytic, Smith 1961).
 export function eigSym3(a) {
   const p1 = a[0][1] ** 2 + a[0][2] ** 2 + a[1][2] ** 2

@@ -96,15 +96,6 @@ export function planeBytes(width, height) {
   return { depth: px * 4, cost: px * 4, nrm: px * 3 * 4, rgb: px * 3 }
 }
 
-// True when none of the required planes are on disk at all — the map is gone, not
-// damaged. Removing an image deletes its planes (see opfs `deleteDepth`) while the
-// index still lists it, and that map should simply drop out; a *partial* or
-// wrong-sized read is corruption instead, and the caller must not fuse it.
-export function depthPlanesMissing(buffers) {
-  if (!buffers) return true
-  return ['depth', 'cost', 'rgb'].every((k) => !buffers[k] || buffers[k].byteLength === 0)
-}
-
 // Rebuild one depth map from its metadata + sidecar buffers. Returns null when a
 // required plane is missing or the wrong size for the recorded dimensions —
 // a truncated write / half-deleted project must surface as "recompute the depth

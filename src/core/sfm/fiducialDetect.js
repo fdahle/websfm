@@ -64,25 +64,6 @@ function at(gray, x, y) {
 }
 
 /**
- * Square patch centred on `(cx, cy)` (rounded to integer px), edge-clamped.
- * Returns `null` when the centre is outside the image.
- * @returns {null | { data: Float32Array, size: number }}
- */
-export function extractPatch(gray, cx, cy, half) {
-  const x0 = Math.round(cx),
-    y0 = Math.round(cy)
-  if (x0 < 0 || y0 < 0 || x0 >= gray.width || y0 >= gray.height) return null
-  const size = 2 * half + 1
-  const data = new Float32Array(size * size)
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      data[r * size + c] = at(gray, x0 - half + c, y0 - half + r)
-    }
-  }
-  return { data, size }
-}
-
-/**
  * Box-filter (average-pooling) downscale of a square patch. `scale` ∈ (0,1].
  *
  * The output size is forced ODD. A template must have a well-defined centre

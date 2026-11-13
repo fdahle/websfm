@@ -139,10 +139,6 @@ export function projectSolverWasmBytes({ cameras = 0, observations = 0, points =
   )
 }
 
-export function projectSparsePeakBytes(counts = {}) {
-  return projectSparsePeakBreakdownBytes(counts).totalBytes
-}
-
 /**
  * Is a projected peak safe for one isolate?
  * - With a live heap reading, the projected HEAP must fit under SPARSE_HEAP_FRACTION of

@@ -7,7 +7,6 @@ import {
   searchWindows,
   fineTiles,
   acceptTile,
-  invertHomography,
   gpsSearchOutline,
   searchRegion,
   matchConfidence,
@@ -30,7 +29,8 @@ it('maps working matches exactly: a point read in both windows lands on its nati
     Array.from({ length: 9 }, (_, k) =>
       [0, 1, 2].reduce((t, m) => t + P[Math.floor(k / 3) * 3 + m] * Q[m * 3 + (k % 3)], 0),
     )
-  const Hw = mul(invertHomography(A(to)), mul(H, A(from)))
+  const invA = (L) => [1 / L.scaleX, 0, -A(L)[2] / L.scaleX, 0, 1 / L.scaleY, -A(L)[5] / L.scaleY, 0, 0, 1]
+  const Hw = mul(invA(to), mul(H, A(from)))
   const back = homographyToNative(Hw, from, to)
   for (const p of [
     [0, 0],

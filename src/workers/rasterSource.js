@@ -25,6 +25,7 @@ import { percentileRange } from '../core/io/tonalStretch.js'
 import { readTiffTag } from '../utils/tiff.js'
 import { inflateSync } from 'fflate'
 import { RESIDENT_TUNING } from '../core/tuning.js'
+import { resizeScale } from '../core/sfm/geometry.js'
 
 export const isPyramid = (src) => src?.kind === 'pyramid'
 
@@ -316,7 +317,7 @@ export function rasterizePyramidTo(src, width, height) {
     ctx.drawImage(from, 0, 0, natW * s, natH * s, 0, 0, width, height)
     data = ctx.getImageData(0, 0, width, height).data
   }
-  return { data, width, height, scale: width / natW, scaleXY: [width / natW, height / natH], natW, natH }
+  return { data, width, height, scale: width / natW, scaleXY: resizeScale(width, height, natW, natH), natW, natH }
 }
 
 /** RGBA of a native-pixel rect (fiducial / GCP windows), at level 0. */

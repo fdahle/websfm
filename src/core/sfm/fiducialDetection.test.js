@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
+  FIDUCIAL_DETECTION_TUNING,
   detectFiducialSpots,
-  makeDetectionPrototype,
   nativeRefinePlan,
   refineDetectionSpot,
 } from './fiducialDetection.js'
 import { slotUnitPoint, slotsForPositions } from './fiducialModel.js'
+import { makeFiducialPrototype } from './fiducialPrimitives.js'
+
+// The analytic mark at the detector's stroke width, painted into the synthetic scans.
+const makeDetectionPrototype = (family, size, variant = 0) =>
+  makeFiducialPrototype(family, size, variant, { strokeFrac: FIDUCIAL_DETECTION_TUNING.strokeFrac })
 
 function scan(family = 'generic', positions = 'corners') {
   const width = 241,

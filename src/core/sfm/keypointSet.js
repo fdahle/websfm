@@ -78,11 +78,6 @@ export function hasKp(set, k) {
   return !!set && k < set.n && set.xy[2 * k] === set.xy[2 * k]
 }
 
-/** [r, g, b] or null. Allocates; for per-point colour, not hot loops. */
-export function kpColor(set, k) {
-  return set?.hasColor?.[k] ? [set.rgb[3 * k], set.rgb[3 * k + 1], set.rgb[3 * k + 2]] : null
-}
-
 /**
  * A new set with every position passed through `fn(x, y, k) → {x, y}`; colours are
  * shared. Missing (NaN) keypoints stay missing.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cloudUnits, toCoordLength, fromCoordLength, formatMeasure } from './cloudUnits.js'
+import { cloudUnits, formatMeasure } from './cloudUnits.js'
 
 describe('cloudUnits', () => {
   it('labels a computed cloud in metres only when the project frame supplies them', () => {
@@ -16,10 +16,8 @@ describe('cloudUnits', () => {
     })
   })
 
-  it('converts lengths both ways and formats with a unit, never bare', () => {
+  it('formats with a unit, never bare', () => {
     const u = cloudUnits({}, { source: 'georef', scale: 2 })
-    expect(toCoordLength(4, u)).toBe(2)
-    expect(fromCoordLength(2, u)).toBe(4)
     expect(formatMeasure(3, u, 2)).toBe('12 m²')
     // Locale-formatted (the app follows the user's locale): 1.5 or 1,5.
     expect(formatMeasure(1.5, cloudUnits({}, null), 1)).toMatch(/^1[.,]5 model units$/)

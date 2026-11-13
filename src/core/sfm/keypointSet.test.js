@@ -1,14 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import {
-  keypointSetFrom,
-  isKeypointSet,
-  kpX,
-  kpY,
-  hasKp,
-  kpColor,
-  mapPositions,
-  keypointSetTransfer,
-} from './keypointSet.js'
+import { keypointSetFrom, isKeypointSet, kpX, kpY, hasKp, mapPositions, keypointSetTransfer } from './keypointSet.js'
+
+// A keypoint's [r, g, b] as the set stores it, or null without one.
+const rgbOf = (set, k) => (set?.hasColor?.[k] ? Array.from(set.rgb.subarray(3 * k, 3 * k + 3)) : null)
 
 describe('keypointSet', () => {
   it('packs positions and colours, and passes a set through unchanged', () => {
@@ -19,8 +13,8 @@ describe('keypointSet', () => {
     expect(isKeypointSet(set)).toBe(true)
     expect(set.n).toBe(2)
     expect([kpX(set, 0), kpY(set, 0), kpX(set, 1), kpY(set, 1)]).toEqual([1.5, 2.25, 3, 4])
-    expect(kpColor(set, 0)).toEqual([10, 20, 30])
-    expect(kpColor(set, 1)).toBeNull() // no colour on that keypoint
+    expect(rgbOf(set, 0)).toEqual([10, 20, 30])
+    expect(rgbOf(set, 1)).toBeNull() // no colour on that keypoint
     expect(keypointSetFrom(set)).toBe(set)
   })
 
@@ -33,7 +27,7 @@ describe('keypointSet', () => {
     const set = keypointSetFrom([{ x: 0, y: 0 }])
     expect(set.rgb).toBeNull()
     expect(set.hasColor).toBeNull()
-    expect(kpColor(set, 0)).toBeNull()
+    expect(rgbOf(set, 0)).toBeNull()
     expect(keypointSetTransfer(set)).toEqual([set.xy.buffer])
   })
 

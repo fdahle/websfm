@@ -21,16 +21,6 @@ export function cloudUnits(cloud, signature) {
   return { scale: 1, unit: 'model', label: 'model units' }
 }
 
-/** A length typed in the labelled unit, as a coordinate length on the cloud. */
-export function toCoordLength(value, units) {
-  return Number.isFinite(value) ? value / units.scale : value
-}
-
-/** A coordinate length on the cloud, in the labelled unit. */
-export function fromCoordLength(value, units) {
-  return Number.isFinite(value) ? value * units.scale : value
-}
-
 /** The unit of a length (power 1), area (2) or volume (3): `m²`, `model units³`. */
 export function measureUnitLabel(units, power = 1) {
   const exp = power === 1 ? '' : power === 2 ? '²' : '³'

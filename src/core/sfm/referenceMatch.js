@@ -31,25 +31,6 @@ function invAffine(A) {
   // [sx 0 cx; 0 sy cy; 0 0 1]
   return [1 / A[0], 0, -A[2] / A[0], 0, 1 / A[4], -A[5] / A[4], 0, 0, 1]
 }
-export function invertHomography(H) {
-  const [a, b, c, d, e, f, g, h, i] = H
-  const A = e * i - f * h,
-    B = -(d * i - f * g),
-    C = d * h - e * g
-  const det = a * A + b * B + c * C
-  if (!det) return null
-  return [
-    A / det,
-    -(b * i - c * h) / det,
-    (b * f - c * e) / det,
-    B / det,
-    (a * i - c * g) / det,
-    -(a * f - c * d) / det,
-    C / det,
-    -(a * h - b * g) / det,
-    (a * e - b * d) / det,
-  ]
-}
 
 // H between two reads' working samples → H between the two rasters' native pixels.
 export function homographyToNative(Hw, fromLayout, toLayout) {

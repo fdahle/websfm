@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   meshTopology,
   compactMesh,
-  removeSmallComponents,
-  removeLongEdges,
   fillHoles,
   cleanMesh,
   taubinSmooth,
@@ -12,6 +10,7 @@ import {
   meshMeasure,
   weldVertices,
 } from './meshEdit.js'
+import { componentsStep, longEdgesStep } from './meshHoles.js'
 
 // ── Synthetic meshes ─────────────────────────────────────────────────────────
 
@@ -256,31 +255,32 @@ describe('compactMesh', () => {
   })
 })
 
-describe('removeSmallComponents', () => {
+describe('componentsStep', () => {
   const main = gridParts(10, 10)
   const speck = gridParts(1, 1, { ox: 50, base: main.verts.length })
   const m = makeMesh([...main.verts, ...speck.verts], [...main.tris, ...speck.tris])
   it('drops components below minTriangles', () => {
-    const logs = []
-    const out = removeSmallComponents(m, { minTriangles: 10 }, (msg) => logs.push(msg))
-    expect(out.count).toBe(200)
-    expect(meshMeasure(out).components).toBe(1)
-    expect(logs[0]).toMatch(/removed 1 components \(2 triangles\)/)
+    const r = componentsStep(m, { minTriangles: 10 })
+    expect(r.mesh.count).toBe(200)
+    expect(meshMeasure(r.mesh).components).toBe(1)
+    expect(r.removedComponents).toBe(1)
+    expect(r.removedTriangles).toBe(2)
   })
   it('drops components below minFraction of the largest', () => {
-    expect(removeSmallComponents(m, { minFraction: 0.05 }).count).toBe(200)
-    expect(removeSmallComponents(m, { minFraction: 0.005 }).count).toBe(202)
+    expect(componentsStep(m, { minFraction: 0.05 }).mesh.count).toBe(200)
+    expect(componentsStep(m, { minFraction: 0.005 }).mesh.count).toBe(202)
   })
 })
 
-describe('removeLongEdges', () => {
+describe('longEdgesStep', () => {
   it('removes a bridging triangle and keeps the grid', () => {
     const g = gridParts(10, 10)
     const far = g.verts.length
     const m = makeMesh([...g.verts, [30, 0, 0]], [...g.tris, [10, far, 120]])
-    const out = removeLongEdges(m, { maxEdgeFactor: 4 })
-    expect(out.count).toBe(200)
-    expect(removeLongEdges(m, { maxEdgeFactor: 1000 }).count).toBe(201)
+    const r = longEdgesStep(m, { maxEdgeFactor: 4 })
+    expect(r.mesh.count).toBe(200)
+    expect(r.removedTriangles).toBe(1)
+    expect(longEdgesStep(m, { maxEdgeFactor: 1000 }).mesh.count).toBe(201)
   })
 })
 

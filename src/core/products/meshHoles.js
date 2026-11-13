@@ -15,6 +15,14 @@ import { medianEdgeLength } from './meshWeld.js'
 
 // ── Small components ─────────────────────────────────────────────────────────
 
+/**
+ * Remove connected components (connectivity through shared vertices) with fewer than
+ * `max(minTriangles, minFraction × largest component's triangles)` triangles — the
+ * floating specks Poisson inflates around stray samples. Vertices are kept (run
+ * `compactMesh` to drop the orphans).
+ *
+ * opts: { minTriangles = 0, minFraction = 0 } → { mesh, components, removedComponents, removedTriangles, threshold }
+ */
 export function componentsStep(mesh, { minTriangles = 0, minFraction = 0 } = {}) {
   const nT = meshTriangleCount(mesh)
   if (!nT)
@@ -54,27 +62,16 @@ export function componentsStep(mesh, { minTriangles = 0, minFraction = 0 } = {})
   }
 }
 
-/**
- * Remove connected components (connectivity through shared vertices) with fewer than
- * `max(minTriangles, minFraction × largest component's triangles)` triangles — the
- * floating specks Poisson inflates around stray samples. Vertices are kept (run
- * `compactMesh` to drop the orphans).
- *
- * opts: { minTriangles = 0, minFraction = 0 }
- */
-export function removeSmallComponents(mesh, opts = {}, onLog) {
-  const r = componentsStep(mesh, opts)
-  onLog?.(
-    `Mesh components: ${r.components.toLocaleString()} found, threshold ${Math.ceil(r.threshold).toLocaleString()} triangles → ` +
-      `removed ${r.removedComponents.toLocaleString()} components (${r.removedTriangles.toLocaleString()} triangles)`,
-    'info',
-    'Products',
-  )
-  return r.mesh
-}
-
 // ── Long edges ───────────────────────────────────────────────────────────────
 
+/**
+ * Drop triangles with any edge longer than `maxEdgeFactor × median edge length` —
+ * the stretched "bridge" triangles screened Poisson spans across data gaps. The
+ * median comes from a deterministic sample of at most ~1 M half-edges. A degenerate
+ * (all zero-length) mesh or `maxEdgeFactor <= 0` removes nothing.
+ *
+ * opts: { maxEdgeFactor = 4 } → { mesh, median, limit, removedTriangles }
+ */
 export function longEdgesStep(mesh, { maxEdgeFactor = 4 } = {}) {
   const nV = meshVertexCount(mesh),
     nT = meshTriangleCount(mesh)
@@ -102,25 +99,6 @@ export function longEdgesStep(mesh, { maxEdgeFactor = 4 } = {}) {
     kept++
   }
   return { mesh: selectTriangles(mesh, keep, kept), removedTriangles: nT - kept, median, limit: Math.sqrt(limit2) }
-}
-
-/**
- * Drop triangles with any edge longer than `maxEdgeFactor × median edge length` —
- * the stretched "bridge" triangles screened Poisson spans across data gaps. The
- * median comes from a deterministic sample of at most ~1 M half-edges. A degenerate
- * (all zero-length) mesh or `maxEdgeFactor <= 0` removes nothing.
- *
- * opts: { maxEdgeFactor = 4 }
- */
-export function removeLongEdges(mesh, opts = {}, onLog) {
-  const r = longEdgesStep(mesh, opts)
-  onLog?.(
-    `Mesh long edges: median edge ${r.median.toPrecision(4)}, limit ${r.limit.toPrecision(4)} → ` +
-      `removed ${r.removedTriangles.toLocaleString()} triangles`,
-    'info',
-    'Products',
-  )
-  return r.mesh
 }
 
 // ── Hole filling ─────────────────────────────────────────────────────────────

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   serializeDepthMap,
   deserializeDepthMap,
-  depthPlanesMissing,
   buildDepthIndex,
   isDepthIndexStale,
   depthMapBytes,
@@ -91,22 +90,6 @@ describe('serialize/deserializeDepthMap', () => {
     expect(deserializeDepthMap(meta, { ...buffers, nrm: new ArrayBuffer(12) })).toBeNull()
     expect(deserializeDepthMap({ ...meta, width: 0 }, buffers)).toBeNull()
     expect(deserializeDepthMap(null, buffers)).toBeNull()
-  })
-})
-
-describe('depthPlanesMissing', () => {
-  // The store drops a missing map (its image was removed) but refuses the whole
-  // saved set on a corrupt one — so this distinction decides which happens.
-  it('reports absent sidecars as missing', () => {
-    expect(depthPlanesMissing(null)).toBe(true)
-    expect(depthPlanesMissing({ depth: null, cost: null, rgb: null, nrm: null })).toBe(true)
-    expect(depthPlanesMissing({ depth: new ArrayBuffer(0), cost: null, rgb: null })).toBe(true)
-  })
-
-  it('does not report a partial read as missing (that is corruption)', () => {
-    const { buffers } = serializeDepthMap(makeMap())
-    expect(depthPlanesMissing(buffers)).toBe(false)
-    expect(depthPlanesMissing({ ...buffers, depth: null, cost: null })).toBe(false)
   })
 })
 
