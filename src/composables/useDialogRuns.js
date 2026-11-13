@@ -6,12 +6,14 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { sectionCloud, sectionToCsv, sectionToDxf } from '../core/products/cloudSection.js'
 import { downloadBlob } from '../utils/download.js'
-import { cancelRun } from '../workers/computeClient.js'
+import { cancelRun, isAbort } from '../workers/computeClient.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
 import { useLog } from './useLog.js'
 import { useDemCoregistration } from './useDemCoregistration.js'
 import { showToast } from './useToasts.js'
 import { defaultExportName, exportFileName } from '../core/exportNames.js'
+import { useProjectMerge } from './useProjectMerge.js'
+import { useDetectTargets } from './useDetectTargets.js'
 
 // What each run-style dialog does on Run, lifted out of App.vue: close the dialog,
 // then hand the settings to the pipeline (usePipeline) — and, for the few that
@@ -59,6 +61,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     mergeCloudsOpen,
     toolModal,
     coregisterInitial,
+    importProjectOpen,
   } = storeToRefs(useModalsStore())
   const demCoregistration = useDemCoregistration()
   const { patchImageView } = useImageViewSettings()
@@ -343,8 +346,58 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     }
   }
 
+  // Import ▸ Project into this project (useProjectMerge), behind the run progress bar.
+  const { importProjectInto } = useProjectMerge()
+  async function onImportProject(sourceId, options = {}) {
+    importProjectOpen.value = false
+    // Cancel stops between batches (no worker to terminate).
+    exportProgress.open('Importing Project', 0, () => {}, { unit: 'photos' })
+    let ok = false
+    try {
+      const r = await importProjectInto(sourceId, exportProgress.report, () => exportProgress.aborted.value, options)
+      ok = !!r && !r.cancelled
+    } finally {
+      await exportProgress.close(ok)
+    }
+  }
+
+  // Tools ▸ Images ▸ Detect targets (useDetectTargets), behind the run progress bar.
+  const detectTargets = useDetectTargets()
+  async function onDetectTargetsRun({ settings, plan }) {
+    toolModal.value = null
+    // Cancel stops taking photos and ends the workers' current ones (computeClient cancelRun).
+    exportProgress.open('Detecting Targets', plan.photos.length, () => cancelRun('target detection cancelled'), {
+      unit: 'photos',
+    })
+    let ok = false
+    try {
+      const r = await detectTargets.run(settings, plan, exportProgress.report, () => exportProgress.aborted.value)
+      if (r.cancelled) return
+      ok = r.found > 0
+      showToast(r.found ? `${r.found} target marks placed` : 'No target found', {
+        detail: r.found
+          ? 'Check them in Edit GCPs, then georeference again.'
+          : settings.kind === 'apriltag' || settings.kind === 'aruco'
+            ? `No ${settings.kind === 'aruco' ? `ArUco ${settings.arucoDict.toUpperCase()}` : 'tag36h11'} tag was read: ` +
+              'a tag needs about 2 px per cell and its white border.'
+            : 'Try a larger search radius or a lower minimum score.',
+        kind: r.found ? 'success' : 'warn',
+      })
+    } catch (err) {
+      if (!isAbort(err)) {
+        const detail = String(err?.message ?? err)
+        log(`Detect targets failed: ${detail}`, 'error', 'GCP')
+        showToast('Detect targets failed', { detail, kind: 'error', ms: 6000 })
+      }
+    } finally {
+      await exportProgress.close(ok)
+    }
+  }
+
   return {
     onCoregisterRun,
+    onImportProject,
+    onDetectTargetsRun,
     onDetectRun,
     onMatchRun,
     georeferenceAfterReconstruct,

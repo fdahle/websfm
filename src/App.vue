@@ -14,11 +14,6 @@ import ModelDownloadModal from './components/modals/app/ModelDownloadModal.vue'
 import DevConsole from './components/layout/DevConsole.vue'
 import BrowserWarning from './components/layout/BrowserWarning.vue'
 import { useStoppedRuns } from './composables/useStoppedRuns.js'
-import { useProjectMerge } from './composables/useProjectMerge.js'
-import { useDetectTargets } from './composables/useDetectTargets.js'
-import { showToast } from './composables/useToasts.js'
-import { useLog } from './composables/useLog.js'
-import { cancelRun as cancelWorkerRun, isAbort } from './workers/computeClient.js'
 import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
 import UnsavedChangesCard from './components/layout/UnsavedChangesCard.vue'
@@ -321,54 +316,6 @@ const {
   editClouds,
   textureMesh,
 })
-// Import ▸ Project into this project (useProjectMerge), behind the run progress bar.
-const { importProjectInto } = useProjectMerge()
-async function onImportProject(sourceId, options = {}) {
-  useModalsStore().importProjectOpen = false
-  // Cancel stops between batches (no worker to terminate).
-  exportProgress.open('Importing Project', 0, () => {}, { unit: 'photos' })
-  let ok = false
-  try {
-    const r = await importProjectInto(sourceId, exportProgress.report, () => exportProgress.aborted.value, options)
-    ok = !!r && !r.cancelled
-  } finally {
-    await exportProgress.close(ok)
-  }
-}
-
-// Tools ▸ Images ▸ Detect targets (useDetectTargets), behind the run progress bar.
-const detectTargets = useDetectTargets()
-async function onDetectTargetsRun({ settings, plan }) {
-  useModalsStore().toolModal = null
-  // Cancel stops taking photos and ends the workers' current ones (computeClient cancelRun).
-  exportProgress.open('Detecting Targets', plan.photos.length, () => cancelWorkerRun('target detection cancelled'), {
-    unit: 'photos',
-  })
-  let ok = false
-  try {
-    const r = await detectTargets.run(settings, plan, exportProgress.report, () => exportProgress.aborted.value)
-    if (r.cancelled) return
-    ok = r.found > 0
-    showToast(r.found ? `${r.found} target marks placed` : 'No target found', {
-      detail: r.found
-        ? 'Check them in Edit GCPs, then georeference again.'
-        : settings.kind === 'apriltag' || settings.kind === 'aruco'
-          ? `No ${settings.kind === 'aruco' ? `ArUco ${settings.arucoDict.toUpperCase()}` : 'tag36h11'} tag was read: ` +
-            'a tag needs about 2 px per cell and its white border.'
-          : 'Try a larger search radius or a lower minimum score.',
-      kind: r.found ? 'success' : 'warn',
-    })
-  } catch (err) {
-    if (!isAbort(err)) {
-      const detail = String(err?.message ?? err)
-      useLog().log(`Detect targets failed: ${detail}`, 'error', 'GCP')
-      showToast('Detect targets failed', { detail, kind: 'error', ms: 6000 })
-    }
-  } finally {
-    await exportProgress.close(ok)
-  }
-}
-
 // Work in flight (a run's progress modal, or a workflow): open, switch and delete wait.
 const isBusy = () => progressOpen.value || workflowRunning.value
 
@@ -771,6 +718,8 @@ const {
   onProductToolRun,
   onReflectanceRun,
   onCoregisterRun,
+  onImportProject,
+  onDetectTargetsRun,
 } = useDialogRuns({
   pipeline: {
     runDetect,
