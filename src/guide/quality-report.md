@@ -44,6 +44,12 @@ meaningful in their stated units and frame. Look for directional or spatial patt
 not only the average. Independent checkpoints are stronger evidence than control used
 in the fit.
 
+With checkpoints, the GCP tab and the exported report give the
+[accuracy class](help:accuracy-class) figures a survey delivery is stated in: RMSE_H and
+RMSE_V with the checkpoints' declared accuracy counted in, the mean error per axis, and
+the standard's sentence once there are 30 checkpoints with declared accuracies. With
+fewer, the figures are still given, marked as not compliant.
+
 ## Dense
 Review depth-map completion, valid-pixel fractions, and consistency before fusion.
 One weak image is often cheaper to exclude or mask than to make every threshold loose.

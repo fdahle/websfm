@@ -5,6 +5,19 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Accuracy at the checkpoints in survey terms.** The Quality Report export has a section
+  *Accuracy at the checkpoints (ASPRS 2023)* with RMSE_H, RMSE_V and RMSE_3D, the
+  checkpoints' declared survey accuracy counted in as the ASPRS Positional Accuracy
+  Standards (Edition 2) ask, and the GCP tab shows RMSE_H / RMSE_V. The section lists per
+  axis the mean error, standard deviation and RMSE, flags a mean error over 25 % of the
+  RMSE and residuals over three times it, and writes the standard's "tested to meet … for a
+  X cm RMSE_H horizontal positional accuracy class" sentence only with at least 30
+  checkpoints that declare their accuracy; with fewer it gives the figures marked as not
+  compliant. Checked against the standard's worked example (a 1 cm fit to checkpoints
+  surveyed at 2 cm gives 2.24 cm). The figures describe the adjusted block; a DEM or
+  orthophoto adds its own error.
+
 ### Fixed
 - **Escape closes the dialog opened last.** Escape now closes whichever dialog sits on
   top, every dialog included, where before it went down a fixed list that a new dialog

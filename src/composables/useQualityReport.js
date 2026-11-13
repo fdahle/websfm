@@ -28,6 +28,7 @@ import { projectHealth } from '../core/eval/health.js'
 import { estimatedIntrinsics } from '../core/sfm/cameraEstimated.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import { buildReportHtml } from '../core/products/report.js'
+import { asprsReportSection, checkpointResiduals } from '../core/eval/asprsAccuracy.js'
 import { methodsUsed } from '../core/help/methodsUsed.js'
 import { citeShort, formatReference } from '../core/help/references.js'
 import { isFisheyeModel } from '../core/sfm/distortion.js'
@@ -330,6 +331,10 @@ export function useQualityReport() {
     ]
   }
 
+  // The export's ASPRS section (core/eval/asprsAccuracy.js) from a GCP accuracy report.
+  const asprsSection = (gcpReport) =>
+    asprsReportSection(checkpointResiduals(gcpReport ?? [], gcpsStore.gcps), crsUnit.value)
+
   // Assemble the full export report object (plain) for buildReportHtml — same numbers
   // the hub shows. Async for the GCP report.
   async function buildExportReport(projectName) {
@@ -406,6 +411,11 @@ export function useQualityReport() {
         note: `Checkpoints are independent; leave-one-out (LOO) predicts each control from the others. Normalized residuals divide by the residual's own uncertainty (${crsUnit.value}): a control's declared covariance less what the fit absorbs, a checkpoint's or a LOO prediction's declared covariance plus the fit's own.`,
       })
     }
+
+    // Accuracy at the checkpoints after ASPRS Edition 2 (core/eval/asprsAccuracy.js): the
+    // figures a surveyor hands on, with the checkpoints' survey error counted in.
+    const asprs = asprsSection(gcpReport)
+    if (asprs) sections.push(asprs)
 
     // Scale bars (D6). Present whenever bars exist — including in a georeferenced
     // project, where they are independent checks against the CRS fit, and

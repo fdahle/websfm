@@ -383,6 +383,13 @@ export const REFERENCES = {
     venue: 'Image and Vision Computing 10(3), 145–155',
     doi: '10.1016/0262-8856(92)90066-C',
   },
+  asprs2023: {
+    authors: ['ASPRS'],
+    year: 2023,
+    title: 'ASPRS Positional Accuracy Standards for Digital Geospatial Data, Edition 2, Version 1.0',
+    venue: 'American Society for Photogrammetry and Remote Sensing',
+    url: 'https://publicdocuments.asprs.org/PositionalAccuracyStd-Ed2-V1',
+  },
 }
 
 // An author is "Given names Surname", or "Surname, Given names" when the surname has

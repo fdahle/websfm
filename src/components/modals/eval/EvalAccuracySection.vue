@@ -9,6 +9,7 @@ import { useReconstructionStore } from '../../../stores/useReconstructionStore.j
 import { useGcpsStore } from '../../../stores/useGcpsStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { sampleDemAtGcps } from '../../../core/eval/demCheck.js'
+import { asprsAccuracy, asprsLength, asprsUnitOk, checkpointResiduals } from '../../../core/eval/asprsAccuracy.js'
 import { sampleDemAtGcpsFull } from '../../../utils/demCogSample.js'
 import { EVAL_THRESHOLDS as T } from '../../../core/eval/health.js'
 import { useLog } from '../../../composables/useLog.js'
@@ -150,6 +151,13 @@ const gcpStats = computed(() => {
     over3: maxAxes.filter((v) => v > 3).length,
   }
 })
+// The checkpoints' accuracy after ASPRS Edition 2, survey error counted in (the export's
+// section, core/eval/asprsAccuracy.js); null without checkpoints or a linear CRS unit.
+const asprs = computed(() => {
+  if (!asprsUnitOk(crsUnit.value)) return null
+  const checks = checkpointResiduals(gcpRows.value, gcpsStore.gcps)
+  return checks.length ? asprsAccuracy(checks) : null
+})
 const gcpTiles = computed(() => {
   const s = gcpStats.value
   const t = [
@@ -168,6 +176,18 @@ const gcpTiles = computed(() => {
     { label: 'RMSE X', value: fmtM(s.rmseX), unit: crsUnit.value },
     { label: 'RMSE Y', value: fmtM(s.rmseY), unit: crsUnit.value },
     { label: 'RMSE Z', value: fmtM(s.rmseZ), unit: crsUnit.value },
+    ...(asprs.value
+      ? [
+          {
+            label: 'ASPRS RMSE_H / RMSE_V',
+            value: `${asprsLength(asprs.value.h.product, crsUnit.value)} / ${asprsLength(asprs.value.v.product, crsUnit.value)}`,
+            tone: asprs.value.enoughPoints.h ? undefined : 'warn',
+            hint:
+              `${pluralize(asprs.value.nH, 'checkpoint')} (the standard asks for 30), ` +
+              'their survey accuracy counted in',
+          },
+        ]
+      : []),
     { label: 'Controls / checks', value: `${s.controls} / ${s.checks}`, hint: `${pluralize(s.total, 'point')} total` },
     {
       label: 'Normalized RMS',

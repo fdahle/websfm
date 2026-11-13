@@ -1748,6 +1748,16 @@ nothing, to show the user *where* a reconstruction is weak.
   minimum, ≥ 3 comfortable): the "where is my overlap thin" map, read off the oriented
   sparse points.
 - **DEM vs reference** (§6.10): Nuth & Kääb shift, bias and NMAD on stable ground.
+- **Accuracy at the checkpoints** (`core/eval/asprsAccuracy.js`), after the ASPRS Positional
+  Accuracy Standards, Edition 2 (2023): per axis the mean error, standard deviation (n − 1)
+  and RMSE of the checkpoint residuals (triangulated in the adjusted model minus surveyed);
+  RMSE_H = √(RMSE_X² + RMSE_Y²), RMSE_3D = √(RMSE_H² + RMSE_V²). Edition 2 counts the
+  checkpoints' own survey error in: RMSE = √(RMSE₁² + RMSE₂²), RMSE₁ the fit, RMSE₂ from each
+  checkpoint's declared 1σ (RMSE_X₂ = √(mean σx²), likewise Y, Z; RMSE_H₂ = √(RMSE_X₂² +
+  RMSE_Y₂²)). The standard's "tested to meet … accuracy class" sentence is written only with
+  ≥ 30 checkpoints and their declared accuracy; the screens for a mean error over 25 % and a
+  residual over 3 × the RMSE use the measured RMSE, as no target is known. The residuals test
+  the photogrammetric adjustment, not a product: a DEM or orthophoto adds its own error.
 
 ## 12. Known limitations
 
@@ -1789,6 +1799,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 
 - Agarwal, S., Snavely, N., Seitz, S. M. & Szeliski, R. (2010). Bundle adjustment in the large. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-642-15552-9_3
 - Arandjelović, R. & Zisserman, A. (2012). Three things everyone should know to improve object retrieval. IEEE Conference on Computer Vision and Pattern Recognition (CVPR). https://doi.org/10.1109/CVPR.2012.6248018
+- ASPRS (2023). ASPRS Positional Accuracy Standards for Digital Geospatial Data, Edition 2, Version 1.0. American Society for Photogrammetry and Remote Sensing. https://publicdocuments.asprs.org/PositionalAccuracyStd-Ed2-V1
 - Barath, D., Noskova, J., Ivashechkin, M. & Matas, J. (2020). MAGSAC++, a fast, reliable and accurate robust estimator. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). https://arxiv.org/abs/1912.05909
 - Besl, P. J. & McKay, N. D. (1992). A method for registration of 3-D shapes. IEEE Transactions on Pattern Analysis and Machine Intelligence 14(2), 239–256. https://doi.org/10.1109/34.121791
 - Bleyer, M., Rhemann, C. & Rother, C. (2011). PatchMatch stereo — stereo matching with slanted support windows. British Machine Vision Conference (BMVC). https://doi.org/10.5244/C.25.14
