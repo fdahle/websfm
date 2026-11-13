@@ -24,7 +24,7 @@
   "crates/mesh/vendor/poisson_reconstruction/src/polynomial.rs": "ea27260d58048b7223f4177dc436d73568e2178626bc5d6170662efe7494895b",
   "crates/reconstruction/Cargo.toml": "a974854741315d9ebe7364150b638851ed6abde848c18201ee03b140b09d4327",
   "crates/reconstruction/examples/bal.rs": "4e536849f5fc861ec2234077cfd70a35480097eddee51bf68e8d9be8817da7c0",
-  "crates/reconstruction/src/bundle.rs": "9d65bd7010f97c4ddf3c944878d8de1794ab6493443a46f6a982f49ece51d923",
+  "crates/reconstruction/src/bundle.rs": "b9d2154e38b0f6a4eaba64c7c3cd6d627cff062f2ba31f138b5a83502af64e1d",
   "crates/reconstruction/src/distort.rs": "419b84be7a219a762d7458c50a66dc05d4f56517da2d7b1c2e423a9e64dabe46",
   "crates/reconstruction/src/guided.rs": "e86f108645253b530e777e6ae33f254c799ab446d89e911cacef75da971b18b6",
   "crates/reconstruction/src/lib.rs": "6c22975970ac1309c79b30d0a25ec80f03dfba47c9af77022970e0743617f969",

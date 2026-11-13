@@ -1816,7 +1816,7 @@ fn bundle_adjust_impl(
         // step rejected at the cap (one barely off the gradient, ×10⁻⁸ of it) ends the run.
         // Giving up after a fixed 8 tries left a model with a bad start where its first
         // iteration took it (×28 Ceres' cost on the largest BAL Ladybug problems), since
-        // 8 tries raise λ only from its working level to ~20 (docs/METHODS.md ▸ BA vs Ceres).
+        // 8 tries raise λ only from its working level to ~20 (docs/METHODS.md §4.5).
         let mut accepted = false;
         for _try in 0..LM_MAX_TRIES {
             // Damp the reduced diagonal, then Schur-eliminate the (λ-damped) points:
@@ -2600,7 +2600,7 @@ mod reduced_solve_tests {
     // LM gives up only on a step rejected at the largest damping (or one too small to
     // move the model): one iteration's tries reach LAMBDA_MAX from λ's floor. A fixed 8
     // tries reached ~20 from λ's working level, and left BAL's largest Ladybug problems at
-    // ×28 Ceres' cost (docs/METHODS.md ▸ BA vs Ceres).
+    // ×28 Ceres' cost (docs/METHODS.md §4.5).
     // The lens's derivatives against central differences of the projection itself, for
     // Brown (radial + decentring) and Kannala–Brandt, over points across a wide frame.
     #[test]
