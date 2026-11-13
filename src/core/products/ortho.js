@@ -16,27 +16,20 @@
 // Each map: { uuid, width, height, K:{fx,fy,cx,cy}, R, t,
 //             depth:Float32Array, cost:Float32Array, rgb:Uint8Array(w*h*3) }.
 // Conventions match geometry.js (x_cam = R·x_world + t; K working-res).
+//
+// Beside this file: orthoColour.js colours a window from one map (the run defaults and
+// the grid's projection quantities too), orthoBlocks.js sizes the tiled run's blocks and
+// its memory; orthoWindow.js, orthoMosaic.js and orthoPlan.js as before.
 import { srgbToLinear, linearToSrgb } from './colourGains.js'
 import { sampleSurfaceWindow } from './surface.js'
 import { createOrthoStats } from '../eval/orthoStats.js'
-import { seamGrid, SEAM_CANDIDATES } from './seamCut.js'
-import {
-  MULTIBAND_LEVELS,
-  MULTIBAND_BYTES_PER_CELL,
-  multibandReach,
-  createMultiband,
-  multibandBegin,
-  multibandAdd,
-  multibandFinish,
-} from './multiband.js'
+import { multibandReach, createMultiband, multibandBegin, multibandAdd, multibandFinish } from './multiband.js'
 import {
   NO_LABEL,
-  WIN_TILE,
   boxReachesMap,
   forTilesReaching,
   newLabels,
   projectInto,
-  samplePhoto,
   winCellToSfm,
   winTiles,
 } from './orthoWindow.js'
@@ -56,11 +49,8 @@ import {
 } from './orthoMosaic.js'
 import { blockGroups, chooseGroupSize, ownersFromCut, unionMaps, viewBytes, visitSequence } from './orthoPlan.js'
 import { fillArray } from '../bigArray.js'
-import { orthoRunSettings } from '../runSettings.js'
-
-// What an option left out means: the user defaults in run units (core/runSettings.js),
-// never a second copy of them here.
-const RUN_DEFAULTS = orthoRunSettings()
+import { ORTHO_BLOCK, maxWindow } from './orthoBlocks.js'
+import { RUN_DEFAULTS, colourFromMap, countColoured, finishWindow, gridProjection } from './orthoColour.js'
 
 // The highest matching cost left in the depth maps, given the settings of the run that
 // built them (the Stage A summary's `settings`). The cross-view filter's Minimum NCC
@@ -241,50 +231,6 @@ export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}
   return { width, height, rgba, covered, sampled, filled, labels }
 }
 
-/**
- * Every product frame's `toSfm` is affine (local / scaled-local / a georeference
- * similarity), so the map-major loop — which revisits every cell once PER MAP —
- * need not call it, and allocate an array, N_maps × N_cells times. Probe it about
- * the grid's own centre (so survey-sized coordinates don't cost precision) and
- * check the linearisation against the corners of the grid's 3D box. Returns
- * `{ c0, P0, A }` (A row-major 3×3: P = P0 + A·(c − c0)) or null if `toSfm` is not
- * affine to within 1e-9 of the box size, in which case the caller calls it directly.
- */
-
-export function affineToSfm(toSfm, lo, hi) {
-  const fit = fitAffineToSfm(toSfm, lo, hi)
-  return fit.err <= 1e-9 * Math.max(1, fit.size) ? { c0: fit.c0, P0: fit.P0, A: fit.A } : null
-}
-
-// The affine of toSfm at the centre of box lo..hi (its finite-difference Jacobian),
-// with its largest miss at the box's corners (`err`, SfM units: for a smooth frame such
-// as a projected CRS with the curvature restored, the miss grows with the square of the
-// distance from the centre, so the corners hold it) and the box's extent in SfM (`size`).
-function fitAffineToSfm(toSfm, lo, hi) {
-  const c0 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2]
-  const P0 = toSfm(c0)
-  const A = new Float64Array(9)
-  for (let k = 0; k < 3; k++) {
-    const c = c0.slice()
-    c[k] += 1
-    const Pk = toSfm(c)
-    for (let r = 0; r < 3; r++) A[r * 3 + k] = Pk[r] - P0[r]
-  }
-  let size = 0,
-    err = 0
-  for (let corner = 0; corner < 8; corner++) {
-    const c = [corner & 1 ? hi[0] : lo[0], corner & 2 ? hi[1] : lo[1], corner & 4 ? hi[2] : lo[2]]
-    const P = toSfm(c),
-      d = [c[0] - c0[0], c[1] - c0[1], c[2] - c0[2]]
-    for (let r = 0; r < 3; r++) {
-      const lin = P0[r] + A[r * 3] * d[0] + A[r * 3 + 1] * d[1] + A[r * 3 + 2] * d[2]
-      err = Math.max(err, Math.abs(lin - P[r]))
-      size = Math.max(size, Math.abs(P[r] - P0[r]))
-    }
-  }
-  return { c0, P0, A, err, size }
-}
-
 // Map-major counterpart: identical selection/weights, one decoded map resident.
 //
 // `loadImage(mi, map)` (optional) returns the map's SOURCE photo for colour:
@@ -340,166 +286,6 @@ export async function orthorectifyStreamed(
   return { width, height, rgba, covered: sampled + filled, sampled, filled, labels }
 }
 
-// What a whole ortho grid fixes for every cell, from its height range (zLo..zHi over
-// the cells with a height) and their mean height zMid: the affine linearisation of
-// `toSfm` over the grid's 3D box (affineToSfm), and each map's footprint per cell
-// (`mapPxPerCell`: the grid centre and its east neighbour, projected; a footprint, not
-// a visibility test, so the centre needn't be seen). Both are GRID quantities — a tiled
-// run computes them once for the whole ortho, never per block, which is what keeps
-// its cells bit-identical to a single pass.
-// Depth-map pixels per ortho cell for map m at height zMid — what the photo loader's
-// decode scale follows (workers/ops/products.js makePhotoLoader), for a preflight.
-export function orthoMapPxPerCell(geom, toSfm, zMid) {
-  return gridProjection(geom, toSfm, zMid + 1, zMid, zMid).mapPxPerCell
-}
-
-function gridProjection({ width, height, gsd, originX, originY }, toSfm, zLo, zHi, zMid) {
-  const affine =
-    zLo <= zHi
-      ? affineToSfm(toSfm, [originX, originY - height * gsd, zLo], [originX + width * gsd, originY, zHi])
-      : null
-  const cx = originX + (width / 2) * gsd,
-    cy = originY - (height / 2) * gsd
-  const P0 = toSfm([cx, cy, zMid]),
-    P1 = toSfm([cx + gsd, cy, zMid])
-  const mapPxPerCell = (m) => {
-    const a = projectInto(m, P0),
-      b = projectInto(m, P1)
-    return a && b ? Math.hypot(b.u - a.u, b.v - a.v) : null
-  }
-  // The frame's up axis in SfM coordinates (unit), for the mosaic's view angle.
-  let up
-  if (affine) up = [affine.A[2], affine.A[5], affine.A[8]]
-  else {
-    const Pz = toSfm([cx, cy, zMid + 1])
-    up = [Pz[0] - P0[0], Pz[1] - P0[1], Pz[2] - P0[2]]
-  }
-  const un = Math.hypot(up[0], up[1], up[2]) || 1
-  // A frame with no exact affine (a projected CRS, the Earth's curvature restored) is
-  // smooth: over a block or a 64-cell tile an affine fitted there misses by far less than
-  // a cell. `local(box)` fits one at a grid box ([x0, x1, y0, y1, z0, z1]) → { c0, P0, A,
-  // err, pad, box }: `box` grown by `pad` in every grid unit, enough that the affine image
-  // of the grown box holds every true point of the box (err over the affine's least
-  // stretch, doubled), so a cull with it skips nothing the exact frame would see. An
-  // exact frame returns its affine with no pad.
-  const local = ([x0, x1, y0, y1, z0, z1]) => {
-    if (affine) return { ...affine, err: 0, pad: 0, box: [x0, x1, y0, y1, z0, z1] }
-    const fit = fitAffineToSfm(toSfm, [x0, y0, z0], [x1, y1, z1])
-    const col = (k) => Math.hypot(fit.A[k], fit.A[3 + k], fit.A[6 + k])
-    const pad = (2 * fit.err) / Math.max(1e-12, Math.min(col(0), col(1), col(2)))
-    return {
-      c0: fit.c0,
-      P0: fit.P0,
-      A: fit.A,
-      err: fit.err,
-      pad,
-      stretch: col(0),
-      box: [x0 - pad, x1 + pad, y0 - pad, y1 + pad, z0 - pad, z1 + pad],
-    }
-  }
-  return { affine, local, mapPxPerCell, up: [up[0] / un, up[1] / un, up[2] / un] }
-}
-
-// The map-major kernel: colour the cells of one window of the ortho grid from map m
-// (index mi). `win` = { x0, y0, w, h } (the window's cells in the GRID, so cell
-// centres are the grid's own) with its per-cell planes, stride w: heights `data` +
-// `mask`, output `rgba`, and the blend's state — `scores` ('best', with `labels`) or
-// `sums` ('average'). Each cell is independent of every other, so a window computes
-// exactly what the same cells compute in a whole-grid pass.
-function colourFromMap(win, grid, m, photo, mi, affine, toSfm, opts, scratch) {
-  const { x0, y0, w, h, data, mask, rgba, scores, sums, labels } = win
-  const { gsd, originX, originY } = grid
-  const { depthTolRel = RUN_DEFAULTS.depthTolRel, maxCost = RUN_DEFAULTS.maxCost } = opts
-  const { P, px } = scratch
-  for (let r = 0; r < h; r++)
-    for (let c = 0; c < w; c++) {
-      const idx = r * w + c
-      if (!mask[idx]) continue
-      const col = x0 + c,
-        row = y0 + r
-      const x = originX + (col + 0.5) * gsd,
-        y = originY - (row + 0.5) * gsd,
-        z = data[idx]
-      // The frame's affine, else the cell's tile's (winTiles), else the exact frame.
-      const aff =
-        affine ?? win.tiles?.cellAff?.[Math.floor(r / WIN_TILE) * win.tiles.nx + Math.floor(c / WIN_TILE)] ?? null
-      if (aff) {
-        const { c0, P0, A } = aff,
-          dx = x - c0[0],
-          dy = y - c0[1],
-          dz = z - c0[2]
-        P[0] = P0[0] + A[0] * dx + A[1] * dy + A[2] * dz
-        P[1] = P0[1] + A[3] * dx + A[4] * dy + A[5] * dz
-        P[2] = P0[2] + A[6] * dx + A[7] * dy + A[8] * dz
-      } else {
-        const q = toSfm([x, y, z])
-        P[0] = q[0]
-        P[1] = q[1]
-        P[2] = q[2]
-      }
-      const p = projectInto(m, P)
-      if (!p) continue
-      const u = Math.round(p.u),
-        v = Math.round(p.v)
-      if (u < 0 || v < 0 || u >= m.width || v >= m.height) continue
-      const i = v * m.width + u,
-        stored = m.depth[i],
-        cost = m.cost ? m.cost[i] : 0
-      if (!(stored > 0) || Math.abs(stored - p.depth) > depthTolRel * p.depth || cost > maxCost) continue
-      const score = cost + 1e-6 * p.depth,
-        o = idx * 4
-      if (photo) {
-        const q = photo.map ? photo.map(p.u, p.v) : { x: p.u, y: p.v }
-        // Pixel centres at integers: the photo spans [−½, size − ½].
-        if (!(q.x >= -0.5 && q.y >= -0.5 && q.x <= photo.width - 0.5 && q.y <= photo.height - 0.5)) continue
-        samplePhoto(photo, q.x, q.y, px)
-      } else {
-        const c3 = i * 3
-        px[0] = m.rgb[c3]
-        px[1] = m.rgb[c3 + 1]
-        px[2] = m.rgb[c3 + 2]
-      }
-      if (sums) {
-        const wt = 1 / (cost + 1e-3)
-        sums[o] += wt * px[0]
-        sums[o + 1] += wt * px[1]
-        sums[o + 2] += wt * px[2]
-        sums[o + 3] += wt
-      } else if (score < scores[idx]) {
-        scores[idx] = score
-        rgba[o] = px[0]
-        rgba[o + 1] = px[1]
-        rgba[o + 2] = px[2]
-        rgba[o + 3] = 255
-        if (labels) labels[idx] = mi
-      }
-    }
-}
-
-// Resolve 'average' sums to colours over the whole window; return how many cells of
-// the core rect [cx, cx+cw) × [cy, cy+ch) (window coords) received a colour.
-function finishWindow(win, cx, cy, cw, ch) {
-  const { w, h, rgba, sums } = win
-  if (sums) {
-    for (let i = 0, n = w * h; i < n; i++) {
-      const o = i * 4
-      if (sums[o + 3] > 0) {
-        rgba[o] = Math.round(sums[o] / sums[o + 3])
-        rgba[o + 1] = Math.round(sums[o + 1] / sums[o + 3])
-        rgba[o + 2] = Math.round(sums[o + 2] / sums[o + 3])
-        rgba[o + 3] = 255
-      }
-    }
-  }
-  return countColoured(rgba, w, cx, cy, cw, ch)
-}
-
-function countColoured(rgba, w, cx, cy, cw, ch) {
-  let n = 0
-  for (let r = cy; r < cy + ch; r++) for (let c = cx; c < cx + cw; c++) if (rgba[(r * w + c) * 4 + 3]) n++
-  return n
-}
-
 // ── Tiled orthophoto (plan SC-9 / T1) ─────────────────────────────────────────
 //
 // An ortho at the photos' GSD is 10–25 k px a side, hundreds of millions of cells:
@@ -528,66 +314,6 @@ function countColoured(rgba, w, cx, cy, cw, ch) {
 // whole visit sequence is known after the cull, so it drops the entry wanted furthest
 // ahead (the streamed-fusion precedent). Only the policy may change; the visit order
 // may not, or 'average' sums would add in another order.
-export const ORTHO_BLOCK = 2048
-// A split ortho's block side (workers/ops/products.js orthoPlan): ORTHO_BLOCK, halved
-// while the grid has fewer blocks than workers that could take them, down to
-// ORTHO_BLOCK_MIN. The workers share out blocks, so a small ortho in one 2,048² block ran
-// on one of them. Every block computes the cells it would in a larger one (its halo
-// holds what its seams and fills read), so the ortho is the same bits at any block size
-// (orthoMosaic.test.js); a smaller block costs more halo and more map visits.
-export const ORTHO_BLOCK_MIN = 1024
-export function orthoBlockSize(width, height, shares = 1) {
-  let b = ORTHO_BLOCK
-  while (b > ORTHO_BLOCK_MIN && Math.ceil(width / b) * Math.ceil(height / b) < shares) b /= 2
-  return b
-}
-
-// The largest block window: core + halo on both sides, plus up to align − 1 cells per
-// side where a multiband window rounds out to its pyramid lattice.
-function maxWindow(W, H, B, halo, align) {
-  const ext = B + 2 * halo + 2 * (align - 1)
-  return { ew: Math.min(W, ext), eh: Math.min(H, ext) }
-}
-
-// The block layout and per-cell working bytes of a tiled run, for the caller's preflight.
-// Per extended-window cell: height 4 + mask 1 + rgba 4 + label 2 + the gap fill's sample
-// flags 1 + the stats' luma 4, plus the blend's state: 8 'best' / 32 'average' / for
-// 'mosaic' raw + smoothing labels 4, score 8, sums 16, fallback 12, flags 1, distance 2,
-// and for multiband its pyramids (multiband.js). Per core cell the handed-out copies,
-// rgba 4 + label 2. A graph-cut mosaic holds its coarse labels (2 B per coarse cell)
-// throughout, and before the blocks its survey of the candidates (orthoSeamSurveyBytes),
-// whichever is larger.
-export function orthoTiledWorkingBytes({
-  width,
-  height,
-  blend = RUN_DEFAULTS.blend,
-  fillRadius = RUN_DEFAULTS.fillRadius,
-  seamWidth = 0,
-  seamline = 'nadir',
-  seamBlend = 'feather',
-  blendLevels = MULTIBAND_LEVELS,
-  blockSize = ORTHO_BLOCK,
-}) {
-  const mode = mosaicMode({ blend, seamline, seamBlend, blendLevels })
-  const halo = orthoHalo({ width, height, blend, fillRadius, seamWidth, seamline, seamBlend, blendLevels })
-  const { ew, eh } = maxWindow(width, height, blockSize, halo, mode.align)
-  const core = Math.min(width, blockSize) * Math.min(height, blockSize)
-  const state = blend === 'average' ? 32 : blend === 'mosaic' ? 4 + 8 + 16 + 12 + 1 + 2 : 8
-  const pyramids = mode.multiband ? MULTIBAND_BYTES_PER_CELL : 0
-  const block = ew * eh * (4 + 1 + 4 + state + pyramids + 2 + 1 + 4) + core * 6
-  if (!mode.graphcut) return block
-  const { cw, ch } = seamGrid(width, height)
-  return Math.max(block + 2 * cw * ch, orthoSeamSurveyBytes(width, height))
-}
-
-// The graph-cut survey before the blocks: per coarse cell its height + mask, the
-// candidates (image 2, footprint 4, colour 3, data cost 4 each) and the solver's labels
-// and flags (~8), plus a min-cut graph over at most the whole coarse grid (~60 B/node).
-export function orthoSeamSurveyBytes(width, height) {
-  const { cw, ch } = seamGrid(width, height)
-  return cw * ch * (5 + SEAM_CANDIDATES * 13 + 8 + 60)
-}
-
 // surface: the height grid ({ width, height, gsd, originX, originY, data, mask });
 // geom: the ortho grid over it (surface.js resampledGeometry — any size).
 // metas[i]: each map's geometry { width, height, K, R, t } (no planes needed);
@@ -1375,3 +1101,12 @@ export async function orthorectifyTiled(surface, geom, metas, loadMap, toSfm, op
 // ~0.17 s, and a unit of predicted reads (a map read 1, a photo decode 3) ~0.08 s.
 const ORTHO_VISIT_S = 0.17,
   ORTHO_READ_S = 0.08
+
+export { affineToSfm, orthoMapPxPerCell } from './orthoColour.js'
+export {
+  ORTHO_BLOCK,
+  ORTHO_BLOCK_MIN,
+  orthoBlockSize,
+  orthoTiledWorkingBytes,
+  orthoSeamSurveyBytes,
+} from './orthoBlocks.js'
