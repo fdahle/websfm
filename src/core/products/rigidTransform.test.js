@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { transformFromMatrix, matrixFromTransform, composeTransforms, parseMatrixText, transformCloud, transformFromEuler, fitPointPairs, applyTransform, rotationAngle, identityTransform } from './rigidTransform.js'
+import {
+  transformFromMatrix,
+  matrixFromTransform,
+  composeTransforms,
+  parseMatrixText,
+  transformCloud,
+  transformFromEuler,
+  fitPointPairs,
+  applyTransform,
+  rotationAngle,
+  identityTransform,
+} from './rigidTransform.js'
 import { icpAlign, alignmentReport } from './icp.js'
 
 function rng(seed) {
