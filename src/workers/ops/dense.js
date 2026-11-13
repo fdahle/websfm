@@ -2,13 +2,9 @@ import { readDepthFiles, readDepthOnly, readDepthAndCost, readDepthCostMap } fro
 import {
   selectSourceViews,
   scaleK,
-  rgbaToGray,
-  depthMapForImage,
-  geomDepthMapForImage,
   resolveViewSelection,
   fuseDepthMaps,
   fuseDepthMapsStreamed,
-  filterDepthMapChunked,
   filterDepthMapsGeometric,
   filterDepthMapsGeometricStreamed,
   applyPackedMask,
@@ -19,46 +15,23 @@ import {
 } from '../../core/dense/mvs.js'
 import { depthCoverage } from '../../core/dense/depthMapCodec.js'
 import { FUSION_PLAN_SHARE, fusionPrepassSteps } from '../../core/dense/fusionPlan.js'
-import { probeGivesUp } from '../../core/dense/gpuProbe.js'
 import { viewIndex } from '../../core/dense/sparseInput.js'
-import { buildMaskLookup } from '../../utils/maskCanvas.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
-import { makeSampleMap } from '../../core/sfm/displayFrame.js'
-import {
-  resampleRgba,
-  resampleMaskLut,
-  pinholeFrameSize,
-  fisheyeCanvas,
-  resampleRgbaMarked,
-  FISHEYE_DENSE_MAX_DEG,
-} from '../../core/products/undistort.js'
-import { startThreadPool } from '../../core/sfm/reconstruction.js'
-import { scaleAxes } from '../../core/sfm/geometry.js'
-import { depthColor } from '../../core/products/colormap.js'
+import { fisheyeCanvas } from '../../core/products/undistort.js'
 import { isGpuAvailable, ensureDevice } from '../gpu/device.js'
-import { computeDepthMapGPU, prepareDepthMapGPU } from '../gpu/depthMapGpu.js'
-import {
-  createMemLedger,
-  projectDensePeakBytes,
-  workingPixels,
-  formatBytes,
-  DEFAULT_BUDGET_BYTES,
-} from '../../core/dense/memBudget.js'
+import { projectDensePeakBytes, workingPixels, formatBytes, DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
 import { pluralize } from '../../core/textFormat.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
 import { joinCloudParts } from '../../core/dense/cloudParts.js'
+import { createRasterCache, gridScale, paddedK } from './depthRasters.js'
+import { chooseDepthBackend, warmUpDepthBackend, depthMapOnBackend } from './depthBackend.js'
+import { finishDepthMap } from './depthMapFinish.js'
 
 // Dense MVS ops (Stage A depth maps + Stage B fusion). `rasterize` (OffscreenCanvas
-// pixel decode) is injected; the raster-space helpers (undistortion, RGB packing,
-// depth-map colourising) live here next to the two dense handlers. The GPU backend
-// swap + first-image GPU↔CPU A/B validation live inside computeDepthMaps.
-// Depth maps: GPU or CPU, as measured on a slow GPU (the probe in depthMaps below), per
-// device for the life of this worker: a Full run's second pass and later runs start on
-// the faster. 'broken': the GPU check on a first map failed (its cost is not the CPU's),
-// so they run on the CPU too. GPUDevice → 'cpu' | 'gpu' | 'broken'.
-const gpuVerdict = new WeakMap()
-// Thrown by the GPU-or-CPU comparison's CPU map when it cannot win (the probe in depthMaps).
-const PROBE_LOST = Symbol('probe lost')
+// pixel decode) is injected. computeDepthMaps runs Stage A's loop; its parts are
+// depthRasters.js (the rasters in the pinhole frame and their cache), depthBackend.js
+// (GPU or CPU, one map with its fallbacks and the slow-GPU probe) and depthMapFinish.js
+// (a finished map's filtering, preview and log line).
 
 export function makeDenseOps({ rasterize }) {
   // Saved-map acks per streamed run (`settings.ackToken`), from the page's depthAck:
@@ -75,210 +48,6 @@ export function makeDenseOps({ rasterize }) {
     const a = acks.get(token) ?? acks.set(token, { acked: 0, wake: null }).get(token)
     while (streamed - a.acked > DENSE_TUNING.depthMapsUnsaved) await new Promise((r) => (a.wake = r))
     a.wake = null
-  }
-  // ── Raster → pinhole frame ──────────────────────────────────────────────────
-  // Every raster dense reads must live in the same pinhole frame as the sparse
-  // cloud: distortion folded out, and for a film scan the scan→canonical affine
-  // applied too. The *map* comes from core/sfm/displayFrame.js `makeSampleMap`
-  // (one composition, shared with the image view's residual overlay and the
-  // undistorted-image export) and the *resampling* from core/products/undistort.js.
-  // Dense supplies the two scale factors because it works at reduced resolution.
-
-  // A working raster's per-axis scale: what the rounded resize applied (rasterize's
-  // scaleXY), never the nominal `scale` alone — see geometry.js scaleK.
-  const gridScale = (r) => r.scaleXY ?? r.scale
-  // A source's identity for the memory ledger: the URL, or a pyramid's `key`
-  // (utils/image.js pyramidSource) — an object would stringify to one shared tag.
-  const srcKey = (u) => (typeof u === 'string' ? u : (u?.key ?? String(u)))
-
-  // Any distortion to remove (calibrated OR self-calibrated), or a rolling-shutter
-  // photo to move onto its principal row's pose (`rs`, RSH-4)?
-  function hasAnyDistortion(dist, selfCal, rs = null) {
-    return hasDistortion(dist) || hasDistortion(selfCal) || !!rs
-  }
-
-  // Remove lens distortion from a working-resolution raster. Kfull is the
-  // native-resolution K; output and source share the working grid, so both scales
-  // are its per-axis factors (`r.scaleXY`). A no-op when both bags are empty — that early return is what
-  // keeps the common EXIF-only case free (a pure scale change is still a real map).
-  //
-  // A fisheye goes onto a wider canvas (undistort.js fisheyeCanvas): the raster then
-  // carries `pad` (the principal-point shift, full-res px — use paddedK), `outside`
-  // (0/1 LUT of canvas pixels off the photo) and, like every undistorted raster,
-  // `undist` = { map, sw, sh } to move a photo-space mask the same way (undistortedMask).
-  // `photo` = { width, height } of the full-resolution photo.
-  function undistortRaster(r, Kfull, dist, selfCal, photo = null, rs = null) {
-    if (!hasAnyDistortion(dist, selfCal, rs)) return r
-    const base = makeSampleMap({ K: Kfull, dist, selfCal, rs, outScale: gridScale(r), srcScale: gridScale(r) })
-    const canvas = !hasDistortion(selfCal) && photo ? fisheyeCanvas(Kfull, dist, photo.width, photo.height) : null
-    if (!canvas) {
-      return { ...r, data: resampleRgba(r, base, r.width, r.height), undist: { map: base, sw: r.width, sh: r.height } }
-    }
-    const [sx, sy] = scaleAxes(gridScale(r))
-    const ox = canvas.dx * sx,
-      oy = canvas.dy * sy
-    const map = (u, v) => base(u - ox, v - oy)
-    const ow = Math.round(canvas.width * sx),
-      oh = Math.round(canvas.height * sy)
-    const { data, outside } = resampleRgbaMarked(r, map, ow, oh)
-    return {
-      ...r,
-      data,
-      width: ow,
-      height: oh,
-      pad: { dx: canvas.dx, dy: canvas.dy },
-      outside,
-      undist: { map, sw: r.width, sh: r.height },
-    }
-  }
-
-  // The camera's K for an undistorted raster's grid (before scaling to it): a widened
-  // fisheye canvas shifts the principal point by its pad; the focal is unchanged.
-  const paddedK = (K, r) => (r.pad ? { ...K, cx: K.cx + r.pad.dx, cy: K.cy + r.pad.dy } : K)
-
-  // A photo-space mask (1 = excluded) on an undistorted raster's grid, nearest sample,
-  // OR the canvas pixels off the photo. Null when there is nothing to exclude.
-  async function undistortedMask(mask, r) {
-    let lut = null
-    if (mask) {
-      lut = await buildMaskLookup(mask, r.undist ? r.undist.sw : r.width, r.undist ? r.undist.sh : r.height)
-      if (r.undist) lut = resampleMaskLut(lut, r.undist.sw, r.undist.sh, r.undist.map, r.width, r.height)
-    }
-    if (!r.outside) return lut
-    if (!lut) return r.outside
-    const out = new Uint8Array(lut.length)
-    for (let k = 0; k < lut.length; k++) out[k] = lut[k] || r.outside[k] ? 1 : 0
-    return out
-  }
-
-  // ── Film scan → canonical warp (F4) ─────────────────────────────────────────
-  // A film image's sparse cameras use the canonical K, so its dense reference
-  // raster must live in the canonical pixel frame too. We warp the scan raster
-  // into that frame with the SAME transform chain the sparse ingest applied, only
-  // inverted (output canonical px → sample the scan). The canonical working grid
-  // is sized so its long side ≈ maxDim (matching non-film rasters). Returns a
-  // raster carrying what the mask warp needs (scanDims, fid, canonK, dist).
-  function filmSampleMap(canonK, dist, fid, cScale, scanScale, selfCal) {
-    return makeSampleMap({
-      K: canonK,
-      dist,
-      selfCal,
-      fiducial: fid,
-      outScale: cScale,
-      srcScale: scanScale,
-    })
-  }
-
-  function warpFilmRaster(r, canonK, dist, fid, maxDim, selfCal) {
-    const { width: sw, height: sh } = r
-    const scanScale = gridScale(r)
-    const { frame } = fid
-    const cScale = maxDim / Math.max(frame.width, frame.height)
-    const { width: ow, height: oh } = pinholeFrameSize({ fiducial: fid, scale: cScale })
-    const useDist = hasDistortion(dist) ? dist : null
-    const useSelf = hasDistortion(selfCal) ? selfCal : null
-    const map = filmSampleMap(canonK, useDist, fid, cScale, scanScale, useSelf)
-    return {
-      // The canonical grid is defined by cScale on both axes (the map above), so K
-      // scales uniformly; only the scan it samples has rounded per-axis factors.
-      data: resampleRgba(r, map, ow, oh),
-      width: ow,
-      height: oh,
-      scale: cScale,
-      scaleXY: [cScale, cScale],
-      fid,
-      canonK,
-      dist: useDist,
-      selfCal: useSelf,
-      scanDims: { w: sw, h: sh, scale: scanScale },
-    }
-  }
-
-  // Warp a scan-space mask LUT (built at scan working size) into the canonical
-  // working grid of raster `r` (a warpFilmRaster output). Nearest sample.
-  async function filmMaskLut(mask, r) {
-    const sd = r.scanDims
-    const scanLut = await buildMaskLookup(mask, sd.w, sd.h)
-    const map = filmSampleMap(r.canonK, r.dist, r.fid, r.scale, sd.scale, r.selfCal)
-    return resampleMaskLut(scanLut, sd.w, sd.h, map, r.width, r.height)
-  }
-
-  // Greyscale rasters (R = G = B everywhere) kept as one channel; the grey plane is
-  // rgbaToGray's own expression on (v, v, v), so it matches it exactly.
-  function isGreyRgba(data) {
-    for (let o = 0; o < data.length; o += 4) if (data[o] !== data[o + 1] || data[o] !== data[o + 2]) return false
-    return true
-  }
-  function firstChannel(data) {
-    const v = new Uint8Array(data.length >> 2)
-    for (let i = 0; i < v.length; i++) v[i] = data[i * 4]
-    return v
-  }
-  function greyFromChannel(v) {
-    const gray = new Uint8Array(v.length)
-    for (let i = 0; i < v.length; i++) gray[i] = (v[i] * 0.299 + v[i] * 0.587 + v[i] * 0.114) | 0
-    return gray
-  }
-  function rgbFromChannel(v) {
-    const rgb = new Uint8Array(v.length * 3)
-    for (let i = 0; i < v.length; i++) rgb[i * 3] = rgb[i * 3 + 1] = rgb[i * 3 + 2] = v[i]
-    return rgb
-  }
-
-  // Extract a tightly-packed RGB buffer (drop alpha) from RGBA pixels.
-  function rgbFromRgba(data, w, h) {
-    const rgb = new Uint8Array(w * h * 3)
-    for (let i = 0; i < w * h; i++) {
-      rgb[i * 3] = data[i * 4]
-      rgb[i * 3 + 1] = data[i * 4 + 1]
-      rgb[i * 3 + 2] = data[i * 4 + 2]
-    }
-    return rgb
-  }
-
-  // Render a depth plane to a colourized PNG Blob for the image viewer's depth
-  // overlay (a Blob, not a data URL: it crosses to the page by reference and stays
-  // off both V8 heaps). Valid depths are normalised to a blue→red ramp (near = red); holes
-  // are transparent so the underlying image shows through.
-  // At most DENSE_TUNING.depthPreviewMaxDim on its long side, nearest sample.
-  async function depthToPng(depth, w, h) {
-    let lo = Infinity,
-      hi = -Infinity
-    for (let i = 0; i < depth.length; i++) {
-      const d = depth[i]
-      if (d > 0) {
-        if (d < lo) lo = d
-        if (d > hi) hi = d
-      }
-    }
-    const span = hi > lo ? hi - lo : 1
-    const f = Math.min(1, DENSE_TUNING.depthPreviewMaxDim / Math.max(w, h))
-    const pw = Math.max(1, Math.round(w * f)),
-      ph = Math.max(1, Math.round(h * f))
-    const img = new ImageData(pw, ph)
-    for (let i = 0; i < pw * ph; i++) {
-      const sx = Math.min(w - 1, Math.floor(((i % pw) + 0.5) / f)),
-        sy = Math.min(h - 1, Math.floor((Math.floor(i / pw) + 0.5) / f))
-      const d = depth[sy * w + sx]
-      const o = i * 4
-      if (d > 0) {
-        // Near = warm (t→1), far = cool (t→0).
-        const t = 1 - (d - lo) / span
-        const [r, g, b] = depthColor(t)
-        img.data[o] = r
-        img.data[o + 1] = g
-        img.data[o + 2] = b
-        img.data[o + 3] = 255
-      } else {
-        img.data[o] = 0
-        img.data[o + 1] = 0
-        img.data[o + 2] = 0
-        img.data[o + 3] = 0
-      }
-    }
-    const canvas = new OffscreenCanvas(pw, ph)
-    canvas.getContext('2d', { willReadFrequently: true }).putImageData(img, 0, 0)
-    return canvas.convertToBlob({ type: 'image/png' })
   }
 
   // Stage A — Build Depth Maps. Rasterises each registered image (and its source
@@ -337,34 +106,6 @@ export function makeDenseOps({ rasterize }) {
     // that image's source count (clamp(ceil(nSources/2),1,4)) rather than a fixed 3.
     const autoBestKMode = !(bestK > 0)
 
-    // Median / p95 of the matching cost over the pixels with depth. A histogram, not a
-    // sort: costs live in [0, 2], and copying + comparator-sorting the ~20 M costs of a
-    // 4570² map took most of the per-image tail on Casa Grande's 1978 scans (62 s in
-    // node for 19 M values). 4096 bins resolve 0.0005, below the logged 2 decimals.
-    const COST_BINS = 4096,
-      COST_MAX = 2
-    const costStat = (depth, cost) => {
-      const hist = new Uint32Array(COST_BINS)
-      let n = 0
-      for (let k = 0; k < depth.length; k++) {
-        if (!(depth[k] > 0)) continue
-        const c = cost[k]
-        hist[c >= COST_MAX ? COST_BINS - 1 : c > 0 ? Math.floor(c * (COST_BINS / COST_MAX)) : 0]++
-        n++
-      }
-      if (!n) return { median: 0, p95: 0, valid: 0 }
-      const at = (q) => {
-        const target = Math.min(n - 1, Math.round(q * (n - 1)))
-        let acc = 0
-        for (let b = 0; b < COST_BINS; b++) {
-          acc += hist[b]
-          if (acc > target) return (b + 0.5) * (COST_MAX / COST_BINS)
-        }
-        return COST_MAX
-      }
-      return { median: at(0.5), p95: at(0.95), valid: n }
-    }
-
     const t0 = performance.now()
     const share = input.refs
       ? `${order.length} of ${images.length} images on this worker`
@@ -377,44 +118,11 @@ export function makeDenseOps({ rasterize }) {
       'Dense',
     ])
 
-    // Backend selection: opt into the (experimental) WebGPU path with settings.useGpu;
-    // anything that prevents it (no WebGPU, no adapter) silently keeps the WASM path.
-    // `backend = undefined` ⇒ depthMapForImage uses its WASM default.
-    let backend
-    let gpuDevice = null
-    if (settings.useGpu && isGpuAvailable()) {
-      const state = await ensureDevice()
-      if (state && gpuVerdict.get(state.device) === 'cpu') {
-        emit('log', [
-          'Depth maps: the CPU was measured faster than this GPU earlier in this session — running on the CPU',
-          'info',
-          'Dense',
-        ])
-      } else if (state && gpuVerdict.get(state.device) === 'broken') {
-        emit('log', [
-          "Depth maps: this GPU's matching cost differed from the CPU's earlier in this session — running on the CPU",
-          'warn',
-          'Dense',
-        ])
-      } else if (state) {
-        backend = computeDepthMapGPU
-        gpuDevice = state.device
-        const id = [
-          ...new Set([state.info?.vendor, state.info?.architecture || state.info?.description].filter(Boolean)),
-        ].join(' ')
-        emit('log', [
-          `Depth maps: backend = WebGPU${id ? ` (${id})` : ''}` +
-            `${state.isFallback ? ' [software adapter]' : ''} — multi-source PatchMatch (experimental)`,
-          'warn',
-          'Dense',
-        ])
-      } else {
-        emit('log', ['Depth maps: GPU requested but no adapter — using WASM (CPU)', 'warn', 'Dense'])
-      }
-    }
-    if (!backend) emit('log', ['Depth maps: backend = WASM (CPU)', 'info', 'Dense'])
+    // Backend selection: opt into the (experimental) WebGPU path with settings.useGpu
+    // (depthBackend.js); `bk.backend` can still flip to WASM mid-run on a GPU error.
+    const bk = await chooseDepthBackend(settings, emit)
     {
-      const vs = resolveViewSelection(settings.viewSelection, !!backend)
+      const vs = resolveViewSelection(settings.viewSelection, !!bk.backend)
       emit('log', [
         `Depth maps: view selection ${vs === 'acmh' ? 'ACMH (adaptive checkerboard, joint view selection)' : 'best-K'}` +
           `${(settings.viewSelection ?? 'auto') === 'auto' ? ' (auto for this backend)' : ''}`,
@@ -422,7 +130,7 @@ export function makeDenseOps({ rasterize }) {
         'Dense',
       ])
     }
-    // Stage A run record. `backend` above can flip to WASM mid-run on a GPU error, so
+    // Stage A run record. `bk.backend` above can flip to WASM mid-run on a GPU error, so
     // the record tracks what was *requested*, what it started on, and how many images
     // fell back — "all 86 maps remained on GPU" is a target in TODO ▸ SB and is
     // unanswerable from a summary that only reports the final value.
@@ -434,9 +142,8 @@ export function makeDenseOps({ rasterize }) {
       !input.split && (settings.cpuDepthThreads ?? DENSE_TUNING.cpuDepthThreads)
         ? Math.max(1, (globalThis.navigator?.hardwareConcurrency ?? 2) - 1)
         : 0
-    if (!backend && cpuThreads) emit('log', [`Depth maps: up to ${cpuThreads} threads per map`, 'info', 'Dense'])
-    const startedOnGpu = !!backend
-    let gpuFallbacks = 0
+    if (!bk.backend && cpuThreads) emit('log', [`Depth maps: up to ${cpuThreads} threads per map`, 'info', 'Dense'])
+    const startedOnGpu = !!bk.backend
     const perImage = [] // { ms, coveragePct, costMedian }
 
     const cameras = new Map(images.map((im) => [im.uuid, { R: im.R, t: im.t, K: im.K }]))
@@ -450,7 +157,7 @@ export function makeDenseOps({ rasterize }) {
       nImages: order.length,
       maxDim,
       nSources: maxSources,
-      backend: backend ? 'gpu' : 'wasm',
+      backend: bk.backend ? 'gpu' : 'wasm',
       // A fisheye's widened canvas (undistortRaster) at the photo's working scale.
       pixels: order
         .map((i) => images[i])
@@ -494,112 +201,13 @@ export function makeDenseOps({ rasterize }) {
         selectSourceViews(cameras, sparse, images[i].uuid, { maxSources, minAngleDeg }, sparseIndex),
       ]),
     )
-    const urlByUuid = new Map(images.map((im) => [im.uuid, im.url]))
-    // Per-url intrinsics + distortion, so decodeRaster can undistort each source once
-    // (url↔image is 1:1, and undistortion is independent of ref/source role).
-    const metaByUrl = new Map(
-      images.map((im) => [
-        im.url,
-        {
-          K: im.K,
-          dist: im.dist || null,
-          selfCal: im.selfCal || null,
-          fid: im.fid || null,
-          rs: im.rs || null,
-          photo: im.width > 0 && im.height > 0 ? { width: im.width, height: im.height } : null,
-        },
-      ]),
-    )
-    const usedSets = new Map(
-      order.map((i) => {
-        const set = new Set([images[i].url])
-        for (const u of srcUuidsByImg.get(i)) {
-          const url = urlByUuid.get(u)
-          if (url) set.add(url)
-        }
-        return [i, set]
-      }),
-    )
-    const useCount = new Map()
-    for (const set of usedSets.values()) for (const url of set) useCount.set(url, (useCount.get(url) || 0) + 1)
-
-    const ledger = createMemLedger()
-    // Where the loop's time goes, beside the matching itself (logged at the end): the
-    // decode + warp of each raster, its mask, its grey plane.
-    const prepMs = { raster: 0, mask: 0, gray: 0, post: 0, saveWait: 0, waited: 0 }
-    const decodeRaster = async (url) => {
-      const tR = performance.now()
-      let r = await rasterize(url, maxDim)
-      // Undistort at ingest so every dense consumer stays pinhole (mirrors sparse).
-      const meta = metaByUrl.get(url)
-      if (meta?.fid) {
-        // Film scan: warp into the canonical frame (composes calibrated + self-cal).
-        r = warpFilmRaster(r, meta.K, meta.dist, meta.fid, maxDim, meta.selfCal)
-      } else if (meta?.dist || meta?.selfCal || meta?.rs) {
-        r = undistortRaster(r, meta.K, meta.dist, meta.selfCal, meta.photo, meta.rs)
-      }
-      // A greyscale raster (a film scan) is held as its one channel: four bytes a
-      // pixel for every raster still needed filled the tab's buffer pool on a film
-      // block at High (7.5 GB). Grey plane and colours come out bit for bit the same.
-      if (isGreyRgba(r.data)) r = { ...r, data: null, channel: firstChannel(r.data) }
-      prepMs.raster += performance.now() - tR
-      return r
-    }
-    // An image's working raster with its mask on that grid and its grey plane, built
-    // once and kept as long as any later map needs it (useCount). Each source used to
-    // rebuild mask and grey for every map it served: decoding a full-size scan mask and
-    // warping it into the film frame, up to seven times per map, was most of the loop's
-    // time on the TMA film blocks. A promise, so the next map's images can be prepared
-    // while this map matches (the worker's thread is idle while the GPU works).
-    const prepared = new Map() // url → Promise<{ r, mask, gray }>
-    const prepare = (im) => {
-      if (!prepared.has(im.url)) {
-        const job = (async () => {
-          const r = await decodeRaster(im.url)
-          const tM = performance.now()
-          const mask = r.fid ? (im.mask ? await filmMaskLut(im.mask, r) : null) : await undistortedMask(im.mask, r)
-          prepMs.mask += performance.now() - tM
-          const tG = performance.now()
-          const gray = r.channel ? greyFromChannel(r.channel) : rgbaToGray(r.data, r.width, r.height)
-          prepMs.gray += performance.now() - tG
-          ledger.track(
-            `raster:${srcKey(im.url)}`,
-            r.width * r.height * ((r.channel ? 1 : 4) + 1) + (mask ? mask.length : 0),
-          )
-          return { r, mask, gray }
-        })()
-        job.catch(() => {}) // a prefetch nobody awaits yet must not be an unhandled rejection
-        prepared.set(im.url, job)
-      }
-      return prepared.get(im.url)
-    }
-    // Waits on a preparation, timing only what the loop could not overlap.
-    const ready = async (im) => {
-      const t = performance.now()
-      const p = await prepare(im)
-      prepMs.waited += performance.now() - t
-      return p
-    }
-    const imageByUuid = new Map(images.map((im) => [im.uuid, im]))
-    // Start preparing map k's reference and sources (not awaited).
-    const prefetch = (k) => {
-      if (k >= order.length) return
-      const i = order[k]
-      prepare(images[i])
-      for (const u of srcUuidsByImg.get(i)) {
-        const s = imageByUuid.get(u)
-        if (s) prepare(s)
-      }
-    }
-    // Drop every raster this image was the last consumer of (decrement its remaining
-    // uses; delete + untrack at zero). Runs on every path out of the loop body.
-    const releaseAfter = (i) => {
-      for (const url of usedSets.get(i)) {
-        const c = (useCount.get(url) || 0) - 1
-        useCount.set(url, c)
-        if (c <= 0 && prepared.delete(url)) ledger.release(`raster:${srcKey(url)}`)
-      }
-    }
+    const { ready, prefetch, releaseAfter, imageByUuid, ledger, prepMs } = createRasterCache({
+      rasterize,
+      images,
+      order,
+      srcUuidsByImg,
+      maxDim,
+    })
 
     const maps = []
     const transfer = []
@@ -622,45 +230,9 @@ export function makeDenseOps({ rasterize }) {
     }
     const total = order.length
     const loopFraction = (v) => (total > 0 ? loopShare * (v / total) : 0)
-    if (backend) {
-      // Compile the GPU shader and measure the browser's fixed wait for finished GPU work
-      // before the first map (depthMapGpu.js getPipeline), so neither counts as map time.
-      // A shader that does not compile: the CPU.
-      emit('progress', [0, total, 'Preparing the GPU…', 0])
-      const t0 = performance.now()
-      try {
-        const { waitMs } = (await prepareDepthMapGPU()) ?? { waitMs: 0 }
-        const secs = ((performance.now() - t0) / 1000).toFixed(1)
-        emit('log', [
-          `Depth maps: GPU shader ready in ${secs} s; the browser reports finished GPU work after ${waitMs.toFixed(1)} ms`,
-          'info',
-          'Dense',
-        ])
-      } catch (err) {
-        emit('log', [
-          `Depth maps: the GPU shader did not compile (${err?.message ?? err}) — running on the CPU (WASM)`,
-          'warn',
-          'Dense',
-        ])
-        backend = undefined
-        gpuFallbacks++
-      }
-    }
-    if (!backend && cpuThreads) {
-      // Start the pool before the first map, and say so: it takes seconds (each thread
-      // instantiates the module), and the run otherwise sat at 0 % without a word. A pool
-      // that does not start leaves one thread per map, many times slower: a warning.
-      emit('progress', [0, total, 'Starting the CPU threads…', 0])
-      const t0 = performance.now()
-      const threads = await startThreadPool(cpuThreads)
-      const secs = ((performance.now() - t0) / 1000).toFixed(1)
-      if (threads > 0) emit('log', [`Depth maps: ${threads} threads (started in ${secs} s)`, 'info', 'Dense'])
-      else
-        emit('log', [
-          'Depth maps: the threaded build did not start here, so each map runs on one thread (much slower)',
-          'warn',
-          'Dense',
-        ])
+    if (!(await warmUpDepthBackend({ backend: bk.backend, cpuThreads, total, emit }))) {
+      bk.backend = undefined
+      bk.gpuFallbacks++
     }
     // The geometric-consistency pass (ACMP's last stage): given `input.geomFrom`, the run's
     // first-pass maps as saved file entries, this call runs each image again against its
@@ -668,7 +240,6 @@ export function makeDenseOps({ rasterize }) {
     // the new maps. The store saves them staged and promotes them once every map is done
     // (utils/opfs/depth.js), so no first-pass plane changes while the pass still reads it.
     const geomFrom = input.geomFrom ? new Map(input.geomFrom.map((e) => [e.uuid, e])) : null
-    const pass = geomFrom ? 'geom' : 'photo'
     if (geomFrom)
       emit('log', [`Depth maps: geometric-consistency pass over ${pluralize(order.length, 'map')}`, 'info', 'Dense'])
     // Neighbours' first-pass depth planes, read on demand; neighbouring captures share most
@@ -695,9 +266,7 @@ export function makeDenseOps({ rasterize }) {
       // the faster; the verdict holds for this device for the rest of the session. Only
       // where the CPU path has its threads (a cross-origin isolated page): on one core it
       // would rarely win, and the bands keep a slow GPU from freezing the screen anyway.
-      // `probe`: { gpuMsPerUnit, gpu } while the CPU map is under way.
-      let probe = null,
-        gpuMaps = 0
+      // `bk.probe`: { gpuMsPerUnit, gpu } while the CPU map is under way.
       const canProbe =
         cpuThreads > 1 && globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined'
       // A finished map's filtering, statistics, preview and hand-over run while the next
@@ -756,33 +325,15 @@ export function makeDenseOps({ rasterize }) {
 
         // The next map's images decode and warp while this one matches.
         prefetch(k + 1)
-        if (probe) backend = undefined
-        const tImg = performance.now()
-        // The probe's CPU map gives up after a pyramid level once it cannot win
-        // (core/dense/gpuProbe.js) against what the GPU would take for this map, from its
-        // time per pixel and source view.
-        const gpuMapMs = probe ? probe.gpuMsPerUnit * ref.width * ref.height * Math.max(1, srcUuids.length) : 0
-        let probeCourseMs = 0
-        const probeHooks = (h) => ({
-          ...h,
-          onProgress: (f) => {
-            const ms = performance.now() - tImg
-            probeCourseMs = ms / Math.max(f, 1e-6)
-            if (probeGivesUp(ms, f, gpuMapMs, settings.gpuProbeGiveUp)) throw PROBE_LOST
-            h.onProgress?.(f)
-          },
-        })
-        // Always stream depthMapForImage's own log (coarse-to-fine plan, debug level);
-        // validate the GPU cost kernel against the CPU reference on the first image only.
-        const hooks = {
+        // Always stream depthMapForImage's own log (coarse-to-fine plan, debug level).
+        const logHooks = {
           onLog: (m, l, c) => emit('log', [`${img.name}: ${m}`, l, c]),
           // Fractional within-image progress (0..1 across pyramid levels), folded into
           // the per-image emit so the bar glides through a minute-long WASM image.
           onProgress: (f) => emit('progress', [k + f, total, img.name, loopFraction(k + f)]),
-          validate: backend && k === 0,
         }
         // The run's per-image settings: GPU or CPU decide the view selection and threads.
-        const settingsFor = () => ({
+        const settingsFor = (backend) => ({
           window,
           iterations,
           bestK: imgBestK,
@@ -797,121 +348,28 @@ export function makeDenseOps({ rasterize }) {
           priorMaxCost: settings.priorMaxCost,
           priorIterations: settings.priorIterations,
         })
-        let ds = settingsFor()
-        let dm
-        if (pass === 'geom') {
-          const entry = geomFrom.get(img.uuid)
-          const ph = entry ? await readDepthFiles(entry) : null
-          const srcDepth = await Promise.all(srcUuids.map(firstPassDepth))
-          try {
-            dm = ph ? await geomDepthMapForImage(ref, sources, sparse.pos, ph, srcDepth, ds, backend) : null
-          } catch (err) {
-            if (!backend) throw err
-            emit('log', [
-              `Depth maps: GPU error on ${img.name} (${err?.message ?? err}) — falling back to WASM`,
-              'warn',
-              'Dense',
-            ])
-            backend = undefined
-            gpuFallbacks++
-            ds = settingsFor()
-            dm = await geomDepthMapForImage(ref, sources, sparse.pos, ph, srcDepth, ds)
-          }
-        } else
-          try {
-            dm = await depthMapForImage(ref, sources, sparse.pos, ds, backend, probe ? probeHooks(hooks) : hooks)
-          } catch (err) {
-            if (err === PROBE_LOST) {
-              // The CPU cannot win: this map, and the rest, on the GPU.
-              emit('log', [
-                `Depth maps: the CPU was on course to take ${(probeCourseMs / 1000).toFixed(0)} s for this map, ` +
-                  `the GPU ${(gpuMapMs / 1000).toFixed(1)} s — the rest stay on the GPU`,
-                'info',
-                'Dense',
-              ])
-              backend = probe.gpu
-              if (gpuDevice) gpuVerdict.set(gpuDevice, 'gpu')
-              probe = null
-              ds = settingsFor()
-              dm = await depthMapForImage(ref, sources, sparse.pos, ds, backend, hooks)
-            } else if (backend) {
-              // A GPU failure mid-run must not abort the whole batch: log it, drop to WASM
-              // for this image and every image after, and retry once on the CPU path.
-              emit('log', [
-                `Depth maps: GPU error on ${img.name} (${err?.message ?? err}) — falling back to WASM`,
-                'warn',
-                'Dense',
-              ])
-              backend = undefined
-              gpuFallbacks++
-              // Keep streaming the coarse-to-fine plan log on the retry (validate no
-              // longer applies once we've dropped off the GPU path).
-              ds = settingsFor()
-              dm = await depthMapForImage(ref, sources, sparse.pos, ds, backend, {
-                onLog: hooks.onLog,
-                onProgress: hooks.onProgress,
-              })
-            } else {
-              throw err
-            }
-          }
-        // The GPU check on the run's first map (depthMapForImage hooks.validate): a GPU whose
-        // cost is not the Rust cost of the same planes (DENSE_TUNING.gpuCheckMax) computes
-        // something else, a broken kernel or driver. This map again, the rest of the run and
-        // later runs in this session on the CPU (gpuVerdict).
-        if (backend && dm?.gpuCheck && !dm.gpuCheck.ok) {
-          emit('log', [
-            `Depth maps: the GPU's matching cost differs from the CPU's on ${img.name} ` +
-              `(median ${dm.gpuCheck.median.toExponential(1)}) — this run continues on the CPU (WASM), which is slower`,
-            'warn',
-            'Dense',
-          ])
-          backend = undefined
-          gpuFallbacks++
-          if (gpuDevice) gpuVerdict.set(gpuDevice, 'broken')
-          ds = settingsFor()
-          dm = await depthMapForImage(ref, sources, sparse.pos, ds, backend, {
-            onLog: hooks.onLog,
-            onProgress: hooks.onProgress,
-          })
-        }
-        const imgMs = performance.now() - tImg
-        {
-          // Time per pixel and source view: the two maps compared see different images.
-          const nSrcHere = Math.max(1, srcUuids.length)
-          const units = ref.width * ref.height * nSrcHere
-          const perMp = (msPerUnit) => ((msPerUnit * 1e6 * nSrcHere) / 1000).toFixed(1)
-          if (probe) {
-            const cpuMsPerUnit = imgMs / units
-            const cpuWins = cpuMsPerUnit < probe.gpuMsPerUnit
-            emit('log', [
-              `Depth maps: the GPU took ${perMp(probe.gpuMsPerUnit)} s per megapixel, the CPU ${perMp(cpuMsPerUnit)} s — ` +
-                `${cpuWins ? 'the rest run on the CPU' : 'the rest stay on the GPU'}`,
-              cpuWins ? 'warn' : 'info',
-              'Dense',
-            ])
-            if (cpuWins) gpuFallbacks++
-            else backend = probe.gpu
-            if (gpuDevice) gpuVerdict.set(gpuDevice, cpuWins ? 'cpu' : 'gpu')
-            probe = null
-          } else if (backend) {
-            gpuMaps++
-            if (
-              canProbe &&
-              gpuMaps === 2 &&
-              !gpuVerdict.has(gpuDevice) &&
-              total - k > 2 &&
-              imgMs > (settings.gpuProbeMs ?? DENSE_TUNING.gpuProbeMs)
-            ) {
-              emit('log', [
-                `Depth maps: a map took ${(imgMs / 1000).toFixed(1)} s on the GPU — the next is computed on the CPU to compare`,
-                'info',
-                'Dense',
-              ])
-              probe = { gpuMsPerUnit: imgMs / units, gpu: backend }
-            }
-          }
-        }
+        const { dm, imgMs } = await depthMapOnBackend(bk, {
+          k,
+          total,
+          img,
+          ref,
+          sources,
+          sparsePos: sparse.pos,
+          srcUuids,
+          settingsFor,
+          logHooks,
+          geomInputs: geomFrom
+            ? async () => {
+                const entry = geomFrom.get(img.uuid)
+                const ph = entry ? await readDepthFiles(entry) : null
+                const srcDepth = await Promise.all(srcUuids.map(firstPassDepth))
+                return { ph, srcDepth }
+              }
+            : null,
+          canProbe,
+          settings,
+          emit,
+        })
         if (!dm) {
           emit('log', [`Depth maps: ${img.name} skipped (no sparse depth support)`, 'warn', 'Dense'])
           releaseAfter(i)
@@ -925,117 +383,18 @@ export function makeDenseOps({ rasterize }) {
             await pause()
             tSeg = performance.now()
           }
-          // P2.1: invalidate "no measurement" pixels before filtering. A pixel no source
-          // ever saw keeps its random init depth at the max cost 2.0; left in place, the
-          // speckle filter's median mixes that junk into good neighbours. Zero its depth
-          // so it reads as a hole (depth<=0) everywhere downstream.
-          {
-            let culled = 0
-            for (let k = 0; k < dm.depth.length; k++) {
-              if (dm.depth[k] > 0 && dm.cost[k] >= 1.99) {
-                dm.depth[k] = 0
-                culled++
-              }
-            }
-            if (culled)
-              emit('log', [
-                `Depth maps: ${img.name} — invalidated ${culled} no-measurement px (cost≈2.0)`,
-                'debug',
-                'Dense',
-              ])
-          }
-          await yieldNow()
-          // Median / speckle filter: clean per-image noise before the cross-view fusion
-          // gate sees it (the per-image PatchMatch has no geometric consistency check).
-          if (speckleFilter) {
-            const {
-              depth: fdepth,
-              removed,
-              smoothed,
-            } = await filterDepthMapChunked(
-              dm.depth,
-              dm.width,
-              dm.height,
-              { radius: filterRadius, relTol: filterRelTol },
-              yieldNow,
-            )
-            dm.depth = fdepth
-            emit('log', [
-              `Depth maps: ${img.name} — speckle filter dropped ${removed} px, smoothed ${smoothed}`,
-              'debug',
-              'Dense',
-            ])
-          }
-          // Drop masked regions from the dense cloud: zero the depth there so fusion
-          // (which treats depth <= 0 as "no data") skips those pixels.
-          // The mask moves with the raster (undistortion, or the fisheye canvas, whose pixels
-          // off the photo are dropped too).
-          const maskLut = refMask
-          if (maskLut && maskLut.length === dm.depth.length) {
-            for (let k = 0; k < dm.depth.length; k++) if (maskLut[k]) dm.depth[k] = 0
-          }
-          const rgb = rRef.channel ? rgbFromChannel(rRef.channel) : rgbFromRgba(rRef.data, rRef.width, rRef.height)
-          await yieldNow()
-          const displayBlob = await depthToPng(dm.depth, dm.width, dm.height)
-          // F4: for film images the depth preview is in the canonical frame, not scan
-          // space, so it won't line up with the scan in the viewer (v1 limitation).
-          if (rRef.fid) {
-            emit('log', [
-              `Depth maps: ${img.name} — preview is in the canonical fiducial frame ` +
-                `(${dm.width}×${dm.height}), not scan space`,
-              'debug',
-              'Dense',
-            ])
-          }
-          if (rRef.pad) {
-            emit('log', [
-              `Depth maps: ${img.name} — fisheye resampled onto a ${dm.width}×${dm.height} pinhole canvas ` +
-                `(up to ${FISHEYE_DENSE_MAX_DEG}° off-axis); its preview is in that frame, not the photo's`,
-              'debug',
-              'Dense',
-            ])
-          }
-          // Per-pixel diagnostics: how many pixels got a depth, and the matching-cost
-          // distribution over those pixels (low cost = confident; high = likely junk
-          // that fusion's maxCost gate will drop — the key signal for dense quality).
-          const cs = costStat(dm.depth, dm.cost)
-          const valid = cs.valid
+          const { map, planes, cs } = await finishDepthMap(
+            dm,
+            { img, rRef, refMask, ref, srcUuids, imgBestK, imgMs },
+            { speckleFilter, filterRadius, filterRelTol, emit, yieldNow },
+          )
           perImage.push({
             ms: imgMs,
-            coveragePct: (100 * valid) / dm.depth.length,
+            coveragePct: (100 * cs.valid) / dm.depth.length,
             costMedian: cs.median,
           })
-          const seedPct = ((100 * dm.seeded) / dm.depth.length).toFixed(1)
-          emit('log', [
-            `Depth maps: ${img.name} — ${srcUuids.length} sources (best-${imgBestK}), ${dm.width}×${dm.height}, ` +
-              `depth ${dm.depthMin.toFixed(2)}–${dm.depthMax.toFixed(2)} (${dm.seeded} seeds, ${seedPct}%), ` +
-              `${((100 * valid) / dm.depth.length).toFixed(0)}% with depth, ` +
-              `cost median ${cs.median.toFixed(2)} / p95 ${cs.p95.toFixed(2)}, ${(imgMs / 1000).toFixed(1)}s`,
-            'info',
-            'Dense',
-          ])
-
-          const map = {
-            uuid: img.uuid,
-            name: img.name,
-            width: dm.width,
-            height: dm.height,
-            K: ref.K,
-            R: img.R,
-            t: img.t,
-            // Per-pixel converged plane normals (camera-frame, unit, nz<0). Kept
-            // alongside depth for fusion → Poisson meshing. Holes are defined by
-            // depth<=0 everywhere downstream, so stale normals under a zeroed depth are
-            // harmless and deliberately NOT cleaned up.
-            depth: dm.depth,
-            cost: dm.cost,
-            normals: dm.normals || null,
-            rgb,
-            displayBlob,
-          }
           pxDone += dm.width * dm.height
           prepMs.post += performance.now() - tSeg
-          const planes = [dm.depth.buffer, dm.cost.buffer, rgb.buffer, ...(dm.normals ? [dm.normals.buffer] : [])]
           if (streamMaps) {
             emit('map', [map], planes)
             streamed++
@@ -1137,9 +496,9 @@ export function makeDenseOps({ rasterize }) {
       date: new Date().toISOString(),
       nMaps: streamMaps ? streamed : maps.length,
       nImages: total,
-      backend: startedOnGpu ? (gpuFallbacks ? 'gpu→wasm' : 'gpu') : 'wasm',
+      backend: startedOnGpu ? (bk.gpuFallbacks ? 'gpu→wasm' : 'gpu') : 'wasm',
       gpuRequested: !!settings.useGpu,
-      gpuFallbacks,
+      gpuFallbacks: bk.gpuFallbacks,
       settings: {
         quality: settings.quality ?? null,
         maxDim,
