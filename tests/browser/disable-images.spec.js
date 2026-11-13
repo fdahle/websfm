@@ -43,7 +43,7 @@ test('a disabled photo keeps its pose, is left out of depth maps, and stays disa
   test.skip(browserName !== 'chromium', 'one browser is enough for the run logic')
   test.setTimeout(240_000)
   const errors = []
-  page.on('pageerror', (e) => errors.push(e.message))
+  page.on('pageerror', (e) => errors.push(e.stack || e.message))
   const id = await openFixture(page)
 
   const first = await page.evaluate(async () => {
@@ -101,7 +101,7 @@ test('a disabled photo keeps its pose, is left out of depth maps, and stays disa
 
 test('Reduce overlap counts as the settings change and disables the photos it does not need', async ({ page }) => {
   const errors = []
-  page.on('pageerror', (e) => errors.push(e.message))
+  page.on('pageerror', (e) => errors.push(e.stack || e.message))
   await openFixture(page)
   await page.getByRole('button', { name: 'Tools', exact: true }).click()
   await page.locator('.ribbon').getByRole('button', { name: 'Images' }).click()

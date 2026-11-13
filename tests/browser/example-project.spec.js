@@ -57,7 +57,7 @@ test('a missing example says so and returns to the new-project dialog', async ({
   await page.route('**/examples/aukerman/manifest.json', (route) => route.fulfill({ status: 404, body: 'not found' }))
   await page.goto('/')
   await page.getByRole('button', { name: 'example project' }).click()
-  await expect(page.getByText('Could not download the example')).toBeVisible()
+  await expect(page.locator('.toast', { hasText: 'Could not download the example' })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'New Project', exact: true })).toBeVisible()
   expect(
     await page.evaluate(async () => {

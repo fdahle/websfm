@@ -5,6 +5,14 @@ Notable changes to websfm. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **A crashed operation says which one it was.** When an operation's WebAssembly code
+  crashes, its error now names the operation, and the browser console keeps where in the
+  code it happened. Before, a crash in a background job showed only "memory access out of
+  bounds". Found while hunting such an error that a browser test logged in 2 of 3 full
+  runs; it has not come back at this version in 120 repeats of that test, 3 runs of the
+  tests before it and 2 full Chromium runs, so its cause is still open.
+
 ## [0.8.0] — 2026-11-12
 
 ### Added

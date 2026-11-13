@@ -131,11 +131,11 @@ self.onmessage = async (e) => {
     // A WebAssembly trap (a Rust panic: the crates build with panic = "abort") leaves the
     // instance undefined (stack pointer not restored, borrows held), so the pool must not
     // send this worker anything more: `fatal` has it replaced (computeClient.js).
-    self.postMessage({
-      id,
-      ok: false,
-      error: err?.message ?? String(err),
-      fatal: err instanceof WebAssembly.RuntimeError,
-    })
+    // The error names the operation, and the console keeps the stack (the WASM function):
+    // a bare "memory access out of bounds" from a job nobody awaited said neither.
+    const fatal = err instanceof WebAssembly.RuntimeError
+    const message = err?.message ?? String(err)
+    if (fatal) console.error(`WebAssembly trap in ${op}:`, err?.stack ?? message)
+    self.postMessage({ id, ok: false, error: fatal ? `${message} (WebAssembly trap in ${op})` : message, fatal })
   }
 }
