@@ -55,6 +55,9 @@ export function archiveCompression(relPath) {
   return /\.json$/i.test(String(relPath || '')) ? 8 : 0
 }
 
+/**
+ * @param {{ project?: *, appVersion?: string | null, includeDerived?: boolean, now?: Date }} [opts]
+ */
 export function buildManifest({ project, appVersion = null, includeDerived = true, now = new Date() } = {}) {
   const p = project || {}
   return {

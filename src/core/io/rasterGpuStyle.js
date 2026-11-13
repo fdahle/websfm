@@ -84,6 +84,7 @@ export function demReliefStyle({ ramp, min, max, hillshade = true, gsd = 0 }) {
     for (let i = 0; i <= 32; i++) stops.push(i / 32, colour(i / 32)[c])
     return ['interpolate', ['linear'], t, ...stops]
   }
+  /** @type {number | any[]} */
   let shade = 1
   if (hillshade) {
     const near = (dx, dy) => {

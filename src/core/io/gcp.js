@@ -39,6 +39,10 @@ export function hasGcpElevation(gcp) {
 // `precision` is the caller's covariance check (core/gcpAccuracy.js
 // `precisionFromGcp`); it lives there because it needs the accuracy model, so it
 // is injected rather than imported (this module stays a leaf).
+/**
+ * @param {*} gcp
+ * @param {{ precision?: (gcp: *) => * }} [opts]
+ */
 export function isGroundControl(gcp, { precision = () => true } = {}) {
   if (!gcp || gcp.enabled === false) return false
   if (normalizeGcpRole(gcp.role) !== 'control') return false

@@ -313,6 +313,7 @@ export function measureMotion(ref, cur, { grid = 3, minTexture = 0.01 } = {}) {
   const blocks = []
   for (let by = 0; by < grid; by++) {
     for (let bx = 0; bx < grid; bx++) {
+      /** @type {[number, number, number, number]} */
       const reg0 = [
         Math.floor((bx * r0.w) / grid),
         Math.floor((by * r0.h) / grid),

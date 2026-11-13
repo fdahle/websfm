@@ -57,6 +57,11 @@ export function looksLikeXyzText(text, minRows = 2) {
 // (cloud { count, pos, col?, nrm? } or mesh { nVerts, count, pos, idx, col? }).
 // `lazDecompress` is the injected LASzip codec (crates/lazcodec via the worker);
 // without it a LAZ file errors rather than being read as garbage.
+/**
+ * @param {*} buffer
+ * @param {string} [name]
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void, lazDecompress?: Function | null }} [opts]
+ */
 export function parseCloudFile(buffer, name = '', { onLog, lazDecompress = null } = {}) {
   const fmt = sniffCloudFormat(buffer, name)
   if (!fmt) throw new Error(`Unrecognized point-cloud format: ${name || '(unnamed file)'}`)
@@ -73,6 +78,10 @@ export function parseCloudFile(buffer, name = '', { onLog, lazDecompress = null 
 // point records are read a slice at a time. Binary PLY and LAZ are read whole (the
 // codec has no streaming decoder), as bytes outside the JS heap. Same results as
 // parseCloudFile on the file's bytes.
+/**
+ * @param {*} source
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void, lazDecompress?: Function | null }} [opts]
+ */
 export async function parseCloudSource(source, { onLog, lazDecompress = null } = {}) {
   const fmt = sniffCloudFormat(await source.read(0, Math.min(source.size, 256)), source.name)
   if (!fmt) throw new Error(`Unrecognized point-cloud format: ${source.name || '(unnamed file)'}`)
@@ -122,6 +131,10 @@ export function cloudStats(parsed) {
 // (a plain axis swap would mirror the model). Normals get the same rotation;
 // `subsampleCell` (world units, after scaling) voxel-merges clouds — it is
 // ignored for meshes (faces index vertices) and drops normals when applied.
+/**
+ * @param {*} parsed
+ * @param {{ unitScale?: number, swapYZ?: boolean, subsampleCell?: number, onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export function applyImportTransform(parsed, { unitScale = 1, swapYZ = false, subsampleCell = 0, onLog } = {}) {
   let out = parsed
   const n = parsed.nVerts ?? parsed.count ?? 0

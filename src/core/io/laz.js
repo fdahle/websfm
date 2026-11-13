@@ -55,6 +55,10 @@ export const LAZ_CHUNK_POINTS = 50_000
 // Returns a Uint8Array, or with `parts: true` [header, points] for a Blob (no
 // concatenated copy). Throws if no compressor was supplied — silently writing an
 // uncompressed .las under a .laz name would be worse.
+/**
+ * @param {*} points
+ * @param {{ crsCode?: number | null, geographic?: boolean, attributes?: boolean, compress?: Function, createCompressor?: Function, onLog?: (msg: string, level?: string, source?: string) => void, parts?: boolean }} [opts]
+ */
 export function cloudToLaz(
   points,
   { crsCode = null, geographic = false, attributes = true, compress, createCompressor, onLog, parts = false } = {},
@@ -155,6 +159,10 @@ export function cloudToLaz(
 
 // LAZ bytes → the flat cloud shape, via the injected decompressor:
 // (vlrData, compressed, numPoints, pointSize) → Uint8Array of raw records.
+/**
+ * @param {*} buffer
+ * @param {{ decompress?: Function, onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export function parseLaz(buffer, { decompress, onLog } = {}) {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
   const { header: h, records } = decompressLazRecords(bytes, {
@@ -184,6 +192,10 @@ export function parseLaz(buffer, { decompress, onLog } = {}) {
 // decodes only the first N records (the codec has no streaming decoder and caps one
 // call at 512 MiB of records); the returned header's `count` is then N, and
 // `truncatedFrom` holds the file's own count.
+/**
+ * @param {*} buffer
+ * @param {{ decompress?: Function, beforeDecompress?: ((header: *) => void) | null, maxPoints?: number }} [opts]
+ */
 export function decompressLazRecords(buffer, { decompress, beforeDecompress = null, maxPoints = Infinity } = {}) {
   if (typeof decompress !== 'function') {
     throw new Error('parseLaz: no LAZ decompressor supplied (the lazcodec WASM module failed to load)')

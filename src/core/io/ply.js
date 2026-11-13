@@ -321,6 +321,10 @@ function plyResult(st, { onLog }) {
   return { attributes, count: n, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
 }
 
+/**
+ * @param {*} buffer
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export function parsePly(buffer, { onLog } = {}) {
   const bytes =
     typeof buffer === 'string'
@@ -343,6 +347,10 @@ export function parsePly(buffer, { onLog } = {}) {
 // utils/blobParts.js blobSource): an ASCII body is decoded and parsed chunk by
 // chunk and never becomes one string; a binary body is read whole (fixed-stride
 // records in an ArrayBuffer, outside the JS heap).
+/**
+ * @param {*} source
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export async function parsePlySource(source, { onLog } = {}) {
   const head = await source.read(0, Math.min(source.size, 65536))
   const header = readPlyHeader(head)

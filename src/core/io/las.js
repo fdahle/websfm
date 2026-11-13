@@ -44,6 +44,10 @@ function asciiField(dst, offset, text, width) {
 // written; without one (local frame) no CRS VLR is emitted. A flat cloud's
 // `attributes` are written as described at the top (attributes:false skips them).
 // Yields Uint8Array parts: the header (+ VLRs), then whole-record chunks.
+/**
+ * @param {*} points
+ * @param {{ crsCode?: number | null, geographic?: boolean, attributes?: boolean, onLog?: (msg: string, level?: string, source?: string) => void, partBytes?: number }} [opts]
+ */
 export function* cloudToLasParts(
   points,
   { crsCode = null, geographic = false, attributes = true, onLog, partBytes = PART_BYTES } = {},
@@ -160,7 +164,7 @@ export function encodeLasPoints({
   offset,
   format = 2,
   recordLength = LAS_RECORD_F2,
-  native = {},
+  native = /** @type {Record<string, any>} */ ({}),
   extra = [],
 }) {
   const out = new Uint8Array(n * recordLength)
@@ -242,7 +246,7 @@ export function writeLasHeader({
   asciiField(out, 26, 'WebSfM', 32) // system identifier
   asciiField(out, 58, 'WebSfM', 32) // generating software
   const now = new Date()
-  const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000)
+  const dayOfYear = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000)
   dv.setUint16(90, dayOfYear, true)
   dv.setUint16(92, now.getFullYear(), true)
   dv.setUint16(94, HEADER_SIZE_12, true) // header size
@@ -321,7 +325,7 @@ export function encodeLas14Points({
   offset,
   format = 6,
   recordLength,
-  native = {},
+  native = /** @type {Record<string, any>} */ ({}),
   extra = [],
 }) {
   const base = format === 7 ? LAS_RECORD_F7 : LAS_RECORD_F6
@@ -393,7 +397,7 @@ export function writeLas14Header({
   asciiField(out, 26, 'WebSfM', 32)
   asciiField(out, 58, 'WebSfM', 32)
   const now = new Date()
-  dv.setUint16(90, Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000), true)
+  dv.setUint16(90, Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000), true)
   dv.setUint16(92, now.getFullYear(), true)
   dv.setUint16(94, HEADER_SIZE_14, true)
   dv.setUint32(96, offsetToPoints, true)
@@ -531,6 +535,9 @@ function extraName(name, used) {
  *   dataType, size, offset }], dropped: [names] }` — `offset` is from the end of the
  * standard record. Format 3 is chosen exactly when a GPS time fits natively.
  * Attributes no extra-bytes type can hold (or past the VLR's 341 fields) are dropped.
+ * @param {*} attributes
+ * @param {number} n
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
  */
 export function planLasAttributes(attributes, n, { onLog } = {}) {
   const native = {},
@@ -664,6 +671,10 @@ export function validateLasAllocation(count, recordLength, extraBytes = 0) {
 // record length. Rejects compressed LAZ with a clear error. Returns
 // { count, pos: Float64Array(3N), col?: Uint8Array(3N) } — flat, never
 // per-point objects (dense-scale invariant).
+/**
+ * @param {*} buffer
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export function parseLas(buffer, { onLog } = {}) {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
   const h = readLasHeader(bytes)
@@ -949,6 +960,10 @@ export function createLasDecoder(count, recordLength, format, scale, offset, ext
 // parseLas over injected I/O ({ size, read(start, end) } — utils/blobParts.js
 // blobSource): the header and VLRs, then the point records a slice at a time, so
 // the file is never one buffer next to the decoded cloud.
+/**
+ * @param {*} source
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void, chunkBytes?: number }} [opts]
+ */
 export async function parseLasSource(source, { onLog, chunkBytes = 8 * 1024 * 1024 } = {}) {
   const first = await source.read(0, Math.min(source.size, HEADER_SIZE_12))
   const offsetToPoints =

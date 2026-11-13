@@ -51,7 +51,11 @@ function metadataNumber(root, names) {
 function numberList(v) {
   if (v == null || v === '') return null
   const items =
-    ArrayBuffer.isView(v) || Array.isArray(v) ? Array.from(v) : typeof v === 'number' ? [v] : String(v).split(/[\s,]+/)
+    ArrayBuffer.isView(v) || Array.isArray(v)
+      ? Array.from(/** @type {ArrayLike<number>} */ (v))
+      : typeof v === 'number'
+        ? [v]
+        : String(v).split(/[\s,]+/)
   const out = items.filter((x) => x !== '' && x != null).map(Number)
   return out.length && out.every(Number.isFinite) ? out : null
 }
@@ -253,7 +257,10 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
 // views into the file buffer, which must not be retained.
 function scalarTag(v) {
   if (v == null) return null
-  if (ArrayBuffer.isView(v)) return v.length ? Number(v[0]) : null
+  if (ArrayBuffer.isView(v)) {
+    const a = /** @type {ArrayLike<number>} */ (/** @type {unknown} */ (v))
+    return a.length ? Number(a[0]) : null
+  }
   return v
 }
 

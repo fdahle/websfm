@@ -90,7 +90,7 @@ export function parseNvm(text) {
   for (let i = 0; i < n; i++) {
     const a = lines[p++].split(/\s+/),
       focal = Number(a[1]),
-      R = quatToRotation(a.slice(2, 6).map(Number)),
+      R = quatToRotation(/** @type {[number, number, number, number]} */ (a.slice(2, 6).map(Number))),
       C = a.slice(6, 9).map(Number)
     images.push({
       externalId: i,

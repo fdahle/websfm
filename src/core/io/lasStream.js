@@ -59,6 +59,8 @@ export function lasNeedsStreaming(head, fileSize) {
 /**
  * → { header, count, bounds, layout: { offset, scale }, colour, attributes, batches() }
  * batches() yields { count, pos: Float64Array (the file's coordinates), col?, attributes }.
+ * @param {*} source
+ * @param {{ createLazDecoder?: Function | null, batchPoints?: number, onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
  */
 export async function openLasStream(source, { createLazDecoder = null, batchPoints = 1 << 20, onLog } = {}) {
   const first = await source.read(0, Math.min(source.size, 375))

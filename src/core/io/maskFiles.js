@@ -32,12 +32,14 @@ export function maskFileCandidates(fileName) {
  * @param {string[]} fileNames the chosen files' names (paths are fine)
  * @param {Array<{ id: any, name: string }>} images
  * @returns {{
- *   pairs: Array<{ index: number, imageId: any }>,   index into fileNames
- *   unmatched: string[],                              mask files that fit no image
- *   duplicates: string[],                             a further file for an image already paired
- *   skipped: string[],                                not an image file
- *   imagesWithout: number,                            images no file was found for
- * }}
+ *   pairs: Array<{ index: number, imageId: any }>,
+ *   unmatched: string[],
+ *   duplicates: string[],
+ *   skipped: string[],
+ *   imagesWithout: number,
+ * }} `pairs`: an index into fileNames with its image; `unmatched`: mask files that fit
+ *   no image; `duplicates`: a further file for an image already paired; `skipped`: not
+ *   an image file; `imagesWithout`: images no file was found for.
  */
 export function matchMaskFiles(fileNames, images) {
   const resolve = makeNameResolver(images)

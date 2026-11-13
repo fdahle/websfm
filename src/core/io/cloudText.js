@@ -50,6 +50,10 @@ const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 // skipped and counted. The delimiter is sniffed from the first content line (the
 // GCP reader's rule). Returns { count, pos: Float64Array, col?, skipped,
 // attributes?: { intensity } }.
+/**
+ * @param {string} text
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export function parseXyzText(text, { onLog } = {}) {
   const parser = createXyzParser({ onLog })
   parser.push(text)
@@ -58,6 +62,10 @@ export function parseXyzText(text, { onLog } = {}) {
 
 // The same reader over an async iterable of byte chunks (a File read slice by
 // slice): UTF-8 decoded in streaming mode, partial lines carried across chunks.
+/**
+ * @param {*} chunks
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export async function parseXyzChunks(chunks, { onLog } = {}) {
   const parser = createXyzParser({ onLog })
   const dec = new TextDecoder()
@@ -67,6 +75,9 @@ export async function parseXyzChunks(chunks, { onLog } = {}) {
 }
 
 // Incremental reader: push(text) any number of times, then finish().
+/**
+ * @param {{ onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export function createXyzParser({ onLog } = {}) {
   // Positions in full precision; colour (0–1, 0–255 or 0–65535) and intensity need no
   // more than Float32 — half the memory of the cloud's largest companions.

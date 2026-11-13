@@ -44,6 +44,7 @@ export function folderStorageSupported(win = globalThis) {
  *                 silent retry here would simply be rejected.
  *   'repick'    — no usable handle (folder moved, deleted, or IndexedDB lost it).
  *                 Offer a fresh directory pick, or forgetting the project.
+ * @param {{ entry?: *, handle?: *, permission?: * }} [opts]
  */
 export function folderOpenPlan({ entry, handle = null, permission = null } = {}) {
   if (!isFolderProject(entry)) return { action: 'open', reason: 'opfs' }

@@ -159,7 +159,7 @@ export function* jsonParts(value, { space = 2, partChars = PART_CHARS, indent = 
   const gap = gapOf(space)
   const buf = textBuffer(partChars)
   const open = new Set() // containers being written, for cycle detection
-  const top = resolve(value, '', { '': value })
+  const top = resolve(value, '')
   if (!serializable(top)) return // JSON.stringify returns undefined
   yield* write(top, indent)
   if (buf.size) yield buf.take()
@@ -193,7 +193,7 @@ export function* jsonParts(value, { space = 2, partChars = PART_CHARS, indent = 
         buf.add('[')
         for (let i = 0; i < n; i++) {
           if (buf.add(i ? `,${sep}` : sep)) yield buf.take()
-          const el = resolve(lazy ? v.at(i) : v[i], String(i), v)
+          const el = resolve(lazy ? v.at(i) : v[i], String(i))
           if (serializable(el)) yield* write(el, inner)
           else if (buf.add('null')) yield buf.take()
         }
@@ -203,7 +203,7 @@ export function* jsonParts(value, { space = 2, partChars = PART_CHARS, indent = 
       buf.add('{')
       let first = true
       for (const k of keys) {
-        const el = resolve(v[k], k, v)
+        const el = resolve(v[k], k)
         if (!serializable(el)) continue
         if (buf.add(`${first ? '' : ','}${sep}${JSON.stringify(k)}:${gap ? ' ' : ''}`)) yield buf.take()
         first = false

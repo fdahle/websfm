@@ -74,6 +74,10 @@ export function meshExportShift(mesh) {
 // attributes all from that point — instead of averaging, the same rule as
 // cloudEdit.js voxelDownsample: a mean class id, return number or GPS time is an
 // observation nobody made.
+/**
+ * @param {*} points
+ * @param {{ sim?: *, cell?: number, onLog?: (msg: string, level?: string, source?: string) => void }} [opts]
+ */
 export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = {}) {
   const down = cell > 0
   if (!sim && !down) return points

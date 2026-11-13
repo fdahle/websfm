@@ -53,6 +53,8 @@ export function percentileRange(samples, spp, { loQ = 0.005, hiQ = 0.995 } = {})
 /**
  * Map 16-bit samples to interleaved 8-bit RGBA.
  * @param {Uint16Array} samples  interleaved, `spp` samples per pixel
+ * @param {number} width
+ * @param {number} height
  * @param {number} spp           1, 2, 3 or 4
  * @param {{ lo: number, hi: number }} range
  * @param {{ invert?: boolean }} [opts]  invert = photometric MinIsWhite
