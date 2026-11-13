@@ -5,7 +5,7 @@
 // run the detector per tile, offset the coords back, and merge. This module owns
 // only the *math* (tile grid, sub-raster slice, positional NMS, auto tile size) —
 // it's DOM/Vue/ORT-free so it unit-tests in Node. The orchestration (calling the
-// SIFT/SuperPoint runners per tile) lives in workers/ops/detect.js, which is where
+// SIFT/SuperPoint runners per tile) lives in workers/ops/keypoints.js, which is where
 // the detectors already live.
 
 // The merge is by OWNERSHIP, not by deduplication. Every tile detects over its

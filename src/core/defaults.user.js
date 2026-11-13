@@ -7,7 +7,7 @@
 // core code can import it directly.
 
 // Tie-point (feature) detection — SIFT. Mirrored by DetectFeaturesModal.vue's
-// `siftSettings` ref. NOTE: the worker op (workers/ops/detect.js) keeps its own,
+// `siftSettings` ref. NOTE: the worker op (workers/ops/keypoints.js) keeps its own,
 // intentionally-different fallbacks (e.g. tileSize 0 ⇒ auto-derive) — that op is the
 // defensive floor, not this user-facing prefill, so the two are allowed to differ.
 // Resolution/budget note (2026-07-24): these were originally set for hand-held photo

@@ -879,7 +879,7 @@ export const SENSOR_TUNING = {
   fiducialMisfitFactor: 3,
 }
 
-// Tools ▸ Images ▸ Detect targets ▸ AprilTag (core/sfm/tagDetect.js, workers/ops/detect.js
+// Tools ▸ Images ▸ Detect targets ▸ AprilTag (core/sfm/tagDetect.js, workers/ops/targets.js
 // detectTagsInPhoto).
 export const TAG_DETECT_TUNING = {
   // The photo is searched in native tiles of `tile` px overlapping by `overlap`: a tag up

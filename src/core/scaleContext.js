@@ -7,7 +7,7 @@
 //
 //     s = min(1, maxDim / max(natW, natH))          (always ≤ 1 — never upscales)
 //
-// but `workers/ops/detect.js` maps it straight back to native coordinates
+// but `workers/ops/keypoints.js` maps it straight back to native coordinates
 // (`x: dx / scale`) before anything else sees it. So every threshold downstream —
 // the F-RANSAC inlier distance, the PnP/BA reprojection gates, the track filter —
 // is expressed in *native* pixels, while the measurement that produced those

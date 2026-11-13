@@ -4,7 +4,7 @@
 // the film) exposes a lattice of small black crosses on every frame. Measured against
 // their nominal positions they give the scan placement AND the film's own deformation
 // (fiducialCalibration.js 'reseau' model). This module finds one cross in a window and
-// plans the lattice; workers/ops/detect.js reads the windows and drives the search.
+// plans the lattice; workers/ops/film.js reads the windows and drives the search.
 
 // The nominal lattice: crosses every `spacingMm` over the film, centred on the frame
 // centre (the principal point is a separate calibration value). Node ids `r:i:j` are
@@ -157,7 +157,7 @@ export function fitLatticeAffine(found) {
 // ── Half-frame scans ─────────────────────────────────────────────────────
 // Some archives scan a frame in two overlapping parts (KH-9: `<frame>_a` the left of
 // the film, `<frame>_b` the right). A half has no frame centre to place the lattice
-// from: its crosses are found by growing from one (workers/ops/detect.js, mode
+// from: its crosses are found by growing from one (workers/ops/film.js, mode
 // 'grow'), each with grid steps (di right, dj down) relative to the first, and the
 // steps become lattice indices here. Rows: a half shows the full film height, so its
 // rows are centred. Columns: from the half's outer edge, the outermost column being

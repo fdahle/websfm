@@ -341,7 +341,7 @@ export function prepareFiducialTemplates(url, obs, options = {}, { onLog } = {})
 // into every call by design — do NOT add their buffers to a transfer list here,
 // they are reused across all images of the sensor and transferring would detach
 // them after the first.
-// Half-frame reseau (SAT-5, workers/ops/detect.js): the crosses grown from one, the
+// Half-frame reseau (SAT-5, workers/ops/film.js): the crosses grown from one, the
 // halves' agreement under candidate fits, and the stitched frame (a TIFF Blob).
 export const growReseau = (url, options) => call('growReseau', [url, options])
 export const reseauOverlapScore = (urlA, urlB, options) => call('reseauOverlapScore', [urlA, urlB, options])
@@ -352,7 +352,7 @@ export const stitchReseauFrame = (urlA, urlB, options, { onLog, onProgress } = {
       else if (ev === 'progress') onProgress?.(...args)
     },
   })
-// Panoramic strips (core/sfm/panoramic.js, workers/ops/detect.js): one strip's segments
+// Panoramic strips (core/sfm/panoramic.js, workers/ops/film.js): one strip's segments
 // as frame images, [TIFF Blob] in segment order.
 export const splitPanoramicStrip = (url, options, { onLog, onProgress } = {}) =>
   call('splitPanoramicStrip', [url, options], {
@@ -362,7 +362,7 @@ export const splitPanoramicStrip = (url, options, { onLog, onProgress } = {}) =>
     },
   })
 
-// Reseau crosses in one scan (SAT-5, workers/ops/detect.js detectReseau).
+// Reseau crosses in one scan (SAT-5, workers/ops/film.js detectReseau).
 export function detectReseau(url, options, { onLog } = {}) {
   return call('detectReseau', [url, options], {
     onEvent: onLog
@@ -383,14 +383,14 @@ export function detectFiducials(url, templates, predictions, options = {}, { onL
   })
 }
 
-// Checker GCP targets near their predictions (workers/ops/detect.js detectTargets):
+// Checker GCP targets near their predictions (workers/ops/targets.js detectTargets):
 // predictions [{ key, x, y, radius, quadRadius }] → { results: [{ key, x, y, score }] }.
 export function detectTargets(url, predictions) {
   return call('detectTargets', [url, predictions.map((p) => ({ ...p }))])
 }
 
 // AprilTag tag36h11 targets, or the markers of an ArUco dictionary (`dict`, '4x4_50' …),
-// anywhere in one photo (workers/ops/detect.js detectTagsInPhoto)
+// anywhere in one photo (workers/ops/targets.js detectTagsInPhoto)
 // → { tags: [{ id, hamming, score, x, y, contrast }] }.
 export function detectTagsInPhoto(url, dict = null) {
   return call('detectTagsInPhoto', [url, dict])

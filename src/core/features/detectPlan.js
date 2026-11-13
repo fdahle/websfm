@@ -2,7 +2,7 @@
 // the live readout behind DetectFeaturesModal's step layout. Pure: the modal hands in
 // image sizes + its settings, nothing here touches the worker.
 //
-// The order is the worker's (workers/ops/detect.js `detect`):
+// The order is the worker's (workers/ops/keypoints.js `detect`):
 //   1. resize  — the image is rasterised so its long side ≤ the detection resolution
 //                (resolveDetectMaxDim: fixed, or a fraction of native in 'auto' mode;
 //                never upscaled);
@@ -23,7 +23,7 @@ import { PYRAMID_TUNING } from '../io/rasterPyramid.js'
 
 // The worker's auto tile size for a learned detector is min(this, what the GPU's
 // reported binding limit allows) — unknowable from the main thread, so the plan uses
-// the ceiling and says "up to" (workers/ops/detect.js SP_GPU_TILE_MAX).
+// the ceiling and says "up to" (workers/ops/keypoints.js SP_GPU_TILE_MAX).
 export const LEARNED_AUTO_TILE_MAX = 1024
 
 /** The tile edge a run will use, and whether that is exact or an upper bound. */

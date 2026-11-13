@@ -414,7 +414,7 @@ export function createImageFiducials({
   }
 
   // Tools ▸ Images ▾ ▸ Detect reseau (SAT-5): the reseau crosses of every image of a
-  // film sensor, at native resolution (workers/ops/detect.js detectReseau). Each image's
+  // film sensor, at native resolution (workers/ops/film.js detectReseau). Each image's
   // earlier reseau detections are replaced; other fiducial marks stay. settings:
   // { spacingMm, filmWidthMm, filmHeightMm, armMm, widthMm }, the sensor's scan pitch
   // (`pixelSize`, mm/px) sets the scale. Returns { calibration, perImage }: the caller

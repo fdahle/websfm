@@ -1,7 +1,7 @@
 // A faint image: SIFT at the set contrast threshold finds fewer than
 // DETECT_TUNING.siftFaintRetryShare of the keypoint cap (a white wall, an office, a
 // low-sun field). Such an image is detected again at siftFaintRetryContrast × that
-// threshold and keeps the second set (workers/ops/detect.js): its matches decide whether
+// threshold and keeps the second set (workers/ops/keypoints.js): its matches decide whether
 // it registers at all, and the cap still bounds the matching cost. Images that reach
 // the floor are detected once, exactly as before.
 //

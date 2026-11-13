@@ -57,7 +57,7 @@ describe('anonymous fiducial detection', () => {
   })
 })
 
-// The worker's coarse → native path (workers/ops/detect.js), replayed in node: a
+// The worker's coarse → native path (workers/ops/film.js), replayed in node: a
 // 4× native scan, a box-downsampled thumbnail, then the planned native window.
 describe('native refine plan', () => {
   const F = 4,
