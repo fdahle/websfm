@@ -86,7 +86,9 @@ jobs:
   # COG validator on the DEM and ortho, PDAL on the LAS / LAZ / COPC, COLMAP's bundle
   # adjuster on the COLMAP model. GDAL and PDAL run from pinned Docker images.
   interop:
-    runs-on: ubuntu-latest
+    # 24.04: Ubuntu 26.04's colmap package (3.12.6-4) is missing libPoseLib.so and cannot
+    # start (ubuntu-latest moved to 26.04 on 2026-11-13). Lift once it is fixed there.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
