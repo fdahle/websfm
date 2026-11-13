@@ -6,8 +6,6 @@
 import { productDescriptor, productTiledMeta } from '../io/rasterSource.js'
 import { MODEL_MAP_CRS, frameOffset } from './modelMap.js'
 
-export const PRODUCT_KINDS = ['dem', 'ortho']
-
 // The persisted per-product view state, by product id: { 'dem-…': { visible, opacity }, … }.
 // Malformed values are dropped, so a hand-edited reconstruction.json can never put a
 // layer on the map by accident; the store drops ids no product has (a project saved

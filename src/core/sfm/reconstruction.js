@@ -254,11 +254,6 @@ export function resolveK(meta, sensor = null) {
   return { fx, fy: fx, cx, cy, source: why }
 }
 
-// Back-compat / metadata-only estimate (no sensor override).
-export function estimateK(meta) {
-  return resolveK(meta, null)
-}
-
 // Build a flat 12-element projection matrix P = [R|t] (normalised coords, no K).
 // R is row-major 3×3, t is [tx, ty, tz].
 export function makeP34flat(R, t) {

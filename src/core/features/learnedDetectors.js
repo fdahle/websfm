@@ -68,14 +68,6 @@ export function detectorLabel(id) {
 }
 
 /**
- * Descriptor width a detector produces. Images carry their own `descDim`; this is
- * for code that must know it before any image has been detected.
- */
-export function detectorDescDim(id) {
-  return LEARNED_DETECTORS[id]?.descDim ?? 128
-}
-
-/**
  * Which LightGlue model matches a set of images, or why none can. LightGlue needs
  * every image detected by the SAME learned detector at that detector's width.
  * @param {{name?:string, detector?:string, descDim?:number}[]} images

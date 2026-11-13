@@ -15,8 +15,6 @@
 // The kept set is returned in response order regardless of the rule: downstream code
 // (LightGlue's prefix cap, guided tiles, the sparse colour pass) assumes best-first.
 
-export const CAP_RULES = Object.freeze(['response', 'coarse-first'])
-
 /**
  * Indices of the keypoints to keep, strongest response first.
  *

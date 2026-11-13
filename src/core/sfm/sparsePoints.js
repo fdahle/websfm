@@ -419,5 +419,3 @@ export class SparsePoints {
     return new SparsePoints({ pos, col, colorMask, viewUuids: uuids, vcount, vcam, vkp, vx, vy })
   }
 }
-
-export const isSparsePoints = (p) => p instanceof SparsePoints

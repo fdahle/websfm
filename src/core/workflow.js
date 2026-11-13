@@ -428,11 +428,6 @@ export function normalizeWorkflow(value) {
 // again. A retry is written as a forward branch to a copy of the stage with other
 // settings, which also guarantees every run terminates (the block index only grows).
 
-// The blocks a jump may target from `index`: the named-or-not blocks after it.
-export function blockJumpTargets(workflow, index) {
-  return workflow.blocks.map((block, i) => ({ block, index: i })).filter((x) => x.index > index)
-}
-
 // The outgoing jump targets a control block's settings name ('' = none).
 export function blockTargets(block) {
   if (block.type === 'gate') {

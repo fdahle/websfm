@@ -6,9 +6,6 @@
 // DEM needs a cloud, an ortho a DEM) use the main one of its kind, as Metashape uses
 // its default. Pure: plain records in, plain values out.
 
-/** The kinds that have a main product of their own (the sparse model's is `mainSparseId`). */
-export const MAIN_KINDS = ['dense', 'mesh', 'dem', 'ortho']
-
 /**
  * "DEM", or "DEM 2", "DEM 3" … when the name is taken.
  * @param {string} base

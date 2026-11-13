@@ -21,9 +21,6 @@ export const DEM_PLANE_MAX = 4096
 export const MAX_RASTER_SIDE = 65535
 export const ORTHO_TILE = 512
 export const DEM_TILE = 512
-// Bytes per cell of the stored rasters: RGBA 8-bit for the ortho, Float32 heights.
-export const ORTHO_BYTES_PER_CELL = 4
-export const DEM_BYTES_PER_CELL = 4
 
 /** The cell size whose grid over a box spanning `spanMax` on its longer side is
  *  `longSide` cells long; 0 when either is not usable. */
@@ -108,6 +105,3 @@ export function demGridFor(box, count, settings = {}) {
 
 /** The longest side an Auto DEM may have (blocks past DEM_PLANE_MAX). */
 export const demAutoMaxSide = () => RASTER_TUNING.demAutoMaxSide
-
-/** The stored size of a raster grid, uncompressed. */
-export const rasterBytes = (geom, bytesPerCell) => geom.width * geom.height * bytesPerCell

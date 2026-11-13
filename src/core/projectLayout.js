@@ -29,7 +29,6 @@ export const DATA_DOCUMENTS = [
 export const RECONSTRUCTION_DOCUMENT = 'reconstruction.json'
 export const DIALOGS_PATH = `${INTERNAL_DIR}/dialogs.json`
 export const LOG_NAME = 'log.ndjson'
-export const LOG_PATH = `${INTERNAL_DIR}/${LOG_NAME}`
 export const RUNS_DIR = 'runs' // inside internal/
 export const BACKUPS_DIR = 'backups' // inside internal/
 export const MIGRATION_STATE = 'format-migration.json' // inside internal/

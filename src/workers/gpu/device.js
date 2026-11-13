@@ -77,12 +77,3 @@ async function initDevice() {
     return null
   }
 }
-
-// Tear down the cached device (used by tests / explicit reset). Not needed in
-// normal operation — the device lives for the worker's lifetime.
-export async function destroyDevice() {
-  if (!devicePromise) return
-  const state = await devicePromise.catch(() => null)
-  devicePromise = null
-  state?.device?.destroy?.()
-}

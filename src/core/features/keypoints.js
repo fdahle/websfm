@@ -45,16 +45,12 @@ export class Keypoints {
   }
 }
 
-export const isKeypoints = (k) => k instanceof Keypoints
-
 /** Rewrap a structured-cloned copy (a plain { data, rgb }) — or pass one through. */
 export function asKeypoints(k) {
   if (k instanceof Keypoints) return k
   if (k?.data instanceof Float32Array) return new Keypoints(k.data, k.rgb ?? null)
   return keypointsFromObjects(k)
 }
-
-export const EMPTY_KEYPOINTS = new Keypoints()
 
 /**
  * Pack a list of keypoint objects ({ x, y, nx?, ny?, scale?, response?, color? }) — an
@@ -81,11 +77,6 @@ export function keypointsFromObjects(list) {
     }
   }
   return new Keypoints(data, rgb)
-}
-
-/** One keypoint as an object (exports, diagnostics; allocates). */
-export function keypointAt(kps, i) {
-  return { x: kps.x(i), y: kps.y(i), nx: kps.nx(i), ny: kps.ny(i), scale: kps.scale(i), response: kps.response(i) }
 }
 
 /**
