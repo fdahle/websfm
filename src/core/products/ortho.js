@@ -331,7 +331,7 @@ export async function orthorectifyStreamed(
 // → { width, height, covered, sampled, filled, surfaceCells, labelled, stats, statsState,
 //     blocks, visits, mapLoads, photoLoads, cacheHits, mosaic?, gains? }
 //
-// Split over workers (workers/ops/products.js): `opts.planOnly` stops after the survey
+// Split over workers (workers/ops/ortho.js): `opts.planOnly` stops after the survey
 // and the grouping and returns { plan: { survey, groupBlocks, groups, predicted,
 // shareModel, groupVisits } }; a worker then runs with `opts.survey` (the plan's, instead
 // of surveying again), `groupBlocks` (the plan's size), `opts.groupIndices` (its share of

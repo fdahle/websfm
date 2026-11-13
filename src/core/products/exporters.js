@@ -1089,7 +1089,7 @@ export async function orthoToGeoTiff(ortho, geo, { crs = {}, deflate = null } = 
 }
 
 // ── Ortho → Cloud-Optimized GeoTIFF ──────────────────────────────────────────
-// Nothing to write: a computed orthophoto IS a COG (workers/ops/products.js
+// Nothing to write: a computed orthophoto IS a COG (workers/ops/ortho.js
 // generateOrtho), so the export copies the stored file. Its GeoTIFF / PNG / JPEG
 // forms are streamed out of that file by workers/ops/export.js exportOrtho.
 //

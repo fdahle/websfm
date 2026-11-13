@@ -625,9 +625,9 @@ export const generateDem = streamingOp('generateDem')
 // Products — orthophoto (reproject each DEM cell into the cached depth maps).
 // Resolves to { width, height, gsd, originX, originY, covered, stats, cog: Blob (the
 // tiled RGBA GeoTIFF — the ortho has no other pixel store), previewBlob, … }.
-// See core/products/ortho.js orthorectifyTiled and workers/ops/products.js.
+// See core/products/ortho.js orthorectifyTiled and workers/ops/ortho.js.
 export const generateOrtho = streamingOp('generateOrtho')
-// An ortho split over the pool (workers/ops/products.js, reconstruction/productRuns.js):
+// An ortho split over the pool (workers/ops/ortho.js, reconstruction/productRuns.js):
 // the plan and the GeoTIFF writer on one worker, the shares on the others. A share's
 // finished blocks arrive as `onBlock(block)`, their arrays transferred.
 export const orthoPlan = streamingOp('orthoPlan')
@@ -674,7 +674,7 @@ export const reflectanceShare = (input, ids, { onLog, onProgress, onBlock, worke
   })
 
 // Tools ▸ Products ▾ — contours / terrain derivatives / polygon clip of a DEM or
-// ortho (see workers/ops/products.js `demTool`). A DEM plane is a copy, transferred
+// ortho (see workers/ops/rasterTools.js `demTool`). A DEM plane is a copy, transferred
 // in; an ortho is clipped from a window of its COG file, read in the worker.
 export const demTool = streamingOp('demTool')
 // A window of a block-built DEM's COG as a height grid (SAT-3): ({ dem, rect, maxCells })
@@ -684,7 +684,7 @@ export const readDemWindow = (input) => call('readDemWindow', [input])
 export const demAscii = streamingOp('demAscii')
 
 // Products ▸ DEM ▸ Symbology… — { grid, style } → { previewBlob }: the DEM's preview
-// re-baked in a new style (workers/ops/products.js `demPreview`).
+// re-baked in a new style (workers/ops/dem.js `demPreview`).
 export const demPreview = streamingOp('demPreview')
 
 // An orthophoto file made from its stored COG — { file, format: 'geotiff'|'png'|'jpeg',

@@ -104,7 +104,7 @@ to the algorithm; the other steps differ only in file names.
 | Run | `composables/useDialogRuns.js` → `composables/usePipeline.js` | closes the dialog, opens the progress bar, wires up Cancel |
 | Store | `stores/reconstruction/productRuns.js` (`generateDem`) | gathers the inputs as plain arrays, saves the result to the project |
 | Worker call | `workers/computeClient.js` | a typed async call into the worker pool |
-| Worker op | `workers/ops/products.js` | unpacks the message, reports progress |
+| Worker op | `workers/ops/dem.js` | unpacks the message, reports progress |
 | Algorithm | `core/products/dem.js` (+ `dem.test.js`) | the computation: plain data in, plain data out |
 | Help | `src/guide/dem.md`, `src/glossary/` | the guide article and the concepts it links |
 

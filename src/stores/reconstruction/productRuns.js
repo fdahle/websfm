@@ -599,7 +599,7 @@ export function createProductRuns({
 
   // The ortho on the pool. Over saved depth maps it is split: one worker surveys (gains,
   // seams), plans the groups and writes the GeoTIFF, the others each take a run of the
-  // groups, their blocks passed on to the writer (workers/ops/products.js orthoPlan …).
+  // groups, their blocks passed on to the writer (workers/ops/ortho.js orthoPlan …).
   // The blocks are the bits one worker builds (core/products/ortho.js). Each worker gets
   // its share of the memory budget, so the plan may use fewer than asked. Resident maps
   // would be copied into every worker: those run whole on one, as does a pool of two.

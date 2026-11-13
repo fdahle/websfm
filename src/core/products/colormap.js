@@ -99,7 +99,7 @@ export function rampByName(name) {
 // The elevation ramp above, multiplied by a Lambertian hillshade from the height
 // gradient, lit from the north-west at 45°.
 //
-// Shared by the computed-DEM preview (workers/ops/products.js) and the imported
+// Shared by the computed-DEM preview (workers/ops/dem.js) and the imported
 // reference-DEM preview (workers/ops/io.js) — the two previews should look the
 // same, and a second copy of this would quietly drift.
 //

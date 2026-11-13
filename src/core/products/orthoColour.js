@@ -62,7 +62,7 @@ function fitAffineToSfm(toSfm, lo, hi) {
 // run computes them once for the whole ortho, never per block, which is what keeps
 // its cells bit-identical to a single pass.
 // Depth-map pixels per ortho cell for map m at height zMid — what the photo loader's
-// decode scale follows (workers/ops/products.js makePhotoLoader), for a preflight.
+// decode scale follows (workers/ops/ortho.js makePhotoLoader), for a preflight.
 export function orthoMapPxPerCell(geom, toSfm, zMid) {
   return gridProjection(geom, toSfm, zMid + 1, zMid, zMid).mapPxPerCell
 }

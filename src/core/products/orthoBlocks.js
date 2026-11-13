@@ -7,7 +7,7 @@ import { mosaicMode, orthoHalo } from './orthoMosaic.js'
 import { RUN_DEFAULTS } from './orthoColour.js'
 
 export const ORTHO_BLOCK = 2048
-// A split ortho's block side (workers/ops/products.js orthoPlan): ORTHO_BLOCK, halved
+// A split ortho's block side (workers/ops/ortho.js orthoPlan): ORTHO_BLOCK, halved
 // while the grid has fewer blocks than workers that could take them, down to
 // ORTHO_BLOCK_MIN. The workers share out blocks, so a small ortho in one 2,048² block ran
 // on one of them. Every block computes the cells it would in a larger one (its halo
