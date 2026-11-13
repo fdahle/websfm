@@ -28,7 +28,7 @@
 
 import { createSession, tensor, resolveBackend } from '../features/ort.js'
 import { modelUrl } from '../models/registry.js'
-import { loadModelBytes } from '../models/modelCache.js'
+import { modelBytes } from '../models/modelCache.js'
 import { pluralize } from '../textFormat.js'
 
 export const SAM2_INPUT_SIZE = 1024
@@ -171,8 +171,8 @@ export function serialized(fn) {
   return p
 }
 
-// loadModelBytes (imported from core/models/modelCache.js): cache-first, else a
-// plain fetch. Non-string (already bytes) passes through untouched.
+// modelBytes (core/models/modelCache.js): cache-first, else a plain fetch.
+// Non-string (already bytes) passes through untouched.
 
 function getSession(role, model, backend, onLog, sessionOpts = {}) {
   // Cache key includes the optimization level so a de-risk retry with a different
@@ -186,7 +186,7 @@ function getSession(role, model, backend, onLog, sessionOpts = {}) {
           `SAM2: first use — ${role} on backend ${backend}` +
             `${sessionOpts.graphOptimizationLevel ? ` (opt=${sessionOpts.graphOptimizationLevel})` : ''}; fetching model…`,
         )
-        const bytes = await loadModelBytes(model, onLog, `SAM2 ${role}`)
+        const bytes = await modelBytes(model, onLog, `SAM2 ${role}`)
         const session = await createSession(bytes, sessionOpts, onLog, backend)
         onLog?.(
           `SAM2: ${role} ready (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`,

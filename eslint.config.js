@@ -21,16 +21,12 @@ export default [
     },
   },
   // src/core/ is pure (AGENTS.md): no Vue, Pinia, stores, OPFS or other browser I/O, so it
-  // runs in a worker and in Node tests alike. Inject I/O instead (verticalDatum.loadGeoid
-  // takes its fetch). The files listed under `ignores` still do I/O and are to be moved
-  // out or given injected I/O (dev/handover-review.md ▸ C1); add nothing to that list.
+  // runs in a worker and in Node tests alike. I/O a core module cannot do without goes
+  // through core/coreIo.js (installed by utils/installCoreIo.js) or a parameter; code
+  // that decodes or draws (canvases) lives in src/utils/.
   {
     files: ['src/core/**/*.js'],
-    ignores: [
-      'src/core/**/*.test.js',
-      'src/core/**/*.testutil.js',
-      'src/core/models/modelCache.js', // Cache API for model weights
-    ],
+    ignores: ['src/core/**/*.test.js', 'src/core/**/*.testutil.js'],
     rules: {
       'no-restricted-imports': [
         'error',

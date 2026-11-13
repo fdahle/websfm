@@ -12,7 +12,7 @@ import { terrainInitial, terrainCandidates } from '../core/sfm/terrainControl.js
 import { fitSimilarity2d } from '../core/sfm/referenceLook.js'
 import { cameraCenter } from '../core/sfm/geometry.js'
 import { learnedDetector } from '../core/features/learnedDetectors.js'
-import { isModelCached } from '../core/models/modelCache.js'
+import { isModelCached } from '../utils/modelCache.js'
 import { modelUrl } from '../core/models/registry.js'
 import { useModelsStore } from '../stores/useModelsStore.js'
 import { FIND_GCPS_DEFAULTS } from '../core/defaults.user.js'

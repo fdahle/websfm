@@ -1,7 +1,8 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { MODELS, MODEL_CACHE_NAME, modelUrl, toMB, isRedistributable } from '../core/models/registry.js'
-import { isModelCached, modelBytesProblem, badModelError } from '../core/models/modelCache.js'
+import { modelBytesProblem, badModelError } from '../core/models/modelCache.js'
+import { isModelCached } from '../utils/modelCache.js'
 import { useLog } from '../composables/useLog.js'
 
 // Main-thread owner of the on-demand model download flow.

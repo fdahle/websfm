@@ -22,7 +22,7 @@
 
 import { createSession, tensor, resolveBackend } from './ort.js'
 import { modelUrl } from '../models/registry.js'
-import { loadModelBytes } from '../models/modelCache.js'
+import { modelBytes } from '../models/modelCache.js'
 
 // ONNX Runtime raises an "Integer overflow" / SafeIntOnOverflow when a single untiled
 // pass on a very large image blows past its int32 tensor-size math (see
@@ -91,7 +91,7 @@ function getSession(label, model, modelKey, backend, onLog, reason = '') {
       key,
       (async () => {
         onLog?.(`${label}: first run — backend ${backend}` + `${reason ? ` (CPU; ${reason})` : ''}; fetching model…`)
-        const bytes = await loadModelBytes(model, onLog, label)
+        const bytes = await modelBytes(model, onLog, label)
         const t = performance.now()
         const session = await createSession(bytes, {}, onLog, backend)
         onLog?.(

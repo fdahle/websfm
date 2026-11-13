@@ -9,7 +9,7 @@ import {
 import { mergeProjectIndex } from './projectIndex.ts'
 import { createDocumentSaver } from './documentSaver.js'
 import { buildPosesCsv, buildSensorsCsv } from './exportCsv.js'
-import { isModelCached } from '../core/models/modelCache.js'
+import { isModelCached } from './modelCache.js'
 
 afterEach(() => vi.unstubAllGlobals())
 

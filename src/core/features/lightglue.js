@@ -29,7 +29,7 @@ import {
 } from './guidedTiles.js'
 import { sliceDescriptorRows } from './subsetGate.js'
 import { modelUrl } from '../models/registry.js'
-import { loadModelBytes } from '../models/modelCache.js'
+import { modelBytes } from '../models/modelCache.js'
 
 // Sessions are cached per `${modelKey}:${backend}` — a modelKey can hold both a
 // WebGPU and a WASM session if we fall back mid-run (see below).
@@ -99,7 +99,7 @@ function getSession(model, modelKey, backend, onLog) {
               backend === 'webgpu' ? ' (experimental GPU path; auto-falls back to CPU on failure)' : ' (CPU WASM)'
             }; loading model…`,
         )
-        const bytes = await loadModelBytes(model, onLog, 'LightGlue')
+        const bytes = await modelBytes(model, onLog, 'LightGlue')
         const session = await createSession(bytes, {}, onLog, backend)
         onLog?.(
           `LightGlue: runtime ready — weights ${modelKey} (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`,
