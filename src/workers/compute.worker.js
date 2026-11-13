@@ -12,6 +12,7 @@
 // SIFT needs pixel rasterisation, which on a worker uses OffscreenCanvas +
 // createImageBitmap instead of the DOM <canvas>/<img> path — hence rasterize here.
 
+import { installBrowserCoreIo } from '../utils/installCoreIo.js'
 import { transferList } from '../core/bigArray.js'
 import { makeDetectOps } from './ops/detect.js'
 import { makeMatchOps } from './ops/match.js'
@@ -33,6 +34,9 @@ import { makeTiles3dOps } from './ops/tiles3d.js'
 import { makeWebTilesOps } from './ops/webTiles.js'
 import { makeReflectanceOps } from './ops/reflectance.js'
 import { isPyramid, openPyramid, rasterizePyramid } from './rasterSource.js'
+
+// The network and app storage for the core modules that need them (core/coreIo.js).
+installBrowserCoreIo()
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
 // OffscreenCanvas, downscaled so the longest side is ≤ maxDim. Returns RGBA

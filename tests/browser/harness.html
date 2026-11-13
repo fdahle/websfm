@@ -10,6 +10,8 @@
       import { createPinia } from 'pinia'
       import Harness from './Harness.vue'
       import { installModalFocus } from '/src/utils/modalFocus.js'
+      import { installBrowserCoreIo } from '/src/utils/installCoreIo.js'
+      installBrowserCoreIo()
       installModalFocus()
       createApp(Harness).use(createPinia()).mount('#app')
     </script>

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { loadCrsRegistry, normaliseCrsRecord, searchCrsRecords } from './crsRegistry.js'
 import { axisLabels, crsInfo, ensureProjection } from './crs.js'
+import { installCoreIo, resetCoreIo } from './coreIo.js'
 
 const records = [
   { code: 'EPSG:4326', name: 'WGS 84', area: 'World', unit: 'degree' },
@@ -64,19 +65,20 @@ describe('loadCrsRegistry', () => {
         2: { code: '2', name: 'Vertical', kind: 'CRS-VERTCRS', wkt: 'VERT_CS[]' },
       }),
     }))
-    vi.stubGlobal('fetch', fetchMock)
+    installCoreIo({ fetch: fetchMock })
     const loaded = await loadCrsRegistry()
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(loaded.map((record) => record.code)).toEqual(['EPSG:1'])
-    vi.unstubAllGlobals()
+    resetCoreIo()
   })
 })
 
 describe('catalog fallback in ensureProjection', () => {
   // Fresh modules per test: the registry promise and the projection registry are
-  // module-level singletons.
-  async function freshModules() {
+  // module-level singletons. The fresh core I/O gets `fetch`.
+  async function freshModules(fetch) {
     vi.resetModules()
+    ;(await import('./coreIo.js')).installCoreIo({ fetch })
     return { registry: await import('./crsRegistry.js'), crs: await import('./crs.js') }
   }
   const catalog = {
@@ -94,22 +96,15 @@ describe('catalog fallback in ensureProjection', () => {
 
   it('resolves a code from the bundled catalog without calling epsg.io', async () => {
     const fetchMock = vi.fn(async (url) => respond(url))
-    vi.stubGlobal('fetch', fetchMock)
-    const { crs } = await freshModules()
+    const { crs } = await freshModules(fetchMock)
     await crs.ensureProjection('EPSG:999003')
     expect(crs.crsInfo('EPSG:999003').name).toBe('Catalog-only CRS')
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('epsg.io'))).toBe(false)
-    vi.unstubAllGlobals()
   })
 
   it('says a code outside the catalog needs a connection when epsg.io is unreachable', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url) => respond(url)),
-    )
-    const { crs } = await freshModules()
+    const { crs } = await freshModules(vi.fn(async (url) => respond(url)))
     await expect(crs.ensureProjection('EPSG:999004')).rejects.toThrow(/not in the built-in catalog/)
-    vi.unstubAllGlobals()
   })
 
   it('retries the catalog after a failed load instead of memoising the failure', async () => {
@@ -117,10 +112,8 @@ describe('catalog fallback in ensureProjection', () => {
       .fn()
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
       .mockImplementation(async (url) => respond(url))
-    vi.stubGlobal('fetch', fetchMock)
-    const { registry } = await freshModules()
+    const { registry } = await freshModules(fetchMock)
     await expect(registry.findCrsRecord('EPSG:999003')).rejects.toThrow()
     expect((await registry.findCrsRecord('EPSG:999003'))?.name).toBe('Catalog-only CRS')
-    vi.unstubAllGlobals()
   })
 })

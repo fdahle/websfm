@@ -5,6 +5,7 @@
 // would be wasteful. Only horizontal CRSs are offered because WebSfM's working
 // CRS is an x/y system; vertical-only and geocentric CRSs cannot be used safely.
 import registryUrl from 'epsg-index/all.json?url'
+import { coreIo } from './coreIo.js'
 
 const HORIZONTAL_KINDS = new Set(['CRS-PROJCRS', 'CRS-GEOGCRS', 'CRS-GEOG3DCRS'])
 
@@ -34,7 +35,8 @@ export async function loadCrsRegistry() {
     // Keep the catalog as a static JSON asset. Bundling it as an object-literal
     // JavaScript chunk inflated it and triggered the large-chunk warning even though
     // it was already lazy. The hashed local URL remains offline-capable.
-    registryPromise = fetch(registryUrl)
+    registryPromise = coreIo()
+      .fetch(registryUrl)
       .then((response) => {
         if (!response.ok) throw new Error(`Could not load the CRS catalog (${response.status})`)
         return response.json()

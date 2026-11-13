@@ -13,7 +13,7 @@ import { get as getOlProjection } from 'ol/proj'
 // crs.js is one of the documented cross-cutting stragglers, not a pure core
 // module (it already carries OpenLayers registration and an epsg.io fetch), so
 // it reaches the storage layer directly rather than duplicating file I/O.
-import { readAppJson, writeAppJson } from '../utils/opfs.js'
+import { coreIo } from './coreIo.js'
 import { findCrsRecord } from './crsRegistry.js'
 
 // ── Catalog ─────────────────────────────────────────────────────────────────
@@ -168,7 +168,8 @@ const defStrings = new Map([
 
 // Cache for definitions fetched from epsg.io, persisted in OPFS across reloads.
 // Definitions fetched from epsg.io, cached in OPFS so a code resolves offline
-// on the next run. Persistence goes through utils/opfs.js rather than a local
+// on the next run. Persistence goes through the app's JSON store (core/coreIo.js,
+// utils/opfs.js in the browser) rather than a local
 // createWritable: two unknown codes resolving at once (a project CRS and an
 // imported raster's, say) both write this one file, and overlapping writables
 // collide on Chromium's swap file — an error this `catch {}` would swallow,
@@ -177,11 +178,16 @@ const DEF_CACHE_FILE = 'crs-defs.json'
 let defCache = null
 async function loadDefCache() {
   if (defCache) return defCache
-  defCache = (await readAppJson(DEF_CACHE_FILE).catch(() => null)) || {}
+  defCache =
+    (await coreIo()
+      .readAppJson(DEF_CACHE_FILE)
+      .catch(() => null)) || {}
   return defCache
 }
 async function saveDefCache() {
-  await writeAppJson(DEF_CACHE_FILE, defCache || {}).catch(() => {})
+  await coreIo()
+    .writeAppJson(DEF_CACHE_FILE, defCache || {})
+    .catch(() => {})
 }
 
 // A definition that is neither built in nor in the bundled catalog came from epsg.io
@@ -334,7 +340,7 @@ export async function ensureProjection(code, supplied = null) {
   if (!num) throw new Error(`Unsupported CRS code: ${code}`)
   let res
   try {
-    res = await fetch(`https://epsg.io/${num}.proj4`)
+    res = await coreIo().fetch(`https://epsg.io/${num}.proj4`)
   } catch {
     throw new Error(
       `${code} is not in the built-in catalog and could not be looked up on epsg.io. ` +

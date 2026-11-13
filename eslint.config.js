@@ -29,8 +29,6 @@ export default [
     ignores: [
       'src/core/**/*.test.js',
       'src/core/**/*.testutil.js',
-      'src/core/crs.js', // epsg.io lookup, CRS definitions cached in OPFS
-      'src/core/crsRegistry.js', // fetches the CRS catalog
       'src/core/examples.js', // downloads an example project
       'src/core/io/folderProject.js', // showDirectoryPicker detection
       'src/core/mask.js', // canvas I/O section
