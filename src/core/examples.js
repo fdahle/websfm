@@ -8,6 +8,8 @@
 // Pure (no DOM, no Vue): the project lifecycle downloads through `downloadExample`
 // and hands the Files to the normal image import.
 
+import { coreIo } from './coreIo.js'
+
 // id → what the picker shows and how the project is set up. `tutorial` is the
 // guide article that walks through this set (src/guide/). `credit` names whose photos
 // they are: the picker, About ▸ Licenses and the CREDITS.txt in the download all show it.
@@ -60,7 +62,7 @@ export function parseExampleManifest(json) {
  * `onProgress({ done, total, bytes, totalBytes })` after each file. Throws with a
  * message that names the URL when the example is not on the server.
  */
-export async function downloadExample(id, { onProgress, signal, fetchFn = fetch } = {}) {
+export async function downloadExample(id, { onProgress, signal, fetchFn = (...a) => coreIo().fetch(...a) } = {}) {
   if (!EXAMPLES[id]) throw new Error(`Unknown example: ${id}`)
   const base = `${exampleBaseUrl()}${id}/`
   const missing = (url, why) =>

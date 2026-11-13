@@ -27,7 +27,8 @@ export function isFolderProject(entry) {
 // users learn it exists; elsewhere (menus) it is hidden.
 export const FOLDER_BROWSERS = 'Chrome, Edge or another Chromium-based browser'
 
-export function folderStorageSupported(win = typeof window !== 'undefined' ? window : null) {
+// `win` defaults to the global scope (the window on the main thread; a worker has no picker).
+export function folderStorageSupported(win = globalThis) {
   return !!win && typeof win.showDirectoryPicker === 'function'
 }
 

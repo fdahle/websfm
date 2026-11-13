@@ -1,4 +1,5 @@
 import { unzlibSync } from 'fflate'
+import { coreIo } from './coreIo.js'
 
 // Vertical datums of heights — GCPs, reference DEMs, computed products — and the
 // geoid separation between them. An ellipsoidal height h and an orthometric
@@ -70,7 +71,7 @@ function geoidBaseUrl() {
 
 // Fetched once per session; the service worker precaches the files (vite.config.js).
 const loaded = new Map()
-export function loadGeoid(datum, { fetchImpl = (...a) => fetch(...a) } = {}) {
+export function loadGeoid(datum, { fetchImpl = (...a) => coreIo().fetch(...a) } = {}) {
   if (!(datum in GRID_FILES)) return Promise.reject(new Error(`No geoid model for ${datum}`))
   if (!loaded.has(datum)) {
     const promise = (async () => {

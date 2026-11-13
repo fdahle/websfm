@@ -29,11 +29,8 @@ export default [
     ignores: [
       'src/core/**/*.test.js',
       'src/core/**/*.testutil.js',
-      'src/core/examples.js', // downloads an example project
-      'src/core/io/folderProject.js', // showDirectoryPicker detection
       'src/core/mask.js', // canvas I/O section
       'src/core/terrainHeights.js', // fetches terrain tiles
-      'src/core/verticalDatum.js', // geoid grid fetch (injectable, fetch by default)
       'src/core/models/modelCache.js', // Cache API for model weights
     ],
     rules: {
