@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **Escape closes the dialog opened last.** Escape now closes whichever dialog sits on
+  top, every dialog included, where before it went down a fixed list that a new dialog
+  could be missing from; a dialog that cannot be dismissed (New Project before the first
+  project) now keeps Escape instead of closing the one under it.
 - **A photo that failed to register gets a fresh try.** Each later registration pass now
   tries a photo's pose with other random samples, so a photo whose first draw missed its
   true matches is no longer refused the same way on every pass. The number of samples

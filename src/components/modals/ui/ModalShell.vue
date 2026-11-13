@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useModalStackEntry } from '../../../composables/useModalStack.js'
 // Shared modal chrome (WS5): overlay + centered panel + header (title/close) + scrollable
 // body slot + footer slot. Clicking the backdrop closes (@click.self) and Escape closes
-// (@keydown.esc, stopped here so App's global Escape handler does not also act).
-// useModalEscape still works unchanged — it drives the store flags that mount/unmount
-// this shell, and catches Escape when focus is outside the dialog.
+// (@keydown.esc, stopped here so App's global Escape handler does not also act). While
+// mounted, the shell is on the modal stack (composables/useModalStack.js), so Escape
+// with the focus outside it closes it too when it is the newest modal.
 //
 //   width / height  CSS sizes for the panel (default 600px wide, content height);
 //                   max 90vw / 90vh always apply. With a height the body fills the
@@ -33,6 +34,7 @@ const panelStyle = computed(() => ({
 function close() {
   if (props.dismissible) emit('close')
 }
+useModalStackEntry(close)
 </script>
 
 <template>

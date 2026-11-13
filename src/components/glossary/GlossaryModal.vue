@@ -9,11 +9,14 @@ import { getGlossaryEntry, getGlossaryEntriesByTopic, searchGlossary } from '../
 import { renderHelpMarkdown } from '../../core/help/helpMarkdown.js'
 import { formatReference, referenceUrl } from '../../core/help/references.js'
 import HelpTabStrip from './HelpTabStrip.vue'
+import { useModalStackEntry } from '../../composables/useModalStack.js'
 
 // Single centered modal holding the glossary. A Home/index tab plus one tab per
 // opened term (unlimited, closeable). Cross-links inside a term open more tabs.
 const glossary = useGlossaryStore()
 const { isOpen, tabs, activeId } = storeToRefs(glossary)
+// Escape closes it while it is the top-most modal (it can open on top of any dialog).
+useModalStackEntry(() => glossary.close(), { open: isOpen })
 
 const query = ref('')
 
@@ -60,7 +63,7 @@ function onBodyClick(e) {
 
 <template>
   <Teleport to="body">
-    <div v-if="isOpen" class="overlay" @click.self="glossary.close()" @keydown.esc="glossary.close()">
+    <div v-if="isOpen" class="overlay" @click.self="glossary.close()" @keydown.esc.stop="glossary.close()">
       <div class="modal" role="dialog" aria-modal="true" aria-label="Glossary">
         <div class="modal-header">
           <span class="modal-title">Glossary</span>

@@ -40,7 +40,7 @@ import { useImportRouting } from './composables/useImportRouting.js'
 import { useExports } from './composables/useExports.js'
 import { useConfirmations } from './composables/useConfirmations.js'
 import { useProjectLifecycle } from './composables/useProjectLifecycle.js'
-import { useModalEscape } from './composables/useModalEscape.js'
+import { closeTopModal } from './composables/useModalStack.js'
 import { useGcpEditing } from './composables/useGcpEditing.js'
 import { useModelTools } from './composables/useModelTools.js'
 import { useFiducialTools } from './composables/useFiducialTools.js'
@@ -833,22 +833,6 @@ const {
 } = useRasterTabs({
   tabs: { activeTab, openProductTab, openRasterTabRaw, closeTab, closeTabForRaster, closeTabForImage, setTabTitle },
   openRasterImport,
-})
-
-// Escape-closes-top-most-modal (pulls modal state from the stores; the few local
-// bits are injected). Used by the global keydown handler in the bootstrap below.
-const { closeTopModal } = useModalEscape({
-  pendingImageDelete,
-  pendingConfirm,
-  cancelPendingConfirm,
-  exportKind,
-  onCancelNewProject: handleCancelNewProject,
-  workflowRunning,
-  onCloseWorkflow: closeWorkflowBuilder,
-  sfmImportSession,
-  onCloseSfmImport: closeSfmImport,
-  folderPrompt,
-  cancelFolderPrompt,
 })
 
 // Autosaved idle sessions can close quietly. Prompt only while closing would

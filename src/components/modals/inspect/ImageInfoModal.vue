@@ -30,8 +30,8 @@ const gpsUrl = computed(() => {
   return `https://www.openstreetmap.org/?mlat=${m.gpsLat}&mlon=${m.gpsLon}#map=15/${m.gpsLat}/${m.gpsLon}`
 })
 
-// No Escape listener of its own: the global closer (composables/useModalEscape.js,
-// `infoImageId`) dismisses this dialog in stacking order. A window listener here
+// No Escape listener of its own: the modal stack (composables/useModalStack.js)
+// dismisses this dialog in stacking order. A window listener here
 // closed it on every Escape — even one meant for a dialog stacked above it.
 // (ModalShell's own Escape handling only sees keys pressed inside this dialog.)
 </script>

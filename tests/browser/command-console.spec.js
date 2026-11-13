@@ -98,7 +98,11 @@ test('Ctrl-K focuses the console, whose verbs reach the stores and the workflow 
   })
   await type('run workflow review')
   await expect(log).toContainText('Workflow waiting: Quality Report needs your input.')
+  // The dialog is a lazily loaded chunk: Escape closes it once it is on screen.
+  const report = page.getByRole('dialog', { name: 'Quality Report' })
+  await expect(report).toBeVisible()
   await page.keyboard.press('Escape')
+  await expect(report).toHaveCount(0)
   await prompt.click()
   await type('continue')
   await expect(log).toContainText('Workflow complete: Review only')

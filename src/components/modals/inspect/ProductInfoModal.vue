@@ -102,8 +102,8 @@ watch(info, (now) => {
   if (!now) emit('close')
 })
 
-// No Escape listener of its own: useModalEscape (`infoProduct`) closes it in
-// stacking order, as for ImageInfoModal.
+// No Escape listener of its own: the modal stack (composables/useModalStack.js) closes
+// it in stacking order, as for ImageInfoModal.
 </script>
 
 <template>

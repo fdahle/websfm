@@ -8,6 +8,7 @@ import { helpLinkFrom, followLink } from '../../composables/useHelpStack.js'
 import { getGuideDoc, getAllGuideDocs, searchGuide } from '../../core/help/guide.js'
 import { renderGuide } from '../../core/help/helpMarkdown.js'
 import HelpTabStrip from '../glossary/HelpTabStrip.vue'
+import { useModalStackEntry } from '../../composables/useModalStack.js'
 
 // Single centered modal holding the Guide. A Home/index tab lists every pipeline
 // operation; each opened operation gets a closeable tab showing its intro plus one
@@ -15,6 +16,8 @@ import HelpTabStrip from '../glossary/HelpTabStrip.vue'
 // it). Mirrors GlossaryModal; cross-links reach the glossary or another operation.
 const guide = useGuideStore()
 const { isOpen, tabs, activeId, focusParam } = storeToRefs(guide)
+// Escape closes it while it is the top-most modal (it can open on top of any dialog).
+useModalStackEntry(() => guide.close(), { open: isOpen })
 
 const query = ref('')
 function onSearch() {
@@ -78,7 +81,7 @@ function onBodyClick(e) {
 
 <template>
   <Teleport to="body">
-    <div v-if="isOpen" class="overlay" @click.self="guide.close()" @keydown.esc="guide.close()">
+    <div v-if="isOpen" class="overlay" @click.self="guide.close()" @keydown.esc.stop="guide.close()">
       <div class="modal" role="dialog" aria-modal="true" aria-label="Guide">
         <div class="modal-header">
           <span class="modal-title">Guide</span>
