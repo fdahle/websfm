@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed } from 'vue'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
-import { buildBorderMask } from '../../../core/mask.js'
+import { buildBorderMask } from '../../../utils/maskCanvas.js'
 import ImageThumb from '../../controls/ImageThumb.vue'
 import ModalShell from '../ui/ModalShell.vue'
 import { maskGroups } from '../../../utils/maskGroups.js'

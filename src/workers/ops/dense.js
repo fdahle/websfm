@@ -21,7 +21,7 @@ import { depthCoverage } from '../../core/dense/depthMapCodec.js'
 import { FUSION_PLAN_SHARE, fusionPrepassSteps } from '../../core/dense/fusionPlan.js'
 import { probeGivesUp } from '../../core/dense/gpuProbe.js'
 import { viewIndex } from '../../core/dense/sparseInput.js'
-import { buildMaskLookup } from '../../core/mask.js'
+import { buildMaskLookup } from '../../utils/maskCanvas.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import {

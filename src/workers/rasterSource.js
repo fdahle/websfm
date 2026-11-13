@@ -171,7 +171,7 @@ export async function buildPyramidFromTiff(
 async function encodeLevel(desc, k, type, quality, maxLong = Infinity) {
   const L = desc.index.levels[k]
   const r = readLevelRect(await openPyramid(desc), k, { x0: 0, y0: 0, x1: L.width, y1: L.height })
-  // CPU canvases (as core/mask.js maskFromSource): pixels in, an encode out.
+  // CPU canvases (as utils/maskCanvas.js maskFromSource): pixels in, an encode out.
   let canvas = new OffscreenCanvas(r.width, r.height)
   canvas.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(r.data, r.width, r.height), 0, 0)
   if (Math.max(r.width, r.height) > maxLong) {

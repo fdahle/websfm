@@ -1,7 +1,7 @@
 // Raster products (DEM, orthophoto).
 import { trackPersistence, persistenceLock, ignoreMissing } from '../persistence.js'
 import { writeBinaryDocument, readBinaryDocument } from '../binaryDocument.js'
-import { dataUrlToBlob } from '../../core/mask.js'
+import { dataUrlToBlob } from '../../utils/maskCanvas.js'
 import { getProjectDir, getSubDir, readBin, readJson, removeFileIn, writeBin, writeJson } from './base.js'
 import { viewAs } from '../../core/bigArray.js'
 

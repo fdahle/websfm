@@ -66,7 +66,7 @@ import {
 import { RESEAU_DEFAULTS, PANORAMIC_DEFAULTS, COREG_DEFAULTS } from '/src/core/defaults.user.js'
 import { useDemCoregistration } from '/src/composables/useDemCoregistration.js'
 import { useProjectMerge } from '/src/composables/useProjectMerge.js'
-import { buildBorderMask } from '/src/core/mask.js'
+import { buildBorderMask } from '/src/utils/maskCanvas.js'
 import { overlapVisibility, chooseOverlapSubset } from '/src/core/sfm/reduceOverlap.js'
 import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
 import { analysisTimes, intervalTimes, selectKeyframes } from '/src/core/io/videoFrames.js'

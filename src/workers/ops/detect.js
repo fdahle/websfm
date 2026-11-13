@@ -12,7 +12,7 @@ import {
 } from '../../core/features/tiling.js'
 import { capOrder, capBoundary } from '../../core/features/keypointCap.js'
 import { SIFT_DESC_NORM, rootSiftInPlace } from '../../core/features/siftDescriptors.js'
-import { buildMaskLookup } from '../../core/mask.js'
+import { buildMaskLookup } from '../../utils/maskCanvas.js'
 import { analyzeImageQuality } from '../../core/features/imageQuality.js'
 import { fromScaledPx } from '../../core/sfm/geometry.js'
 import { KP_STRIDE } from '../../core/features/keypoints.js'

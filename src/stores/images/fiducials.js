@@ -26,7 +26,7 @@ import { fiducialDetectionConcurrency } from '../../core/features/detectConcurre
 import { fiducialBatchConsensus, fiducialShapeCheck } from '../../core/sfm/fiducialConsensus.js'
 import { FIDUCIAL_DETECT_TUNING } from '../../core/sfm/fiducialDetect.js'
 import { detectionConfidence } from '../../core/sfm/fiducialDetection.js'
-import { buildBorderMask } from '../../core/mask.js'
+import { buildBorderMask } from '../../utils/maskCanvas.js'
 import { pluralize } from '../../core/textFormat.js'
 import { median } from '../../core/stats.js'
 

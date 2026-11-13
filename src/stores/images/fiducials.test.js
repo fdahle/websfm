@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createImageFiducials } from './fiducials.js'
 import { detectFiducialSpots, prepareFiducialTemplates } from '../../workers/computeClient.js'
-import { buildBorderMask } from '../../core/mask.js'
+import { buildBorderMask } from '../../utils/maskCanvas.js'
 
 // The detector and the mask raster are faked; consensus and the commit are real.
 // POOL_SIZE 1 keeps the run serial, so "cancelled after image N" is deterministic.
@@ -11,7 +11,7 @@ vi.mock('../../workers/computeClient.js', () => ({
   prepareFiducialTemplates: vi.fn(),
   detectFiducials: vi.fn(),
 }))
-vi.mock('../../core/mask.js', () => ({ buildBorderMask: vi.fn() }))
+vi.mock('../../utils/maskCanvas.js', () => ({ buildBorderMask: vi.fn() }))
 
 const SENSOR = { id: 's1' }
 const spot = () => ({
