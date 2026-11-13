@@ -10,7 +10,7 @@ a slope that slid, a riverbank that eroded. Summed over an area, the differences
 times the cell area give the **volume** gained (where the newer surface lies higher)
 and lost (where it lies lower).
 
-<!-- TODO(image): assets/dem-of-difference.svg - two terrain profiles of one slope at two dates, the area between them shaded blue where material was added and red where it was removed. -->
+![Two profiles of one slope at two dates: the area between them shaded red where the later surface is lower (material removed) and blue where it is higher (added).](assets/dem-of-difference.svg)
 
 Two things decide whether the numbers mean anything. The two models must be in the
 same coordinate system and [vertical datum](help:vertical-datum): a geoid offset

@@ -21,7 +21,7 @@ Two cases in this app move it a long way from the middle:
 - **Tiled or cropped imagery**, where the principal point must be translated by
   the same offset as the crop.
 
-<!-- TODO(image): assets/principal-point.svg - an image frame with the geometric centre marked as a hollow cross and the true principal point (cx, cy) offset from it as a filled dot, the optical axis arrow arriving at the latter, and the offset dimensioned. -->
+![An image frame with the image centre as a cross and the principal point (cx, cy) as a red dot a little off it, where the optical axis arrives; the offset dimensioned as Δx and Δy.](assets/principal-point.svg)
 
 **Why it matters, and why it is hard.** A wrong principal point tilts and shifts
 the whole reconstruction rather than distorting it locally, so it is easy to miss

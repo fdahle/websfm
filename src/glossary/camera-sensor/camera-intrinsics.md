@@ -15,7 +15,7 @@ $$K = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}$
 - $c_x, c_y$ — the **principal point**, where the optical axis pierces the
   sensor, ideally near the image centre.
 
-<!-- TODO(image): assets/pinhole-projection.svg - the pinhole model in one figure: world point X, camera centre, optical axis, image plane at distance f, the projected pixel, and the principal point offset (cx, cy) from the pixel-array origin - annotated to match the terms of K. -->
+![The pinhole model in side view: a world point X, the ray from the camera centre through it meeting the image plane at distance f at a pixel, the optical axis meeting the plane at the principal point, and cy measured from the pixel array origin; u = f·X/Z + cx, v = f·Y/Z + cy.](assets/pinhole-projection.svg)
 
 A 3D point in the camera frame projects to a pixel via $x = K\,[R \mid t]\,X$,
 where $[R \mid t]$ is the [camera pose](help:camera-pose). So

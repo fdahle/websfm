@@ -1,7 +1,7 @@
 # Glossary figures (src/glossary/assets/*.svg), drawn from computed geometry in the style
 # of epipolar-geometry.svg (dark ground, its palette): distortion from the Brown radial
 # model, uncertainty ellipses from the rays' information matrices, RANSAC by scoring every
-# point pair. Rewrites the six figures it knows:
+# point pair, smoothing by running the passes. Rewrites every figure it knows:
 #   python3 scripts/figures/glossary.py src/glossary/assets
 # A new figure: a function here, then replace its TODO(image) comment in the entry.
 import math, random, sys, os
@@ -217,5 +217,150 @@ def tri():
     b += text(320, 24, 'rays through matched keypoints (green) miss each other slightly', GREY, 11, 'middle')
     svg('triangulation.svg', W, H, b)
 
-for f in (gsd, lens, baseline, ransac, fov, tri): f()
+# ── pinhole-projection.svg ───────────────────────────────────────────────────
+def pinhole():
+    W, H = 640, 320
+    C, f, ax = (110, 190), 160, 190          # camera centre, focal length (px), axis height
+    px = C[0] + f                             # image plane (drawn in front of the centre)
+    X = (580, 70)
+    b = line(C[0], ax, 620, ax, DIM, 1.2, '6 4') + text(600, ax - 8, 'optical axis', GREY, 11, 'end')
+    b += line(px, 60, px, 300, FG, 2.5)
+    b += text(px - 8, 300, 'image plane', GREY, 11, 'end')
+    # projection of X: the ray from C through X meets the plane at v
+    v = C[1] + (X[1] - C[1]) * (px - C[0]) / (X[0] - C[0])
+    b += line(C[0], C[1], X[0], X[1], BLUE, 1.5)
+    b += circ(X[0], X[1], 5, GOLD) + text(X[0] - 10, X[1] - 12, 'X = (X, Y, Z)', GOLD, 12, 'end')
+    b += circ(px, v, 4, GREEN) + text(px + 10, v - 6, 'pixel', GREEN, 12)
+    b += circ(px, ax, 4, RED) + text(px + 10, ax + 18, 'principal point', RED, 12)
+    # pixel-array origin at the top of the plane, and cy measured from it
+    b += circ(px, 60, 3, FG, fill=False) + text(px - 8, 54, '(0, 0)', GREY, 11, 'end')
+    b += line(px - 14, 60, px - 14, ax, RED, 1) + text(px - 18, (60 + ax) / 2 + 4, 'cy', RED, 12, 'end')
+    b += line(C[0], ax + 34, px, ax + 34, GREY, 1) + text((C[0] + px) / 2, ax + 50, 'f (pixels)', GREY, 12, 'middle')
+    b += camera(*C, label='camera centre', ldx=-40, ldy=24)
+    b += text(330, 252, 'u = f · X / Z + cx', FG, 13)
+    b += text(330, 272, 'v = f · Y / Z + cy', FG, 13)
+    b += text(330, 294, 'K = [[f, 0, cx], [0, f, cy], [0, 0, 1]]', GREY, 12)
+    svg('pinhole-projection.svg', W, H, b)
+
+# ── principal-point.svg ──────────────────────────────────────────────────────
+def principal():
+    W, H = 560, 340
+    x0, y0, w, h = 70, 50, 420, 260
+    b = f'  <rect x="{x0}" y="{y0}" width="{w}" height="{h}" fill="none" stroke="{FG}" stroke-width="2"/>\n'
+    cx0, cy0 = x0 + w / 2, y0 + h / 2
+    pp = (cx0 + 34, cy0 - 22)
+    b += line(cx0 - 10, cy0, cx0 + 10, cy0, FG, 1.5) + line(cx0, cy0 - 10, cx0, cy0 + 10, FG, 1.5)
+    b += text(cx0 - 14, cy0 + 26, 'image centre (W/2, H/2)', GREY, 11, 'end')
+    # the optical axis arriving at the principal point (seen obliquely)
+    b += line(pp[0] + 120, pp[1] - 120, pp[0] + 6, pp[1] - 6, BLUE, 1.5)
+    b += poly([(pp[0] + 6, pp[1] - 16), (pp[0] + 4, pp[1] - 4), (pp[0] + 16, pp[1] - 6)], BLUE, fill=BLUE, w=1, closed=True)
+    b += text(pp[0] + 126, pp[1] - 124, 'optical axis', BLUE, 12)
+    b += circ(pp[0], pp[1], 5, RED) + text(pp[0] + 10, pp[1] + 20, 'principal point (cx, cy)', RED, 12)
+    # the offset, dimensioned
+    b += line(cx0, cy0 + 40, pp[0], cy0 + 40, GOLD, 1.2) + text((cx0 + pp[0]) / 2, cy0 + 56, 'Δx', GOLD, 12, 'middle')
+    b += line(cx0 - 40, cy0, cx0 - 40, pp[1], GOLD, 1.2) + text(cx0 - 46, (cy0 + pp[1]) / 2 + 4, 'Δy', GOLD, 12, 'end')
+    b += line(cx0, cy0 + 34, cx0, cy0 + 46, GOLD, 1) + line(pp[0], cy0 + 34, pp[0], pp[1] + 6, GOLD, 1, '3 3')
+    b += line(cx0 - 46, cy0, cx0 - 34, cy0, GOLD, 1) + line(cx0 - 46, pp[1], pp[0] - 6, pp[1], GOLD, 1, '3 3')
+    b += text(x0 - 4, y0 - 8, '(0, 0)', GREY, 11)
+    b += text(W / 2, 334, 'a few pixels of offset are normal; self-calibration estimates it', GREY, 11, 'middle')
+    svg('principal-point.svg', W, H, b)
+
+# ── statistical-outlier-removal.svg ──────────────────────────────────────────
+def sor():
+    W, H = 660, 320
+    rnd = random.Random(7)
+    surf = [(x, 210 - 40 * math.sin(x / 60) + rnd.gauss(0, 2.5)) for x in [30 + i * 6.5 for i in range(56)]]
+    fly = [(120, 120), (230, 95), (300, 135), (340, 70)]
+    pts = surf + fly
+    k = 6
+    def knn_mean(p):
+        d = sorted(math.hypot(p[0] - q[0], p[1] - q[1]) for q in pts if q is not p)
+        return sum(d[:k]) / k, d[k - 1]
+    means = [knn_mean(p) for p in pts]
+    mu = sum(m for m, _ in means) / len(means)
+    sg = math.sqrt(sum((m - mu) ** 2 for m, _ in means) / len(means))
+    cut = mu + 1.5 * sg
+    b = ''
+    for (p, (m, r)) in list(zip(pts, means)):
+        bad = m > cut
+        b += circ(p[0], p[1], 3, RED if bad else BLUE)
+    b += '  <clipPath id="profile"><rect x="20" y="45" width="380" height="270"/></clipPath>\n  <g clip-path="url(#profile)">\n'
+    for idx in (20, len(surf)):  # one surface point, one flyer: their k-neighbour circles
+        p, (m, r) = pts[idx], means[idx]
+        b += circ(p[0], p[1], r, GOLD, fill=False, w=1.2)
+    b += '  </g>\n'
+    b += text(30, 30, f'each point: mean distance to its {k} nearest neighbours (gold: two examples)', GREY, 11)
+    # histogram of the means
+    hx, hy, hw, hh = 420, 70, 210, 180
+    lo, hi = 0, max(m for m, _ in means) * 1.05
+    nb = 14
+    counts = [0] * nb; redc = [0] * nb
+    for m, _ in means:
+        i = min(int((m - lo) / (hi - lo) * nb), nb - 1)
+        counts[i] += 1
+        if m > cut: redc[i] += 1
+    top = max(counts)
+    bw = hw / nb
+    for i in range(nb):
+        if not counts[i]: continue
+        bh = hh * counts[i] / top
+        col = RED if redc[i] else BLUE
+        b += f'  <rect x="{f2(hx + i * bw + 1)}" y="{f2(hy + hh - bh)}" width="{f2(bw - 2)}" height="{f2(bh)}" fill="{col}" opacity="0.85"/>\n'
+    b += line(hx, hy + hh, hx + hw, hy + hh, GREY, 1)
+    xc = hx + (cut - lo) / (hi - lo) * hw
+    b += line(xc, hy - 10, xc, hy + hh, GOLD, 2, '5 3')
+    b += text(xc + 4, hy - 14, 'μ + 1.5 σ', GOLD, 12)
+    b += text(hx + hw / 2, hy + hh + 22, 'mean neighbour distance', GREY, 11, 'middle')
+    b += text(hx + hw / 2, hy + hh + 38, 'the flyers fall right of the cut (red)', GREY, 11, 'middle')
+    svg('statistical-outlier-removal.svg', W, H, b)
+
+# ── dem-of-difference.svg ────────────────────────────────────────────────────
+def dod():
+    W, H = 620, 300
+    xs = [30 + i * 4 for i in range(141)]
+    z1 = [70 + 0.32 * (x - 30) + 6 * math.sin(x / 35) for x in xs]
+    def dz(x):  # material removed on the lower slope, added on the upper one
+        return -26 * math.exp(-((x - 190) / 45) ** 2) + 22 * math.exp(-((x - 470) / 55) ** 2)
+    z2 = [z + dz(x) for x, z in zip(xs, z1)]
+    Y = lambda z: 280 - z
+    b = ''
+    seg = []
+    for i in range(len(xs) - 1):
+        d0, d1 = z2[i] - z1[i], z2[i + 1] - z1[i + 1]
+        if abs(d0) < 0.3 and abs(d1) < 0.3: continue
+        col = BLUE if d0 + d1 > 0 else RED
+        b += poly([(xs[i], Y(z1[i])), (xs[i + 1], Y(z1[i + 1])), (xs[i + 1], Y(z2[i + 1])), (xs[i], Y(z2[i]))], col, fill=col, w=0, op=0.55, closed=True)
+    b += poly([(x, Y(z)) for x, z in zip(xs, z1)], FG, w=2)
+    b += poly([(x, Y(z)) for x, z in zip(xs, z2)], GOLD, w=2, dash='6 4')
+    b += text(40, 30, 'earlier date', FG, 12) + line(130, 26, 170, 26, FG, 2)
+    b += text(190, 30, 'later date', GOLD, 12) + line(270, 26, 310, 26, GOLD, 2, '6 4')
+    b += text(190, Y(z1[40]) + 40, 'removed (later − earlier < 0)', RED, 12, 'middle')
+    b += text(470, Y(z1[110]) + 40, 'added (> 0)', BLUE, 12, 'middle')
+    svg('dem-of-difference.svg', W, H, b)
+
+# ── mesh-smoothing.svg ───────────────────────────────────────────────────────
+def smoothing():
+    W, H = 660, 260
+    rnd = random.Random(3)
+    n, R = 90, 80
+    base = [(R * math.cos(2 * math.pi * i / n) * (1 + 0.12 * math.cos(3 * 2 * math.pi * i / n)),
+             R * math.sin(2 * math.pi * i / n) * (1 + 0.12 * math.cos(3 * 2 * math.pi * i / n))) for i in range(n)]
+    noisy = [(x + rnd.gauss(0, 4), y + rnd.gauss(0, 4)) for x, y in base]
+    def passes(pts, steps):
+        for lam in steps:
+            pts = [(p[0] + lam * ((pts[i - 1][0] + pts[(i + 1) % n][0]) / 2 - p[0]),
+                    p[1] + lam * ((pts[i - 1][1] + pts[(i + 1) % n][1]) / 2 - p[1])) for i, p in enumerate(pts)]
+        return pts
+    lap = passes(noisy, [0.5] * 60)
+    tau = passes(noisy, [0.5, -0.53] * 30)
+    b = ''
+    for pi, (lab, P) in enumerate([('noisy', noisy), ('60 Laplacian passes: shrinks', lap), ('60 Taubin passes: keeps its size', tau)]):
+        cx, cy = 110 + pi * 220, 125
+        b += poly([(cx + x, cy + y) for x, y in base], DIM, w=1, closed=True, dash='4 3')
+        b += poly([(cx + x, cy + y) for x, y in P], BLUE, w=1.6, closed=True)
+        b += text(cx, 240, lab, FG, 12, 'middle')
+    b += text(330, 22, 'dashed: the true shape; Taubin alternates λ = 0.5 with μ = −0.53', GREY, 11, 'middle')
+    svg('mesh-smoothing.svg', W, H, b)
+
+for f in (gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing): f()
 print('ok')

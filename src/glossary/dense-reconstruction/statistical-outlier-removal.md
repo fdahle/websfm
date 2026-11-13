@@ -23,7 +23,7 @@ The ratio $\alpha$ sets how aggressive it is: lower removes more. Because the
 threshold comes from the cloud's own statistics, it adapts to the point spacing and
 no distance has to be typed in.
 
-<!-- TODO(image): assets/statistical-outlier-removal.svg - a profile of a dense surface with a few floating points above it, each point's k-neighbour circle drawn, and a histogram of mean neighbour distances with the mean plus ratio times sigma cut-off marked and the flyers falling to its right. -->
+![A surface profile of points with a few flyers above it, the 6-neighbour circle of one surface point (small) and one flyer (large), and a histogram of mean neighbour distances where the flyers fall right of the μ + 1.5 σ cut.](assets/statistical-outlier-removal.svg)
 
 It has two blind spots. It assumes roughly even density, so where density varies a
 lot, genuine but sparsely sampled surface (the far edge of a scan) can go first. And

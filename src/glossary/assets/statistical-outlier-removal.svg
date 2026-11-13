@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 320" font-family="sans-serif" font-size="13">
+  <rect width="660" height="320" fill="#1b1f27"/>
+  <circle cx="30" cy="190.2" r="3" fill="#5aa9e6"/>
+  <circle cx="36.5" cy="188.4" r="3" fill="#5aa9e6"/>
+  <circle cx="43" cy="183.2" r="3" fill="#5aa9e6"/>
+  <circle cx="49.5" cy="179.8" r="3" fill="#5aa9e6"/>
+  <circle cx="56" cy="175.5" r="3" fill="#5aa9e6"/>
+  <circle cx="62.5" cy="174.9" r="3" fill="#5aa9e6"/>
+  <circle cx="69" cy="176.3" r="3" fill="#5aa9e6"/>
+  <circle cx="75.5" cy="173" r="3" fill="#5aa9e6"/>
+  <circle cx="82" cy="173.4" r="3" fill="#5aa9e6"/>
+  <circle cx="88.5" cy="170.8" r="3" fill="#5aa9e6"/>
+  <circle cx="95" cy="171" r="3" fill="#5aa9e6"/>
+  <circle cx="101.5" cy="170.8" r="3" fill="#5aa9e6"/>
+  <circle cx="108" cy="166.9" r="3" fill="#5aa9e6"/>
+  <circle cx="114.5" cy="174.4" r="3" fill="#5aa9e6"/>
+  <circle cx="121" cy="175.2" r="3" fill="#5aa9e6"/>
+  <circle cx="127.5" cy="177.2" r="3" fill="#5aa9e6"/>
+  <circle cx="134" cy="174.2" r="3" fill="#5aa9e6"/>
+  <circle cx="140.5" cy="176.9" r="3" fill="#5aa9e6"/>
+  <circle cx="147" cy="182.3" r="3" fill="#5aa9e6"/>
+  <circle cx="153.5" cy="186.8" r="3" fill="#5aa9e6"/>
+  <circle cx="160" cy="192.5" r="3" fill="#5aa9e6"/>
+  <circle cx="166.5" cy="195.5" r="3" fill="#5aa9e6"/>
+  <circle cx="173" cy="201.1" r="3" fill="#5aa9e6"/>
+  <circle cx="179.5" cy="202.4" r="3" fill="#5aa9e6"/>
+  <circle cx="186" cy="209.1" r="3" fill="#5aa9e6"/>
+  <circle cx="192.5" cy="213.7" r="3" fill="#5aa9e6"/>
+  <circle cx="199" cy="215.3" r="3" fill="#5aa9e6"/>
+  <circle cx="205.5" cy="225.5" r="3" fill="#5aa9e6"/>
+  <circle cx="212" cy="226.7" r="3" fill="#5aa9e6"/>
+  <circle cx="218.5" cy="232.2" r="3" fill="#5aa9e6"/>
+  <circle cx="225" cy="231.3" r="3" fill="#5aa9e6"/>
+  <circle cx="231.5" cy="234.4" r="3" fill="#5aa9e6"/>
+  <circle cx="238" cy="238.5" r="3" fill="#5aa9e6"/>
+  <circle cx="244.5" cy="241.9" r="3" fill="#5aa9e6"/>
+  <circle cx="251" cy="246.1" r="3" fill="#5aa9e6"/>
+  <circle cx="257.5" cy="247.1" r="3" fill="#5aa9e6"/>
+  <circle cx="264" cy="246.9" r="3" fill="#5aa9e6"/>
+  <circle cx="270.5" cy="246.8" r="3" fill="#5aa9e6"/>
+  <circle cx="277" cy="248.5" r="3" fill="#5aa9e6"/>
+  <circle cx="283.5" cy="253" r="3" fill="#5aa9e6"/>
+  <circle cx="290" cy="247.7" r="3" fill="#5aa9e6"/>
+  <circle cx="296.5" cy="249.6" r="3" fill="#5aa9e6"/>
+  <circle cx="303" cy="248.8" r="3" fill="#5aa9e6"/>
+  <circle cx="309.5" cy="242.4" r="3" fill="#5aa9e6"/>
+  <circle cx="316" cy="244.1" r="3" fill="#5aa9e6"/>
+  <circle cx="322.5" cy="244.8" r="3" fill="#5aa9e6"/>
+  <circle cx="329" cy="233.7" r="3" fill="#5aa9e6"/>
+  <circle cx="335.5" cy="234.7" r="3" fill="#5aa9e6"/>
+  <circle cx="342" cy="231.8" r="3" fill="#5aa9e6"/>
+  <circle cx="348.5" cy="226.2" r="3" fill="#5aa9e6"/>
+  <circle cx="355" cy="225.6" r="3" fill="#5aa9e6"/>
+  <circle cx="361.5" cy="220.1" r="3" fill="#5aa9e6"/>
+  <circle cx="368" cy="212.3" r="3" fill="#5aa9e6"/>
+  <circle cx="374.5" cy="213.7" r="3" fill="#5aa9e6"/>
+  <circle cx="381" cy="209" r="3" fill="#5aa9e6"/>
+  <circle cx="387.5" cy="205.4" r="3" fill="#5aa9e6"/>
+  <circle cx="120" cy="120" r="3" fill="#ef6f6c"/>
+  <circle cx="230" cy="95" r="3" fill="#ef6f6c"/>
+  <circle cx="300" cy="135" r="3" fill="#ef6f6c"/>
+  <circle cx="340" cy="70" r="3" fill="#ef6f6c"/>
+  <clipPath id="profile"><rect x="20" y="45" width="380" height="270"/></clipPath>
+  <g clip-path="url(#profile)">
+  <circle cx="160" cy="192.5" r="24.9" fill="none" stroke="#e6b84f" stroke-width="1.2"/>
+  <circle cx="120" cy="120" r="56.8" fill="none" stroke="#e6b84f" stroke-width="1.2"/>
+  </g>
+  <text x="30" y="30" fill="#9ca3af" font-size="11">each point: mean distance to its 6 nearest neighbours (gold: two examples)</text>
+  <rect x="436" y="70" width="13" height="180" fill="#5aa9e6" opacity="0.85"/>
+  <rect x="451" y="236.2" width="13" height="13.8" fill="#5aa9e6" opacity="0.85"/>
+  <rect x="496" y="246.5" width="13" height="3.5" fill="#ef6f6c" opacity="0.85"/>
+  <rect x="556" y="246.5" width="13" height="3.5" fill="#ef6f6c" opacity="0.85"/>
+  <rect x="586" y="246.5" width="13" height="3.5" fill="#ef6f6c" opacity="0.85"/>
+  <rect x="616" y="246.5" width="13" height="3.5" fill="#ef6f6c" opacity="0.85"/>
+  <line x1="420" y1="250" x2="630" y2="250" stroke="#9ca3af" stroke-width="1"/>
+  <line x1="502.9" y1="60" x2="502.9" y2="250" stroke="#e6b84f" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="506.9" y="56" fill="#e6b84f" font-size="12">μ + 1.5 σ</text>
+  <text x="525" y="272" fill="#9ca3af" font-size="11" text-anchor="middle">mean neighbour distance</text>
+  <text x="525" y="288" fill="#9ca3af" font-size="11" text-anchor="middle">the flyers fall right of the cut (red)</text>
+</svg>

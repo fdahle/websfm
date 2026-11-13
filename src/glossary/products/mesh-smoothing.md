@@ -22,7 +22,7 @@ where $\Delta v$ is the average of the neighbours minus $v$. Together the two st
 act as a low-pass filter. Fine noise, which changes from vertex to vertex, is damped,
 while broad shape passes almost unchanged.
 
-<!-- TODO(image): assets/mesh-smoothing.svg - a noisy curved profile, the same profile after many plain Laplacian passes (smooth but visibly shrunken), and after the same number of Taubin passes (smooth and the original size). -->
+![A noisy closed outline, the same after 60 Laplacian passes (smooth but visibly smaller than the dashed true shape), and after 60 Taubin passes (smooth and the size of the true shape).](assets/mesh-smoothing.svg)
 
 Smoothing cannot add information. More iterations remove coarser noise but also
 round off real edges and corners, so use as few as do the job.
