@@ -229,7 +229,7 @@ mod tests {
             flat2.extend_from_slice(&[(u + 80.0) as f32, (v - 70.0) as f32]);
         }
 
-        let out = solve_pnp(&flat3, &flat2, fx as f32, fy as f32, cx as f32, cy as f32, 2.0, 500);
+        let out = solve_pnp(&flat3, &flat2, fx as f32, fy as f32, cx as f32, cy as f32, 2.0, 500, 0);
         assert!(out.len() >= 12 + n_in + n_out, "solve_pnp failed to return a pose");
 
         let r_est: M3 = [

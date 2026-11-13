@@ -9,6 +9,7 @@ import {
   recoverPose,
   fundamentalToEssential,
   solvePnp,
+  pnpSamplesFor,
   bundleAdjust,
   resolveK,
   refineModeMask,
@@ -357,10 +358,45 @@ describe('solvePnp', () => {
     expect(resid[resid.length >> 1]).toBeLessThan(2.0)
   })
 
+  it('draws other samples under another seed, and seed 0 is the default draw', async () => {
+    // 12 true correspondences among 60 (20 %) and only 15 samples: an all-inlier
+    // triple turns up in about one draw of nine (1 − (1 − 0.2³)^15), so the outcome
+    // must depend on the seed. A fixed seed would fail the same way on every retry.
+    const rng = mulberry32(11)
+    const world = Array.from({ length: 60 }, () => [(rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4])
+    const R = rotY(0.1)
+    const t = poseFromCenter(R, [0.5, 0, 0])
+    const pts3 = world.map(([x, y, z]) => ({ x, y, z }))
+    const pts2 = world.map((X, i) =>
+      i % 5 === 0 ? projectPix(R, t, X) : { x: 100 + 1800 * rng(), y: 100 + 1300 * rng() },
+    )
+    const truePose = (p) => p && p.inlierMask.filter((v, i) => v > 0.5 && i % 5 === 0).length >= 10
+    const opts = { ransacThreshPx: 2, maxIters: 15 }
+    const outcomes = []
+    for (let seed = 0; seed < 40; seed++) outcomes.push(truePose(await solvePnp(pts3, pts2, KPIX, { ...opts, seed })))
+    expect(outcomes.some(Boolean)).toBe(true)
+    expect(outcomes.every(Boolean)).toBe(false)
+    const a = await solvePnp(pts3, pts2, KPIX, opts)
+    const b = await solvePnp(pts3, pts2, KPIX, { ...opts, seed: 0 })
+    expect(a?.R ?? null).toEqual(b?.R ?? null)
+  })
+
   it('returns null with fewer than 6 correspondences', async () => {
     const pts3 = Array.from({ length: 5 }, (_, i) => ({ x: i, y: 0, z: 5 }))
     const pts2 = pts3.map(() => ({ x: 0, y: 0 }))
     expect(await solvePnp(pts3, pts2, KPIX)).toBeNull()
+  })
+})
+
+describe('pnpSamplesFor', () => {
+  it('needs log(1 − c) / log(1 − r³) samples, never fewer than the floor', () => {
+    // r = 0.15: r³ = 0.003375, log(0.01) / log(0.996625) = 1362.3
+    expect(pnpSamplesFor(0.15)).toBe(1363)
+    // r = 0.3 needs 169, below the floor
+    expect(pnpSamplesFor(0.3)).toBe(200)
+    expect(pnpSamplesFor(0.3, { floor: 1 })).toBe(169)
+    expect(pnpSamplesFor(1)).toBe(200)
+    expect(pnpSamplesFor(0.01)).toBe(5000)
   })
 })
 

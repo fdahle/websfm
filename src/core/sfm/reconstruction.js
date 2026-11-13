@@ -378,12 +378,24 @@ export async function triangulateDlt(ptsA, ptsB, PA, PB) {
   return pts
 }
 
+// How many P3P samples find an all-inlier triple with probability `confidence` when
+// a share `inlierRatio` of the correspondences are true: log(1 − c) / log(1 − r³),
+// and never fewer than `floor`. At the default PnP ratio gate (0.3) that is the floor.
+export function pnpSamplesFor(inlierRatio, { confidence = 0.99, floor = 200, cap = 5000 } = {}) {
+  const r3 = Math.min(1, Math.max(0, inlierRatio)) ** 3
+  if (r3 >= 1) return floor
+  if (r3 <= 0) return cap
+  return Math.min(cap, Math.max(floor, Math.ceil(Math.log(1 - confidence) / Math.log(1 - r3))))
+}
+
 // RANSAC PnP: estimate camera pose from 3D-2D correspondences.
 // pts3d: [{ x,y,z }], pts2d: [{ x,y }] (pixel coords).
+// opts.seed varies the minimal samples (0: the default draw); a retry of the same
+// image passes another, so a failed draw is not repeated.
 // Returns { R, t, inlierMask } or null.
 export async function solvePnp(pts3d, pts2d, K, opts = {}) {
   await ensureWasm()
-  const { ransacThreshPx = 4.0, maxIters = 200 } = opts
+  const { ransacThreshPx = 4.0, maxIters = 200, seed = 0 } = opts
   const n = Math.min(pts3d.length, pts2d.length)
   if (n < 6) return null
 
@@ -400,7 +412,7 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
   // The RANSAC hypotheses are scored on the thread pool once the bundle adjustment has
   // started it (the same pose bits either way, crates/reconstruction/src/pose.rs).
   const run = threadedModule?.solve_pnp ?? solve_pnp
-  const raw = run(flat3, flat2, K.fx, K.fy, K.cx, K.cy, ransacThreshPx, maxIters)
+  const raw = run(flat3, flat2, K.fx, K.fy, K.cx, K.cy, ransacThreshPx, maxIters, seed >>> 0)
   if (!raw || raw.length < 12 + n) return null
 
   return {

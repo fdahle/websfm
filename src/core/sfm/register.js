@@ -19,7 +19,7 @@
 // }
 // Point ids from `tracks` are held only within one sweep's correspondence cache, and
 // `refreshTracks` (which renumbers them) runs only where that cache is invalidated.
-import { solvePnp, triangulateDlt } from './reconstruction.js'
+import { pnpSamplesFor, solvePnp, triangulateDlt } from './reconstruction.js'
 import { projectPoint, triangulationAngle, cameraCenter } from './geometry.js'
 import { toNorm, camToP34flat, retriangulatePairs } from './tracks.js'
 import { distortionIdentifiable, withoutDistortionTerms } from './selfCalSchedule.js'
@@ -291,6 +291,12 @@ export async function registerImages(ctx) {
   // points that may let previously-deferred images register on the next pass.
   // Stop when a full pass registers nothing new.
   const deferReasons = new Map() // uuid → last reason it failed to register
+  // PnP attempts per image: each retry draws other P3P samples (the seed), so a
+  // correspondence set whose draw missed is not failed the same way on every pass.
+  const pnpAttempts = new Map()
+  // Enough samples to find an all-inlier triple at the lowest inlier ratio the gate
+  // accepts (the floor of 200 at the default 0.3).
+  const pnpSamples = pnpSamplesFor(minPnpInlierRatio)
   let progressed = true
   let pass = 0
   let registeredSinceBA = 0 // R3: cameras added since the last interim bundle adjust
@@ -371,7 +377,9 @@ export async function registerImages(ctx) {
       reportRegister(`Registering ${img.name} (${pts3.length} correspondences)`)
       // The correspondences' current positions (solvePnp and the rechecks below).
       const xyz = pts3.map((p) => ({ x: tracks.x(p), y: tracks.y(p), z: tracks.z(p) }))
-      const pnp = await solvePnp(xyz, pts2, K, { ransacThreshPx: pnpThresh, maxIters: 200 })
+      const seed = pnpAttempts.get(img.uuid) ?? 0
+      pnpAttempts.set(img.uuid, seed + 1)
+      const pnp = await solvePnp(xyz, pts2, K, { ransacThreshPx: pnpThresh, maxIters: pnpSamples, seed })
       if (!pnp) {
         // Diagnostic: the solver returns nothing when no P3P hypothesis gathers its
         // 4 inliers at the gate (solvePnp itself refuses fewer than 6 correspondences). Re-probe at looser thresholds — if a 2×/4× gate suddenly
@@ -380,7 +388,7 @@ export async function registerImages(ctx) {
         // If even 4× finds nothing, the correspondences themselves are wrong.
         const probe = []
         for (const thr of [pnpThresh * 2, pnpThresh * 4]) {
-          const p = await solvePnp(xyz, pts2, K, { ransacThreshPx: thr, maxIters: 200 })
+          const p = await solvePnp(xyz, pts2, K, { ransacThreshPx: thr, maxIters: pnpSamples, seed })
           const ic = p ? p.inlierMask.filter((v) => v > 0.5).length : 0
           probe.push(`${ic}/${pts3.length}@${thr.toFixed(0)}px`)
         }

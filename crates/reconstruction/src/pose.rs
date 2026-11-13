@@ -400,6 +400,8 @@ pub fn triangulate_dlt(
 /// - `fx,fy,cx,cy`: camera intrinsics
 /// - `ransac_thresh_px`: inlier reprojection threshold (pixels)
 /// - `max_iters`: RANSAC iterations
+/// - `seed`: varies the minimal samples; 0 is the default draw. A retry of the same
+///   correspondences passes another seed, so it does not repeat a failed draw.
 ///
 /// # Output
 /// `[R00…R22, tx,ty,tz, inlier_0, inlier_1, …, inlier_N]` = 12 + N floats,
@@ -410,6 +412,7 @@ pub fn solve_pnp(
     fx: f32, fy: f32, cx: f32, cy: f32,
     ransac_thresh_px: f32,
     max_iters: u32,
+    seed: u32,
 ) -> Vec<f32> {
     let n = pts_3d.len() / 3;
     if n < 4 { return vec![]; }
@@ -440,7 +443,9 @@ pub fn solve_pnp(
     // order. Taking the first lowest cost in (sample, solution) order is what the plain
     // loop took, so the pose is the same bits on any number of threads.
     let iters = max_iters.max(1) as usize;
-    let mut rng = Xorshift(n as u32 * 1000 + 7);
+    // Seed 0 keeps the draw of earlier versions (n·1000 + 7); xorshift needs a non-zero state.
+    let state = (n as u32 * 1000 + 7).wrapping_add(seed.wrapping_mul(0x9E37_79B9));
+    let mut rng = Xorshift(if state == 0 { 1 } else { state });
     let samples: Vec<Vec<usize>> = (0..iters).map(|_| rng.sample_k(n, 3)).collect();
     // Per sample: its lowest-cost solution (cost, inlier count, R, t); cost ∞ when none.
     type Hypothesis = (f64, usize, M3, V3);

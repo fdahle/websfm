@@ -6,6 +6,10 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **A photo that failed to register gets a fresh try.** Each later registration pass now
+  tries a photo's pose with other random samples, so a photo whose first draw missed its
+  true matches is no longer refused the same way on every pass. The number of samples
+  also follows the lowest inlier share the pose check accepts (unchanged at its default).
 - **A crashed operation says which one it was.** When an operation's WebAssembly code
   crashes, its error now names the operation, and the browser console keeps where in the
   code it happened. Before, a crash in a background job showed only "memory access out of

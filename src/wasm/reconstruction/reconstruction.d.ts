@@ -190,12 +190,14 @@ export function recover_pose(pts_a: Float32Array, pts_b: Float32Array, e_flat: F
  * - `fx,fy,cx,cy`: camera intrinsics
  * - `ransac_thresh_px`: inlier reprojection threshold (pixels)
  * - `max_iters`: RANSAC iterations
+ * - `seed`: varies the minimal samples; 0 is the default draw. A retry of the same
+ *   correspondences passes another seed, so it does not repeat a failed draw.
  *
  * # Output
  * `[R00…R22, tx,ty,tz, inlier_0, inlier_1, …, inlier_N]` = 12 + N floats,
  * or empty Vec on failure.
  */
-export function solve_pnp(pts_3d: Float32Array, pts_2d: Float32Array, fx: number, fy: number, cx: number, cy: number, ransac_thresh_px: number, max_iters: number): Float32Array;
+export function solve_pnp(pts_3d: Float32Array, pts_2d: Float32Array, fx: number, fy: number, cx: number, cy: number, ransac_thresh_px: number, max_iters: number, seed: number): Float32Array;
 
 /**
  * Triangulate N point pairs via linear DLT.
@@ -235,7 +237,7 @@ export interface InitOutput {
     readonly guidedsearch_search: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number) => [number, number];
     readonly plane_costs: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number) => [number, number];
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
-    readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+    readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
     readonly triangulate_dlt: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
     readonly undistort_brown_pixels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;

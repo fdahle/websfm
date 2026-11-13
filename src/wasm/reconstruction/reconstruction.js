@@ -531,6 +531,8 @@ export function recover_pose(pts_a, pts_b, e_flat, fx, fy, cx, cy) {
  * - `fx,fy,cx,cy`: camera intrinsics
  * - `ransac_thresh_px`: inlier reprojection threshold (pixels)
  * - `max_iters`: RANSAC iterations
+ * - `seed`: varies the minimal samples; 0 is the default draw. A retry of the same
+ *   correspondences passes another seed, so it does not repeat a failed draw.
  *
  * # Output
  * `[R00…R22, tx,ty,tz, inlier_0, inlier_1, …, inlier_N]` = 12 + N floats,
@@ -543,14 +545,15 @@ export function recover_pose(pts_a, pts_b, e_flat, fx, fy, cx, cy) {
  * @param {number} cy
  * @param {number} ransac_thresh_px
  * @param {number} max_iters
+ * @param {number} seed
  * @returns {Float32Array}
  */
-export function solve_pnp(pts_3d, pts_2d, fx, fy, cx, cy, ransac_thresh_px, max_iters) {
+export function solve_pnp(pts_3d, pts_2d, fx, fy, cx, cy, ransac_thresh_px, max_iters, seed) {
     const ptr0 = passArrayF32ToWasm0(pts_3d, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(pts_2d, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.solve_pnp(ptr0, len0, ptr1, len1, fx, fy, cx, cy, ransac_thresh_px, max_iters);
+    const ret = wasm.solve_pnp(ptr0, len0, ptr1, len1, fx, fy, cx, cy, ransac_thresh_px, max_iters, seed);
     var v3 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v3;
