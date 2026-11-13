@@ -362,5 +362,201 @@ def smoothing():
     b += text(330, 22, 'dashed: the true shape; Taubin alternates λ = 0.5 with μ = −0.53', GREY, 11, 'middle')
     svg('mesh-smoothing.svg', W, H, b)
 
-for f in (gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing): f()
+# ── surface-normal.svg ───────────────────────────────────────────────────────
+def normal():
+    W, H = 620, 330
+    rnd = random.Random(5)
+    pts = [(x, 220 - 55 * math.sin((x - 40) / 85) + rnd.gauss(0, 1.5)) for x in [40 + i * 13 for i in range(41)]]
+    q = pts[20]
+    k = 7
+    nb = sorted(pts, key=lambda p: math.hypot(p[0] - q[0], p[1] - q[1]))[:k]
+    mx = sum(p[0] for p in nb) / k; my = sum(p[1] for p in nb) / k
+    a = sum((p[0] - mx) ** 2 for p in nb) / k; c = sum((p[1] - my) ** 2 for p in nb) / k
+    bxy = sum((p[0] - mx) * (p[1] - my) for p in nb) / k
+    ang = 0.5 * math.atan2(2 * bxy, a - c)            # the largest eigenvector: the tangent
+    t = (math.cos(ang), math.sin(ang)); n = (-t[1], t[0])
+    cam = (470, 50)
+    if (cam[0] - q[0]) * n[0] + (cam[1] - q[1]) * n[1] < 0: n = (-n[0], -n[1])  # toward the camera
+    b = ''
+    for p in pts: b += circ(p[0], p[1], 3, BLUE)
+    for p in nb: b += circ(p[0], p[1], 7, GOLD, fill=False, w=1.2)
+    b += line(q[0] - 90 * t[0], q[1] - 90 * t[1], q[0] + 90 * t[0], q[1] + 90 * t[1], GREEN, 2)
+    b += text(q[0] - 95 * t[0] - 6, q[1] - 95 * t[1] - 8, 'fitted tangent plane', GREEN, 12, 'end')
+    L = 70
+    b += line(q[0], q[1], q[0] + L * n[0], q[1] + L * n[1], FG, 2)
+    b += poly([(q[0] + L * n[0] + 7 * t[0] - 2 * n[0], q[1] + L * n[1] + 7 * t[1] - 2 * n[1]), (q[0] + (L + 10) * n[0], q[1] + (L + 10) * n[1]), (q[0] + L * n[0] - 7 * t[0] - 2 * n[0], q[1] + L * n[1] - 7 * t[1] - 2 * n[1])], FG, fill=FG, w=1, closed=True)
+    b += line(q[0], q[1], q[0] - L * n[0], q[1] - L * n[1], DIM, 1.5, '5 4')
+    b += text(q[0] - (L + 14) * n[0] + 6, q[1] - (L + 14) * n[1] + 14, 'the other sign: away from the camera', GREY, 11)
+    b += circ(q[0], q[1], 4, RED)
+    b += line(cam[0], cam[1], q[0], q[1], BLUE, 1, '2 4')
+    b += camera(*cam) + text(cam[0] - 12, cam[1] + 4, 'camera that saw the point', BLUE, 12, 'end')
+    b += text(30, 26, f'the point (red), its {k} nearest neighbours (gold); the normal is their smallest-spread direction', GREY, 11)
+    svg('surface-normal.svg', W, H, b)
+
+# ── contour-lines.svg ────────────────────────────────────────────────────────
+def contours():
+    W, H = 620, 340
+    Z = [[8, 9, 11, 12, 11, 9],
+         [9, 12, 13, 10, 9, 8],
+         [10, 13, 9, 12, 13, 10],
+         [9, 11, 10, 13, 12, 9],
+         [8, 9, 9, 10, 10, 8]]
+    L = 10.5
+    ox, oy, d = 60, 60, 60
+    P = lambda r, c: (ox + c * d, oy + r * d)
+    b = ''
+    rows, cols = len(Z), len(Z[0])
+    for r in range(rows):
+        for c in range(cols - 1): b += line(*P(r, c), *P(r, c + 1), DIM, 1)
+    for c in range(cols):
+        for r in range(rows - 1): b += line(*P(r, c), *P(r + 1, c), DIM, 1)
+    def cross(r0, c0, r1, c1):
+        z0, z1 = Z[r0][c0], Z[r1][c1]; t = (L - z0) / (z1 - z0)
+        (x0, y0), (x1, y1) = P(r0, c0), P(r1, c1)
+        return (x0 + t * (x1 - x0), y0 + t * (y1 - y0))
+    saddle = None
+    for r in range(rows - 1):
+        for c in range(cols - 1):
+            corners = [(r, c), (r, c + 1), (r + 1, c + 1), (r + 1, c)]  # tl, tr, br, bl
+            up = [Z[a][e] >= L for a, e in corners]  # a level equal to a sample counts as above
+            edges = []
+            for k in range(4):
+                (a0, e0), (a1, e1) = corners[k], corners[(k + 1) % 4]
+                edges.append(cross(a0, e0, a1, e1) if up[k] != up[(k + 1) % 4] else None)
+            hits = [e for e in edges if e]
+            if len(hits) == 2:
+                b += line(*hits[0], *hits[1], GOLD, 2.5)
+            elif len(hits) == 4:
+                centre = sum(Z[a][e] for a, e in corners) / 4
+                top, right, bottom, left = edges
+                # centre above: cut off each corner below; below: cut off each corner above
+                below_tr = (top, right), (bottom, left)
+                below_tl = (left, top), (right, bottom)
+                chosen, other = (below_tr, below_tl) if (centre >= L) == up[0] else (below_tl, below_tr)
+                for s0, s1 in other: b += line(*s0, *s1, GOLD, 1.2, '4 4', op=0.6)
+                for s0, s1 in chosen: b += line(*s0, *s1, GOLD, 2.5)
+                saddle = (corners, centre)
+    for r in range(rows):
+        for c in range(cols):
+            x, y = P(r, c); hi = Z[r][c] >= L
+            b += circ(x, y, 4, FG if hi else DIM)
+            b += text(x + 6, y - 6, str(Z[r][c]), FG if hi else GREY, 11)
+    if saddle:
+        (r, c), centre = saddle[0][0], saddle[1]
+        (x0, y0), (x1, y1) = P(r, c), P(r + 1, c + 1)
+        b += f'  <rect x="{x0}" y="{y0}" width="{x1 - x0}" height="{y1 - y0}" fill="none" stroke="{RED}" stroke-width="1.5"/>\n'
+        b += text(ox + (cols - 1) * d + 24, oy + 2 * d - 4, 'saddle square:', RED, 12)
+        b += text(ox + (cols - 1) * d + 24, oy + 2 * d + 14, f'centre = mean = {centre:g}', RED, 12)
+        b += text(ox + (cols - 1) * d + 24, oy + 2 * d + 32, f'above {L:g}: solid reading,', RED, 12)
+        b += text(ox + (cols - 1) * d + 24, oy + 2 * d + 50, 'the other dashed', RED, 12)
+    b += text(30, 30, f'level {L:g} through heights at the cell centres; each crossing interpolated along its edge', GREY, 11)
+    svg('contour-lines.svg', W, H, b)
+
+# ── dem-binning.svg ──────────────────────────────────────────────────────────
+def binning():
+    W, H = 660, 320
+    rnd = random.Random(11)
+    zf = lambda x, y: 0.5 + 0.35 * math.sin(x / 2.2) * math.cos(y / 1.8) + 0.08 * x / 8
+    nx, ny, cs = 8, 6, 30
+    hole = (5, 1)
+    pts = []
+    while len(pts) < 260:
+        x, y = rnd.uniform(0, nx), rnd.uniform(0, ny)
+        if (int(x), int(y)) == hole: continue
+        pts.append((x, y, zf(x, y) + rnd.gauss(0, 0.03)))
+    col = lambda z: '#%02x%02x%02x' % tuple(int(a + (b2 - a) * max(0, min(1, z))) for a, b2 in zip((40, 90, 160), (230, 184, 79)))
+    b = ''
+    ox, oy = 30, 60
+    for x, y, z in pts: b += circ(ox + x * cs, oy + y * cs, 2, col(z))
+    for i in range(nx + 1): b += line(ox + i * cs, oy, ox + i * cs, oy + ny * cs, DIM, 0.8)
+    for j in range(ny + 1): b += line(ox, oy + j * cs, ox + nx * cs, oy + j * cs, DIM, 0.8)
+    pick = (2, 3)
+    b += f'  <rect x="{ox + pick[0] * cs}" y="{oy + pick[1] * cs}" width="{cs}" height="{cs}" fill="none" stroke="{GOLD}" stroke-width="2"/>\n'
+    b += text(ox, oy - 14, 'dense cloud, plan view', GREY, 11)
+    # the picked cell's points in side view, and their median
+    cell = sorted(p[2] for p in pts if (int(p[0]), int(p[1])) == pick)
+    med = cell[len(cell) // 2]
+    ix, iy, iw, ih = 290, 150, 90, 100
+    b += f'  <rect x="{ix}" y="{iy}" width="{iw}" height="{ih}" fill="none" stroke="{GOLD}" stroke-width="1"/>\n'
+    zs = lambda z: iy + ih - (z - 0.0) / 1.2 * ih
+    for k2, z in enumerate(cell):
+        x = ix + 10 + k2 * (iw - 20) / max(len(cell) - 1, 1)
+        b += line(x, iy + ih, x, zs(z), BLUE, 1) + circ(x, zs(z), 2.5, BLUE)
+    b += line(ix, zs(med), ix + iw, zs(med), GOLD, 2) + text(ix + iw / 2, iy - 8, 'one cell, side view:', GOLD, 11, 'middle')
+    b += text(ix + iw / 2, iy + ih + 16, f'{len(cell)} points → one height', GOLD, 11, 'middle')
+    # the grid
+    gx = 420
+    for i in range(nx):
+        for j in range(ny):
+            ps = [p[2] for p in pts if (int(p[0]), int(p[1])) == (i, j)]
+            if ps:
+                zz = sorted(ps)[len(ps) // 2]
+                b += f'  <rect x="{gx + i * 27}" y="{oy + j * 27 + 10}" width="26" height="26" fill="{col(zz)}"/>\n'
+    hx, hy = gx + hole[0] * 27, oy + hole[1] * 27 + 10
+    b += f'  <rect x="{hx + 1}" y="{hy + 1}" width="24" height="24" fill="{col(zf(hole[0] + 0.5, hole[1] + 0.5))}" stroke="{RED}" stroke-width="2.5" stroke-dasharray="4 2"/>\n'
+    b += text(gx, oy - 14, 'DEM: one height per cell', GREY, 11)
+    gy1 = oy + ny * 27 + 10
+    b += line(hx + 13, hy + 26, hx + 13, gy1 + 14, RED, 1.2)
+    b += text(hx + 13, gy1 + 28, 'no points: interpolated', RED, 11, 'middle')
+    b += text(hx + 13, gy1 + 42, 'from its neighbours', RED, 11, 'middle')
+    svg('dem-binning.svg', W, H, b)
+
+# ── volume-cut-fill.svg ──────────────────────────────────────────────────────
+def volume():
+    W, H = 640, 300
+    x0, x1 = 60, 580
+    base = lambda x: 240 - 0.09 * (x - x0)          # the plane through the polygon's vertices
+    def surf(x):
+        return base(x) - 120 * math.exp(-((x - 260) / 85) ** 2) + 26 * math.exp(-((x - 480) / 38) ** 2)
+    b = ''
+    step = 16
+    for x in range(x0, x1, step):
+        xm = x + step / 2; dz = base(xm) - surf(xm)  # > 0: material above the base (cut)
+        if abs(dz) < 1: continue
+        y = min(base(xm), surf(xm))
+        b += f'  <rect x="{x + 1}" y="{f2(y)}" width="{step - 2}" height="{f2(abs(dz))}" fill="{GOLD if dz > 0 else BLUE}" opacity="0.6"/>\n'
+    b += poly([(x, surf(x)) for x in range(x0, x1 + 1, 4)], FG, w=2)
+    b += line(x0, base(x0), x1, base(x1), RED, 1.8, '7 4')
+    for x in (x0, x1): b += circ(x, base(x), 5, RED)
+    b += text(x0 - 4, base(x0) + 22, 'polygon vertex', RED, 11)
+    b += text(330, base(330) + 24, 'base plane through the vertices', RED, 11, 'middle')
+    b += text(260, 92, 'cut: above the base', GOLD, 12, 'middle')
+    b += text(480, base(480) + 52, 'fill: below it', BLUE, 12, 'middle')
+    b += text(30, 26, 'V = Σ (z − base) · cell area over the cells whose centre lies inside the polygon', GREY, 11)
+    svg('volume-cut-fill.svg', W, H, b)
+
+# ── gauge-freedom.svg ────────────────────────────────────────────────────────
+def gauge():
+    W, H = 680, 330
+    cams = [(-55, 50, -math.pi / 2 + 0.25), (55, 50, -math.pi / 2 - 0.25)]   # x, y, viewing angle
+    pts = [(-30, -55), (8, -85), (42, -45)]
+    fpx = 40
+    def project(cam, p):  # 1-D image coordinate in the camera's own frame
+        cx, cy, a = cam
+        dx, dy = p[0] - cx, p[1] - cy
+        depth = dx * math.cos(a) + dy * math.sin(a); lat = -dx * math.sin(a) + dy * math.cos(a)
+        return fpx * lat / depth
+    imgs = [[project(cm, p) for p in pts] for cm in cams]   # identical for every panel
+    sims = [('translated', 0, 1.0, (-20, 15)), ('rotated', 0.5, 1.0, (0, 0)), ('scaled with the cameras', 0, 1.45, (0, 15))]
+    b = ''
+    for pi, (lab, rot, sc, sh) in enumerate(sims):
+        ox, oy = 115 + pi * 225, 150
+        T = lambda p: (ox + sh[0] + sc * (p[0] * math.cos(rot) - p[1] * math.sin(rot)), oy + sh[1] + sc * (p[0] * math.sin(rot) + p[1] * math.cos(rot)))
+        P2 = [T(p) for p in pts]
+        for cm in cams:
+            C = T((cm[0], cm[1]))
+            for q in P2: b += line(C[0], C[1], q[0], q[1], BLUE, 0.8, op=0.6)
+            b += camera(*C)
+        for q in P2: b += circ(q[0], q[1], 4, GOLD)
+        b += text(ox, 30, lab, FG, 12, 'middle')
+        # the two images, the same in every panel
+        for ci, im in enumerate(imgs):
+            sx, sy = ox - 45 + ci * 90, 270
+            b += line(sx - 30, sy, sx + 30, sy, FG, 2)
+            for u in im: b += circ(sx + u, sy, 3, GREEN)
+        b += text(ox, 296, 'images of both cameras', GREY, 10, 'middle')
+    b += text(340, 318, 'the same images, so the same reprojection error: the solve cannot tell these apart', GREY, 11, 'middle')
+    svg('gauge-freedom.svg', W, H, b)
+
+for f in (gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning, volume, gauge): f()
 print('ok')

@@ -18,7 +18,7 @@ gives the lines. A square whose diagonal corners are above the level and the oth
 two below (a saddle) could be read two ways; the square's mean height decides, so
 lines of one level never cross.
 
-<!-- TODO(image): assets/contour-lines.svg - a small DEM grid with heights at the cell centres, one level traced through the squares by its interpolated edge crossings, and a saddle square with both possible readings and the centre value choosing one. -->
+![A 6 by 5 grid of heights at cell centres with the 10.5 level traced through the squares by interpolated edge crossings; one saddle square outlined, its centre mean 11 choosing the solid reading over the dashed one.](assets/contour-lines.svg)
 
 Contours inherit the DEM's quality. A spike or a pit becomes a tight ring, noise
 becomes wiggles, and a gap that was interpolated over gets lines through surface

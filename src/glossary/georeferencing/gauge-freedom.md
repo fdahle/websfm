@@ -14,7 +14,7 @@ There are seven such freedoms — 3 translation, 3 rotation, 1 scale — which
 together are a **similarity transform**. Photogrammetry calls the same idea the
 *datum defect* of a free network.
 
-<!-- TODO(image): assets/gauge-freedom.svg - one camera-and-points configuration drawn three times (translated, rotated, uniformly scaled with the cameras) with the identical image plane projections beneath each, showing the reprojection error is unchanged. -->
+![Two cameras and three points drawn translated, rotated and scaled together, each with the same two camera images beneath: identical projections, so the same reprojection error.](assets/gauge-freedom.svg)
 
 Two consequences run through the whole application:
 

@@ -16,7 +16,7 @@ $$V_{cut} = \sum_{z_i > b_i} (z_i - b_i)\,A, \qquad V_{fill} = \sum_{z_i < b_i} 
 where $z_i$ is the DEM height of cell $i$, $b_i$ the base under it and $A$ the cell
 area.
 
-<!-- TODO(image): assets/volume-cut-fill.svg - a cross-section of a stockpile on sloping ground, the best-fit base plane through the polygon vertices drawn as a line, the material above it shaded as cut and a dip below it shaded as fill, with the DEM cells as columns. -->
+![A stockpile cross-section with the base plane through the polygon's two vertices dashed; DEM cells as columns, shaded gold above the base (cut) and blue where a dip lies below it (fill).](assets/volume-cut-fill.svg)
 
 The base decides the answer more than anything else. A **plane through the polygon
 vertices** follows sloping ground under a pile, so the vertices belong on the ground

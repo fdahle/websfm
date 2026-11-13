@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 340" font-family="sans-serif" font-size="13">
+  <rect width="620" height="340" fill="#1b1f27"/>
+  <line x1="60" y1="60" x2="120" y2="60" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="60" x2="180" y2="60" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="60" x2="240" y2="60" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="60" x2="300" y2="60" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="60" x2="360" y2="60" stroke="#6b7280" stroke-width="1"/>
+  <line x1="60" y1="120" x2="120" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="120" x2="180" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="120" x2="240" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="120" x2="300" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="120" x2="360" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="60" y1="180" x2="120" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="180" x2="180" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="180" x2="240" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="180" x2="300" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="180" x2="360" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="60" y1="240" x2="120" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="240" x2="180" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="240" x2="240" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="240" x2="300" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="240" x2="360" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="60" y1="300" x2="120" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="300" x2="180" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="300" x2="240" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="300" x2="300" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="300" x2="360" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="60" y1="60" x2="60" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="60" y1="120" x2="60" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="60" y1="180" x2="60" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="60" y1="240" x2="60" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="60" x2="120" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="120" x2="120" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="180" x2="120" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="240" x2="120" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="60" x2="180" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="120" x2="180" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="180" x2="180" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="240" x2="180" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="60" x2="240" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="120" x2="240" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="180" x2="240" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="240" y1="240" x2="240" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="60" x2="300" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="120" x2="300" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="180" x2="300" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="300" y1="240" x2="300" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="360" y1="60" x2="360" y2="120" stroke="#6b7280" stroke-width="1"/>
+  <line x1="360" y1="120" x2="360" y2="180" stroke="#6b7280" stroke-width="1"/>
+  <line x1="360" y1="180" x2="360" y2="240" stroke="#6b7280" stroke-width="1"/>
+  <line x1="360" y1="240" x2="360" y2="300" stroke="#6b7280" stroke-width="1"/>
+  <line x1="120" y1="90" x2="90" y2="120" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="165" y1="60" x2="120" y2="90" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="240" y1="105" x2="230" y2="120" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="300" y1="75" x2="240" y2="105" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="315" y1="60" x2="300" y2="75" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="90" y1="120" x2="70" y2="180" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="180" y1="157.5" x2="157.5" y2="180" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="180" y1="157.5" x2="230" y2="120" stroke="#e6b84f" stroke-width="1.2" stroke-dasharray="4 4" opacity="0.6"/>
+  <line x1="240" y1="135" x2="210" y2="180" stroke="#e6b84f" stroke-width="1.2" stroke-dasharray="4 4" opacity="0.6"/>
+  <line x1="230" y1="120" x2="240" y2="135" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="210" y1="180" x2="180" y2="157.5" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="300" y1="142.5" x2="240" y2="135" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="350" y1="180" x2="300" y2="142.5" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="70" y1="180" x2="105" y2="240" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="157.5" y1="180" x2="150" y2="240" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="210" y1="180" x2="190" y2="240" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="350" y1="180" x2="330" y2="240" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="105" y1="240" x2="120" y2="255" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="150" y1="240" x2="120" y2="255" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="190" y1="240" x2="240" y2="290" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="300" y1="285" x2="240" y2="290" stroke="#e6b84f" stroke-width="2.5"/>
+  <line x1="330" y1="240" x2="300" y2="285" stroke="#e6b84f" stroke-width="2.5"/>
+  <circle cx="60" cy="60" r="4" fill="#6b7280"/>
+  <text x="66" y="54" fill="#9ca3af" font-size="11">8</text>
+  <circle cx="120" cy="60" r="4" fill="#6b7280"/>
+  <text x="126" y="54" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="180" cy="60" r="4" fill="#c9d1d9"/>
+  <text x="186" y="54" fill="#c9d1d9" font-size="11">11</text>
+  <circle cx="240" cy="60" r="4" fill="#c9d1d9"/>
+  <text x="246" y="54" fill="#c9d1d9" font-size="11">12</text>
+  <circle cx="300" cy="60" r="4" fill="#c9d1d9"/>
+  <text x="306" y="54" fill="#c9d1d9" font-size="11">11</text>
+  <circle cx="360" cy="60" r="4" fill="#6b7280"/>
+  <text x="366" y="54" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="60" cy="120" r="4" fill="#6b7280"/>
+  <text x="66" y="114" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="120" cy="120" r="4" fill="#c9d1d9"/>
+  <text x="126" y="114" fill="#c9d1d9" font-size="11">12</text>
+  <circle cx="180" cy="120" r="4" fill="#c9d1d9"/>
+  <text x="186" y="114" fill="#c9d1d9" font-size="11">13</text>
+  <circle cx="240" cy="120" r="4" fill="#6b7280"/>
+  <text x="246" y="114" fill="#9ca3af" font-size="11">10</text>
+  <circle cx="300" cy="120" r="4" fill="#6b7280"/>
+  <text x="306" y="114" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="360" cy="120" r="4" fill="#6b7280"/>
+  <text x="366" y="114" fill="#9ca3af" font-size="11">8</text>
+  <circle cx="60" cy="180" r="4" fill="#6b7280"/>
+  <text x="66" y="174" fill="#9ca3af" font-size="11">10</text>
+  <circle cx="120" cy="180" r="4" fill="#c9d1d9"/>
+  <text x="126" y="174" fill="#c9d1d9" font-size="11">13</text>
+  <circle cx="180" cy="180" r="4" fill="#6b7280"/>
+  <text x="186" y="174" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="240" cy="180" r="4" fill="#c9d1d9"/>
+  <text x="246" y="174" fill="#c9d1d9" font-size="11">12</text>
+  <circle cx="300" cy="180" r="4" fill="#c9d1d9"/>
+  <text x="306" y="174" fill="#c9d1d9" font-size="11">13</text>
+  <circle cx="360" cy="180" r="4" fill="#6b7280"/>
+  <text x="366" y="174" fill="#9ca3af" font-size="11">10</text>
+  <circle cx="60" cy="240" r="4" fill="#6b7280"/>
+  <text x="66" y="234" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="120" cy="240" r="4" fill="#c9d1d9"/>
+  <text x="126" y="234" fill="#c9d1d9" font-size="11">11</text>
+  <circle cx="180" cy="240" r="4" fill="#6b7280"/>
+  <text x="186" y="234" fill="#9ca3af" font-size="11">10</text>
+  <circle cx="240" cy="240" r="4" fill="#c9d1d9"/>
+  <text x="246" y="234" fill="#c9d1d9" font-size="11">13</text>
+  <circle cx="300" cy="240" r="4" fill="#c9d1d9"/>
+  <text x="306" y="234" fill="#c9d1d9" font-size="11">12</text>
+  <circle cx="360" cy="240" r="4" fill="#6b7280"/>
+  <text x="366" y="234" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="60" cy="300" r="4" fill="#6b7280"/>
+  <text x="66" y="294" fill="#9ca3af" font-size="11">8</text>
+  <circle cx="120" cy="300" r="4" fill="#6b7280"/>
+  <text x="126" y="294" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="180" cy="300" r="4" fill="#6b7280"/>
+  <text x="186" y="294" fill="#9ca3af" font-size="11">9</text>
+  <circle cx="240" cy="300" r="4" fill="#6b7280"/>
+  <text x="246" y="294" fill="#9ca3af" font-size="11">10</text>
+  <circle cx="300" cy="300" r="4" fill="#6b7280"/>
+  <text x="306" y="294" fill="#9ca3af" font-size="11">10</text>
+  <circle cx="360" cy="300" r="4" fill="#6b7280"/>
+  <text x="366" y="294" fill="#9ca3af" font-size="11">8</text>
+  <rect x="180" y="120" width="60" height="60" fill="none" stroke="#ef6f6c" stroke-width="1.5"/>
+  <text x="384" y="176" fill="#ef6f6c" font-size="12">saddle square:</text>
+  <text x="384" y="194" fill="#ef6f6c" font-size="12">centre = mean = 11</text>
+  <text x="384" y="212" fill="#ef6f6c" font-size="12">above 10.5: solid reading,</text>
+  <text x="384" y="230" fill="#ef6f6c" font-size="12">the other dashed</text>
+  <text x="30" y="30" fill="#9ca3af" font-size="11">level 10.5 through heights at the cell centres; each crossing interpolated along its edge</text>
+</svg>

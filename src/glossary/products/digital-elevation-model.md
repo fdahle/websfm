@@ -16,7 +16,7 @@ representative height per cell. Cells with no points are filled by
 inverse-distance-weighted interpolation from their neighbours, and a hillshaded
 preview is rendered so relief is easy to read at a glance.
 
-<!-- TODO(image): assets/dem-binning.svg - a side-by-side of a scattered dense cloud and the regular grid it bins into, one cell blown up to show several points collapsing to a single representative height, and an empty cell marked as filled by interpolation from its neighbours. -->
+![A scattered dense cloud in plan view over a grid, one cell's three points shown side by side collapsing to one height, and the resulting DEM grid of one colour per cell, its single empty cell filled by interpolation from its neighbours.](assets/dem-binning.svg)
 
 Built from every point, the DEM is a **surface model (DSM)**: it runs over roofs and
 tree tops. A **terrain model (DTM)** of the bare earth needs the ground points alone,

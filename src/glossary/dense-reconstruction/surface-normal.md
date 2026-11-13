@@ -25,7 +25,7 @@ analysis). That fixes the *axis* but not the *side*. A plane has two faces, and 
 fit cannot tell which one is outward. The side has to come from outside knowledge,
 such as where the camera that saw the point was standing.
 
-<!-- TODO(image): assets/surface-normal.svg - a curved surface sampled by points, one point's k nearest neighbours circled with the fitted tangent plane, the normal axis drawn in both directions, and the camera that saw the point deciding which direction is outward. -->
+![Points sampled along a curved surface; one point's 7 nearest neighbours circled, the tangent plane fitted through them, and the normal drawn toward the camera that saw the point, the opposite sign dashed.](assets/surface-normal.svg)
 
 A dense cloud computed in WebSfM gets its normals for free: [PatchMatch](help:patchmatch)
 fits a small tilted plane at every [depth map](help:depth-map) pixel, fusion keeps
