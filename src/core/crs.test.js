@@ -40,6 +40,52 @@ describe('transform', () => {
   })
 })
 
+// Known answers, not round trips: a round trip passes even when both directions share the
+// same mistake (a missing +south, a longitude that does not wrap).
+describe('UTM south and the antimeridian', () => {
+  beforeAll(async () => {
+    for (const c of ['EPSG:32633', 'EPSG:32733', 'EPSG:32601']) await ensureProjection(c)
+  })
+
+  it('puts the equator at the false northing on a southern zone', () => {
+    const [e, n] = transform([15, 0], 'EPSG:4326', 'EPSG:32733') // zone 33's central meridian
+    expect(e).toBeCloseTo(500000, 3)
+    expect(n).toBeCloseTo(10000000, 3)
+  })
+
+  it('places 30° S by the meridian arc, scaled by k0 = 0.9996', () => {
+    // WGS84 meridian arc from the equator to 30°: 3,320,113.40 m.
+    const [e, n] = transform([15, -30], 'EPSG:4326', 'EPSG:32733')
+    expect(e).toBeCloseTo(500000, 3)
+    expect(Math.abs(n - (10000000 - 0.9996 * 3320113.4))).toBeLessThan(0.05)
+  })
+
+  it('mirrors north and south zones across the equator', () => {
+    const [eN, nN] = transform([16.2, 0.5], 'EPSG:4326', 'EPSG:32633')
+    const [eS, nS] = transform([16.2, -0.5], 'EPSG:4326', 'EPSG:32733')
+    expect(eS).toBeCloseTo(eN, 4)
+    expect(nN + nS).toBeCloseTo(10000000, 4)
+  })
+
+  it('wraps longitude across ±180° in zone 1', () => {
+    // Zone 1's central meridian is 177° W: 179.9° E is 3.1° west of it, 173.9° W 3.1° east.
+    const [eW, nW] = transform([179.9, 10], 'EPSG:4326', 'EPSG:32601')
+    const [eE, nE] = transform([-173.9, 10], 'EPSG:4326', 'EPSG:32601')
+    expect(eW + eE).toBeCloseTo(1000000, 3)
+    expect(nW).toBeCloseTo(nE, 3)
+    expect(eW).toBeLessThan(500000)
+  })
+
+  it('keeps the local metric frame continuous across ±180°', () => {
+    // 0.02° along the equator is a·Δλ = 6,378,137 m × 0.02 × π / 180 = 2,226.39 m.
+    const code = localMetricFrame(179.995, 0)
+    const [x1, y1] = transform([179.99, 0], 'EPSG:4326', code)
+    const [x2, y2] = transform([-179.99, 0], 'EPSG:4326', code)
+    expect(x2 - x1).toBeCloseTo((6378137 * 0.02 * Math.PI) / 180, 2)
+    expect(Math.abs(y1) + Math.abs(y2)).toBeLessThan(1e-6)
+  })
+})
+
 describe('projected CRS linear units', () => {
   it('reports metre CRSs and leaves metre distances unchanged', () => {
     expect(metresPerCrsUnit('EPSG:32632')).toBe(1)
