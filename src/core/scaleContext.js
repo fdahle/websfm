@@ -50,6 +50,7 @@
 
 // Co-located defaults (the self-contained-pure-module exception in CLAUDE.md ▸
 // Conventions — tuning.js points here rather than duplicating these).
+import { upperMedian } from './stats.js'
 export const SCALE_CONTEXT_DEFAULTS = {
   // Hard ceiling on the correction factor. A factor above this means detection
   // threw away so much resolution that the honest fix is to raise `maxDim`, not to
@@ -72,11 +73,6 @@ export function detectScaleOf(entry) {
 
 // Median of a numeric array (upper median for even counts — matches numStats
 // elsewhere in core). Empty ⇒ null.
-function median(values) {
-  if (values.length === 0) return null
-  const sorted = Float64Array.from(values).sort()
-  return sorted[Math.min(sorted.length - 1, Math.round(0.5 * (sorted.length - 1)))]
-}
 
 // Build the run-wide context from the image entries participating in a stage.
 //
@@ -94,7 +90,7 @@ export function buildScaleContext(entries, opts = {}) {
     return { n: 0, medianScale: 1, minScale: 1, maxScale: 1, factor: 1, rawFactor: 1, clamped: false, mixed: false }
   }
 
-  const medianScale = median(scales)
+  const medianScale = scales.length ? upperMedian(scales) : null
   let minScale = scales[0],
     maxScale = scales[0]
   for (const s of scales) {

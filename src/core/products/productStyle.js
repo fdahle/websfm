@@ -12,6 +12,7 @@
 //          filter on the preview image (orthoAdjustFilter), so both match.
 
 import { RAMPS } from './colormap.js'
+import { clamp } from '../stats.js'
 
 // Ramp keys are persisted with the DEM, like a raster style's (colormap.js RAMPS).
 export const DEM_RAMPS = [
@@ -27,7 +28,6 @@ export const DEFAULT_DEM_STYLE = Object.freeze({ ramp: 'turbo', range: 'auto', m
 export const DEFAULT_ORTHO_STYLE = Object.freeze({ brightness: 0, contrast: 0, gamma: 1 })
 
 const num = (v) => (v == null || v === '' ? NaN : Number(v))
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
 // A stored (or hand-edited) style → every field present and valid. A manual range
 // that is not increasing falls back to the DEM's own range rather than painting

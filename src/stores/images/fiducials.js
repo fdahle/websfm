@@ -28,6 +28,7 @@ import { FIDUCIAL_DETECT_TUNING } from '../../core/sfm/fiducialDetect.js'
 import { detectionConfidence } from '../../core/sfm/fiducialDetection.js'
 import { buildBorderMask } from '../../core/mask.js'
 import { pluralize } from '../../core/textFormat.js'
+import { median } from '../../core/stats.js'
 
 // Film-scan fiducials on the image records, split out of useImagesStore: detector
 // results and hand-placed marks per slot (F4), imported observations, and the
@@ -226,11 +227,6 @@ export function createImageFiducials({
       } catch (err) {
         log(`${img.name}: donor crop failed — ${err.message}`, 'warn', 'Fiducial')
       }
-    }
-    const median = (v) => {
-      const s = [...v].sort((a, b) => a - b),
-        m = s.length >> 1
-      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
     }
     if (templates.length)
       for (const row of buffered) {

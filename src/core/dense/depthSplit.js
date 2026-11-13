@@ -3,6 +3,7 @@
 // the pool's workers, each with its share of the memory budget. On the GPU one worker
 // feeds the device, which is the bottleneck there.
 
+import { upperMedian } from '../stats.js'
 /**
  * How many workers to split `n` depth maps over: at most `poolSize`, at least
  * `minPerWorker` maps each (a worker re-decodes the source photos its neighbours'
@@ -27,11 +28,8 @@ export function contiguousChunks(n, parts) {
   })
 }
 
-const median = (vals) => {
-  if (!vals.length) return null
-  const s = [...vals].sort((a, b) => a - b)
-  return s[Math.min(s.length - 1, Math.round(0.5 * (s.length - 1)))]
-}
+// The upper median, or null for no values.
+const median = (vals) => (vals.length ? upperMedian(vals) : null)
 
 /**
  * One Stage A summary from the workers' results (`{ summary, perImage }` each), as a

@@ -15,12 +15,9 @@
 import { validateFiducialCalibration } from '../sfm/fiducialCalibration.js'
 import { isFiducialCalibrated } from '../sfm/fiducialModel.js'
 import { SENSOR_TUNING } from '../tuning.js'
+import { median } from '../stats.js'
 
-const median = (v) => {
-  const s = [...v].sort((a, b) => a - b),
-    m = s.length >> 1
-  return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null
-}
+const medianOrNull = (v) => (v.length ? median(v) : null)
 
 // The roll of a photo: its file name without the extension and the trailing frame
 // number (CA215731L0040.tif → CA215731L). Null when nothing is left.
@@ -76,8 +73,8 @@ function misfitRolls(images, calibration, tuning) {
   const out = []
   for (const [roll, ids] of byRoll) {
     const others = [...rms].filter(([id]) => !ids.includes(id)).map(([, r]) => r)
-    const medianUm = median(ids.map((id) => rms.get(id)))
-    const othersUm = median(others)
+    const medianUm = medianOrNull(ids.map((id) => rms.get(id)))
+    const othersUm = medianOrNull(others)
     if (othersUm == null) continue
     if (medianUm > Math.max(tuning.fiducialMisfitFactor * othersUm, floorUm))
       out.push({ roll, ids, medianUm, othersUm })

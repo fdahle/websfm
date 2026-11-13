@@ -36,6 +36,7 @@ import { faintRetry } from '../../core/features/faintRetry.js'
 import { findCheckerCorner } from '../../core/sfm/targetDetect.js'
 import { detectTags, tagTiles, mergeTags, DEFAULT_FAMILY } from '../../core/sfm/tagDetect.js'
 import { arucoFamily } from '../../core/sfm/tags/aruco.js'
+import { quantileNearest, upperMedian } from '../../core/stats.js'
 
 // Detection ops (SIFT / learned: SuperPoint, DISK, ALIKED). `rasterize` (OffscreenCanvas pixel decode)
 // stays in the worker and is injected; the STRIDE parse + shared feature-bundle
@@ -49,9 +50,7 @@ export function makeDetectOps({ rasterize }) {
   let gpuBindingBytes
 
   // Percentile helper over a value array (sorted ascending in place by caller).
-  function percentile(sorted, q) {
-    return sorted.length ? sorted[Math.min(sorted.length - 1, Math.round(q * (sorted.length - 1)))] : 0
-  }
+  const percentile = (sorted, q) => (sorted.length ? quantileNearest(sorted, q) : 0)
 
   // SIFT detector → a uniform feature bundle (see detect() for the shared shape):
   // count, per-keypoint accessors, a descriptor-row view, and detector-specific diag.
@@ -785,10 +784,6 @@ export function makeDetectOps({ rasterize }) {
       const found = new Map([[key(0, 0), { di: 0, dj: 0, ...seed }]])
       const queue = [[0, 0]]
       const scores = [seed.score]
-      const median = () => {
-        const a = [...scores].sort((x, y) => x - y)
-        return a[a.length >> 1]
-      }
       const predict = (di, dj) => {
         const near = []
         for (let b = -2; b <= 2; b++)
@@ -823,7 +818,7 @@ export function makeDetectOps({ rasterize }) {
           const p = predict(ni, nj)
           if (!p) continue
           const hit = find(p.px, p.py, refinePx)
-          if (!hit || hit.score < 0.35 * median()) {
+          if (!hit || hit.score < 0.35 * upperMedian(scores)) {
             found.set(key(ni, nj), null)
             continue
           }

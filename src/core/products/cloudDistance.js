@@ -46,6 +46,7 @@
 
 import { buildKnnIndex, knnQuery } from './knn.js'
 import { eigenSym3 } from './cloudNormals.js'
+import { quantileSorted } from '../stats.js'
 
 function countOf(cloud) {
   if (!cloud?.pos) return 0
@@ -53,16 +54,6 @@ function countOf(cloud) {
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────────
-
-// Linear-interpolated quantile of an ascending array (type 7).
-function quantile(sorted, p) {
-  const n = sorted.length
-  if (!n) return NaN
-  const h = (n - 1) * p,
-    lo = Math.floor(h),
-    hi = Math.min(n - 1, lo + 1)
-  return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo])
-}
 
 /**
  * Summary statistics of a distance array, ignoring NaN.
@@ -96,13 +87,13 @@ export function distanceStats(distances) {
   abs.sort()
   return {
     mean: valid ? sum / valid : NaN,
-    median: quantile(vals, 0.5),
+    median: quantileSorted(vals, 0.5),
     rms: valid ? Math.sqrt(sum2 / valid) : NaN,
-    p95: quantile(vals, 0.95),
+    p95: quantileSorted(vals, 0.95),
     min: valid ? vals[0] : NaN,
     max: valid ? vals[valid - 1] : NaN,
     meanAbs: valid ? sumAbs / valid : NaN,
-    p95Abs: quantile(abs, 0.95),
+    p95Abs: quantileSorted(abs, 0.95),
     validCount: valid,
   }
 }

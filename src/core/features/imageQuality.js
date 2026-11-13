@@ -23,6 +23,7 @@
 import { rgbaToGray } from '../sfm/geometry.js'
 import { IMAGE_QUALITY_TUNING } from '../tuning.js'
 import { IMAGE_QUALITY_DEFAULTS } from '../defaults.user.js'
+import { quantile } from '../stats.js'
 
 // The analysis knobs are IMAGE_QUALITY_TUNING (tuning.js); the blur threshold the dialog
 // shows is IMAGE_QUALITY_DEFAULTS.minRelative (defaults.user.js).
@@ -101,14 +102,7 @@ export function resampleArea(src, w, h, outW, outH, gain) {
 }
 
 /** Linear-interpolated percentile (p in 0..1) of a plain numeric array. */
-function percentile(values, p) {
-  if (!values.length) return null
-  const s = values.slice().sort((a, b) => a - b)
-  const pos = p * (s.length - 1)
-  const lo = Math.floor(pos)
-  const hi = Math.ceil(pos)
-  return s[lo] + (s[hi] - s[lo]) * (pos - lo)
-}
+const percentile = (values, p) => (values.length ? quantile(values, p) : null)
 
 /**
  * Sharpness + exposure for one decoded raster.

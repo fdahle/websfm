@@ -8,6 +8,7 @@
 // points   a SparsePoints (core/sfm/sparsePoints.js): pos, vstart, vcam, viewUuids
 // toFrame  (p: [x, y, z] model) → [x, y, z] in the frame
 // → the GSD (frame units per photo pixel), or null when no camera sees a point.
+import { upperMedian } from '../stats.js'
 export function photoGsd(cameras, points, toFrame, { sampleMax = 50_000 } = {}) {
   const n = points?.length ?? 0
   if (!n || !cameras?.size) return null
@@ -29,11 +30,6 @@ export function photoGsd(cameras, points, toFrame, { sampleMax = 50_000 } = {}) 
     }
   }
   const perCamera = []
-  for (const c of centre.values()) if (c.d.length) perCamera.push(median(c.d) / c.fx)
-  return perCamera.length ? median(perCamera) : null
-}
-
-function median(v) {
-  v.sort((a, b) => a - b)
-  return v[v.length >> 1]
+  for (const c of centre.values()) if (c.d.length) perCamera.push(upperMedian(c.d) / c.fx)
+  return perCamera.length ? upperMedian(perCamera) : null
 }

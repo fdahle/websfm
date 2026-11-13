@@ -13,6 +13,7 @@
 import { formatBytes } from '../formatBytes.js'
 import { MAX_BUFFER_BYTES, TAB_BUFFER_POOL_BYTES } from '../bufferLimit.js'
 import { LOCAL_MIN_BYTES, maxLocalArrayBytes, maxShareableArrayBytes } from '../bigArray.js'
+import { clamp } from '../stats.js'
 
 // Default budget: ~2 GB. Conservative for a browser tab on unified-memory Macs
 // (the GPU competes for the same RAM Safari polices).
@@ -48,8 +49,6 @@ const DEVICE_MEMORY_FRACTION = 0.5
 // Fraction of the JS-heap ceiling to use when that is the only signal (weaker: it
 // caps the JS heap, not the typed-array/wasm/GPU allocations a dense run dominates with).
 const HEAP_LIMIT_FRACTION = 0.75
-
-const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
 
 /**
  * Derive a dense-run memory budget from injected hardware readings. PURE: the

@@ -2,6 +2,7 @@
 // upstream input; this module never changes detected pixel centres.
 
 import { fillArray } from '../bigArray.js'
+import { median } from '../stats.js'
 
 function solveLinear(A, b) {
   const n = b.length,
@@ -140,11 +141,6 @@ function reseauResidual(pairs, h, stepMm, outlierMm) {
         if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && Number.isFinite(a[jj * nx + ii])) v.push(a[jj * nx + ii])
       }
     return v
-  }
-  const median = (v) => {
-    const s = [...v].sort((a, b) => a - b),
-      m = s.length >> 1
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
   }
   let outliers = 0
   for (let j = 0; j < ny; j++)
@@ -364,11 +360,6 @@ export function estimateBatchFiducialLayout(images, scanPitchMm, options = {}) {
     }
   }
   if (bySlot.size < 3) return null
-  const median = (v) => {
-    const s = [...v].sort((a, b) => a - b),
-      m = s.length >> 1
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
-  }
   const marks = [...bySlot].map(([slot, pts]) => ({
     id: slot,
     xMm: median(pts.map((p) => p.x)),

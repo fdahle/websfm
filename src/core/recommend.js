@@ -1,4 +1,5 @@
 import { pluralize } from './textFormat.js'
+import { clamp } from './stats.js'
 // Recommended settings (usability track U2).
 //
 // Turn a `DatasetProfile` (core/profile.js, U1) into derived pipeline settings —
@@ -19,7 +20,6 @@ import { pluralize } from './textFormat.js'
 
 /** @typedef {import('./types').DatasetProfile} DatasetProfile */
 
-const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
 const rec = (value, reason) => ({ value, reason })
 
 // Matching can safely select proximity by default only when at least two loaded

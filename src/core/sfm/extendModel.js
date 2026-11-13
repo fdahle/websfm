@@ -28,9 +28,10 @@ import { makeFrameModelResolver, makeScanCentreToPinhole } from './displayFrame.
 import { mapPositions } from './keypointSet.js'
 import { isFisheyeModel } from './distortion.js'
 import { pluralize } from '../textFormat.js'
+import { quantileRank } from '../stats.js'
 
 const groupOf = (img) => (img.sensorId != null ? `sensor:${img.sensorId}` : `image:${img.uuid}`)
-const quantile = (sorted, q) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : 0)
+const quantile = (sorted, q) => (sorted.length ? quantileRank(sorted, q) : 0)
 
 export function seedFromModel({ imgs, rawKp, base, Kmap, fiducialTransforms, cameras, tracks, ids, maxFrameMedianPx }) {
   const baseCams = base.cameras instanceof Map ? base.cameras : new Map(base.cameras.map((c) => [c.uuid, c]))

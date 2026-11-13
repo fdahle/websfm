@@ -10,6 +10,7 @@
 // Pure: plain arrays in, plain arrays out. The band *reading* (geotiff) happens
 // in workers/ops/io.js; everything numeric is here so it can be tested.
 import { rampByName } from '../products/colormap.js'
+import { clamp } from '../stats.js'
 
 export const STYLE_MODES = ['gray', 'rgb', 'index']
 export const STRETCH_MODES = ['percentile', 'minmax', 'manual']
@@ -25,8 +26,6 @@ export const INDEX_PRESETS = {
   ndsi: { label: 'NDSI — snow / ice', roleA: 'Green', roleB: 'SWIR' },
   custom: { label: 'Custom — (A−B) / (A+B)', roleA: 'A', roleB: 'B' },
 }
-
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
 // The band a role names, among band names such as a reflectance map's ("Blue", "Red
 // edge", "NIR", "LWIR (°C)"), or −1. Red must not match "Red edge".

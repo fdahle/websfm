@@ -15,16 +15,9 @@
 // Shift convention: `shift` = [east, north] is where the DEM sits relative to the
 // reference, in DEM units: the DEM's feature at p + shift is the reference's at p.
 
-import { NMAD_K } from '../constants.js'
+import { median, nmad } from '../stats.js'
 
 const D2R = Math.PI / 180
-
-function median(v) {
-  const s = Float64Array.from(v).sort()
-  const n = s.length
-  return n ? (n % 2 ? s[n >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2) : NaN
-}
-const nmadOf = (v, m = median(v)) => NMAD_K * median(v.map((x) => Math.abs(x - m)))
 
 /**
  * points: [{ x, y, z }] DEM cells (its own heights) in the DEM's frame.
@@ -67,7 +60,7 @@ export function coregisterNuthKaab(
     const ok = d.map(Number.isFinite)
     const vals = d.filter((_, i) => ok[i])
     const m = median(vals),
-      spread = nmadOf(vals, m)
+      spread = nmad(vals, m)
     // Normal equations of y = a·cos ψ + b·sin ψ + c over points within 3 NMAD.
     const A = [
         [0, 0, 0],
@@ -101,8 +94,8 @@ export function coregisterNuthKaab(
   return {
     shift: t,
     bias: median(after),
-    nmadBefore: nmadOf(before),
-    nmadAfter: nmadOf(after),
+    nmadBefore: nmad(before),
+    nmadAfter: nmad(after),
     n: use.length,
     iterations,
     converged,

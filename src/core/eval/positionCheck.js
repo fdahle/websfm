@@ -1,6 +1,7 @@
 import { cameraCenter } from '../sfm/geometry.js'
 import { fitSimilarity, applySimilarity } from '../products/georef.js'
 import { WGS84_A, WGS84_E2 } from '../constants.js'
+import { quantileRank } from '../stats.js'
 
 // ── Camera centres vs independent GNSS positions (pure) ──────────────────────
 // When the images carry positions the reconstruction never saw (EXIF GNSS, with no
@@ -47,11 +48,7 @@ export function makeEnuFrame(lat0Deg, lon0Deg, h0) {
   }
 }
 
-const quantile = (arr, f) => {
-  if (!arr.length) return null
-  const a = [...arr].sort((x, y) => x - y)
-  return a[Math.min(a.length - 1, Math.floor(f * a.length))]
-}
+const quantile = (arr, f) => (arr.length ? quantileRank(Float64Array.from(arr).sort(), f) : null)
 const rms = (arr) => (arr.length ? Math.sqrt(arr.reduce((s, v) => s + v * v, 0) / arr.length) : null)
 
 /**

@@ -8,6 +8,7 @@ import { readRasterWindow } from '../../workers/computeClient.js'
 import RasterMeasurements from './RasterMeasurements.vue'
 import ZoomField from './ZoomField.vue'
 import { orthoAdjustFilter } from '../../utils/orthoFilter.js'
+import { clamp } from '../../core/stats.js'
 const GpuRasterCanvas = defineAsyncComponent(() => import('./raster/GpuRasterCanvas.vue'))
 const gpuReady = ref(false)
 // What the tiled canvas draws: an imported raster's own meta, or a computed ortho's
@@ -102,7 +103,6 @@ let resizeObserver = null
 
 const MIN_SCALE = 0.02
 const MAX_SCALE = 60
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
 function dims() {
   return props.product ? [props.product.width, props.product.height] : [0, 0]

@@ -1,4 +1,5 @@
 import { pluralize } from './textFormat.js'
+import { median } from './stats.js'
 // Dataset profiler (usability track U1).
 //
 // Classify an image set from METADATA ONLY — no pixel reads. Everything here is
@@ -23,13 +24,6 @@ const PHONE_MAKES = ['apple', 'samsung', 'google', 'xiaomi', 'huawei', 'oneplus'
 const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v)
 const longEdge = (m) => (isFiniteNum(m?.width) && isFiniteNum(m?.height) ? Math.max(m.width, m.height) : null)
 const megapixels = (m) => (isFiniteNum(m?.width) && isFiniteNum(m?.height) ? (m.width * m.height) / 1e6 : null)
-
-function median(nums) {
-  if (!nums.length) return null
-  const s = [...nums].sort((a, b) => a - b)
-  const mid = s.length >> 1
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2
-}
 
 // A sensor is "calibrated" for distortion once any Brown–Conrady coefficient is a
 // declared, non-zero number. A null (unknown) or an explicit 0 (pinhole) does not
@@ -89,7 +83,7 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
   const mps = images.map((i) => megapixels(i.meta)).filter(isFiniteNum)
   const minDim = longEdges.length ? Math.min(...longEdges) : null
   const maxDim = longEdges.length ? Math.max(...longEdges) : null
-  const medianMP = median(mps)
+  const medianMP = mps.length ? median(mps) : null
 
   if (!longEdges.length) {
     notes.push('No image dimensions available — cannot size detection/quality; using conservative defaults downstream.')

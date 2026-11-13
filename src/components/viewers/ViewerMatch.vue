@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { asPairList } from '../../core/sfm/matchCodec.js'
 import { MAX_SCALE, MIN_SCALE } from '../../composables/useImageViewport.js'
+import { clamp } from '../../core/stats.js'
 
 const props = defineProps({
   imageA: { type: Object, required: true },
@@ -75,10 +76,6 @@ const overlayCanvas = ref(null)
 // Per-panel pan/zoom state
 const L = ref({ scale: 1, tx: 0, ty: 0 })
 const R = ref({ scale: 1, tx: 0, ty: 0 })
-
-function clamp(v, lo, hi) {
-  return Math.min(hi, Math.max(lo, v))
-}
 
 let dragging = null // null | { panel: 'L'|'R', startX, startY, startTx, startTy }
 

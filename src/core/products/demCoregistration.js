@@ -20,16 +20,11 @@
 
 import { coregisterNuthKaab } from '../eval/demCoregister.js'
 import { COREG_TUNING } from '../tuning.js'
-import { NMAD_K } from '../constants.js'
+import { median, nmad } from '../stats.js'
 
-function median(v) {
-  const s = Float64Array.from(v).sort()
-  const n = s.length
-  return n ? (n % 2 ? s[n >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2) : NaN
-}
 function spreadOf(v) {
   const m = median(v)
-  return { median: m, nmad: NMAD_K * median(v.map((x) => Math.abs(x - m))), n: v.length }
+  return { median: m, nmad: nmad(v, m), n: v.length }
 }
 
 // The DEM's cells to co-register on: a regular sub-grid of about `maxPoints` cells

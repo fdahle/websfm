@@ -23,6 +23,7 @@
 //     the comparison would be meaningless. All-or-nothing, decided up front.
 
 import { FIDUCIAL_DETECTION_TUNING } from './fiducialDetection.js'
+import { median } from '../stats.js'
 
 export const FIDUCIAL_CONSENSUS_TUNING = {
   // Below this the median is not evidence, it is a coin flip. A 3-image batch
@@ -42,13 +43,6 @@ export const FIDUCIAL_CONSENSUS_TUNING = {
   // fraction of the mark extent (~25 px on a 10k scan), never less than shapeMinTolPx.
   shapeTolFrac: 0.002,
   shapeMinTolPx: 4,
-}
-
-const median = (v) => {
-  if (!v.length) return NaN
-  const s = [...v].sort((a, b) => a - b),
-    m = s.length >> 1
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
 /** A usable film frame: present, confident, non-degenerate, a plausible share of the scan. */

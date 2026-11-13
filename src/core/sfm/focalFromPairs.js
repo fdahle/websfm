@@ -20,6 +20,7 @@
 import { essentialSingularValues } from './rotations.js'
 import { hasFundamental } from './ingest.js'
 import { pluralize } from '../textFormat.js'
+import { quantileRank } from '../stats.js'
 
 export const FOCAL_FROM_PAIRS_DEFAULTS = {
   maxPairs: 40, // strongest pairs used per group
@@ -59,8 +60,6 @@ export function pairFocalScale(F, dimsA, dimsB, pa, pb, cfg = FOCAL_FROM_PAIRS_D
   return best
 }
 
-const quantile = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]
-
 // Estimate the scale for a set of pairs; null when too few agree.
 function estimateScale(pairs, dims, Kmap, c) {
   const scales = []
@@ -72,11 +71,11 @@ function estimateScale(pairs, dims, Kmap, c) {
   }
   if (scales.length < c.minPairs) return null
   scales.sort((a, b) => a - b)
-  const median = quantile(scales, 0.5)
+  const median = quantileRank(scales, 0.5)
   const agreeing = scales.filter((v) => Math.abs(v / median - 1) <= c.agree)
   const agreement = agreeing.length / scales.length
   if (agreeing.length < c.minPairs || agreement < c.minAgreement) return null
-  return { s: quantile(agreeing, 0.5), n: agreeing.length, of: scales.length, agreement }
+  return { s: quantileRank(agreeing, 0.5), n: agreeing.length, of: scales.length, agreement }
 }
 
 // For every image `isGuess(uuid)` marks (no focal in its metadata), replace Kmap's fx/fy

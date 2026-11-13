@@ -1,6 +1,7 @@
 // Framing the 3D view (Viewer3D.vue): how big the camera glyphs are, and robust
 // bounds of a cloud for the view presets and the grid.
 import * as THREE from 'three'
+import { median as statsMedian, quantileNearest } from '../../core/stats.js'
 
 // The visual size of the camera frustums / image thumbnails is driven by how
 // tightly the cameras were shot (median nearest-neighbour spacing), NOT by the
@@ -9,18 +10,9 @@ import * as THREE from 'three'
 // makes every quad the same big size regardless of camera spacing, so they pile
 // up and overlap. Nearest-neighbour spacing is invariant to those outliers and to
 // absolute scene scale, so adjacent frustums roughly touch instead of overlapping.
-export function median(arr) {
-  if (arr.length === 0) return 0
-  const s = [...arr].sort((a, b) => a - b)
-  const m = s.length >> 1
-  return s.length % 2 ? s[m] : 0.5 * (s[m - 1] + s[m])
-}
-export function percentile(arr, q) {
-  if (arr.length === 0) return 0
-  const s = [...arr].sort((a, b) => a - b)
-  const idx = Math.min(s.length - 1, Math.max(0, Math.round(q * (s.length - 1))))
-  return s[idx]
-}
+// 0 for no values (the framing then falls back to its defaults).
+const median = (arr) => (arr.length ? statsMedian(arr) : 0)
+const percentile = (arr, q) => (arr.length ? quantileNearest(Float64Array.from(arr).sort(), q) : 0)
 // centres: THREE.Vector3[] of camera centres. Returns the frustum forward depth.
 export function cameraFrustumDepth(centres, points3d) {
   // Preferred: median nearest-neighbour distance between camera centres.

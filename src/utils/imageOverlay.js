@@ -18,10 +18,7 @@
 // fake context can test each painter in node.
 
 import { depthColor } from '../core/products/colormap.js'
-
-function clamp(v, lo, hi) {
-  return Math.min(hi, Math.max(lo, v))
-}
+import { clamp } from '../core/stats.js'
 
 /** The view of one repaint: viewport `w × h`, pan `tx/ty`, `scale`, native `frame`. */
 export function overlayView({ w, h, tx, ty, scale, frame }) {

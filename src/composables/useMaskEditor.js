@@ -5,6 +5,7 @@ import { createRevision } from '../utils/revision.js'
 import { viewerMayHandleKey } from '../utils/keyRouting.js'
 import { matches } from '../core/help/shortcuts.js'
 import { useSmartSelect } from './useSmartSelect.js'
+import { clamp } from '../core/stats.js'
 
 // The image viewer's mask editor (components/viewers/ViewerImage.vue): the
 // native-resolution mask canvas, the edit tools (brush / erase / rectangle /
@@ -41,10 +42,6 @@ import { useSmartSelect } from './useSmartSelect.js'
 // stays off — the pointer router only paints while `editable`, which a reduced copy
 // never is.
 const UNDO_MAX = 10
-
-function clamp(v, lo, hi) {
-  return Math.min(hi, Math.max(lo, v))
-}
 
 export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, isVisible, largeScan = () => false }) {
   const { scale, tx, ty, frame, editable } = viewport

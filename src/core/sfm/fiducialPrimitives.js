@@ -11,8 +11,9 @@
 // height }`, row-major, values 0..255; patches are square `{ data, size }`.
 
 import { matchZNCC, subpixelPeak } from './fiducialDetect.js'
+import { clamp } from '../stats.js'
 
-export const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+export { clamp }
 
 /**
  * How many analytic variants a prototype family has. `generic` sweeps

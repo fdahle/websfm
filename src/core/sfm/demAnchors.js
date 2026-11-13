@@ -1,4 +1,5 @@
 import { NMAD_K } from '../constants.js'
+import { upperMedian } from '../stats.js'
 
 // F13 — reference-DEM-constrained bundle adjustment (TODO ▸ F13, issue #8): sparse points
 // over stable ground pulled toward a reference DEM, as a weak "the ground is about here"
@@ -100,10 +101,8 @@ export function demAnchors({
 // The NMAD of the height differences about the least-squares quadratic surface through
 // them (x, y centred and scaled), or about their median when too few or degenerate.
 function localScatter(items, median) {
-  const nmadOf = (r) => {
-    const a = r.map(Math.abs).sort((x, y) => x - y)
-    return a.length ? NMAD_K * a[a.length >> 1] : NaN
-  }
+  // NMAD about zero, with the upper median of |r|.
+  const nmadOf = (r) => NMAD_K * upperMedian(r.map(Math.abs))
   if (items.length < 12) return nmadOf(items.map((c) => c.dz - median))
   let cx = 0,
     cy = 0

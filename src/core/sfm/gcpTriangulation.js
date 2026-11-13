@@ -26,6 +26,7 @@
 import { triangulateDlt, makeP34flat } from './reconstruction.js'
 import { cameraCenter, projectPoint, rowCamera } from './geometry.js'
 import { SFM_TUNING } from '../tuning.js'
+import { median } from '../stats.js'
 
 // Gauss-Newton refinement (defaults co-located with the algorithm, per CLAUDE.md).
 const GN_MAX_ITERS = 10
@@ -252,12 +253,6 @@ function perViewResiduals(views, x, y, z) {
     const sy = Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1
     return { imageId: v.imageId, dx, dy, reprojPx: Math.hypot(dx, dy), normalized: Math.hypot(dx / sx, dy / sy) }
   })
-}
-
-function median(nums) {
-  const s = nums.slice().sort((a, b) => a - b)
-  const m = s.length >> 1
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
 // Triangulate one GCP's observations.

@@ -20,6 +20,7 @@
 
 import { coregisterNuthKaab } from './demCoregister.js'
 import { NMAD_K } from '../constants.js'
+import { quantileSorted } from '../stats.js'
 
 // Co-registration (demCoregister.js) on at most this many of the compared cells: each
 // costs about a dozen reference samples, and 20,000 pin a metre-scale shift.
@@ -149,7 +150,7 @@ export function summarizeDifferences(values) {
     sumSq += sorted[i] * sorted[i]
   }
   const mean = sum / n
-  const median = quantile(sorted, 0.5)
+  const median = quantileSorted(sorted, 0.5)
   const absDev = new Float64Array(n),
     absErr = new Float64Array(n)
   for (let i = 0; i < n; i++) {
@@ -164,13 +165,13 @@ export function summarizeDifferences(values) {
     std: n > 1 ? Math.sqrt(Math.max(0, (sumSq - n * mean * mean) / (n - 1))) : 0,
     rmse: Math.sqrt(sumSq / n),
     median,
-    nmad: NMAD_K * quantile(absDev, 0.5),
+    nmad: NMAD_K * quantileSorted(absDev, 0.5),
     min: sorted[0],
     max: sorted[n - 1],
-    le90: quantile(absErr, 0.9),
-    le95: quantile(absErr, 0.95),
-    q02: quantile(sorted, 0.02),
-    q98: quantile(sorted, 0.98),
+    le90: quantileSorted(absErr, 0.9),
+    le95: quantileSorted(absErr, 0.95),
+    q02: quantileSorted(sorted, 0.02),
+    q98: quantileSorted(sorted, 0.98),
   }
 }
 
@@ -233,14 +234,6 @@ export function differenceRgba({ width, height, diff, demOnly = null }, range, r
     rgba[i * 4 + 3] = 255
   }
   return rgba
-}
-
-// Linear-interpolated quantile of an ascending array (the R-7 / NumPy default).
-function quantile(sorted, q) {
-  const pos = (sorted.length - 1) * q
-  const lo = Math.floor(pos),
-    hi = Math.ceil(pos)
-  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo)
 }
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())

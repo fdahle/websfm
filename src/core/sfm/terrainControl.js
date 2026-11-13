@@ -8,6 +8,7 @@
 // georeference) gives it, the height offset coming from the DEM itself.
 
 import { spreadCandidates } from './referenceGcps.js'
+import { upperMedian } from '../stats.js'
 
 /**
  * The prior as a 3D similarity from the orthophoto's frame (x, y, z in its own
@@ -41,8 +42,7 @@ export function terrainInitial(prior, ortho, geo) {
 
 /** Median of the finite values, or NaN. */
 export function median(values) {
-  const v = values.filter(Number.isFinite).sort((p, q) => p - q)
-  return v.length ? v[v.length >> 1] : NaN
+  return upperMedian(values.filter(Number.isFinite))
 }
 
 /**

@@ -27,6 +27,7 @@
 import { cameraCenter } from './geometry.js'
 import { fitSimilarity, applySimilarity } from '../products/georef.js'
 import { SparsePoints } from './sparsePoints.js'
+import { clamp } from '../stats.js'
 
 export const MODEL_MERGE_METHODS = ['photos', 'gcps', 'georef']
 
@@ -39,7 +40,6 @@ const mul = (A, B) =>
   Array.from({ length: 3 }, (_, i) =>
     Array.from({ length: 3 }, (_, j) => A[i][0] * B[0][j] + A[i][1] * B[1][j] + A[i][2] * B[2][j]),
   )
-const clamp = (x, a, b) => Math.max(a, Math.min(b, x))
 function rotationErrorDeg(A, B) {
   const R = mul(A, transpose(B))
   return (Math.acos(clamp((R[0][0] + R[1][1] + R[2][2] - 1) / 2, -1, 1)) * 180) / Math.PI
