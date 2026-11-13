@@ -1,4 +1,4 @@
-import { TERRAIN, decodeTerrarium } from './basemaps.js'
+import { TERRAIN } from './basemaps.js'
 import { TILE_CACHE_MAX_ZOOM } from './offlineCache.js'
 import { WEB_MERCATOR_MAX_LAT } from './constants.js'
 
@@ -33,20 +33,6 @@ export function terrainZoom([west, south, east, north]) {
   return 0
 }
 
-// One Terrarium tile as elevations in metres ({ elev, w, h }, row-major).
-export async function fetchTerrariumTile(z, x, y, { signal } = {}) {
-  const res = await fetch(TERRAIN.url(z, x, y), { signal })
-  if (!res.ok) throw new Error(`Terrain tile ${z}/${x}/${y}: HTTP ${res.status}`)
-  // The PNG's bytes ARE the elevations: no colour management, no premultiply.
-  const bitmap = await createImageBitmap(await res.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
-  const { width: w, height: h } = bitmap
-  const canvas = new OffscreenCanvas(w, h)
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  ctx.drawImage(bitmap, 0, 0)
-  bitmap.close()
-  return { elev: decodeTerrarium(ctx.getImageData(0, 0, w, h).data, w, h), w, h }
-}
-
 // Bilinear height between pixel centres of one tile (clamped at its edge), at the
 // fractional tile coordinates `tx`, `ty` of tile column `x`, row `y`.
 function tileHeight({ elev, w, h }, tx, ty, x, y) {
@@ -71,9 +57,9 @@ function tileHeight({ elev, w, h }, tx, ty, x, y) {
  * failure is kept in `error` for the caller's report. `heightAtLoaded` answers at
  * once from the tiles already read (after `prefetch`), null elsewhere: for a caller
  * that samples thousands of cells synchronously. `loadTile(z, x, y)` →
- * { elev, w, h } is injectable for tests.
+ * { elev, w, h } reads one tile (utils/terrainTiles.js fetchTerrariumTile in the app).
  */
-export function terrainSampler(zoom, { loadTile = fetchTerrariumTile } = {}) {
+export function terrainSampler(zoom, { loadTile }) {
   const tiles = new Map()
   const loaded = new Map()
   const tileAt = (x, y) => {

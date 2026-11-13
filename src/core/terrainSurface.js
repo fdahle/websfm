@@ -4,7 +4,7 @@
 // `sample(x, y)` answers synchronously once the tiles under the DEM are read, in the
 // DEM's vertical datum when the terrain's (EGM96) converts to it.
 import { ensureProjection, transformer } from './crs.js'
-import { terrainSampler, terrainZoom, TERRAIN_DATUM, fetchTerrariumTile } from './terrainHeights.js'
+import { terrainSampler, terrainZoom, TERRAIN_DATUM } from './terrainHeights.js'
 import { heightShifter } from './verticalDatum.js'
 import { WEB_MERCATOR_MAX_LAT } from './constants.js'
 
@@ -35,7 +35,8 @@ function lonLatBox([x0, y0, x1, y1], toLonLat) {
 // `bounds` [xmin, ymin, xmax, ymax] of the DEM in `crs`; `datum` its vertical datum
 // (null / 'unknown': the terrain's heights are used as they are, and `datumNote` says
 // so). Throws when the terrain cannot cover the DEM at all.
-export async function terrainSurface({ crs, bounds, datum = null, loadTile = fetchTerrariumTile }) {
+// `loadTile` reads one tile (utils/terrainTiles.js fetchTerrariumTile in the app).
+export async function terrainSurface({ crs, bounds, datum = null, loadTile }) {
   if (!crs || crs === 'local') throw new Error('The DEM has no coordinate system to find the terrain under it')
   await ensureProjection(crs)
   const toLonLat = transformer(crs, 'EPSG:4326')

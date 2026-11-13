@@ -12,6 +12,7 @@ import {
 } from '../core/crs.js'
 import { projectFootprint, projectFootprintOnTerrain } from '../core/footprint.js'
 import { terrainSampler, terrainZoom, TERRAIN_DATUM } from '../core/terrainHeights.js'
+import { fetchTerrariumTile } from '../utils/terrainTiles.js'
 import { heightShifter, datumLabel, shiftRange } from '../core/verticalDatum.js'
 import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
@@ -442,7 +443,7 @@ export const useFootprintsStore = registerProjectStore(
       }
       const pad = Math.max(0.02, 0.25 * Math.max(e - w, n - s))
       const box = [w - pad, Math.max(-85, s - pad), e + pad, Math.min(85, n + pad)]
-      const sampler = terrainSampler(terrainZoom(box))
+      const sampler = terrainSampler(terrainZoom(box), { loadTile: fetchTerrariumTile })
       await sampler.prefetch(box)
       const shiftAt = target ? await heightShifter(TERRAIN_DATUM, target) : null
       if (target && !shiftAt) {

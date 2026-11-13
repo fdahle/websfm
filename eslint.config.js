@@ -29,7 +29,6 @@ export default [
     ignores: [
       'src/core/**/*.test.js',
       'src/core/**/*.testutil.js',
-      'src/core/terrainHeights.js', // fetches terrain tiles
       'src/core/models/modelCache.js', // Cache API for model weights
     ],
     rules: {

@@ -10,7 +10,7 @@ import ImageTileSource from 'ol/source/ImageTile'
 import WMTS, { optionsFromCapabilities } from 'ol/source/WMTS'
 import WMTSCapabilities from 'ol/format/WMTSCapabilities'
 import { SATELLITE, TERRAIN, CUSTOM_SATELLITE_MAX_ZOOM, customAttribution, hillshade } from '../../../core/basemaps.js'
-import { fetchTerrariumTile } from '../../../core/terrainHeights.js'
+import { fetchTerrariumTile } from '../../../utils/terrainTiles.js'
 
 // Every basemap layer preloads all coarser levels under the view. Online this
 // fills the screen sooner; offline it is what lets the service worker's cached

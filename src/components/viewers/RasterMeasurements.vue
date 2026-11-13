@@ -30,6 +30,7 @@ import { demRef } from '../../core/products/demWindow.js'
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { readDemWindow } from '../../workers/computeClient.js'
 import { terrainSurface, TERRAIN_SURFACE_NAME } from '../../core/terrainSurface.js'
+import { fetchTerrariumTile } from '../../utils/terrainTiles.js'
 
 // Raster measurements over the active ProductViewer. The tool is CHOSEN from the
 // Ribbon's contextual DEM/Orthophoto tab (Measure group) — this component only
@@ -249,7 +250,12 @@ watch([baseKind, () => props.product?.crs, () => props.product?.verticalDatum], 
   refError.value = ''
   if (kind === 'terrain') {
     try {
-      const t = await terrainSurface({ crs, bounds: demBounds(), datum: props.product?.verticalDatum ?? null })
+      const t = await terrainSurface({
+        crs,
+        bounds: demBounds(),
+        datum: props.product?.verticalDatum ?? null,
+        loadTile: fetchTerrariumTile,
+      })
       if (baseKind.value === kind) refSampler.value = { name: t.name, sample: t.sample, note: t.datumNote }
     } catch (err) {
       if (baseKind.value === kind) refError.value = err?.message ?? String(err)
