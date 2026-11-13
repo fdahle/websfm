@@ -170,6 +170,35 @@ describe.each(Object.keys(RUNNERS))('fusion on a known plane (%s)', (runner) => 
     expect(ownRms).toBeGreaterThan(0.6 * raw)
   })
 
+  it('removes a lone speck two maps agree on, only with removeIsolated', async () => {
+    // A point well in front of the plane that maps 0 and 1 both see (a fusion speck: a
+    // consistent pair with nothing around it). It passes the consistency check, so only
+    // the isolated-cell removal (voxelAccumulator filterIsolated) can take it out.
+    const maps = WIDE.map((C) => render(C))
+    const [m0, m1] = maps
+    const [u0, v0] = [10, 10]
+    const dS = 0.6 * m0.depth[v0 * W + u0]
+    const C0 = centreOf(m0)
+    const S = mulT(m0.R, [(u0 - K.cx) / K.fx, (v0 - K.cy) / K.fy, 1]).map((v, k) => C0[k] + dS * v)
+    m0.depth[v0 * W + u0] = dS
+    const pc = mul(m1.R, S).map((v, k) => v + m1.t[k])
+    m1.depth[Math.round((K.fy * pc[1]) / pc[2] + K.cy) * W + Math.round((K.fx * pc[0]) / pc[2] + K.cx)] = pc[2]
+    const kept = await fuse(maps, { minViews: 1, removeIsolated: false })
+    const speck = (out) => points(out).filter((p) => offPlane(p) > 0.5)
+    expect(speck(kept)).toHaveLength(1)
+    expect(
+      Math.hypot(
+        ...speck(kept)[0]
+          .slice(0, 3)
+          .map((v, k) => v - S[k]),
+      ),
+    ).toBeLessThan(0.1)
+    const cleaned = await fuse(maps, { minViews: 1, removeIsolated: true })
+    expect(speck(cleaned)).toHaveLength(0)
+    // The plane stays: at most the few cells along its border go with the speck.
+    expect(cleaned.count).toBeGreaterThan(0.99 * kept.count)
+  })
+
   it('keeps depths that agree within the tolerance', async () => {
     // ±0.4 % noise against a 1 % tolerance: still the same surface.
     const noisy = (u, v, d) => d * (1 + 0.004 * Math.sin(12.9898 * u + 78.233 * v))
