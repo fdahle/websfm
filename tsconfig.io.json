@@ -1,0 +1,47 @@
+// The file parsers and writers in src/core/io that type-check clean in loose mode (JS
+// inference, no implicit-any errors). scripts/check-io-types.mjs runs it and fails on an
+// error in a listed file; files they import are checked but not reported. A parser joins
+// the list once it passes. Not yet: las.js, laz.js and 14 others (stale JSDoc options).
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "strict": false,
+    "noImplicitAny": false
+  },
+  "include": [],
+  "files": [
+    "src/core/io/boundedZip.js",
+    "src/core/io/cameraKind.js",
+    "src/core/io/cloudAttributes.js",
+    "src/core/io/colmapDatabase.js",
+    "src/core/io/colmapModel.js",
+    "src/core/io/exifPose.js",
+    "src/core/io/exportSize.js",
+    "src/core/io/featureText.js",
+    "src/core/io/fiducialColumns.js",
+    "src/core/io/fiducialMarks.js",
+    "src/core/io/fiducialObs.js",
+    "src/core/io/geojson.js",
+    "src/core/io/imageDuplicates.js",
+    "src/core/io/imageIndex.js",
+    "src/core/io/importKind.js",
+    "src/core/io/kml.js",
+    "src/core/io/metashapeProject.js",
+    "src/core/io/metashapeXml.js",
+    "src/core/io/nameMatch.js",
+    "src/core/io/pose.js",
+    "src/core/io/projectMerge.js",
+    "src/core/io/projectRasterWindow.js",
+    "src/core/io/rasterKind.js",
+    "src/core/io/rasterPyramid.js",
+    "src/core/io/rasterSample.js",
+    "src/core/io/rasterSource.js",
+    "src/core/io/rasterStyle.js",
+    "src/core/io/rasterWindow.js",
+    "src/core/io/sensor.js",
+    "src/core/io/transforms.js",
+    "src/core/io/xmlLite.js"
+  ]
+}

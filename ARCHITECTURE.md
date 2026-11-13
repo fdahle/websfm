@@ -165,8 +165,9 @@ to the algorithm; the other steps differ only in file names.
 
 ```bash
 npm test             # Vitest: src/core, utils, stores, composables, components, workers; scripts/licenses
-npm run typecheck    # tsc on the few .ts files, vue-tsc on .vue templates (checkJs off), the
-                     # template-binding check, ESLint on .js (not .vue)
+npm run typecheck    # tsc on the few .ts files and the io parsers in tsconfig.io.json, vue-tsc
+                     # on .vue templates (checkJs off), the template-binding check, ESLint
+                     # on .js and .vue
 npm run test:browser # Playwright, Chromium (test:browser:firefox for Firefox)
 cargo test --manifest-path crates/Cargo.toml --workspace --release
 ```

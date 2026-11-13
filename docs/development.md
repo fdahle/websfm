@@ -67,9 +67,10 @@ does what it did. Test against what the result must be instead:
   noticed (`reports/mutation/index.html`). A surviving mutant is a bug the tests would let
   through; it is not run in CI.
 
-`npm run typecheck` checks every Vue template's bindings, the shared data types and the
-few modules written in TypeScript, and lints the JavaScript; not every store is statically
-typed yet. GitHub Actions runs all of the above plus a production build. To use an
+`npm run typecheck` checks every Vue template's bindings, the shared data types, the
+few modules written in TypeScript and the file parsers listed in `tsconfig.io.json`
+(loose JS inference; add a parser once it passes), and lints the JavaScript and the Vue
+components; not every store is statically typed yet. GitHub Actions runs all of the above plus a production build. To use an
 installed Chrome locally, set `PLAYWRIGHT_CHANNEL=chrome`.
 
 WebKit on Linux needs a few system libraries: `npx playwright install-deps webkit` installs
