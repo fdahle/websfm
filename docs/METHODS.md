@@ -1592,6 +1592,25 @@ nothing feeds back into the solve.
 - **Neighbour search** (`core/products/knn.js`): one exact static k-d tree (median split,
   leaves of 12) behind normals, ICP and distances; unlike a uniform grid it stays fast for
   queries far from the data (another epoch, an unaligned start).
+- **Filter** (`cloudEdit.js` `filterCloud`): the steps the dialog turns on run in a fixed
+  order, each on the previous one's output (range → voxel thinning → isolated clusters →
+  statistical outliers), so thinning first makes the outlier step cheaper. *Range*: z and
+  brightness bounds, brightness the Rec. 709 luma (0.2126 R + 0.7152 G + 0.0722 B) of the
+  stored 0–255 colour. *Voxel thinning*: one point per cube on a grid aligned near the
+  cloud's box (Float32 keeps its precision on CRS-sized coordinates), colours averaged and
+  normals averaged and renormalised; a cloud with scalar fields (class, return flags, GPS
+  time) keeps each cell's first point instead, since an average of those would be an
+  observation that never existed. *Isolated clusters*: occupancy on a grid (auto cell 4×
+  the spacing (box volume / n)^(1/d)); a cell is kept when it holds more than `maxSupport`
+  points or at least `minNeighbors` of its 26 neighbours are occupied; the original points
+  stay (a cleanup, not a resample). *Statistical outliers* (Rusu et al. 2008): each
+  point's mean distance to its k nearest neighbours (exact, the k-d tree above) within a
+  reach of 4× the spacing; a point with none in reach is dropped, the rest are kept below
+  μ + r·σ of the cloud's means. A resident cloud runs the neighbour means in slabs over the
+  worker pool (`cloudSlabs.js`: cut along the longer horizontal side at point quantiles,
+  each with a margin as wide as the reach, so every point sees the neighbours one run
+  would); a streamed cloud runs tile by tile with the outlier step last and its limit from
+  the summed statistics of all tiles (`outlierLimit`), the cut a single pass would make.
 - **Normals** (`cloudNormals.js`): PCA of the 16 nearest neighbours (smallest eigenvector,
   cyclic Jacobi in double precision), each oriented on its own toward the nearest camera
   or +up: no spanning-tree propagation, so the result is deterministic.
