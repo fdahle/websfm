@@ -71,6 +71,10 @@ import { overlapVisibility, chooseOverlapSubset } from '/src/core/sfm/reduceOver
 import { FIDUCIAL_SPOT_DEFAULTS, VIDEO_IMPORT_DEFAULTS } from '/src/core/defaults.user.js'
 import { analysisTimes, intervalTimes, selectKeyframes } from '/src/core/io/videoFrames.js'
 import { openVideoSource, analyzeVideo, extractVideoFrames } from '/src/utils/videoSource.js'
+import { installBrowserCoreIo } from '/src/utils/installCoreIo.js'
+
+// The network, app storage and model cache for core modules (core/coreIo.js), as main.js installs them.
+installBrowserCoreIo()
 
 // SfM input capture (config `dumpSfmInput`): the next `reconstruct` op posted to a
 // worker is encoded before it is sent (its match buffers are transferred, so they

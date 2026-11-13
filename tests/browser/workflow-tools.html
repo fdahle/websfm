@@ -9,6 +9,8 @@
       import { createApp } from 'vue'
       import { createPinia } from 'pinia'
       import Harness from './WorkflowToolsHarness.vue'
+      import { installBrowserCoreIo } from '/src/utils/installCoreIo.js'
+      installBrowserCoreIo()
       createApp(Harness).use(createPinia()).mount('#app')
     </script>
   </body>
