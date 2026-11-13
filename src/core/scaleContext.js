@@ -48,9 +48,10 @@
 //
 // Pure: numbers in, numbers out. No Vue / Pinia / OPFS / worker imports.
 
+import { upperMedian } from './stats.js'
+
 // Co-located defaults (the self-contained-pure-module exception in CLAUDE.md ▸
 // Conventions — tuning.js points here rather than duplicating these).
-import { upperMedian } from './stats.js'
 export const SCALE_CONTEXT_DEFAULTS = {
   // Hard ceiling on the correction factor. A factor above this means detection
   // threw away so much resolution that the honest fix is to raise `maxDim`, not to

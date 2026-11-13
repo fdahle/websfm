@@ -14,9 +14,10 @@
 // The median keeps one stray position (a GPS glitch, a mislabelled image) from
 // moving the zone.
 
+import { median } from './stats.js'
+
 // UTM zone number (1–60) for a WGS 84 position, honouring the two standard
 // exceptions to the 6° grid.
-import { median } from './stats.js'
 export function utmZone(lat, lon) {
   const l = ((((lon + 180) % 360) + 360) % 360) - 180 // normalise to [-180, 180)
   if (lat >= 56 && lat < 64 && l >= 3 && l < 12) return 32 // south-west Norway

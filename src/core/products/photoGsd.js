@@ -1,3 +1,5 @@
+import { upperMedian } from '../stats.js'
+
 // The photos' own ground sample distance in a product's frame: what one photo pixel
 // covers on the surface it sees. Per camera, the median distance from its centre to the
 // tie points it observes over its focal length (px); the median over cameras. Measured
@@ -8,7 +10,6 @@
 // points   a SparsePoints (core/sfm/sparsePoints.js): pos, vstart, vcam, viewUuids
 // toFrame  (p: [x, y, z] model) → [x, y, z] in the frame
 // → the GSD (frame units per photo pixel), or null when no camera sees a point.
-import { upperMedian } from '../stats.js'
 export function photoGsd(cameras, points, toFrame, { sampleMax = 50_000 } = {}) {
   const n = points?.length ?? 0
   if (!n || !cameras?.size) return null
