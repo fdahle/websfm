@@ -168,8 +168,8 @@ const sceneCenter = new THREE.Vector3(0, 0, 0)
 let sceneRadius = 5
 // Estimated scene up (unit); orients the initial view + grid so the model reads
 // level without georeferencing (see estimateUpFromCameras). Default world +Z.
-const sceneUp = new THREE.Vector3(0, 0, 1)
-// Signed extent of the cloud/mesh *along sceneUp*, relative to sceneCenter — drives
+const upAxis = new THREE.Vector3(0, 0, 1)
+// Signed extent of the cloud/mesh *along upAxis*, relative to sceneCenter — drives
 // the grid's min/avg/max placement (see updateGrid). 0 until a cloud loads.
 let sceneAlongMin = 0,
   sceneAlongMax = 0
@@ -220,6 +220,7 @@ const {
   abortStroke,
   setOverlaySize,
   // Not used here: kept on the component so the browser tests can draw a shape.
+  // eslint-disable-next-line no-unused-vars
   applySelectionShape,
 } = useCloudSelection({
   view,
@@ -257,7 +258,7 @@ const {
   props,
   container,
   cloudLayers,
-  sceneUp,
+  sceneUp: upAxis,
   pointerPx,
   pickRadiusPx: PICK_RADIUS_PX,
   requestRender,
@@ -327,14 +328,14 @@ function updateGrid() {
   if (!grid) return
   const span = Math.max(sceneRadius * 2, 1)
   grid.scale.setScalar(span / 10) // GridHelper(10,…) is 10 world units wide by default
-  grid.quaternion.setFromUnitVectors(GRID_NORMAL, sceneUp) // lay it perpendicular to up
+  grid.quaternion.setFromUnitVectors(GRID_NORMAL, upAxis) // lay it perpendicular to up
   const off =
     gridZ.value === 'min'
       ? sceneAlongMin
       : gridZ.value === 'max'
         ? sceneAlongMax
         : 0.5 * (sceneAlongMin + sceneAlongMax) // 'avg' → middle of the extent
-  grid.position.copy(sceneCenter).addScaledVector(sceneUp, off)
+  grid.position.copy(sceneCenter).addScaledVector(upAxis, off)
 }
 
 function init() {
@@ -433,7 +434,7 @@ function createLodCloudLayer(cloud) {
   return layer
 }
 const layerBounds = (layer) =>
-  layer.lod ? layer.boundsFor(sceneUp, robustBounds) : robustBounds(layer.positions, layer.count, sceneUp)
+  layer.lod ? layer.boundsFor(upAxis, robustBounds) : robustBounds(layer.positions, layer.count, upAxis)
 
 function createCloudLayer(cloud) {
   if (usesLod(cloud)) return createLodCloudLayer(cloud)
@@ -470,7 +471,7 @@ function createCloudLayer(cloud) {
     positions,
     count,
     source: cloud,
-    bounds: robustBounds(positions, count, sceneUp),
+    bounds: robustBounds(positions, count, upAxis),
   }
 }
 
@@ -539,14 +540,14 @@ function updateLayerBounds() {
   for (const { bounds: b } of cloudLayers.values()) {
     box.expandByPoint(b.center.clone().addScalar(-b.radius))
     box.expandByPoint(b.center.clone().addScalar(b.radius))
-    const height = b.center.dot(sceneUp)
+    const height = b.center.dot(upAxis)
     low = Math.min(low, height + b.alongMin)
     high = Math.max(high, height + b.alongMax)
   }
   box.getCenter(sceneCenter)
   sceneRadius = Math.max(0.001, box.getSize(new THREE.Vector3()).length() / 2)
-  sceneAlongMin = low - sceneCenter.dot(sceneUp)
-  sceneAlongMax = high - sceneCenter.dot(sceneUp)
+  sceneAlongMin = low - sceneCenter.dot(upAxis)
+  sceneAlongMax = high - sceneCenter.dot(upAxis)
 }
 
 // Reconcile by cloud id, retaining GPU geometry when only selection, names,
@@ -581,12 +582,12 @@ function setCloudLayers(clouds, { follow = false } = {}) {
   const cameras = new Map()
   for (const map of cameraMaps) for (const [id, cam] of map) cameras.set(id, cam)
   const up = props.sceneUp || estimateUpFromCameras(cameras)
-  const prevUp = sceneUp.clone()
-  if (up) sceneUp.set(...up).normalize()
-  else sceneUp.set(0, 0, 1)
-  // Bounds are measured along sceneUp: when the estimate moved (new cameras, no
+  const prevUp = upAxis.clone()
+  if (up) upAxis.set(...up).normalize()
+  else upAxis.set(0, 0, 1)
+  // Bounds are measured along upAxis: when the estimate moved (new cameras, no
   // prop), the layers kept below must be re-measured like the prop watcher does.
-  const upChanged = !prevUp.equals(sceneUp)
+  const upChanged = !prevUp.equals(upAxis)
   for (const cloud of visible) {
     let layer = cloudLayers.get(cloud.id)
     if (
@@ -721,12 +722,12 @@ function onSelectKey(e) {
 }
 
 // ── Camera view presets ──────────────────────────────────────────────────────
-// Presets are relative to the estimated scene up (sceneUp), not world axes, so a
-// model in a tilted SfM frame still frames level (Top looks down sceneUp, the four
+// Presets are relative to the estimated scene up (upAxis), not world axes, so a
+// model in a tilted SfM frame still frames level (Top looks down upAxis, the four
 // sides are horizontal about it). Build an orthonormal {right, fwd, up} basis around
-// sceneUp with a stable horizontal reference.
+// upAxis with a stable horizontal reference.
 function upBasis() {
-  const up = sceneUp.clone().normalize()
+  const up = upAxis.clone().normalize()
   // Reference axis to derive "horizontal" from — avoid the degenerate case where it
   // is parallel to up.
   const ref = Math.abs(up.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0)
@@ -771,8 +772,8 @@ function syncControlsUp() {
 // The turntable turns about the scene's up axis, which needs the camera's up on it:
 // the Top and Bottom presets tilt it into the ground plane.
 function alignUpToScene() {
-  if (!camera || camera.up.angleTo(sceneUp) < 1e-6) return
-  camera.up.copy(sceneUp)
+  if (!camera || camera.up.angleTo(upAxis) < 1e-6) return
+  camera.up.copy(upAxis)
   syncControlsUp()
 }
 
@@ -948,7 +949,7 @@ watch(
   () => props.sceneUp,
   (u) => {
     if (u && u.length === 3) {
-      sceneUp.set(u[0], u[1], u[2]).normalize()
+      upAxis.set(u[0], u[1], u[2]).normalize()
       for (const layer of cloudLayers.values()) layer.bounds = layerBounds(layer)
       updateLayerBounds()
       updateGrid()

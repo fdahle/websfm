@@ -18,7 +18,7 @@ import Icon from '../Icon.vue'
 // The popover is TELEPORTED to <body>: `.ribbon-body` scrolls horizontally, and
 // `overflow-x: auto` forces `overflow-y` to auto too, so an absolutely positioned
 // child would be clipped at the ribbon's bottom edge.
-const props = defineProps({
+defineProps({
   label: { type: String, required: true },
   icon: { type: String, required: true },
   rows: { type: Array, required: true },

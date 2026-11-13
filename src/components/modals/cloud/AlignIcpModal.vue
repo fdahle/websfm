@@ -1,6 +1,6 @@
 <script setup>
 import FieldHelp from '../../guide/FieldHelp.vue'
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import SettingsPresetsMenu from '../ui/SettingsPresetsMenu.vue'
 import { useDialogSettings } from '../../../composables/useDialogSettings.js'

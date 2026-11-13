@@ -1,4 +1,5 @@
 import globals from 'globals'
+import pluginVue from 'eslint-plugin-vue'
 export default [
   // Alone in its object, so the patterns are ignored everywhere (generated wasm glue included).
   { ignores: ['node_modules/**', 'dist/**', 'src/wasm/**', 'test-results/**', 'playwright-report/**'] },
@@ -45,6 +46,23 @@ export default [
         'createImageBitmap',
         'XMLHttpRequest',
       ],
+    },
+  },
+  // Single-file components: the plugin's essential set (errors, not style; Prettier
+  // formats), plus the same unused-binding check as the plain scripts.
+  ...pluginVue.configs['flat/essential'].map((c) => ({ ...c, files: ['**/*.vue'] })),
+  {
+    files: ['**/*.vue'],
+    languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: globals.browser },
+    rules: {
+      'no-undef': 'error',
+      'no-unused-vars': [
+        'error',
+        { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_', ignoreRestSiblings: true },
+      ],
+      // A style rule against names that could become HTML elements; Icon, Ribbon,
+      // Sidebar and the test Harness clash with none.
+      'vue/multi-word-component-names': 'off',
     },
   },
   {
