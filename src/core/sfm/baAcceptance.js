@@ -9,7 +9,7 @@
 //
 // So compare both states under ONE robust cost: the Huber loss at a single δ taken
 // from the pre-BA residuals (the crate re-derives δ per iteration; a fixed δ is what
-// makes before and after comparable). The projection mirrors bundle.rs `project_full`
+// makes before and after comparable). The projection mirrors bundle/camera.rs `project_full`
 // (pinhole + radial k1..k3 on normalised coordinates, or — for a K carrying
 // `fisheye: true` — the Kannala–Brandt lens in recorded pixels). A projection behind
 // or on the camera costs δ², as in the crate.
@@ -49,7 +49,7 @@ function projectFullGlobal(cam, K, x, y, z) {
   const r2 = a * a + b * b
   let d
   if (K.fisheye) {
-    // θd/r with θ = atan r — bundle.rs `lens_factor`, its on-axis limit included.
+    // θd/r with θ = atan r — bundle/camera.rs `lens_factor`, its on-axis limit included.
     const r = Math.sqrt(r2),
       th = Math.atan(r),
       t2 = th * th

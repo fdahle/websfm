@@ -68,7 +68,7 @@ export const DETECT_TUNING = {
 // bundle-adjustment / track filtering). `settings` from the caller still overrides.
 // NOT here (owned by its module): init-pair thresholds → core/sfm/initPair.js.
 export const SFM_TUNING = {
-  // ── Bundle-adjustment linear solver (bundle.rs SolverOpts) ──
+  // ── Bundle-adjustment linear solver (bundle/solve.rs SolverOpts) ──
   // Policy for the reduced camera system of every bundle adjustment. null ⇒ the crate
   // default: PCG from n ≥ 600 (≈ 100 cameras), rel_tol 1e-10, 2,000 iterations, Cholesky
   // fallback at the cap. The policy here is inexact Newton instead: CG to 1e-6, at most

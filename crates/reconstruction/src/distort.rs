@@ -105,3 +105,51 @@ pub fn undistort_brown_pixels(xy: &[f64], starts: &[u32], k: &[f64], d: &[f64], 
     });
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bundle::distort_jac;
+
+    // The lens model is written three times: here (undistortion, the self-calibration
+    // fold), in bundle/camera.rs (the solver's projection and its Jacobians) and in
+    // src/core/sfm/distortion.js. That this file gives distortion.js's bits is checked in
+    // src/core/sfm/reconstruction.test.js (undistortBrownPixels); these check the
+    // solver's model against this file, and its fisheye branch against Kannala–Brandt.
+    fn close(a: f64, b: f64) -> bool { (a - b).abs() <= 1e-13 * (1.0 + b.abs()) }
+
+    #[test]
+    fn the_solver_distorts_as_the_undistortion_inverts() {
+        // [k1, k2, k3, p1, p2]: barrel, pincushion with decentring, none.
+        let bags = [[-0.2, 0.05, -0.01, 0.0, 0.0], [0.12, -0.03, 0.004, 1e-3, -5e-4], [0.0; 5]];
+        for bag in bags {
+            for i in 0..21 {
+                for j in 0..21 {
+                    let (a, b) = (-0.6 + 0.06 * i as f64, -0.45 + 0.045 * j as f64);
+                    let (xd, yd) = brown_forward(a, b, &[bag[0], bag[1], bag[2], 0.0, 0.0, 0.0, bag[3], bag[4]]);
+                    let s = distort_jac(a, b, &[bag[0], bag[1], bag[2], 0.0], &[bag[3], bag[4]], false);
+                    assert!(close(s.xd, xd) && close(s.yd, yd), "{bag:?} at ({a}, {b}): solver ({}, {}), undistortion's forward ({xd}, {yd})", s.xd, s.yd);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_solver_fisheye_is_kannala_brandt() {
+        // θd = θ·(1 + k1θ² + k2θ⁴ + k3θ⁶ + k4θ⁸), θ = atan r; the point moves along its ray.
+        let k = [0.03, -0.01, 0.002, -1e-4];
+        for i in 1..40 {
+            let r = 0.05 * i as f64;
+            for j in 0..8 {
+                let phi = 0.7 * j as f64;
+                let (a, b) = (r * phi.cos(), r * phi.sin());
+                let th = r.atan();
+                let thd = th * (1.0 + k[0] * th.powi(2) + k[1] * th.powi(4) + k[2] * th.powi(6) + k[3] * th.powi(8));
+                let s = distort_jac(a, b, &k, &[0.0, 0.0], true);
+                assert!(close(s.xd, a * thd / r) && close(s.yd, b * thd / r), "r {r}, φ {phi}");
+            }
+        }
+        let s = distort_jac(0.0, 0.0, &k, &[0.0, 0.0], true);
+        assert_eq!((s.xd, s.yd), (0.0, 0.0));
+    }
+}

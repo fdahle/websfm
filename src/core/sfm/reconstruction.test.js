@@ -490,7 +490,7 @@ describe('bundleAdjust', () => {
     expect(f[2]).toBe(200)
     expect(f[3]).toBe(1)
     expect(baSolverFlat({ pcgAcceptPartial: false })[3]).toBe(0)
-    // Slot 4: the LM function-tolerance stop (bundle.rs SolverOpts::function_tol).
+    // Slot 4: the LM function-tolerance stop (bundle/solve.rs SolverOpts::function_tol).
     expect(baSolverFlat({ functionTolerance: 1e-6 })[4]).toBeCloseTo(1e-6, 12)
     expect(baSolverFlat({})[4]).toBeNaN()
     // Slot 5: the preconditioner (SolverOpts::precond); only 'ic0' sets it.
