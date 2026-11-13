@@ -5,6 +5,10 @@ import { seamGrid, SEAM_CANDIDATES } from './seamCut.js'
 import { MULTIBAND_LEVELS, MULTIBAND_BYTES_PER_CELL } from './multiband.js'
 import { mosaicMode, orthoHalo } from './orthoMosaic.js'
 import { RUN_DEFAULTS } from './orthoColour.js'
+import { sampleSurfaceWindow } from './surface.js'
+import { boxReachesMap, newLabels } from './orthoWindow.js'
+import { createMultiband } from './multiband.js'
+import { fillArray } from '../bigArray.js'
 
 export const ORTHO_BLOCK = 2048
 // A split ortho's block side (workers/ops/ortho.js orthoPlan): ORTHO_BLOCK, halved
@@ -64,4 +68,112 @@ export function orthoTiledWorkingBytes({
 export function orthoSeamSurveyBytes(width, height) {
   const { cw, ch } = seamGrid(width, height)
   return cw * ch * (5 + SEAM_CANDIDATES * 13 + 8 + 60)
+}
+
+// A tiled run's pre-pass (orthorectifyTiled): the grid's height range and mean (row-major,
+// as the single pass reads them), the surface cell count, and each block core's height
+// range for the cull. B: the block side; nbx × nby blocks.
+export function surveyHeights(surface, geom, B, nbx, nby) {
+  const { width: W, height: H } = geom
+  const nBlocks = nbx * nby
+  const blockLo = fillArray(new Float64Array(nBlocks), Infinity),
+    blockHi = fillArray(new Float64Array(nBlocks), -Infinity)
+  const rowData = new Float32Array(W),
+    rowMask = new Uint8Array(W)
+  let zLo = Infinity,
+    zHi = -Infinity,
+    zMid = 0,
+    surfaceCells = 0
+  for (let row = 0; row < H; row++) {
+    sampleSurfaceWindow(surface, geom, 0, row, W, 1, rowData, rowMask)
+    const base = Math.floor(row / B) * nbx
+    for (let col = 0; col < W; col++) {
+      if (!rowMask[col]) continue
+      const z = rowData[col]
+      if (z < zLo) zLo = z
+      if (z > zHi) zHi = z
+      zMid += (z - zMid) / ++surfaceCells
+      const bi = base + Math.floor(col / B)
+      if (z < blockLo[bi]) blockLo[bi] = z
+      if (z > blockHi[bi]) blockHi[bi] = z
+    }
+  }
+  return { blockLo, blockHi, zLo, zHi, zMid, surfaceCells }
+}
+
+// The block windows of a tiled run (core + halo, clipped to the grid; a multiband window
+// rounded out to its pyramid lattice) and the maps that can see each. The window reaches
+// at most `reach` blocks over, so those blocks' core ranges bound every height in it.
+export function blockWindows({ geom, B, nbx, nby, halo, align, blockLo, blockHi, gp, metas }) {
+  const { width: W, height: H } = geom
+  const reach = Math.ceil((halo + align - 1) / B)
+  const blocks = []
+  for (let by = 0; by < nby; by++)
+    for (let bx = 0; bx < nbx; bx++) {
+      const col0 = bx * B,
+        row0 = by * B,
+        bw = Math.min(B, W - col0),
+        bh = Math.min(B, H - row0)
+      const ex0 = Math.max(0, Math.floor((col0 - halo) / align) * align),
+        ey0 = Math.max(0, Math.floor((row0 - halo) / align) * align)
+      const ex1 = Math.min(W, Math.ceil((col0 + bw + halo) / align) * align),
+        ey1 = Math.min(H, Math.ceil((row0 + bh + halo) / align) * align)
+      let lo = Infinity,
+        hi = -Infinity
+      for (let ny = Math.max(0, by - reach); ny <= Math.min(nby - 1, by + reach); ny++) {
+        for (let nx = Math.max(0, bx - reach); nx <= Math.min(nbx - 1, bx + reach); nx++) {
+          lo = Math.min(lo, blockLo[ny * nbx + nx])
+          hi = Math.max(hi, blockHi[ny * nbx + nx])
+        }
+      }
+      const maps = []
+      if (lo <= hi) {
+        // The cull with the block's own affine (and its grown box) when the frame has none.
+        const near = gp.local([
+          geom.originX + (ex0 + 0.5) * geom.gsd,
+          geom.originX + (ex1 - 0.5) * geom.gsd,
+          geom.originY - (ey1 - 0.5) * geom.gsd,
+          geom.originY - (ey0 + 0.5) * geom.gsd,
+          lo,
+          hi,
+        ])
+        for (let mi = 0; mi < metas.length; mi++) if (boxReachesMap(metas[mi], near, near.box)) maps.push(mi)
+      }
+      blocks.push({ col0, row0, bw, bh, ex0, ey0, ew: ex1 - ex0, eh: ey1 - ey0, maps, empty: !(lo <= hi) })
+    }
+  return blocks
+}
+
+// A tiled run's window buffers, sized once for the largest window: one set per block of
+// a group (`groups`, lists of block indices).
+export function windowStates({ W, H, B, halo, align, groups, opts, metas, mosaic, multiband, mode }) {
+  const win0 = maxWindow(W, H, B, halo, align),
+    maxCells = win0.ew * win0.eh
+  const average = opts.blend === 'average'
+  const groupSize = groups.reduce((n, g) => Math.max(n, g.length), 0)
+  return Array.from({ length: groupSize }, () => ({
+    buf: {
+      data: new Float32Array(maxCells),
+      mask: new Uint8Array(maxCells),
+      rgba: new Uint8ClampedArray(maxCells * 4),
+      scores: average || mosaic ? null : new Float64Array(maxCells),
+      sums: average ? new Float64Array(maxCells * 4) : null,
+      labels: newLabels(maxCells, opts, metas.length),
+    },
+    mb: mosaic
+      ? {
+          raw: new Uint16Array(maxCells),
+          label: new Uint16Array(maxCells),
+          tmp: new Uint16Array(maxCells),
+          score: new Float64Array(maxCells),
+          sums: new Float32Array(maxCells * 4),
+          fallback: new Float32Array(maxCells * 3),
+          flags: new Uint8Array(maxCells),
+          dist: new Uint16Array(maxCells),
+          pyr: multiband ? createMultiband(win0.ew, win0.eh, mode.levels) : null,
+        }
+      : null,
+    // map index → its position in the block's map list, -1 for a map the block does not see
+    slot: new Int32Array(metas.length).fill(-1),
+  }))
 }
