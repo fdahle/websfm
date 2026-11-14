@@ -58,6 +58,13 @@ Notable changes to websfm. The format follows
   orthophoto adds its own error.
 
 ### Performance
+- **Texturing a mesh is about four times faster.** Tools ▸ Mesh ▸ Texture now spreads its
+  photo work over every processor core: finding which photos see each face, and copying
+  the photos' pixels into the atlas, run side by side, one share of the photos per core;
+  the log says how many cores took part. The textured mesh is the same, byte for byte, as
+  before. Quarry (347 photos, a 653,708-triangle mesh, 7 pages of 4,096 px, GPU
+  z-buffers): 195 s on one worker → 53 s on 8 (visibility 65 → 12 s, bake 124 → 23 s);
+  the pages' JPEGs are identical to the previous version's and between 1 and 8 workers.
 - **Bundle adjustment of very large projects fits in the browser.** When the exact solve
   would need more memory than the browser gives a bundle adjustment, WebSfM now solves the
   camera system iteratively without storing it, the way Ceres does for large problems. A

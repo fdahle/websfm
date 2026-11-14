@@ -5,7 +5,9 @@ import { meshGeometry, projectVertices, rasterizeDepth, viewGrid, localCamera, f
 import { selectViews, mergeSmallCharts } from './labeling.js'
 import { buildCharts } from './charts.js'
 import { smoothingEdges } from './seamLevel.js'
-import { textureMesh } from './texture.js'
+import { textureMesh, textureBegin, textureLayout, textureFinish, gainObservations, gainSampleView } from './texture.js'
+import { faceCandidatesPart, mergeCandidateParts } from './visibility.js'
+import { bakeViews, pieceBlocks, pasteBlocks } from './bake.js'
 import { makeSampleMap } from '../../sfm/displayFrame.js'
 import { undistortPixel } from '../../sfm/distortion.js'
 import { sampleRgbaBilinear } from '../undistort.js'
@@ -387,6 +389,79 @@ describe('faceCandidates', () => {
   })
 })
 
+describe('mergeCandidateParts', () => {
+  // A share's sparse slots: [[face, [[view, score], …]], …].
+  const slots = (list) => ({
+    face: Int32Array.from(list.map(([f]) => f)),
+    n: Uint8Array.from(list.map(([, c]) => c.length)),
+    view: Uint16Array.from(list.flatMap(([, c]) => c.map(([v]) => v))),
+    score: Float32Array.from(list.flatMap(([, c]) => c.map(([, s]) => s))),
+    colour: null,
+  })
+  const part = (main, fallback, seenBy) => ({
+    K: 2,
+    KF: 2,
+    nFaces: 5,
+    seenBy: Int32Array.from(seenBy),
+    main: slots(main),
+    fallback: slots(fallback),
+  })
+
+  it("keeps each face's K best over the shares, and the fallbacks one pass would", () => {
+    // Views 0–1 in share A, 2–3 in share B; a negative score faces away. Face 0: seen
+    // whole in both. Face 1: only partly, in both. Face 2: whole in B, partly in A. Face 3:
+    // partly in A, then whole in B but from behind (the winding step drops that, so A's
+    // fallback is used). Face 4: whole in A from behind, partly in B: one pass stopped
+    // recording fallbacks at A's view, so the face is left with none.
+    const a = part(
+      [
+        [
+          0,
+          [
+            [0, 3],
+            [1, 1],
+          ],
+        ],
+        [4, [[0, -5]]],
+      ],
+      [
+        [1, [[0, 2]]],
+        [2, [[1, 9]]],
+        [3, [[1, 6]]],
+      ],
+      [2, 0, 0, 0],
+    )
+    const b = part(
+      [
+        [0, [[2, 2]]],
+        [2, [[3, 4]]],
+        [3, [[2, -7]]],
+      ],
+      [
+        [1, [[3, 5]]],
+        [4, [[3, 5]]],
+      ],
+      [0, 0, 2, 0],
+    )
+    const c = mergeCandidateParts([a, b], 4, { orientation: 1 })
+    const cands = (f) => Array.from({ length: c.count[f] }, (_, i) => [c.view[f * 2 + i], c.score[f * 2 + i]])
+    expect(c.orientation).toBe(1)
+    expect(cands(0)).toEqual([
+      [0, 3],
+      [2, 2],
+    ])
+    expect(cands(1)).toEqual([
+      [3, 5],
+      [0, 2],
+    ])
+    expect(cands(2)).toEqual([[3, 4]])
+    expect(cands(3)).toEqual([[1, 6]])
+    expect(cands(4)).toEqual([])
+    expect(c.fallbackFaces).toBe(2)
+    expect([...c.seenBy]).toEqual([2, 0, 2, 0])
+  })
+})
+
 describe('selectViews', () => {
   it('takes the best view without smoothing and removes speckle with it', () => {
     // A strip of 6 faces; all see views 0 and 1, view 0 is better except on face 2.
@@ -673,6 +748,83 @@ describe('textureMesh', () => {
     expect(re.summary.charts).toBeLessThanOrEqual(fresh.summary.charts + 2)
     expect(re.summary.pieces).toBeLessThanOrEqual(fresh.summary.pieces + 2)
     expect(re.summary.seams.seams).toBeGreaterThan(0.8 * fresh.summary.seams.seams)
+  })
+
+  // The worker run (workers/ops/texture.js): visibility in shares of the views, merged in
+  // view order; the bake in shares of the photos, each into its own blocks, pasted onto
+  // the pages; the gain observations concatenated in bake order.
+  async function splitRun(mesh, views, opts, hooks, shares) {
+    const run = textureBegin(mesh, views, opts, hooks)
+    const chunks = (list, n) => {
+      const out = []
+      for (let k = 0; k < n; k++)
+        out.push(list.slice(Math.floor((k * list.length) / n), Math.floor(((k + 1) * list.length) / n)))
+      return out
+    }
+    const parts = []
+    for (const vl of chunks(
+      views.map((_, i) => i),
+      shares,
+    ))
+      parts.push(
+        await faceCandidatesPart(run.geom, run.mesh.idx, views, vl, run.o, {
+          viewImage: run.o.photoConsistency ? hooks.viewImage : undefined,
+        }),
+      )
+    const { layout, entries, sampling } = textureLayout(run, mergeCandidateParts(parts, views.length, run.o))
+    const pages = layout.pageHeights.map((h) => new Uint8ClampedArray(layout.pageSize * h * 4))
+    const failed = [],
+      obs = []
+    let decoded = 0
+    for (const share of chunks(entries, shares)) {
+      const blocks = pieceBlocks(layout, share)
+      const o = sampling ? gainObservations() : null
+      const r = await bakeViews(layout, share, blocks.target, {
+        loadPhoto: hooks.loadPhoto,
+        onPhoto: o
+          ? (vi, photo) => gainSampleView(sampling, run.geom, run.mesh.idx, views, vi, photo, layout.scale, o)
+          : undefined,
+      })
+      pasteBlocks(
+        layout,
+        pages,
+        share.flatMap(([, list]) => list),
+        blocks.data,
+      )
+      decoded += r.decoded
+      failed.push(...r.failed)
+      if (o) obs.push(o.done())
+    }
+    return textureFinish(run, pages, { decoded, failed, obs })
+  }
+
+  it('gives the same atlas split over workers as in one part', async () => {
+    const mesh = sceneMesh(0.2)
+    const gains = [
+      [1.25, 1.25, 1.25],
+      [0.8, 0.85, 0.8],
+      [1, 1, 1],
+      [1.2, 1.1, 1],
+      [0.85, 0.85, 0.9],
+      [1, 1, 1],
+      [1.15, 1.15, 1.15],
+      [0.9, 0.9, 0.9],
+    ]
+    const { views, photos } = sceneViews(8, { gains })
+    for (const photoConsistency of [false, true]) {
+      const opts = { pageSize: 1024, maxPages: 4, photoConsistency }
+      const hooks = { loadPhoto: photoLoader(photos), viewImage: viewImager(photos) }
+      const one = await textureMesh(mesh, views, opts, hooks)
+      for (const shares of [2, 3]) {
+        const split = await splitRun(mesh, views, opts, hooks, shares)
+        expect([...split.uv]).toEqual([...one.uv])
+        expect([...split.idx]).toEqual([...one.idx])
+        expect(split.pages.length).toBe(one.pages.length)
+        split.pages.forEach((p, i) => expect(p.data.every((v, j) => v === one.pages[i].data[j])).toBe(true))
+        expect(split.summary.gains).toEqual(one.summary.gains)
+        expect(split.summary.seams).toEqual(one.summary.seams)
+      }
+    }
   })
 
   it('lowers the texel scale until the atlas fits the page cap', async () => {

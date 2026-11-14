@@ -197,7 +197,18 @@ export function rasterizeDepth(proj, idx, width, height, depth) {
 //   onProgress(done, total)
 // → { K, count: Uint8Array(F), view: Uint16Array(F·K), score: Float32Array(F·K),
 //     colour: Uint8Array(3·F·K) | null, orientation: 1 | −1 | 0, seenBy: Int32Array(nViews) }
+// The views are independent until the end, so a run may split them into shares
+// (faceCandidatesPart, one per worker) and merge the parts (mergeCandidateParts): one
+// part of every view is this function.
 export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
+  const part = await faceCandidatesPart(geom, idx, views, null, opts, hooks)
+  return mergeCandidateParts([part], views.length, opts)
+}
+
+// One share of faceCandidates: the views in `viewList` (all when null), each face's best
+// K so far and its partly hidden fallbacks, as sparse lists (only the faces these views
+// see; a share of an aerial block sees a strip of the mesh). Plain typed arrays, to post.
+export async function faceCandidatesPart(geom, idx, views, viewList = null, opts = {}, hooks = {}) {
   const {
     bufferSide = TEXTURE_TUNING.bufferSide,
     maxCandidates: K = TEXTURE_TUNING.maxCandidates,
@@ -230,7 +241,9 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
     [1 / 3, 1 / 3, 1 / 3],
   ]
 
-  for (let vi = 0; vi < views.length; vi++) {
+  const list = viewList ?? views.map((_, vi) => vi)
+  for (let li = 0; li < list.length; li++) {
+    const vi = list[li]
     const v = views[vi]
     const cam = localCamera(v, geom.origin)
     const grid = viewGrid(v, bufferSide)
@@ -320,7 +333,104 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
       seen++
     }
     seenBy[vi] = seen
-    hooks.onProgress?.(vi + 1, views.length)
+    hooks.onProgress?.(li + 1, list.length)
+  }
+  return {
+    K,
+    KF,
+    nFaces: F,
+    seenBy,
+    main: sparseSlots(count, view, score, colour, K),
+    fallback: fallback ? sparseSlots(fbCount, fbView, fbScore, fbColour, KF) : null,
+  }
+}
+
+// Each face's slots of a share as lists: `face` (the faces with any), `n` (how many),
+// then their views, scores and colours, slot by slot.
+function sparseSlots(count, view, score, colour, K) {
+  let faces = 0,
+    slots = 0
+  for (let f = 0; f < count.length; f++)
+    if (count[f]) {
+      faces++
+      slots += count[f]
+    }
+  const out = {
+    face: new Int32Array(faces),
+    n: new Uint8Array(faces),
+    view: new Uint16Array(slots),
+    score: new Float32Array(slots),
+    colour: colour ? new Uint8Array(3 * slots) : null,
+  }
+  let fi = 0,
+    si = 0
+  for (let f = 0; f < count.length; f++) {
+    const c = count[f]
+    if (!c) continue
+    out.face[fi] = f
+    out.n[fi++] = c
+    for (let i = 0; i < c; i++, si++) {
+      out.view[si] = view[f * K + i]
+      out.score[si] = score[f * K + i]
+      if (colour) for (let ch = 0; ch < 3; ch++) out.colour[3 * si + ch] = colour[3 * (f * K + i) + ch]
+    }
+  }
+  return out
+}
+
+// Replay a share's sparse slots into dense arrays with insertCandidate, slot by slot.
+// `only(f)`: the faces to take (all when null).
+function replaySlots(sp, count, view, score, colour, K, only = null) {
+  const rgb = [0, 0, 0]
+  for (let fi = 0, si = 0; fi < sp.face.length; fi++) {
+    const f = sp.face[fi],
+      n = sp.n[fi]
+    if (only && !only(f)) {
+      si += n
+      continue
+    }
+    for (let i = 0; i < n; i++, si++) {
+      let c = null
+      if (colour && sp.colour) {
+        rgb[0] = sp.colour[3 * si]
+        rgb[1] = sp.colour[3 * si + 1]
+        rgb[2] = sp.colour[3 * si + 2]
+        c = rgb
+      }
+      insertCandidate(count, view, score, K, f, sp.view[si], sp.score[si], colour, c)
+    }
+  }
+}
+
+// The parts of faceCandidatesPart (in the order of their views) → faceCandidates' result.
+// Each face's slots are replayed share by share: one part gives back exactly the arrays
+// it was made from; several keep the same K best views (a later share's view replaces
+// the worst only when strictly better, as in one pass), ordered best first by the
+// winding step, which leaves only views of exactly equal score in another order.
+// A face's fallbacks are the ones its views gave before any saw it whole, as in one
+// pass: those of every share before the first that saw it whole, and that share's own
+// (it recorded them while its count was 0). They are used when the winding step leaves
+// the face no candidate.
+export function mergeCandidateParts(parts, nViews, opts = {}) {
+  if (!parts.length) throw new Error('mergeCandidateParts: no parts')
+  const { K, KF, nFaces: F } = parts[0]
+  const colour = parts[0].main.colour ? new Uint8Array(3 * F * K) : null
+  const count = new Uint8Array(F)
+  const view = new Uint16Array(F * K).fill(NO_VIEW)
+  const score = new Float32Array(F * K)
+  const seenBy = new Int32Array(nViews)
+  const withFallback = parts[0].fallback != null
+  const fbCount = withFallback ? new Uint8Array(F) : null
+  const fbView = withFallback ? new Uint16Array(F * KF).fill(NO_VIEW) : null,
+    fbScore = withFallback ? new Float32Array(F * KF) : null
+  const fbColour = withFallback && colour ? new Uint8Array(3 * F * KF) : null
+  // One pass records a face's fallbacks only until some view sees it whole: a share's
+  // count, so only while no earlier share has.
+  const unseen = (f) => !count[f]
+  for (const part of parts) {
+    if (withFallback) replaySlots(part.fallback, fbCount, fbView, fbScore, fbColour, KF, unseen)
+    replaySlots(part.main, count, view, score, colour, K)
+    for (let v = 0; v < nViews; v++) seenBy[v] += part.seenBy[v]
   }
 
   const orientation = settleOrientation(count, view, score, K, opts.orientation, colour)
@@ -328,7 +438,7 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
   // faces the settled side. Better than a flat colour: Poisson closes trees into
   // solid blobs, while the photos see the wall behind them through the leaves.
   let fallbackFaces = 0
-  for (let f = 0; f < F && fallback; f++) {
+  for (let f = 0; f < F && withFallback; f++) {
     if (count[f] || !fbCount[f]) continue
     let n = 0
     for (let i = 0; i < fbCount[f]; i++) {

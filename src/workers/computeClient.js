@@ -716,9 +716,17 @@ export const meshify = streamingOp('meshify')
 export const meshPrepare = streamingOp('meshPrepare')
 export const meshTile = streamingOp('meshTile')
 export const meshFinish = streamingOp('meshFinish')
-// Mesh texture (workers/ops/texture.js): { mesh, views, settings } →
-// { mesh: { pos, idx, uv, col, nVerts, count }, texture: { data, pages, groups }, summary }.
-export const textureMesh = streamingOp('textureMesh')
+// Mesh texture (workers/ops/texture.js), split over the pool by
+// stores/reconstruction/meshTexture.js: begin, layout, add and finish on the worker that
+// holds the run (pinned), the visibility and the bake in shares of the views.
+export const textureBegin = streamingOp('textureBegin')
+export const textureVisibility = streamingOp('textureVisibility')
+export const textureLayout = streamingOp('textureLayout')
+export const textureBake = streamingOp('textureBake')
+export const textureBakeAdd = (input, { worker, transfer = [] } = {}) =>
+  call('textureBakeAdd', [input], { worker, transfer })
+export const textureFinish = streamingOp('textureFinish')
+export const textureAbort = (runId, { worker } = {}) => call('textureAbort', [runId], { worker })
 
 // Level-of-detail octree of a resident cloud (core/lod/build.js) into the given
 // directory handle: { cloud: { count, pos, col?, attributes? }, dir, name } (buffers

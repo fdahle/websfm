@@ -1658,7 +1658,12 @@ nothing feeds back into the solve.
   per-view z-buffer visibility, one view per face chosen with Potts smoothing (loopy belief
   propagation) and a photo-consistency check, charts of connected same-view faces with UVs
   from their projection, atlas packing, per-image gains in linear light and seam levelling.
-  Faces no view sees take a flat colour.
+  Faces no view sees take a flat colour. The visibility and the bake run in shares of the
+  views on the worker pool: each share keeps its faces' best views, merged in view order
+  (a later share's view replaces the worst only when strictly better, as in one pass), and
+  bakes its photos' atlas pieces into its own blocks, pasted onto the pages; the gain
+  samples are concatenated in bake order. Any split gives the one-pass atlas, bit for bit
+  short of views of exactly equal score.
 - **Ground classification** (`groundFilter.js`): the cloth simulation filter (CSF, Zhang et
   al. 2016), mirrored in z (the cloth rises beneath the upright cloud). Collision height per
   cell = the lowest point (isolated one-cell dips > 1 m below their neighbours raised to

@@ -19,11 +19,11 @@ import { exposurePriors, fitGains, gainSampleClipped, growable, srgbToLinear } f
 import { sampleRgbaBilinear } from '../undistort.js'
 import { faceAdjacency } from './meshGraph.js'
 import { weldVertices, coincidentVertices } from '../meshEdit.js'
-import { meshGeometry, faceCandidates, localCamera, NO_VIEW } from './visibility.js'
+import { meshGeometry, faceCandidatesPart, mergeCandidateParts, localCamera, NO_VIEW } from './visibility.js'
 import { selectViews, mergeSmallCharts } from './labeling.js'
 import { buildCharts, cornerPixels, chartPieces } from './charts.js'
 import { packAtlas } from './packing.js'
-import { bakeAtlas, applyGains } from './bake.js'
+import { bakeOrder, bakeViews, fillFlat, pageTarget, applyGains } from './bake.js'
 import { levelSeams } from './seamLevel.js'
 import { pluralize } from '../../textFormat.js'
 import { NMAD_K } from '../../constants.js'
@@ -37,25 +37,58 @@ const MIN_SCALE = 1 / 64
 // → { pos, idx, uv, col, nVerts, count, groups: [{ page, start, count }],
 //     pages: [{ width, height, data }], summary }
 export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
+  const run = textureBegin(mesh, views, opts, hooks)
+  // 1 · Visibility, every view in one part.
+  const part = await faceCandidatesPart(run.geom, run.mesh.idx, views, null, run.o, {
+    validLut: hooks.validLut,
+    renderDepth: hooks.renderDepth,
+    // Only for photo consistency: it costs one more (small) decode of every photo.
+    viewImage: run.o.photoConsistency ? hooks.viewImage : undefined,
+    onProgress: (d, t) => run.progress((0.55 * d) / t, 'visibility'),
+  })
+  const { layout, entries, sampling } = textureLayout(run, mergeCandidateParts([part], views.length, run.o))
+  // 5 · Bake, collecting colour-levelling samples from each photo while it is loaded.
+  const pages = layout.pageHeights.map((h) => new Uint8ClampedArray(layout.pageSize * h * 4))
+  const obs = sampling ? gainObservations() : null
+  const baked = await bakeViews(
+    layout,
+    entries,
+    pageTarget(layout, pages),
+    {
+      loadPhoto: hooks.loadPhoto,
+      onPhoto: obs
+        ? (vi, photo) => gainSampleView(sampling, run.geom, run.mesh.idx, views, vi, photo, layout.scale, obs)
+        : undefined,
+      onProgress: (d, t) => run.progress(0.6 + (0.35 * d) / t, 'bake'),
+    },
+    run.o.grayFallback,
+  )
+  return textureFinish(run, pages, { ...baked, obs: obs ? [obs.done()] : [] })
+}
+
+// The steps of textureMesh, for a run split over workers (workers/ops/texture.js): the
+// begin, layout and finish on one worker, the visibility (faceCandidatesPart) and the
+// bake (bakeViews) in shares of the views on all of them. textureMesh is the same steps
+// in one part, so either way gives the same atlas.
+
+// Weld an open mesh, its geometry, the run's options. → the run (passed to the next steps).
+export function textureBegin(mesh, views, opts = {}, hooks = {}) {
   const o = { ...TEXTURE_TUNING, ...TEXTURE_DEFAULTS, ...opts }
   const log = (m, level = 'info') => hooks.onLog?.(m, level)
   const progress = (f, stage) => hooks.onProgress?.(f, stage)
   if (!views.length) throw new Error('No registered cameras to texture from')
   if (views.length >= 0xffff) throw new Error(`Too many views (${views.length}); the limit is 65,534`)
-
   mesh = weldIfOpen(mesh, o.weldOpenShare, log)
-  const { pos, idx, col = null } = mesh
+  return { o, log, progress, views, mesh, geom: meshGeometry(mesh.pos, mesh.idx) }
+}
 
-  // 1 · Visibility.
-  const geom = meshGeometry(pos, idx)
+// From the merged candidates to the atlas layout: early gains and photo consistency, view
+// selection, charts, palette cells, scale and packing. → { layout, entries (bakeOrder),
+// sampling (the colour-levelling samples the bake takes, or null) }
+export function textureLayout(run, cand) {
+  const { o, log, progress, views, geom } = run
+  const { idx, col = null } = run.mesh
   const F = geom.nFaces
-  const cand = await faceCandidates(geom, idx, views, o, {
-    validLut: hooks.validLut,
-    renderDepth: hooks.renderDepth,
-    // Only for photo consistency: it costs one more (small) decode of every photo.
-    viewImage: o.photoConsistency ? hooks.viewImage : undefined,
-    onProgress: (d, t) => progress((0.55 * d) / t, 'visibility'),
-  })
   let seenFaces = 0
   for (let f = 0; f < F; f++) if (cand.count[f]) seenFaces++
   if (!seenFaces) throw new Error('No registered photo sees this mesh: is it in the model frame of the cameras?')
@@ -71,7 +104,6 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
         : `mesh faces point ${cand.orientation > 0 ? 'outward' : 'inward'} (back faces dropped)`),
     seenFaces < 0.5 * F ? 'warn' : 'info',
   )
-
   // Colours from the visibility pass: gains first (photo consistency compares levelled
   // colours), then drop each face's views that saw something else there.
   // The gains centre on each photo's EXIF exposure (colourGains.js exposurePriors).
@@ -157,26 +189,48 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
       (s < o.maxScale ? ` (lowered from ${o.maxScale === 1 ? 'native' : o.maxScale} to fit ${o.maxPages} pages)` : ''),
   )
 
-  // 5 · Bake, collecting colour-levelling samples from each photo while it is loaded.
   const layout = { pageSize: o.pageSize, pageHeights: pack.pageHeights, scale: s, pieces, place: pack, flat }
-  const levelling = o.levelColours && !early ? gainSampler(geom, idx, cand, views, s, o.gainSamples, prior) : null
-  const baked = await bakeAtlas(
+  const sampling = o.levelColours && !early ? gainSamplePlan(cand, views.length, o.gainSamples) : null
+  Object.assign(run, {
+    cand,
+    seenFaces,
+    exif,
+    prior,
+    early,
+    consistency,
+    adj,
+    labels,
+    charts,
+    px,
+    flat,
+    cut,
+    pack,
+    s,
+    used,
+    pageArea,
     layout,
-    {
-      loadPhoto: hooks.loadPhoto,
-      onPhoto: levelling?.sample,
-      onProgress: (d, t) => progress(0.6 + (0.35 * d) / t, 'bake'),
-    },
-    o.grayFallback,
-  )
+    sampling,
+  })
+  return { layout, entries: bakeOrder(layout), sampling }
+}
+
+// After the bake: the flat cells, colour levelling, seam levelling, the seam figure and
+// the output mesh. `pages` hold every photo piece; `baked` = { decoded, failed (views),
+// obs: the shares' gain observations in bake order }.
+export function textureFinish(run, pages, baked) {
+  const { o, log, progress, views, layout, cand, early, exif, prior, labels, adj, cut, px, flat, pack, charts, geom } =
+    run
+  const { seenFaces, consistency, s, used, pageArea } = run
+  const { pieces } = cut
+  const { idx } = run.mesh
+  fillFlat(layout, pages)
   if (baked.failed.length)
     log(`Texture: ${pluralize(baked.failed.length, 'photo')} could not be read; their charts are grey`, 'warn')
-
   // 6 · Colour levelling.
   let gainSummary = null
-  if (o.levelColours && (levelling || early)) {
-    const { gains, summary } = early ?? levelling.fit()
-    applyGains(baked.pages, layout, gains)
+  if (o.levelColours && (run.sampling || early)) {
+    const { gains, summary } = early ?? fitSampledGains(run.sampling, views.length, baked.obs, prior)
+    applyGains(pages, layout, gains)
     gainSummary = summary
     log(
       summary.images
@@ -198,7 +252,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
   let seamLevel = null
   if (o.levelColours && o.seamLevelling) {
     const t0 = Date.now()
-    seamLevel = levelSeams(labels, idx, geom.nVerts, cut, px, layout, baked.pages, {
+    seamLevel = levelSeams(labels, idx, geom.nVerts, cut, px, layout, pages, {
       smoothWeight: o.seamSmoothWeight,
       delta: o.seamDelta,
       chromaWeight: o.seamChromaWeight,
@@ -214,7 +268,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
   }
 
   // Quality figure: the colour step across seams, in the finished atlas.
-  const seams = seamStats(adj, labels, idx, cut, px, layout, baked.pages)
+  const seams = seamStats(adj, labels, idx, cut, px, layout, pages)
   log(
     `Texture: seams ${seams.seams.toLocaleString()} edges between photos, mean colour step ` +
       `${seams.step.toFixed(1)} levels (median ${seams.median.toFixed(1)})` +
@@ -224,10 +278,10 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
   )
 
   // 7 · Output mesh.
-  const out = assemble(mesh, idx, cut, px, flat, pack, layout)
+  const out = assemble(run.mesh, idx, cut, px, flat, pack, layout)
   progress(1, 'done')
   const summary = {
-    faces: F,
+    faces: geom.nFaces,
     seenFaces,
     unseenFaces: flat.faces,
     orientation: cand.orientation,
@@ -249,7 +303,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
   }
   return {
     ...out,
-    pages: baked.pages.map((data, p) => ({ width: o.pageSize, height: pack.pageHeights[p], data })),
+    pages: pages.map((data, p) => ({ width: o.pageSize, height: pack.pageHeights[p], data })),
     summary,
   }
 }
@@ -357,7 +411,10 @@ const GAIN_PROBES = [
 const GAIN_ROUNDS = 2
 const GAIN_MIN_TOL = 0.05 // never reject below ±5 % in log colour
 
-function gainSampler(geom, idx, cand, views, s, max, prior) {
+// Which faces the colour levelling samples (up to `max` seen by two or more views), and
+// for each view the samples it gives, as CSR. → { nPoints, start: Int32Array(nViews+1),
+// list: Int32Array (sample indices), faces: Int32Array (sample → face) }
+export function gainSamplePlan(cand, nViews, max) {
   const { K, count, view } = cand
   const F = count.length
   let multi = 0
@@ -365,53 +422,79 @@ function gainSampler(geom, idx, cand, views, s, max, prior) {
   const stride = Math.max(1, Math.ceil(multi / max))
   const sampleFaces = []
   for (let f = 0, m = 0; f < F; f++) if (count[f] >= 2 && m++ % stride === 0) sampleFaces.push(f)
-  // View → its samples (CSR).
-  const start = new Int32Array(views.length + 1)
+  const start = new Int32Array(nViews + 1)
   for (const f of sampleFaces) for (let i = 0; i < count[f]; i++) start[view[f * K + i] + 1]++
-  for (let v = 0; v < views.length; v++) start[v + 1] += start[v]
-  const fill = start.slice(0, views.length),
-    list = new Int32Array(start[views.length])
+  for (let v = 0; v < nViews; v++) start[v + 1] += start[v]
+  const fill = start.slice(0, nViews),
+    list = new Int32Array(start[nViews])
   sampleFaces.forEach((f, si) => {
     for (let i = 0; i < count[f]; i++) list[fill[view[f * K + i]]++] = si
   })
-  const obsPt = growable(Int32Array),
-    obsImg = growable(Int32Array),
-    obsRgb = growable(Float32Array)
+  return { nPoints: sampleFaces.length, start, list, faces: Int32Array.from(sampleFaces) }
+}
+
+// The gain observations a bake collects: sample, view, linear RGB. done() → plain arrays.
+export function gainObservations() {
+  const pt = growable(Int32Array),
+    img = growable(Int32Array),
+    rgb = growable(Float32Array)
+  return { pt, img, rgb, done: () => ({ pt: pt.array, img: img.array, rgb: rgb.array }) }
+}
+
+// View vi's samples from its decoded photo (bake.js onPhoto), into `obs`.
+export function gainSampleView(plan, geom, idx, views, vi, photo, s, obs) {
+  const { start, list, faces } = plan
+  const { P, origin } = geom
+  const { r, t, K: Kv } = localCamera(views[vi], origin)
   const px = new Float32Array(4),
     acc = new Float64Array(3)
-  const { P, origin } = geom
-  return {
-    sample(vi, photo) {
-      const { r, t, K: Kv } = localCamera(views[vi], origin)
-      for (let x = start[vi]; x < start[vi + 1]; x++) {
-        const si = list[x],
-          f = sampleFaces[si]
-        const a = 3 * idx[3 * f],
-          b = 3 * idx[3 * f + 1],
-          c = 3 * idx[3 * f + 2]
-        acc.fill(0)
-        for (const [la, lb, lc] of GAIN_PROBES) {
-          const X = la * P[a] + lb * P[b] + lc * P[c],
-            Y = la * P[a + 1] + lb * P[b + 1] + lc * P[c + 1]
-          const Z = la * P[a + 2] + lb * P[b + 2] + lc * P[c + 2]
-          const z = r[6] * X + r[7] * Y + r[8] * Z + t[2]
-          const u = toScaledPx(Kv.fx * ((r[0] * X + r[1] * Y + r[2] * Z + t[0]) / z) + Kv.cx, s)
-          const v = toScaledPx(Kv.fy * ((r[3] * X + r[4] * Y + r[5] * Z + t[1]) / z) + Kv.cy, s)
-          const m = photo.map ? photo.map(u, v) : { x: u, y: v }
-          sampleRgbaBilinear(photo.data, photo.width, photo.height, m.x, m.y, px, 0)
-          acc[0] += px[0]
-          acc[1] += px[1]
-          acc[2] += px[2]
-        }
-        const n = GAIN_PROBES.length
-        if (gainSampleClipped(acc[0] / n, acc[1] / n, acc[2] / n)) continue
-        obsPt.push(si)
-        obsImg.push(vi)
-        for (let ch = 0; ch < 3; ch++) obsRgb.push(srgbToLinear(acc[ch] / n))
-      }
-    },
-    fit: () => robustGains(views.length, sampleFaces.length, obsPt.array, obsImg.array, obsRgb.array, prior),
+  for (let x = start[vi]; x < start[vi + 1]; x++) {
+    const si = list[x],
+      f = faces[si]
+    const a = 3 * idx[3 * f],
+      b = 3 * idx[3 * f + 1],
+      c = 3 * idx[3 * f + 2]
+    acc.fill(0)
+    for (const [la, lb, lc] of GAIN_PROBES) {
+      const X = la * P[a] + lb * P[b] + lc * P[c],
+        Y = la * P[a + 1] + lb * P[b + 1] + lc * P[c + 1]
+      const Z = la * P[a + 2] + lb * P[b + 2] + lc * P[c + 2]
+      const z = r[6] * X + r[7] * Y + r[8] * Z + t[2]
+      const u = toScaledPx(Kv.fx * ((r[0] * X + r[1] * Y + r[2] * Z + t[0]) / z) + Kv.cx, s)
+      const v = toScaledPx(Kv.fy * ((r[3] * X + r[4] * Y + r[5] * Z + t[1]) / z) + Kv.cy, s)
+      const m = photo.map ? photo.map(u, v) : { x: u, y: v }
+      sampleRgbaBilinear(photo.data, photo.width, photo.height, m.x, m.y, px, 0)
+      acc[0] += px[0]
+      acc[1] += px[1]
+      acc[2] += px[2]
+    }
+    const n = GAIN_PROBES.length
+    if (gainSampleClipped(acc[0] / n, acc[1] / n, acc[2] / n)) continue
+    obs.pt.push(si)
+    obs.img.push(vi)
+    for (let ch = 0; ch < 3; ch++) obs.rgb.push(srgbToLinear(acc[ch] / n))
   }
+}
+
+// The gains from the bake's observations (the shares' in bake order, concatenated).
+function fitSampledGains(plan, nViews, parts, prior) {
+  const cat = (T, key) => {
+    const out = new T(parts.reduce((n, p) => n + p[key].length, 0))
+    let off = 0
+    for (const p of parts) {
+      out.set(p[key], off)
+      off += p[key].length
+    }
+    return out
+  }
+  return robustGains(
+    nViews,
+    plan.nPoints,
+    cat(Int32Array, 'pt'),
+    cat(Int32Array, 'img'),
+    cat(Float32Array, 'rgb'),
+    prior,
+  )
 }
 
 // fitGains, then drop observations off their face's consensus and fit again (twice).
