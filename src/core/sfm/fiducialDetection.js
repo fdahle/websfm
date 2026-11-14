@@ -35,11 +35,13 @@ export function estimateDetectionFrame(gray, maxFrac = 0.22) {
  * only add a wrong-orientation peak.
  * Returns null for a detection with nothing to refine — a frame-family point is
  * a geometric construction, and a missing-slot draft is only the slot guess.
+ * `d.px/py` is a coarse pixel index; `px0/py0` is the native pixel index of the same
+ * point (the centre of coarse cell i is native (i + ½)/scale − ½).
  */
 export function nativeRefinePlan(d, scale, cfg = FIDUCIAL_DETECTION_TUNING) {
   if (d.family === 'frame' || d.reason === 'missing-slot' || !(scale > 0)) return null
-  const px0 = d.px / scale,
-    py0 = d.py / scale
+  const px0 = (d.px + 0.5) / scale - 0.5,
+    py0 = (d.py + 0.5) / scale - 0.5
   const nativeSize = Math.max(7, Math.round((d.scale || 13) / scale)) | 1
   const radius = Math.max(4, Math.ceil((cfg.refineRadiusCoarsePx ?? 3) / scale))
   // Window: the template plus the search radius, so every candidate centre is legal.

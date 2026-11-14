@@ -736,10 +736,14 @@ marks** (4 or 8) whose positions the calibration certificate gives in millimetre
 camera frame, with the calibrated focal length and principal point.
 
 A sensor is declared `kind: 'film'`. `image.fiducialDetections` (anonymous raster slots
-and scan-pixel centres) is kept apart from `sensor.fiducialCalibration` (slot-to-mark
+and scan-pixel positions) is kept apart from `sensor.fiducialCalibration` (slot-to-mark
 identity, metric coordinates, focal length, principal point), so detection can be run and
-reviewed before a certificate is available. At SfM ingest, and only there, the two are
-joined into point pairs, and:
+reviewed before a certificate is available. Every detection is stored as a **mark**, in
+the viewer's pixel-edge convention (pixel i spans [i, i + 1]), whether it was clicked,
+found by the shape or template detector, a reseau cross or imported, as GCP marks are
+(`core/sfm/pixelConvention.js`). At SfM ingest, and only there, the two are joined into
+point pairs (`calibratedFiducialPairs`), each detection moved to the pixel-centre
+convention of the keypoints the fit will map (−½ px), and:
 
 1. **A per-image transform** `scan px → camera mm` is fitted by least squares
    (`fitFiducialTransform`): conformal, affine (default) or projective. It yields pixel

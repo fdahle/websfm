@@ -329,3 +329,70 @@ describe('version 3 → 4: each sparse model keeps its own lens', () => {
     expect(out['reconstruction/reconstruction.json'].clouds.find((c) => c.kind === 'sparse').calibration).toEqual(own)
   })
 })
+
+describe('version 4 → 5: fiducial detections are stored as marks', () => {
+  const step = FORMAT_MIGRATIONS.find((s) => s.from === 4)
+  const det = (source, px, py) => ({ slot: `s-${source}`, px, py, source, family: 'generic', confidence: 1 })
+
+  it('moves the shape and template detections by +½ px, and nothing else', () => {
+    const docs = {
+      'project.json': {
+        images: [
+          {
+            uuid: 'a',
+            fiducialDetections: [
+              det('shape', 100, 200),
+              det('template', 10.25, 20.75),
+              det('manual', 5.5, 6.5),
+              det('reseau', 7, 8),
+              det('import', 9, 10),
+              det('frame', 0, 0),
+            ],
+          },
+          { uuid: 'b' },
+          { uuid: 'c', fiducialDetections: [] },
+        ],
+      },
+    }
+    const out = step.migrate(structuredClone(docs))
+    const got = Object.fromEntries(
+      out['project.json'].images[0].fiducialDetections.map((d) => [d.source, [d.px, d.py]]),
+    )
+    expect(got).toEqual({
+      shape: [100.5, 200.5],
+      template: [10.75, 21.25],
+      manual: [5.5, 6.5],
+      reseau: [7, 8],
+      import: [9, 10],
+      frame: [0, 0],
+    })
+    // Every other field stays.
+    expect(out['project.json'].images[0].fiducialDetections[0]).toMatchObject({ slot: 's-shape', family: 'generic' })
+    expect(out['project.json'].images.slice(1)).toEqual(docs['project.json'].images.slice(1))
+  })
+
+  it('gives the same scan→film pairs as before for the detectors, and moves clicks onto pixel centres', async () => {
+    const { calibratedFiducialPairs } = await import('./sfm/fiducialModel.js')
+    const sensor = {
+      fiducialCalibration: {
+        marks: [
+          { id: 'F1', xMm: -100, yMm: 100 },
+          { id: 'F2', xMm: 100, yMm: 100 },
+        ],
+        slotMap: { 's-shape': 'F1', 's-manual': 'F2' },
+      },
+    }
+    // Before: the fit read the stored px as they were (the shape detector's were centres).
+    const before = { fiducialDetections: [det('shape', 100, 200), det('manual', 5.5, 6.5)] }
+    const after = step.migrate({ 'project.json': { images: [structuredClone(before)] } })['project.json'].images[0]
+    const pairs = calibratedFiducialPairs(after, sensor)
+    expect(pairs.find((p) => p.fidId === 'F1')).toMatchObject({ px: 100, py: 200 })
+    // The click at the centre of pixel (5, 6) now reaches the fit as that pixel's centre.
+    expect(pairs.find((p) => p.fidId === 'F2')).toMatchObject({ px: 5, py: 6 })
+  })
+
+  it('leaves a project without images alone', () => {
+    const docs = { 'project.json': { name: 'P' } }
+    expect(step.migrate(structuredClone(docs))).toEqual(docs)
+  })
+})

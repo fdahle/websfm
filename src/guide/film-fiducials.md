@@ -30,7 +30,9 @@ marks go to review.
 
 **Import ▸ Image Fiducials** reads marks measured elsewhere, one row per mark or one
 row per image with a column pair per position, and previews where each goes before
-importing.
+importing. Positions are read as the viewer and Metashape give them: the scan's top-left
+corner is (0, 0), so the first pixel's centre is (0.5, 0.5). From a tool that puts the
+first pixel's centre at (0, 0), such as OpenCV, add 0.5 to both.
 
 ## Detection type
 <!-- param: family  default: Generic -->

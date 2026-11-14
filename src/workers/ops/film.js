@@ -14,6 +14,7 @@ import {
   nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
 import { pluralize } from '../../core/textFormat.js'
+import { centreToMarkPx, markToCentrePx } from '../../core/sfm/pixelConvention.js'
 import { upperMedian } from '../../core/stats.js'
 import { cropGray, decodeBitmap, downscaleBitmap, scaledRgba } from './detectBitmaps.js'
 
@@ -37,8 +38,9 @@ export function makeFilmOps() {
       }
       const templates = []
       const transfer = []
+      // `obs` are marks (pixel-edge); the template is centred on the pixel index.
       for (const o of obs) {
-        const win = cropGray(bmp, o.px - templateHalf, o.py - templateHalf, size, size)
+        const win = cropGray(bmp, markToCentrePx(o.px) - templateHalf, markToCentrePx(o.py) - templateHalf, size, size)
         templates.push({ fidId: o.fidId, size, data: win.data })
         transfer.push(win.data.buffer)
       }
@@ -100,6 +102,10 @@ export function makeFilmOps() {
         natH: rgba.natH,
       }
       const coarse = detectFiducialSpotsCore(gray, cfg)
+      // Every detection leaves as a mark (pixel-edge native px, displayFrame.js
+      // markToCentrePx), as clicks and reseau crosses are stored. A refined hit is a
+      // pixel index (+ ½); a frame-derived point (no plan) is a position along the
+      // frame's edges, already in that sense.
       const refine = (d) => {
         const plan = nativeRefinePlan(d, gray.scale, cfg)
         if (!plan) return { ...d, px: d.px / gray.scale, py: d.py / gray.scale }
@@ -114,8 +120,13 @@ export function makeFilmOps() {
         // Keep the coarse peakMargin: it was measured over the whole slot search,
         // while the refine window is too small to hold a distinct runner-up.
         return hit
-          ? { ...d, px: win.originX + hit.x, py: win.originY + hit.y, score: hit.score }
-          : { ...d, px: px0, py: py0 }
+          ? {
+              ...d,
+              px: centreToMarkPx(win.originX + hit.x),
+              py: centreToMarkPx(win.originY + hit.y),
+              score: hit.score,
+            }
+          : { ...d, px: centreToMarkPx(px0), py: centreToMarkPx(py0) }
       }
       const accepted = coarse.accepted.map(refine),
         drafts = coarse.drafts.map(refine)

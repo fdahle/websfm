@@ -12,7 +12,8 @@
 // mark keeps the slot its column names.
 //
 // CRS-agnostic (pixels are pixels): the caller matches rows to images by name and
-// upserts each observation.
+// upserts each observation. The pixel x/y are marks, in the pixel-edge convention every
+// stored fiducial detection uses (core/sfm/pixelConvention.js), as Metashape writes them.
 
 import { sniffDelimiter, parseRows } from './gcp.js'
 import { fiducialColumns } from './fiducialColumns.js'

@@ -25,6 +25,8 @@
 // detectFiducialsForSensor): donor crops from the batch's best anonymous marks are
 // matched around batch-median positions on scans that came back incomplete.
 
+import { centreToMarkPx, markToCentrePx } from './pixelConvention.js'
+
 /**
  * Internal algorithm tuning (the self-contained-module exception in CLAUDE.md —
  * these are not user knobs). Exported so tests can read them rather than
@@ -255,18 +257,21 @@ export function subpixelPeak(gray, tpl, px, py) {
  *   Full-resolution templates cut from the reference image.
  * @param {{ fidId: string, px: number, py: number, radius: number }[]} args.predictions
  *   Expected positions with a search radius, in the REFERENCE frame — i.e. the
- *   target's native scan px assuming the target is not rotated. The rotation
- *   pass below remaps them if it finds the scan went through sideways.
+ *   target's native scan px assuming the target is not rotated — as marks, in the
+ *   pixel-edge convention every stored fiducial detection uses (displayFrame.js
+ *   markToCentrePx). The rotation pass below remaps them if it finds the scan went
+ *   through sideways.
  * @param {object} [args.cfg] `{ ...FIDUCIAL_DETECT_TUNING, tryRotations }`.
  * @param {(cx:number, cy:number, half:number) => null | { data: Float32Array,
  *          width: number, height: number, originX: number, originY: number }}
  *   [args.cropWindow]
  *   Injected full-resolution window crop (worker-side; only it has
  *   OffscreenCanvas). `originX/originY` are the native px coords of window pixel
- *   (0,0). Omitted ⇒ coarse-only result (used by tests with small rasters).
+ *   (0,0), a pixel index. Omitted ⇒ coarse-only result (used by tests with small rasters).
  * @param {(msg: string) => void} [args.onLog]
  * @returns {{ fidId: string, px: number, py: number, score: number,
  *             coarseScore: number, rotationK: number }[]}
+ *   px/py as marks (pixel-edge native px), like the predictions.
  *   Always one entry per prediction — gating is the store's job, not the
  *   detector's (it needs thresholds and population stats this layer never sees).
  */
@@ -277,6 +282,9 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
   const scale = coarse.scale
   const natW = coarse.natW,
     natH = coarse.natH
+  // Native pixel index → coarse pixel index (the centre of native pixel i is coarse
+  // (i + ½)·scale − ½). Predictions are marks; rotatePoint90 works on pixel indices.
+  const coarseIndex = (i) => (i + 0.5) * scale - 0.5
 
   // ── rotation pass ────────────────────────────────────────────────────────
   // A scan fed through the scanner the other way round moves every mark, so the
@@ -315,9 +323,9 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
       for (const pred of probes) {
         const tpl = downscalePatch(rotatePatch90(byId.get(pred.fidId), k), coarseScale)
         const [sw, sh] = k % 2 ? [natH, natW] : [natW, natH]
-        const p = rotatePoint90(pred.px, pred.py, k, sw, sh)
-        const cx = p.x * scale,
-          cy = p.y * scale
+        const p = rotatePoint90(markToCentrePx(pred.px), markToCentrePx(pred.py), k, sw, sh)
+        const cx = coarseIndex(p.x),
+          cy = coarseIndex(p.y)
         const r = Math.max(1, pred.radius * scale)
         sum += matchZNCC(coarse, tpl, cx - r, cy - r, cx + r, cy + r).score
       }
@@ -354,27 +362,30 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
     // reference's height). Using the target's own dims here silently mirrors
     // every prediction on non-square scans.
     const [srcW, srcH] = rotationK % 2 ? [natH, natW] : [natW, natH]
-    const p = rotatePoint90(pred.px, pred.py, rotationK, srcW, srcH)
-    const cx = p.x * scale,
-      cy = p.y * scale
+    const p = rotatePoint90(markToCentrePx(pred.px), markToCentrePx(pred.py), rotationK, srcW, srcH)
+    const cx = coarseIndex(p.x),
+      cy = coarseIndex(p.y)
     const r = Math.max(1, pred.radius * scale)
     const hit = matchZNCC(coarse, tplCoarse, cx - r, cy - r, cx + r, cy + r)
     const coarseScore = hit.score
 
-    // Coarse peak back to native px (centre of the coarse cell).
+    // Coarse peak back to native px: the centre of the coarse cell, as a mark
+    // (pixel-edge: native pixel i spans [i, i + 1]).
     let px = (hit.x + 0.5) / scale
     let py = (hit.y + 0.5) / scale
     let score = coarseScore
 
     // ── full-resolution refine ─────────────────────────────────────────────
-    const win = cropWindow?.(px, py, refineHalf)
+    // The window is cut around the pixel index (mark − ½); its sub-pixel peak is an
+    // index too, so the mark is index + ½.
+    const win = cropWindow?.(markToCentrePx(px), markToCentrePx(py), refineHalf)
     if (win) {
       const half = (tplFull.size - 1) / 2
       const gray = { data: win.data, width: win.width, height: win.height }
       const best = matchZNCC(gray, tplFull, half, half, win.width - 1 - half, win.height - 1 - half)
       const sub = subpixelPeak(gray, tplFull, best.x, best.y)
-      px = win.originX + sub.x
-      py = win.originY + sub.y
+      px = centreToMarkPx(win.originX + sub.x)
+      py = centreToMarkPx(win.originY + sub.y)
       score = best.score
     }
 

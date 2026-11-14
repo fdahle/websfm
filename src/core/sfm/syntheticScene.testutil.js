@@ -286,9 +286,11 @@ export function aerialBlock({
       meta: film ? { width: 1800, height: 1400 } : { ...meta, ...bandMeta },
       ...(film
         ? {
+            // Stored as marks (pixel-edge, core/sfm/pixelConvention.js), as the app stores them;
+            // mmToScan gives pixel centres, the keypoints' convention.
             fiducialDetections: fid.marks.map((m, i) => {
               const q = mmToScan(m.xMm, m.yMm)
-              return { slot: SLOTS[i], px: q.x + gauss() * 0.2, py: q.y + gauss() * 0.2, confidence: 1 }
+              return { slot: SLOTS[i], px: q.x + 0.5 + gauss() * 0.2, py: q.y + 0.5 + gauss() * 0.2, confidence: 1 }
             }),
           }
         : {}),

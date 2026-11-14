@@ -285,7 +285,7 @@ const CFG = { templateHalf: 16, coarseScale: 1 / 4, refineHalf: 24 }
 describe('detectFiducialsInImage', () => {
   it('finds every mark in an unrotated target', () => {
     const { img, marks, templates } = buildScene()
-    const predictions = marks.map((m) => ({ fidId: m.fidId, px: m.x + 5, py: m.y - 4, radius: 12 }))
+    const predictions = marks.map((m) => ({ fidId: m.fidId, px: m.x + 5.5, py: m.y - 3.5, radius: 12 }))
     const out = detectFiducialsInImage({
       coarse: coarseOf(img, CFG.coarseScale),
       templates,
@@ -296,7 +296,8 @@ describe('detectFiducialsInImage', () => {
     expect(out).toHaveLength(4)
     for (const r of out) {
       const m = marks.find((mm) => mm.fidId === r.fidId)
-      expect(Math.hypot(r.px - m.x, r.py - m.y)).toBeLessThan(0.5)
+      // Each mark is drawn centred on pixel (m.x, m.y); detections are marks, pixel-edge.
+      expect(Math.hypot(r.px - (m.x + 0.5), r.py - (m.y + 0.5))).toBeLessThan(0.5)
       expect(r.score).toBeGreaterThan(0.95)
     }
   })
@@ -317,8 +318,9 @@ describe('detectFiducialsInImage', () => {
       expect(out[0].rotationK, `k=${k}`).toBe(k)
       for (const r of out) {
         const m = marks.find((mm) => mm.fidId === r.fidId)
+        // The drawn pixel, rotated (rotatePoint90 maps pixel indices), as a mark.
         const want = rotatePoint90(m.x, m.y, k, img.width, img.height)
-        expect(Math.hypot(r.px - want.x, r.py - want.y), `${r.fidId} k=${k}`).toBeLessThan(0.5)
+        expect(Math.hypot(r.px - (want.x + 0.5), r.py - (want.y + 0.5)), `${r.fidId} k=${k}`).toBeLessThan(0.5)
         expect(r.score).toBeGreaterThan(0.9)
       }
     }

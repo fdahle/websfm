@@ -143,6 +143,28 @@ export const FORMAT_MIGRATIONS = [
       return docs
     },
   },
+  {
+    from: 4,
+    note: 'fiducial detections from the shape and template detectors are stored as marks (pixel-edge), as clicks and reseau crosses already were',
+    documents: ['project.json'],
+    // Every stored fiducial or reseau detection is now a mark: pixel i spans [i, i + 1]
+    // (core/sfm/pixelConvention.js), and the scan→film fit converts to pixel centres
+    // (fiducialModel.js calibratedFiducialPairs). Clicks ('manual'), reseau crosses and
+    // imported rows were marks already, and were fitted half a pixel off. The shape and
+    // template detectors stored pixel centres: those move by +½ px, so their fit is
+    // unchanged. (A detection either detector placed without refining it is only as
+    // good as its coarse search, several pixels; ½ px is the same move for it.)
+    migrate(docs) {
+      for (const image of docs['project.json']?.images ?? []) {
+        for (const d of image.fiducialDetections ?? []) {
+          if (d.source !== 'shape' && d.source !== 'template') continue
+          if (Number.isFinite(d.px)) d.px += 0.5
+          if (Number.isFinite(d.py)) d.py += 0.5
+        }
+      }
+      return docs
+    },
+  },
 ]
 
 /**

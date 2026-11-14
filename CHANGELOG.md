@@ -76,6 +76,17 @@ Notable changes to websfm. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Film: clicked fiducials and reseau crosses no longer shift the frame by half a scan
+  pixel.** Detect fiducials, the template retry, a click in the viewer, Detect reseau and
+  imported marks now all store a fiducial at the same point of its pixel, so a scan
+  calibrated from clicks or reseau crosses gets the same film frame as one from detected
+  marks. Before, the detectors stored pixel centres and the others pixel edges, and the
+  fit read both as centres: a principal-point error of about 0.7 px (about 10 µm at 15 µm
+  per pixel) on scans calibrated by hand or by the reseau, which positions-only blocks
+  carry into the ground (about 0.2 m at 3 km with a 152 mm lens). Saved projects are
+  updated on open (project format 5): detected marks move by half a pixel so their fit is
+  unchanged; models already built keep their frame until the next Sparse run. The viewer
+  also draws detected marks on the mark itself instead of half a pixel up and left.
 - **Escape closes the dialog opened last.** Escape now closes whichever dialog sits on
   top, every dialog included, where before it went down a fixed list that a new dialog
   could be missing from; a dialog that cannot be dismissed (New Project before the first

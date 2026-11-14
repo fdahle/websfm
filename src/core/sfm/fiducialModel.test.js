@@ -20,7 +20,8 @@ describe('fiducial model', () => {
     const sensor = {
       fiducialCalibration: { slotMap: { 'corner-tl': 'F1' }, marks: [{ id: 'F1', xMm: -10, yMm: -20 }] },
     }
-    expect(calibratedFiducialPairs(image, sensor)[0]).toMatchObject({ fidId: 'F1', px: 5, xMm: -10 })
+    // A stored detection is a mark (pixel-edge); the fit gets the pixel centre.
+    expect(calibratedFiducialPairs(image, sensor)[0]).toMatchObject({ fidId: 'F1', px: 4.5, py: 5.5, xMm: -10 })
   })
   it('treats a certificate without a slot map as uncalibrated', () => {
     const marks = [{ id: 'F1', xMm: -10, yMm: -20 }]
@@ -51,5 +52,42 @@ describe('fiducial model', () => {
       reviewed: true,
     })
     expect(d[1].markId).toBe('F2')
+  })
+})
+
+// The review's P12 check: a fiducial clicked or detected on a pixel and a keypoint on that
+// pixel are the same scan point, so they reach the same film position.
+describe('fiducial marks and keypoints share one film frame', () => {
+  it("puts a keypoint on a mark's pixel at the mark's film position", async () => {
+    const { fitFiducialTransform, applyFiducialTransform } = await import('./fiducialCalibration.js')
+    const pitch = 0.015 // mm per scan px
+    const marks = [
+      { id: 'F1', xMm: -100, yMm: 100 },
+      { id: 'F2', xMm: 100, yMm: 100 },
+      { id: 'F3', xMm: 100, yMm: -100 },
+      { id: 'F4', xMm: -100, yMm: -100 },
+    ]
+    // Film mm → the scan pixel (index) it lands on: 7,000 px square scan, y down.
+    const pixelOf = (m) => ({ x: 3500 + m.xMm / pitch, y: 3500 - m.yMm / pitch })
+    const slots = ['corner-tl', 'corner-tr', 'corner-br', 'corner-bl']
+    const sensor = {
+      fiducialCalibration: { marks, slotMap: Object.fromEntries(slots.map((s, i) => [s, marks[i].id])) },
+    }
+    // Stored as the viewer stores a click on that pixel: its centre, pixel-edge (i + ½).
+    const image = {
+      fiducialDetections: marks.map((m, i) => ({
+        slot: slots[i],
+        px: pixelOf(m).x + 0.5,
+        py: pixelOf(m).y + 0.5,
+        source: 'manual',
+      })),
+    }
+    const fit = fitFiducialTransform(calibratedFiducialPairs(image, sensor), 'affine')
+    // A keypoint is a pixel index: the keypoint on the pixel of a point 30 mm right and
+    // 40 mm up of the centre.
+    const p = { xMm: 30, yMm: 40 }
+    const mm = applyFiducialTransform(pixelOf(p), fit)
+    expect(Math.abs(mm.x - p.xMm) / pitch).toBeLessThan(0.05)
+    expect(Math.abs(mm.y - p.yMm) / pitch).toBeLessThan(0.05)
   })
 })

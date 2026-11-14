@@ -3,6 +3,7 @@
 
 import { fillArray } from '../bigArray.js'
 import { median } from '../stats.js'
+import { calibratedFiducialPairs } from './fiducialModel.js'
 
 function solveLinear(A, b) {
   const n = b.length,
@@ -320,13 +321,10 @@ export function fitFiducialTransform(pairs, model = 'affine', options = {}) {
   }
 }
 
+// The pairs reconstruction fits (fiducialModel.js calibratedFiducialPairs: stored marks
+// as pixel centres), so the validation reports the fit reconstruction will make.
 export function pairsForCalibration(image, calibration) {
-  const byId = new Map((calibration?.marks || []).map((m) => [m.id, m]))
-  return (image?.fiducialDetections || []).flatMap((d) => {
-    const id = calibration?.slotMap?.[d.slot],
-      m = byId.get(id)
-    return m ? [{ slot: d.slot, fidId: id, px: d.px, py: d.py, xMm: m.xMm, yMm: m.yMm }] : []
-  })
+  return calibratedFiducialPairs(image, { fiducialCalibration: calibration })
 }
 
 export function validateFiducialCalibration(images, calibration) {

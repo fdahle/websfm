@@ -146,6 +146,12 @@ describe('native refine plan', () => {
       ).toBeLessThan(0.5)
     }
   }, 30000)
+  it('maps the coarse index to the native index of the same point', () => {
+    // At ¼ scale coarse pixel 10 covers native pixels 40…43, whose centre is 41.5.
+    const plan = nativeRefinePlan({ family, px: 10, py: 0, scale: 13 }, 0.25)
+    expect(plan.px0).toBe(41.5)
+    expect(plan.py0).toBe(1.5)
+  })
   it('does not refine a frame point or a missing-slot guess', () => {
     expect(nativeRefinePlan({ family: 'frame', px: 1, py: 1 }, 0.25)).toBe(null)
     expect(nativeRefinePlan({ family, reason: 'missing-slot', px: 1, py: 1 }, 0.25)).toBe(null)

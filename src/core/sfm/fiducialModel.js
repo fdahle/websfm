@@ -1,5 +1,11 @@
 // Domain boundary between anonymous image-space detections and metric camera
 // calibration. Pure so restore/import/reconstruction share one interpretation.
+//
+// A stored detection (image.fiducialDetections) is a mark: native scan px in the
+// pixel-edge convention, as a click in the viewer and a GCP mark (pixelConvention.js). The scan→film fit maps keypoints, which are pixel centres, so the
+// pairs it is fitted from are converted here, once.
+
+import { markToCentrePx } from './pixelConvention.js'
 
 export const CORNER_SLOTS = ['corner-tl', 'corner-tr', 'corner-br', 'corner-bl']
 export const SIDE_SLOTS = ['side-top', 'side-right', 'side-bottom', 'side-left']
@@ -76,7 +82,9 @@ export function calibratedFiducialPairs(image, sensor) {
   return (image?.fiducialDetections || []).flatMap((d) => {
     const fidId = cal.slotMap[d.slot],
       m = byId.get(fidId)
-    return m ? [{ slot: d.slot, fidId, px: d.px, py: d.py, xMm: m.xMm, yMm: m.yMm }] : []
+    return m
+      ? [{ slot: d.slot, fidId, px: markToCentrePx(d.px), py: markToCentrePx(d.py), xMm: m.xMm, yMm: m.yMm }]
+      : []
   })
 }
 
