@@ -122,8 +122,9 @@ Booleans go in a config file: on the command line `--gpu false` is the string "f
   SuperPoint's are not redistributable: copy your own `superpoint.onnx` there, and
   remove it before a release build (`check-release` refuses a build that contains it).
 - `variants`: `[{ label, match?, recon? }]`. Detection runs once; each variant then
-  re-matches only when its match settings change, and always reconstructs. Use this
-  for SfM-only experiments on identical inputs.
+  re-matches only when its match settings change, from no pairs (a variant never keeps the
+  pairs of the one before), and always reconstructs. Use this for SfM-only experiments on
+  identical inputs.
 - `dev`: use the Vite dev server instead of a frozen build (faster to start). Any
   source edit then reloads the page mid-run.
 - `build <dir>`: reuse an earlier snapshot. `headed`: show the browser window.

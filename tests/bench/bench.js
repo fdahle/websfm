@@ -2631,7 +2631,10 @@ window.bench = {
     }
   },
 
-  async match({ preset = null, ...overrides } = {}) {
+  // `fresh`: forget every matched pair first (the variants loop: a variant with another
+  // pairing must not inherit the pairs of the one before).
+  async match({ preset = null, fresh = false, ...overrides } = {}) {
+    if (fresh) matches.clear({ purge: true })
     const settings = {
       strategy: 'exhaustive',
       matcher: 'bruteforce',

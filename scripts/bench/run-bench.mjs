@@ -1053,8 +1053,8 @@ try {
     await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
   }
   if (cfg.variants?.length) {
-    // Detect once, then per variant: re-match only when its match settings differ from
-    // the previous variant's, and always reconstruct. Reconstruction never mutates the
+    // Detect once, then per variant: re-match (from no pairs) only when its match settings
+    // differ from the previous variant's, and always reconstruct. Reconstruction never mutates the
     // stored keypoints (folds act on the worker's copy), so variants are independent.
     if (stages.includes('detect')) await runStage('detect', cfg.detect)
     let lastMatch = null
@@ -1062,7 +1062,8 @@ try {
       const label = v.label ?? JSON.stringify(v)
       const match = { ...cfg.match, ...(v.match ?? {}) }
       if (JSON.stringify(match) !== lastMatch) {
-        await runStage('match', match, `match[${label}]`)
+        // From a cleared match store: the pairs of the variant before are not this one's.
+        await runStage('match', lastMatch == null ? match : { ...match, fresh: true }, `match[${label}]`)
         lastMatch = JSON.stringify(match)
       }
       await runStage('recon', { ...cfg.recon, ...(v.recon ?? {}) }, `recon[${label}]`)
