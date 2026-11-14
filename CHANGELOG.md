@@ -6,11 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
-- **Diagrams in the help.** Sixteen glossary entries now show a figure: ground sample
+- **Diagrams in the help.** Twenty-one glossary entries now show a figure: ground sample
   distance, lens distortion, baseline and parallax, RANSAC, focal length and field of
   view, triangulation, the pinhole model, the principal point, statistical outlier
   removal, DEM of difference, mesh smoothing, surface normals, contour lines, DEM
-  binning, cut and fill volume, and gauge freedom. Each is drawn from computed geometry
+  binning, cut and fill volume, gauge freedom, the Lowe ratio test, tracks, the COG
+  pyramid, the match graph and camera pose. Each is drawn from computed geometry
   (the distortion from the radial model, the uncertainty ellipses from the rays, the
   smoothing and the contours by running the algorithms), not sketched.
 - **Accuracy at the checkpoints in survey terms.** The Quality Report export has a section

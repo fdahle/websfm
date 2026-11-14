@@ -19,7 +19,7 @@ as close, the feature is ambiguous — one window in a row of identical windows,
 one ripple in a snowfield — and picking the closer of two indistinguishable
 options is a coin flip.
 
-<!-- TODO(image): assets/lowe-ratio.svg - a query descriptor with its two nearest neighbours in descriptor space shown twice: a distinctive case where d1 is much smaller than d2 (accepted), and an ambiguous case on a repetitive facade where d1 is approximately d2 (rejected), with the corresponding image patches beside each. -->
+![Two cases in descriptor space: a distinctive query whose nearest neighbour is far closer than the second (d1/d2 = 0.24, accepted, the image patches showing one matching corner), and a query on a repetitive façade with two neighbours almost equally close (0.95, rejected, all three patches alike).](assets/lowe-ratio.svg)
 
 The threshold $\tau$ is the main quality/quantity dial in matching:
 

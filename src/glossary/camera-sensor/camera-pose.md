@@ -25,7 +25,7 @@ single most common source of interop bugs:
   camera-to-world matrix looking down −z with +y up, which is why every export
   that crosses that boundary does the axis flip in exactly one documented place.
 
-<!-- TODO(image): assets/camera-pose.svg - a world axis triad and a camera drawn with its own axis triad, the rotation R and translation t annotated as the mapping between them, and the camera centre C = -R^T t marked distinctly from the vector t to make the difference explicit. -->
+![A world axis pair at the origin and a camera with its own rotated axes: the turn R from the world axes to the camera's, t as the arrow to the world origin in camera axes, and the camera centre C = −Rᵀ·t in world axes.](assets/camera-pose.svg)
 
 Poses arrive in a project two ways. They can be **estimated** by the
 reconstruction — the initial pair from the [essential matrix](help:essential-matrix),

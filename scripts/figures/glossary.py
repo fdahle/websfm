@@ -558,5 +558,154 @@ def gauge():
     b += text(340, 318, 'the same images, so the same reprojection error: the solve cannot tell these apart', GREY, 11, 'middle')
     svg('gauge-freedom.svg', W, H, b)
 
-for f in (gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning, volume, gauge): f()
+# ── lowe-ratio.svg ───────────────────────────────────────────────────────────
+def lowe():
+    W, H = 680, 320
+    rnd = random.Random(2)
+    b = ''
+    for pi, (lab, n1, n2, patch) in enumerate([('distinctive: accepted', (24, 6), (95, -40), 'corner'),
+                                               ('repetitive façade: rejected', (40, 12), (-38, 22), 'windows')]):
+        ox, oy = 110 + pi * 340, 160
+        for _ in range(26):
+            a = rnd.uniform(0, 2 * math.pi); r = rnd.uniform(70, 125)
+            b += circ(ox + r * math.cos(a), oy + r * math.sin(a), 3, DIM)
+        q = (ox, oy); p1 = (ox + n1[0], oy + n1[1]); p2 = (ox + n2[0], oy + n2[1])
+        d1, d2 = math.hypot(*n1), math.hypot(*n2)
+        b += line(*q, *p1, GREEN, 2) + line(*q, *p2, RED, 1.5, '5 3')
+        b += circ(*p1, 4.5, GREEN) + circ(*p2, 4.5, RED) + circ(*q, 5.5, GOLD)
+        b += text(p1[0] + 8, p1[1] + 4, 'd1', GREEN, 12) + text(p2[0] + (8 if n2[0] > 0 else -10), p2[1] + (-4 if n2[0] > 0 else 18), 'd2', RED, 12, None if n2[0] > 0 else 'end')
+        ratio = d1 / d2
+        ok = ratio < 0.8
+        b += text(ox, 290, f'd1 / d2 = {ratio:.2f} {"<" if ok else ">"} 0.8: {"accept" if ok else "reject"}', GREEN if ok else RED, 13, 'middle')
+        b += text(ox, 30, lab, FG, 13, 'middle')
+        # the image patches: the query's and its two candidates'
+        px = ox + 135
+        for k, (yy, c) in enumerate([(70, GOLD), (130, GREEN), (190, RED)]):
+            b += f'  <rect x="{px}" y="{yy}" width="44" height="44" fill="#2a303b" stroke="{c}" stroke-width="2"/>\n'
+            if patch == 'corner':
+                if k < 2:  # the query and its true match: the same corner
+                    b += f'  <rect x="{px + 4}" y="{yy + 22}" width="22" height="18" fill="{GREY}"/>\n  <rect x="{px + 4}" y="{yy + 4}" width="8" height="18" fill="{GREY}"/>\n'
+                else:      # a different structure
+                    b += f'  <circle cx="{px + 22}" cy="{yy + 22}" r="12" fill="{GREY}"/>\n'
+            else:          # windows: all three look alike
+                for wx in (6, 25):
+                    for wy in (6, 25):
+                        b += f'  <rect x="{px + wx}" y="{yy + wy}" width="13" height="13" fill="{GREY}"/>\n'
+    b += text(340, 312, 'descriptor space; gold: the query, green / red: its nearest and second-nearest neighbour', GREY, 11, 'middle')
+    svg('lowe-ratio.svg', W, H, b)
+
+# ── track.svg ────────────────────────────────────────────────────────────────
+def track():
+    W, H = 640, 360
+    X = (320, 60)
+    cams = [(90, 250), (230, 285), (410, 285), (550, 250)]
+    kps = []
+    b = ''
+    for k, C in enumerate(cams):
+        dx, dy = X[0] - C[0], X[1] - C[1]; d = math.hypot(dx, dy); ux, uy = dx / d, dy / d
+        pc = (C[0] + 42 * ux, C[1] + 42 * uy)               # the keypoint on the image plane
+        b += line(pc[0] - 22 * uy, pc[1] + 22 * ux, pc[0] + 22 * uy, pc[1] - 22 * ux, FG, 2.5)
+        b += line(C[0], C[1], X[0], X[1], BLUE, 1, op=0.7)
+        b += camera(*C, label=f'image {k + 1}', ldx=-22, ldy=24)
+        kps.append(pc)
+    for (a, c) in zip(kps, kps[1:]):
+        mx, my = (a[0] + c[0]) / 2, (a[1] + c[1]) / 2 - 38
+        b += f'  <path d="M {f2(a[0])} {f2(a[1])} Q {f2(mx)} {f2(my)} {f2(c[0])} {f2(c[1])}" fill="none" stroke="{GREEN}" stroke-width="1.6" stroke-dasharray="5 3"/>\n'
+    for pc in kps: b += circ(*pc, 4.5, GREEN)
+    b += circ(*X, 6, GOLD) + text(X[0] + 12, X[1] + 4, 'one world point', GOLD, 12)
+    b += poly([(70, 322), (70, 332), (570, 332), (570, 322)], GREY, w=1.2)
+    b += text(320, 350, 'one track of length 4: the keypoints (green) linked by pairwise matches', GREY, 11, 'middle')
+    svg('track.svg', W, H, b)
+
+# ── cog-pyramid.svg ──────────────────────────────────────────────────────────
+def cog():
+    W, H = 680, 330
+    b = ''
+    levels = [(8, 'full resolution'), (4, 'overview 1 (½)'), (2, 'overview 2 (¼)')]
+    sizes = [240, 120, 60]
+    x = 30
+    boxes = []
+    for (n, lab), sz in zip(levels, sizes):
+        y0 = 60 + (240 - sz)
+        t = sz / n
+        for i in range(n):
+            for j in range(n):
+                b += f'  <rect x="{f2(x + i * t)}" y="{f2(y0 + j * t)}" width="{f2(t)}" height="{f2(t)}" fill="#2a303b" stroke="{DIM}" stroke-width="1"/>\n'
+        b += text(x + sz / 2, 324 - 4, lab, GREY, 11, 'middle')
+        boxes.append((x, y0, t, n))
+        x += sz + 50
+    # zoomed in: a small window on the full level touches 4 tiles
+    x0, y0, t, n = boxes[0]
+    wx, wy, ww = x0 + 2.5 * t, y0 + 3.4 * t, 1.3 * t
+    for i in (2, 3):
+        for j in (3, 4):
+            b += f'  <rect x="{f2(x0 + i * t)}" y="{f2(y0 + j * t)}" width="{f2(t)}" height="{f2(t)}" fill="{GOLD}" opacity="0.45"/>\n'
+    b += f'  <rect x="{f2(wx)}" y="{f2(wy)}" width="{f2(ww)}" height="{f2(ww)}" fill="none" stroke="{GOLD}" stroke-width="2.5"/>\n'
+    b += text(x0, 46, 'zoomed in: the 4 tiles under the view', GOLD, 12)
+    # zoomed out: the whole raster on screen reads the coarsest level, one or two tiles
+    x2, y2, t2, n2 = boxes[2]
+    b += f'  <rect x="{f2(x2)}" y="{f2(y2)}" width="{f2(2 * t2)}" height="{f2(2 * t2)}" fill="{BLUE}" opacity="0.4"/>\n'
+    b += f'  <rect x="{f2(x2 - 3)}" y="{f2(y2 - 3)}" width="{f2(2 * t2 + 6)}" height="{f2(2 * t2 + 6)}" fill="none" stroke="{BLUE}" stroke-width="2.5"/>\n'
+    b += text(x2 + t2, y2 - 14, 'zoomed out: 4 small tiles', BLUE, 12, 'middle')
+    b += text(340, 22, 'each level half the size of the one below, all cut into tiles of the same pixel size', GREY, 11, 'middle')
+    svg('cog-pyramid.svg', W, H, b)
+
+# ── match-graph.svg ──────────────────────────────────────────────────────────
+def mgraph():
+    W, H = 660, 330
+    rnd = random.Random(8)
+    A = [(80 + 110 * math.cos(a) * 0.9, 170 + 95 * math.sin(a)) for a in [2 * math.pi * k / 8 for k in range(8)]]
+    A = [(x + 60, y) for x, y in A]
+    B = [(400 + 55 * math.cos(a), 170 + 55 * math.sin(a)) for a in [2 * math.pi * k / 5 + 0.3 for k in range(5)]]
+    Cc = [(580, 110), (620, 170), (565, 220)]
+    b = ''
+    def edge(p, q, n, c=BLUE):
+        return line(p[0], p[1], q[0], q[1], c, max(0.6, n / 60), op=0.85)
+    for i in range(len(A)):
+        for j in range(i + 1, len(A)):
+            if rnd.random() < 0.7: b += edge(A[i], A[j], rnd.uniform(60, 320))
+    for i in range(len(B)):
+        for j in range(i + 1, len(B)):
+            if rnd.random() < 0.8: b += edge(B[i], B[j], rnd.uniform(60, 260))
+    for i in range(3):
+        for j in range(i + 1, 3): b += edge(Cc[i], Cc[j], rnd.uniform(80, 200))
+    bridge = (A[0], B[3])
+    b += line(*bridge[0], *bridge[1], RED, 1.2, '4 3')
+    for p in A + B + Cc: b += circ(*p, 7, GOLD)
+    b += text(140, 54, 'dense cluster', FG, 12, 'middle')
+    b += text(300, 96, 'fragile bridge:', RED, 12, 'middle') + text(300, 112, 'one weak pair', RED, 12, 'middle')
+    b += text(590, 66, 'detached', FG, 12, 'middle') + text(590, 82, 'component', FG, 12, 'middle')
+    b += text(330, 314, 'nodes: images; edges: verified pairs, thicker for more inliers', GREY, 11, 'middle')
+    svg('match-graph.svg', W, H, b)
+
+# ── camera-pose.svg ──────────────────────────────────────────────────────────
+def pose():
+    W, H = 640, 330
+    O = (90, 270)
+    C = (430, 120); th = math.radians(-35)
+    def arrow(p, d, L, c, lab, lo=(6, -6)):
+        e = (p[0] + L * d[0], p[1] + L * d[1])
+        n = (-d[1], d[0])
+        h = [(e[0] - 10 * d[0] + 5 * n[0], e[1] - 10 * d[1] + 5 * n[1]), e, (e[0] - 10 * d[0] - 5 * n[0], e[1] - 10 * d[1] - 5 * n[1])]
+        return line(p[0], p[1], e[0] - 6 * d[0], e[1] - 6 * d[1], c, 2) + poly(h, c, fill=c, w=1, closed=True) + text(e[0] + lo[0], e[1] + lo[1], lab, c, 12)
+    b = arrow(O, (1, 0), 80, FG, 'x') + arrow(O, (0, -1), 80, FG, 'y', (6, 4))
+    b += circ(*O, 4, FG) + text(O[0] - 10, O[1] + 20, 'world origin', GREY, 11)
+    cx_ = (math.cos(th), math.sin(th)); cy_ = (math.sin(th), -math.cos(th))
+    b += arrow(C, cx_, 70, BLUE, 'x_cam') + arrow(C, cy_, 70, BLUE, 'y_cam', (6, 2))
+    b += camera(*C)
+    # t: the world origin as the camera sees it, an arrow from the camera to the origin
+    d = (O[0] - C[0], O[1] - C[1]); L = math.hypot(*d); u = (d[0] / L, d[1] / L)
+    b += arrow(C, u, L - 8, GOLD, '', (0, 0))
+    b += text((C[0] + O[0]) / 2 + 18, (C[1] + O[1]) / 2 + 22, 't: the world origin in camera axes', GOLD, 12)
+    b += text(C[0] - 30, C[1] - 10, 'C = −Rᵀ·t: the camera centre in world axes', BLUE, 12, 'end')
+    # R: the turn from the world axes to the camera's
+    r = 40
+    a0, a1 = 0, th
+    pts = [(C[0] + r * math.cos(a0 + (a1 - a0) * k / 20), C[1] + r * math.sin(a0 + (a1 - a0) * k / 20)) for k in range(21)]
+    b += line(C[0], C[1], C[0] + 60, C[1], DIM, 1, '3 3')
+    b += poly(pts, RED, w=1.6) + text(C[0] + r + 8, C[1] - 4, 'R', RED, 13)
+    b += text(320, 24, 'x_cam = R · x_world + t: R turns the world axes into the camera\'s, t then shifts', GREY, 11, 'middle')
+    svg('camera-pose.svg', W, H, b)
+
+for f in (gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning, volume, gauge, lowe, track, cog, mgraph, pose): f()
 print('ok')

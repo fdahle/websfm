@@ -19,7 +19,7 @@ A 2-image track is the minimum that can be triangulated at all and is exactly as
 trustworthy as the weaker of its two matches; a 6-image track is over-determined,
 heavily constrained, and pins the cameras that see it.
 
-<!-- TODO(image): assets/track.svg - one world point projecting into four cameras, its four keypoints highlighted, the pairwise match links drawn between consecutive images, and the whole chain bracketed as one track of length 4. -->
+![One world point seen by four cameras, its keypoint in each image marked, consecutive keypoints linked by pairwise matches, and the chain bracketed as one track of length 4.](assets/track.svg)
 
 Tracks fail in two characteristic ways, and WebSfM repairs both:
 

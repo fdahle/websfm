@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 320" font-family="sans-serif" font-size="13">
+  <rect width="680" height="320" fill="#1b1f27"/>
+  <circle cx="227.5" cy="126.7" r="3" fill="#6b7280"/>
+  <circle cx="180" cy="186" r="3" fill="#6b7280"/>
+  <circle cx="166.5" cy="65.1" r="3" fill="#6b7280"/>
+  <circle cx="68" cy="83.9" r="3" fill="#6b7280"/>
+  <circle cx="28.7" cy="96.2" r="3" fill="#6b7280"/>
+  <circle cx="41.3" cy="121.6" r="3" fill="#6b7280"/>
+  <circle cx="26.9" cy="198.7" r="3" fill="#6b7280"/>
+  <circle cx="89" cy="37.1" r="3" fill="#6b7280"/>
+  <circle cx="204.9" cy="128.8" r="3" fill="#6b7280"/>
+  <circle cx="30.3" cy="188.8" r="3" fill="#6b7280"/>
+  <circle cx="179.7" cy="176" r="3" fill="#6b7280"/>
+  <circle cx="24.6" cy="179.1" r="3" fill="#6b7280"/>
+  <circle cx="23.2" cy="241.5" r="3" fill="#6b7280"/>
+  <circle cx="10.5" cy="143.8" r="3" fill="#6b7280"/>
+  <circle cx="116.2" cy="231" r="3" fill="#6b7280"/>
+  <circle cx="74.7" cy="229" r="3" fill="#6b7280"/>
+  <circle cx="-14.7" cy="152" r="3" fill="#6b7280"/>
+  <circle cx="73.4" cy="88.8" r="3" fill="#6b7280"/>
+  <circle cx="199.3" cy="89.4" r="3" fill="#6b7280"/>
+  <circle cx="98.3" cy="40.7" r="3" fill="#6b7280"/>
+  <circle cx="119.2" cy="46.9" r="3" fill="#6b7280"/>
+  <circle cx="34.8" cy="258.5" r="3" fill="#6b7280"/>
+  <circle cx="186.6" cy="141.3" r="3" fill="#6b7280"/>
+  <circle cx="112.8" cy="50.7" r="3" fill="#6b7280"/>
+  <circle cx="13.7" cy="183.8" r="3" fill="#6b7280"/>
+  <circle cx="-10.6" cy="167.6" r="3" fill="#6b7280"/>
+  <line x1="110" y1="160" x2="134" y2="166" stroke="#7ee787" stroke-width="2"/>
+  <line x1="110" y1="160" x2="205" y2="120" stroke="#ef6f6c" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <circle cx="134" cy="166" r="4.5" fill="#7ee787"/>
+  <circle cx="205" cy="120" r="4.5" fill="#ef6f6c"/>
+  <circle cx="110" cy="160" r="5.5" fill="#e6b84f"/>
+  <text x="142" y="170" fill="#7ee787" font-size="12">d1</text>
+  <text x="213" y="116" fill="#ef6f6c" font-size="12">d2</text>
+  <text x="110" y="290" fill="#7ee787" font-size="13" text-anchor="middle">d1 / d2 = 0.24 < 0.8: accept</text>
+  <text x="110" y="30" fill="#c9d1d9" font-size="13" text-anchor="middle">distinctive: accepted</text>
+  <rect x="245" y="70" width="44" height="44" fill="#2a303b" stroke="#e6b84f" stroke-width="2"/>
+  <rect x="249" y="92" width="22" height="18" fill="#9ca3af"/>
+  <rect x="249" y="74" width="8" height="18" fill="#9ca3af"/>
+  <rect x="245" y="130" width="44" height="44" fill="#2a303b" stroke="#7ee787" stroke-width="2"/>
+  <rect x="249" y="152" width="22" height="18" fill="#9ca3af"/>
+  <rect x="249" y="134" width="8" height="18" fill="#9ca3af"/>
+  <rect x="245" y="190" width="44" height="44" fill="#2a303b" stroke="#ef6f6c" stroke-width="2"/>
+  <circle cx="267" cy="212" r="12" fill="#9ca3af"/>
+  <circle cx="334.3" cy="159.4" r="3" fill="#6b7280"/>
+  <circle cx="378" cy="254.2" r="3" fill="#6b7280"/>
+  <circle cx="527" cy="103.8" r="3" fill="#6b7280"/>
+  <circle cx="340.1" cy="110.2" r="3" fill="#6b7280"/>
+  <circle cx="434.1" cy="64.5" r="3" fill="#6b7280"/>
+  <circle cx="465.5" cy="246.5" r="3" fill="#6b7280"/>
+  <circle cx="425.3" cy="84.8" r="3" fill="#6b7280"/>
+  <circle cx="521" cy="113.7" r="3" fill="#6b7280"/>
+  <circle cx="523.9" cy="114" r="3" fill="#6b7280"/>
+  <circle cx="555" cy="131.2" r="3" fill="#6b7280"/>
+  <circle cx="351.6" cy="157.4" r="3" fill="#6b7280"/>
+  <circle cx="390.6" cy="76.7" r="3" fill="#6b7280"/>
+  <circle cx="419.1" cy="235.4" r="3" fill="#6b7280"/>
+  <circle cx="329" cy="150.9" r="3" fill="#6b7280"/>
+  <circle cx="397" cy="108.1" r="3" fill="#6b7280"/>
+  <circle cx="497.1" cy="60.7" r="3" fill="#6b7280"/>
+  <circle cx="517.3" cy="115.9" r="3" fill="#6b7280"/>
+  <circle cx="447.6" cy="86.8" r="3" fill="#6b7280"/>
+  <circle cx="401.3" cy="90.3" r="3" fill="#6b7280"/>
+  <circle cx="467.3" cy="276.9" r="3" fill="#6b7280"/>
+  <circle cx="527.5" cy="221.1" r="3" fill="#6b7280"/>
+  <circle cx="500.7" cy="93.7" r="3" fill="#6b7280"/>
+  <circle cx="479.1" cy="274.8" r="3" fill="#6b7280"/>
+  <circle cx="353.2" cy="211" r="3" fill="#6b7280"/>
+  <circle cx="538.1" cy="177.9" r="3" fill="#6b7280"/>
+  <circle cx="500.4" cy="254.4" r="3" fill="#6b7280"/>
+  <line x1="450" y1="160" x2="490" y2="172" stroke="#7ee787" stroke-width="2"/>
+  <line x1="450" y1="160" x2="412" y2="182" stroke="#ef6f6c" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <circle cx="490" cy="172" r="4.5" fill="#7ee787"/>
+  <circle cx="412" cy="182" r="4.5" fill="#ef6f6c"/>
+  <circle cx="450" cy="160" r="5.5" fill="#e6b84f"/>
+  <text x="498" y="176" fill="#7ee787" font-size="12">d1</text>
+  <text x="402" y="200" fill="#ef6f6c" font-size="12" text-anchor="end">d2</text>
+  <text x="450" y="290" fill="#ef6f6c" font-size="13" text-anchor="middle">d1 / d2 = 0.95 > 0.8: reject</text>
+  <text x="450" y="30" fill="#c9d1d9" font-size="13" text-anchor="middle">repetitive façade: rejected</text>
+  <rect x="585" y="70" width="44" height="44" fill="#2a303b" stroke="#e6b84f" stroke-width="2"/>
+  <rect x="591" y="76" width="13" height="13" fill="#9ca3af"/>
+  <rect x="591" y="95" width="13" height="13" fill="#9ca3af"/>
+  <rect x="610" y="76" width="13" height="13" fill="#9ca3af"/>
+  <rect x="610" y="95" width="13" height="13" fill="#9ca3af"/>
+  <rect x="585" y="130" width="44" height="44" fill="#2a303b" stroke="#7ee787" stroke-width="2"/>
+  <rect x="591" y="136" width="13" height="13" fill="#9ca3af"/>
+  <rect x="591" y="155" width="13" height="13" fill="#9ca3af"/>
+  <rect x="610" y="136" width="13" height="13" fill="#9ca3af"/>
+  <rect x="610" y="155" width="13" height="13" fill="#9ca3af"/>
+  <rect x="585" y="190" width="44" height="44" fill="#2a303b" stroke="#ef6f6c" stroke-width="2"/>
+  <rect x="591" y="196" width="13" height="13" fill="#9ca3af"/>
+  <rect x="591" y="215" width="13" height="13" fill="#9ca3af"/>
+  <rect x="610" y="196" width="13" height="13" fill="#9ca3af"/>
+  <rect x="610" y="215" width="13" height="13" fill="#9ca3af"/>
+  <text x="340" y="312" fill="#9ca3af" font-size="11" text-anchor="middle">descriptor space; gold: the query, green / red: its nearest and second-nearest neighbour</text>
+</svg>

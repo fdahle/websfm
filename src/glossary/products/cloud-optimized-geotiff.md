@@ -20,7 +20,7 @@ but it is arranged for partial reads:
   that is what makes it "cloud optimized"; on a local disk it is what keeps panning
   smooth.
 
-<!-- TODO(image): assets/cog-pyramid.svg - a stack of overview levels, each half the size of the one below and cut into tiles, with a viewport at two zoom levels highlighting the few tiles it reads from each level. -->
+![Three levels of a cloud-optimized GeoTIFF, each half the size of the one below and cut into equal tiles; zoomed in, a view reads the four full-resolution tiles under it; zoomed out, the four small tiles of the coarsest level.](assets/cog-pyramid.svg)
 
 WebSfM stores every computed orthophoto as a COG (tiled, with overviews and DEFLATE
 compression), written block by block as it is built. The orthophoto's tab and the

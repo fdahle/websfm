@@ -16,7 +16,7 @@ main model, so no chain of [tracks](help:track) reaches them and no amount of
 splits into two components, the outcome is two reconstructions in unrelated
 coordinate frames, not one incomplete one.
 
-<!-- TODO(image): assets/match-graph.svg - an image graph with edge thickness by inlier count, showing one dense cluster, a second component fully detached, and a single fragile bridge edge whose removal would split the graph - each of the three annotated. -->
+![An image graph with edge thickness by inlier count: a densely connected cluster, a second group joined to it by one dashed weak pair (a fragile bridge), and a detached component with no edge to the rest.](assets/match-graph.svg)
 
 Three properties matter when reading it:
 

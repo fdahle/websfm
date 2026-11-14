@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 330" font-family="sans-serif" font-size="13">
+  <rect width="660" height="330" fill="#1b1f27"/>
+  <line x1="239" y1="170" x2="210" y2="237.2" stroke="#5aa9e6" stroke-width="5.169945155282325" opacity="0.85"/>
+  <line x1="239" y1="170" x2="140" y2="265" stroke="#5aa9e6" stroke-width="4.0542066657769675" opacity="0.85"/>
+  <line x1="239" y1="170" x2="70" y2="237.2" stroke="#5aa9e6" stroke-width="2.072244268026035" opacity="0.85"/>
+  <line x1="239" y1="170" x2="70" y2="102.8" stroke="#5aa9e6" stroke-width="3.7814298853124635" opacity="0.85"/>
+  <line x1="239" y1="170" x2="140" y2="75" stroke="#5aa9e6" stroke-width="2.9635738682652857" opacity="0.85"/>
+  <line x1="239" y1="170" x2="210" y2="102.8" stroke="#5aa9e6" stroke-width="1.8330003163849562" opacity="0.85"/>
+  <line x1="210" y1="237.2" x2="70" y2="237.2" stroke="#5aa9e6" stroke-width="2.01479282445539" opacity="0.85"/>
+  <line x1="210" y1="237.2" x2="41" y2="170" stroke="#5aa9e6" stroke-width="2.155992331013857" opacity="0.85"/>
+  <line x1="210" y1="237.2" x2="70" y2="102.8" stroke="#5aa9e6" stroke-width="4.908945301783723" opacity="0.85"/>
+  <line x1="210" y1="237.2" x2="140" y2="75" stroke="#5aa9e6" stroke-width="1.4928340182167996" opacity="0.85"/>
+  <line x1="210" y1="237.2" x2="210" y2="102.8" stroke="#5aa9e6" stroke-width="5.296943720641294" opacity="0.85"/>
+  <line x1="140" y1="265" x2="70" y2="237.2" stroke="#5aa9e6" stroke-width="3.687394501725632" opacity="0.85"/>
+  <line x1="140" y1="265" x2="41" y2="170" stroke="#5aa9e6" stroke-width="3.863653743651274" opacity="0.85"/>
+  <line x1="140" y1="265" x2="70" y2="102.8" stroke="#5aa9e6" stroke-width="3.9956358102925464" opacity="0.85"/>
+  <line x1="140" y1="265" x2="140" y2="75" stroke="#5aa9e6" stroke-width="3.815459250704807" opacity="0.85"/>
+  <line x1="70" y1="237.2" x2="41" y2="170" stroke="#5aa9e6" stroke-width="1.6159312424245345" opacity="0.85"/>
+  <line x1="70" y1="237.2" x2="70" y2="102.8" stroke="#5aa9e6" stroke-width="5.099556213833498" opacity="0.85"/>
+  <line x1="70" y1="237.2" x2="140" y2="75" stroke="#5aa9e6" stroke-width="1.8400339904593954" opacity="0.85"/>
+  <line x1="41" y1="170" x2="70" y2="102.8" stroke="#5aa9e6" stroke-width="4.158746325961656" opacity="0.85"/>
+  <line x1="41" y1="170" x2="210" y2="102.8" stroke="#5aa9e6" stroke-width="2.5456858677553993" opacity="0.85"/>
+  <line x1="70" y1="102.8" x2="210" y2="102.8" stroke="#5aa9e6" stroke-width="4.311946297230955" opacity="0.85"/>
+  <line x1="140" y1="75" x2="210" y2="102.8" stroke="#5aa9e6" stroke-width="3.9907854499400313" opacity="0.85"/>
+  <line x1="452.5" y1="186.3" x2="400.8" y2="225" stroke="#5aa9e6" stroke-width="4.1666657736874235" opacity="0.85"/>
+  <line x1="452.5" y1="186.3" x2="367" y2="126" stroke="#5aa9e6" stroke-width="1.6588271833656056" opacity="0.85"/>
+  <line x1="452.5" y1="186.3" x2="431.7" y2="125.1" stroke="#5aa9e6" stroke-width="2.7624006490994115" opacity="0.85"/>
+  <line x1="400.8" y1="225" x2="347.9" y2="187.7" stroke="#5aa9e6" stroke-width="1.23806944012945" opacity="0.85"/>
+  <line x1="400.8" y1="225" x2="431.7" y2="125.1" stroke="#5aa9e6" stroke-width="3.3376492546234497" opacity="0.85"/>
+  <line x1="347.9" y1="187.7" x2="367" y2="126" stroke="#5aa9e6" stroke-width="1.812954279479985" opacity="0.85"/>
+  <line x1="347.9" y1="187.7" x2="431.7" y2="125.1" stroke="#5aa9e6" stroke-width="2.1441042577175127" opacity="0.85"/>
+  <line x1="367" y1="126" x2="431.7" y2="125.1" stroke="#5aa9e6" stroke-width="2.411339522768379" opacity="0.85"/>
+  <line x1="580" y1="110" x2="620" y2="170" stroke="#5aa9e6" stroke-width="2.087185436959363" opacity="0.85"/>
+  <line x1="580" y1="110" x2="565" y2="220" stroke="#5aa9e6" stroke-width="3.0019657468606407" opacity="0.85"/>
+  <line x1="620" y1="170" x2="565" y2="220" stroke="#5aa9e6" stroke-width="3.1162687651850716" opacity="0.85"/>
+  <line x1="239" y1="170" x2="367" y2="126" stroke="#ef6f6c" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <circle cx="239" cy="170" r="7" fill="#e6b84f"/>
+  <circle cx="210" cy="237.2" r="7" fill="#e6b84f"/>
+  <circle cx="140" cy="265" r="7" fill="#e6b84f"/>
+  <circle cx="70" cy="237.2" r="7" fill="#e6b84f"/>
+  <circle cx="41" cy="170" r="7" fill="#e6b84f"/>
+  <circle cx="70" cy="102.8" r="7" fill="#e6b84f"/>
+  <circle cx="140" cy="75" r="7" fill="#e6b84f"/>
+  <circle cx="210" cy="102.8" r="7" fill="#e6b84f"/>
+  <circle cx="452.5" cy="186.3" r="7" fill="#e6b84f"/>
+  <circle cx="400.8" cy="225" r="7" fill="#e6b84f"/>
+  <circle cx="347.9" cy="187.7" r="7" fill="#e6b84f"/>
+  <circle cx="367" cy="126" r="7" fill="#e6b84f"/>
+  <circle cx="431.7" cy="125.1" r="7" fill="#e6b84f"/>
+  <circle cx="580" cy="110" r="7" fill="#e6b84f"/>
+  <circle cx="620" cy="170" r="7" fill="#e6b84f"/>
+  <circle cx="565" cy="220" r="7" fill="#e6b84f"/>
+  <text x="140" y="54" fill="#c9d1d9" font-size="12" text-anchor="middle">dense cluster</text>
+  <text x="300" y="96" fill="#ef6f6c" font-size="12" text-anchor="middle">fragile bridge:</text>
+  <text x="300" y="112" fill="#ef6f6c" font-size="12" text-anchor="middle">one weak pair</text>
+  <text x="590" y="66" fill="#c9d1d9" font-size="12" text-anchor="middle">detached</text>
+  <text x="590" y="82" fill="#c9d1d9" font-size="12" text-anchor="middle">component</text>
+  <text x="330" y="314" fill="#9ca3af" font-size="11" text-anchor="middle">nodes: images; edges: verified pairs, thicker for more inliers</text>
+</svg>

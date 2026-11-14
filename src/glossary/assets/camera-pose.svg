@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 330" font-family="sans-serif" font-size="13">
+  <rect width="640" height="330" fill="#1b1f27"/>
+  <line x1="90" y1="270" x2="164" y2="270" stroke="#c9d1d9" stroke-width="2"/>
+  <polygon points="160,275 170,270 160,265" fill="#c9d1d9" stroke="#c9d1d9" stroke-width="1"/>
+  <text x="176" y="264" fill="#c9d1d9" font-size="12">x</text>
+  <line x1="90" y1="270" x2="90" y2="196" stroke="#c9d1d9" stroke-width="2"/>
+  <polygon points="95,200 90,190 85,200" fill="#c9d1d9" stroke="#c9d1d9" stroke-width="1"/>
+  <text x="96" y="194" fill="#c9d1d9" font-size="12">y</text>
+  <circle cx="90" cy="270" r="4" fill="#c9d1d9"/>
+  <text x="80" y="290" fill="#9ca3af" font-size="11">world origin</text>
+  <line x1="430" y1="120" x2="482.4" y2="83.3" stroke="#5aa9e6" stroke-width="2"/>
+  <polygon points="482,89.7 487.3,79.8 476.3,81.5" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1"/>
+  <text x="493.3" y="73.8" fill="#5aa9e6" font-size="12">x_cam</text>
+  <line x1="430" y1="120" x2="393.3" y2="67.6" stroke="#5aa9e6" stroke-width="2"/>
+  <polygon points="399.7,68 389.8,62.7 391.5,73.7" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1"/>
+  <text x="395.8" y="64.7" fill="#5aa9e6" font-size="12">y_cam</text>
+  <circle cx="430" cy="120" r="6" fill="#5aa9e6"/>
+  <line x1="430" y1="120" x2="102.8" y2="264.3" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="104.5,258.2 97.3,266.8 108.5,267.3" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <text x="97.3" y="266.8" fill="#e6b84f" font-size="12"></text>
+  <text x="278" y="217" fill="#e6b84f" font-size="12">t: the world origin in camera axes</text>
+  <text x="400" y="110" fill="#5aa9e6" font-size="12" text-anchor="end">C = −Rᵀ·t: the camera centre in world axes</text>
+  <line x1="430" y1="120" x2="490" y2="120" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3"/>
+  <polyline points="470,120 470,118.8 469.9,117.6 469.8,116.3 469.7,115.1 469.5,113.9 469.3,112.7 469.1,111.5 468.8,110.3 468.5,109.1 468.1,108 467.8,106.8 467.3,105.7 466.9,104.5 466.4,103.4 465.9,102.3 465.3,101.2 464.7,100.2 464.1,99.1 463.5,98.1 462.8,97.1" fill="none" stroke="#ef6f6c" stroke-width="1.6"/>
+  <text x="478" y="116" fill="#ef6f6c" font-size="13">R</text>
+  <text x="320" y="24" fill="#9ca3af" font-size="11" text-anchor="middle">x_cam = R · x_world + t: R turns the world axes into the camera's, t then shifts</text>
+</svg>
