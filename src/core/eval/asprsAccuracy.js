@@ -227,3 +227,84 @@ export function asprsReportSection(checks, unit) {
     note: notes.join(' '),
   }
 }
+
+// The DEM at the checkpoints, as asprsAccuracy takes them: the enabled checkpoints the DEM
+// covers, its height (bilinear) minus the surveyed one, with the declared σz.
+// demRows: core/eval/demCheck.js sampleDemAtGcps ([{ gcpId, name, dz }], dz null off the
+// DEM or on nodata); gcps: the GCP records. → { checks, off } (`off`: checkpoints the DEM
+// does not cover, left out).
+export function demCheckpointResiduals(demRows = [], gcps = []) {
+  const byId = new Map(gcps.map((g) => [g.id, g]))
+  const rows = demRows
+    .map((r) => ({ r, g: byId.get(r.gcpId) }))
+    .filter(({ g }) => g && g.enabled !== false && g.role === 'check')
+  return {
+    checks: rows
+      .filter(({ r }) => finite(r.dz))
+      .map(({ r, g }) => ({ name: r.name ?? g.name, dx: null, dy: null, dz: r.dz, sz: g.accuracyZ })),
+    off: rows.filter(({ r }) => !finite(r.dz)).length,
+  }
+}
+
+// The Quality Report export's section for the DEM's vertical accuracy at the checkpoints:
+// the standard's non-vegetated vertical accuracy (NVA), which Edition 2 tests on
+// checkpoints in open ground. Unlike the adjustment's section, this checks the product: the
+// DEM a user exports. null without a checkpoint on the DEM or without a linear unit.
+export function asprsDemSection(demRows, gcps, unit) {
+  const { checks, off } = demCheckpointResiduals(demRows, gcps)
+  if (!checks.length || !asprsUnitOk(unit)) return null
+  const a = asprsAccuracy(checks)
+  const len = (v) => asprsLength(v, unit)
+  const notes = [
+    ...asprsStatement(a, len).map((s) => s.replace('RMSE_V vertical', 'RMSE_V (NVA) vertical')),
+    "Residuals are the DEM's height at each checkpoint (bilinear) minus its surveyed height: " +
+      'the accuracy of the elevation product itself. The standard tests NVA on checkpoints in ' +
+      'open, non-vegetated ground; a checkpoint under vegetation or on a structure measures ' +
+      'something else.',
+  ]
+  if (off) notes.push(`${off} checkpoint${off === 1 ? '' : 's'} outside the DEM or on a gap, left out.`)
+  if (a.meanErrorFlags.includes('z'))
+    notes.push(
+      'Mean error over 25 % of the RMSE: a vertical shift between the DEM and the checkpoints ' +
+        'the standard asks to remove first.',
+    )
+  const bl = a.blunders.filter((b) => b.axis === 'z')
+  if (bl.length)
+    notes.push(
+      'Over 3 × the RMSE (blunders by the standard): ' + bl.map((b) => `${b.name} ${len(b.value)}`).join(', ') + '.',
+    )
+  return {
+    title: 'DEM accuracy at the checkpoints (ASPRS 2023, NVA)',
+    tiles: [
+      { label: 'RMSE_V (NVA)', value: len(a.v.product) },
+      { label: 'Mean error', value: len(a.z.mean), tone: a.meanErrorFlags.includes('z') ? 'warn' : undefined },
+      {
+        label: 'Checkpoints',
+        value: String(a.nV),
+        tone: a.enoughPoints.v ? undefined : 'warn',
+        hint: a.enoughPoints.v ? undefined : 'The standard asks for at least 30',
+      },
+    ],
+    columns: [
+      { key: 'component', label: 'Component' },
+      { key: 'n', label: 'n', align: 'right' },
+      { key: 'mean', label: 'Mean error', align: 'right' },
+      { key: 'sd', label: 'Std dev', align: 'right' },
+      { key: 'fit', label: 'RMSE₁ (DEM)', align: 'right' },
+      { key: 'survey', label: 'RMSE₂ (survey)', align: 'right' },
+      { key: 'rmse', label: 'RMSE', align: 'right' },
+    ],
+    rows: [
+      {
+        component: 'Vertical (NVA)',
+        n: a.nV,
+        mean: len(a.z.mean),
+        sd: len(a.z.sd),
+        fit: len(a.v.fit),
+        survey: len(a.v.survey),
+        rmse: len(a.v.product),
+      },
+    ],
+    note: notes.join(' '),
+  }
+}

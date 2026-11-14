@@ -5,7 +5,9 @@ import {
   asprsStatement,
   axisStats,
   asprsReportSection,
+  asprsDemSection,
   checkpointResiduals,
+  demCheckpointResiduals,
   ASPRS_MIN_CHECKPOINTS,
 } from './asprsAccuracy.js'
 import { buildReportHtml } from '../products/report.js'
@@ -133,5 +135,69 @@ describe('asprsReportSection', () => {
   it('names the blunders and the shifted axes in its note', () => {
     const checks = [...alternating(30), { name: 'B9', dx: 0, dy: 0, dz: 0.5, sx: 0.019, sy: 0.019, sz: 0.02 }]
     expect(asprsReportSection(checks, 'm').note).toMatch(/B9 Z 50\.0 cm/)
+  })
+})
+
+// The DEM at the checkpoints (NVA): rows as core/eval/demCheck.js sampleDemAtGcps gives them.
+describe('asprsDemSection', () => {
+  // n checkpoints (σz 2 cm) whose DEM heights alternate ±3 cm about the survey: RMSE₁ 3 cm,
+  // product √(3² + 2²) = 3.61 cm; plus a control and a disabled checkpoint, both left out.
+  const setup = (n, dz = 0.03) => {
+    const gcps = Array.from({ length: n }, (_, i) => ({
+      id: `g${i}`,
+      name: `C${i + 1}`,
+      role: 'check',
+      accuracyZ: 0.02,
+    }))
+    gcps.push({ id: 'ctl', name: 'K1', role: 'control', accuracyZ: 0.02 })
+    gcps.push({ id: 'off', name: 'X1', role: 'check', enabled: false, accuracyZ: 0.02 })
+    const rows = gcps.map((g, i) => ({ gcpId: g.id, name: g.name, dz: i % 2 ? -dz : dz }))
+    return { gcps, rows }
+  }
+
+  it('takes the enabled checkpoints the DEM covers and counts the ones it does not', () => {
+    const { gcps, rows } = setup(4)
+    rows[1].dz = null // on a gap
+    const { checks, off } = demCheckpointResiduals(rows, gcps)
+    expect(checks.map((c) => c.name)).toEqual(['C1', 'C3', 'C4'])
+    expect(off).toBe(1)
+    expect(checks[0]).toMatchObject({ dz: 0.03, sz: 0.02 })
+  })
+
+  it('states the NVA class with 30 checkpoints and their survey accuracy', () => {
+    const { gcps, rows } = setup(30)
+    const sec = asprsDemSection(rows, gcps, 'm')
+    expect(sec.tiles[0]).toMatchObject({ label: 'RMSE_V (NVA)', value: cm(Math.hypot(0.03, 0.02)) })
+    expect(sec.rows).toHaveLength(1)
+    expect(sec.rows[0]).toMatchObject({ n: 30, fit: cm(0.03), survey: cm(0.02), rmse: cm(Math.hypot(0.03, 0.02)) })
+    expect(sec.note).toMatch(/tested to meet the ASPRS .* for a 3\.6 cm RMSE_V \(NVA\) vertical/)
+  })
+
+  it('reports fewer than 30 checkpoints as measured, not compliant', () => {
+    const { gcps, rows } = setup(12)
+    const sec = asprsDemSection(rows, gcps, 'm')
+    expect(sec.note).toMatch(/12 checkpoints, fewer than the 30/)
+    expect(sec.note).not.toMatch(/tested to meet/)
+    expect(sec.tiles[2]).toMatchObject({ value: '12', tone: 'warn' })
+  })
+
+  it('flags a DEM shifted against the checkpoints', () => {
+    const { gcps, rows } = setup(30)
+    for (const r of rows) r.dz = r.dz + 0.05 // the DEM 5 cm high everywhere
+    const sec = asprsDemSection(rows, gcps, 'm')
+    expect(sec.tiles[1]).toMatchObject({ label: 'Mean error', value: cm(0.05), tone: 'warn' })
+    expect(sec.note).toMatch(/vertical shift/)
+  })
+
+  it('is left out with no checkpoint on the DEM or without a length unit', () => {
+    const { gcps, rows } = setup(5)
+    expect(
+      asprsDemSection(
+        rows.map((r) => ({ ...r, dz: null })),
+        gcps,
+        'm',
+      ),
+    ).toBeNull()
+    expect(asprsDemSection(rows, gcps, 'degree')).toBeNull()
   })
 })

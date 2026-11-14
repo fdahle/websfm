@@ -28,7 +28,7 @@ import { projectHealth } from '../core/eval/health.js'
 import { estimatedIntrinsics } from '../core/sfm/cameraEstimated.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import { buildReportHtml } from '../core/products/report.js'
-import { asprsReportSection, checkpointResiduals } from '../core/eval/asprsAccuracy.js'
+import { asprsDemSection, asprsReportSection, checkpointResiduals } from '../core/eval/asprsAccuracy.js'
 import { methodsUsed } from '../core/help/methodsUsed.js'
 import { citeShort, formatReference } from '../core/help/references.js'
 import { isFisheyeModel } from '../core/sfm/distortion.js'
@@ -338,7 +338,7 @@ export function useQualityReport() {
   // Assemble the full export report object (plain) for buildReportHtml — same numbers
   // the hub shows. Async for the GCP report.
   async function buildExportReport(projectName) {
-    const { rows, gcpReport } = await computeHealth()
+    const { rows, gcpReport, demCheck } = await computeHealth()
     const f2 = (v, d = 2) => (v == null ? '—' : v.toFixed(d))
     const sections = []
 
@@ -416,6 +416,9 @@ export function useQualityReport() {
     // figures a surveyor hands on, with the checkpoints' survey error counted in.
     const asprs = asprsSection(gcpReport)
     if (asprs) sections.push(asprs)
+    // The DEM itself at the same checkpoints (NVA): the product, not the adjustment.
+    const demNva = demCheck ? asprsDemSection(demCheck, gcpsStore.gcps, crsUnit.value) : null
+    if (demNva) sections.push(demNva)
 
     // Scale bars (D6). Present whenever bars exist — including in a georeferenced
     // project, where they are independent checks against the CRS fit, and

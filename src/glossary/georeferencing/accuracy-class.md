@@ -18,5 +18,8 @@ the RMSE (no systematic shift left), and treats a residual over three times the 
 blunder to explain.
 
 WebSfM reports these figures in the Quality Report for the GCPs marked as checkpoints,
-using their declared accuracies as the survey error. They describe the adjusted block: a
-DEM or orthophoto built from it adds its own error.
+using their declared accuracies as the survey error. The first set describes the adjusted
+block. When there is a DEM, a second set tests the DEM itself at the same checkpoints,
+its height there against the surveyed one: the standard's **non-vegetated vertical
+accuracy (NVA)**, which assumes checkpoints on open ground. The orthophoto's horizontal
+accuracy is not tested yet.

@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **The DEM's vertical accuracy in survey terms.** When a project has a DEM, the Quality
+  Report export adds *DEM accuracy at the checkpoints (ASPRS 2023, NVA)*: the DEM's height
+  at each checkpoint against its surveyed height, as RMSE_V with the checkpoints' declared
+  accuracy counted in, the mean error and the blunders, and the standard's "tested to
+  meet" sentence with at least 30 checkpoints. Checkpoints outside the DEM or on a gap are
+  counted and left out.
 - **Diagrams in the help.** Twenty-one glossary entries now show a figure: ground sample
   distance, lens distortion, baseline and parallax, RANSAC, focal length and field of
   view, triangulation, the pinhole model, the principal point, statistical outlier
