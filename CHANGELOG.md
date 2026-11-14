@@ -18,8 +18,13 @@ Notable changes to websfm. The format follows
   (8 %) in 79 s → all 347 cameras, 130,544 points, 23.0 cm (10 per photo: 2,514 pairs in
   43 s, 347 cameras, 23.5 cm). South Building (128): 1,568 pairs (19 %), the same 128
   cameras and 4.8 mm median against COLMAP's model as exhaustive; 783 pairs (10 per
-  photo) 4.7 mm. Finding the similar photos took 6 s and 11–20 s. Film scans keep their
-  old start until it is measured on a film block.
+  photo) 4.7 mm. Finding the similar photos took 6 s and 11–20 s. Film scans start on it
+  too, where they started on Sequential: on a TMA block (258 scans, three cameras, masked
+  fiducials, the same keypoints for every pairing) Similar images registered 164 cameras,
+  footprint preselection 140, exhaustive 96 and Sequential with Find revisits 71 (file
+  names sort camera by camera, so capture order misses the links between them); 37 raw
+  Casa Grande scans (fiducials and data strip unmasked): 32 cameras with 10 per photo,
+  30 exhaustive.
 - **Sequential matching joins a second pass over the same place.** Match Features ▸
   Sequential ▸ **Find revisits** (on by default) also matches each photo with the 5 photos
   that look most like it, wherever they are in the sequence, so two laps or a strip flown

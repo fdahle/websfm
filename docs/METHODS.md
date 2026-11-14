@@ -163,7 +163,10 @@ separate codebooks. On South Building (128 images; COLMAP's exhaustive verificat
 truth) k = 15 chose 14 % of the pairs and kept 88 % of all verified inliers, 75 % of the
 pairs with ≥ 100; a larger codebook (256) or query expansion moved this by < 1 point and
 PCA whitening, learned on so few images, destroyed it. Like the other prefilters it turns
-the subset gate off.
+the subset gate off. It is the start for more than 200 images without positions, film
+scans included: the fiducials and data strip every scan shares are a small part of its
+descriptors (masked, or outnumbered by the scene), and on a three-camera TMA block it
+found the links between cameras that a capture-order window misses.
 
 **Descriptor matching** (`core/features/bruteforce.js`, or the learned `lightglue.js`):
 mutual nearest neighbour (cross-check) and the **Lowe ratio test** `d1/d2 < ratio`, default

@@ -117,7 +117,6 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
         ? {
             posedImageCount: posedImageCount?.value ?? 0,
             video: datasetProfile.value.kind === 'video',
-            film: datasetProfile.value.kind === 'film',
             images: kpImageCount?.value ?? 0,
           }
         : {}),

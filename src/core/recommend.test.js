@@ -30,7 +30,6 @@ describe('recommendSettings', () => {
     expect(initialMatchStrategy(0, { images: 201 })).toBe('retrieval')
     expect(initialMatchStrategy(2, { images: 5000 })).toBe('preselect')
     expect(initialMatchStrategy(0, { video: true, images: 5000 })).toBe('sequential')
-    expect(initialMatchStrategy(0, { film: true, images: 5000 })).toBe('exhaustive')
   })
 
   it('starts video frames on sequential matching, unless positions exist', () => {
@@ -122,7 +121,7 @@ describe('recommendSettings', () => {
   })
 
   // ── Pinned end-to-end profiles (U1 → U2) for the two benchmark datasets ──
-  it('B0 (aerial film scans): tiled hi-res detect, sequential match, low dense', () => {
+  it('B0 (aerial film scans): tiled hi-res detect, similar-images match, low dense', () => {
     // Scanned film: no EXIF, ~11k px, sequential names, many images, no GPS.
     const images = Array.from({ length: 250 }, (_, i) => ({
       name: `CA213732V${String(i + 1).padStart(4, '0')}.tif`,
@@ -134,7 +133,7 @@ describe('recommendSettings', () => {
     const r = recommendSettings(p)
     expect(r.detect.maxDim.value).toBe(3200)
     expect(r.detect.tiling.value).toBe('auto')
-    expect(r.match.strategy.value).toBe('sequential')
+    expect(r.match.strategy.value).toBe('retrieval')
     expect(r.depthmap.quality.value).toBe('low') // large set
   })
 

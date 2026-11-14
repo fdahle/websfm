@@ -52,7 +52,7 @@ settings, for example how many pairs will be matched. Settings the current choic
 ignore are hidden or greyed with the reason.
 
 ## Pairing
-<!-- param: strategy  default: Preselect when images have camera positions, Sequential for video frames, Similar images for more than 200 images (not film scans), otherwise Exhaustive -->
+<!-- param: strategy  default: Preselect when images have camera positions, Sequential for video frames, Similar images for more than 200 images, otherwise Exhaustive -->
 Which pairs are matched. **Exhaustive** matches every pair: safe, but the time grows
 with the square of the image count. **Sequential** matches each image to the next few
 in capture order: for video, orbits and single strips. **Similar images** matches each

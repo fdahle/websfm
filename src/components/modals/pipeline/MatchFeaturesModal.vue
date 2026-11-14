@@ -66,7 +66,6 @@ const preselectAvailable = computed(() => hasPoses.value || hasFootprints.value)
 const strategy = ref(
   initialMatchStrategy(props.posedImageCount, {
     video: profile.value.kind === 'video',
-    film: profile.value.kind === 'film',
     images: props.detectedImageCount,
   }),
 )

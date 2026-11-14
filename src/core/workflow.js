@@ -657,7 +657,6 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
       value.strategy === 'auto' || value.strategy == null
         ? initialMatchStrategy(runtime.posedImageCount ?? 0, {
             video: !!runtime.video,
-            film: !!runtime.film,
             images: runtime.images ?? 0,
           })
         : value.strategy

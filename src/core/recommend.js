@@ -29,12 +29,14 @@ const rec = (value, reason) => ({ value, reason })
 // A set of video frames (profile kind 'video') starts on Sequential instead of
 // Exhaustive: the frames are in capture order, and each overlaps its neighbours. A large
 // set (more than RETRIEVAL_TUNING.autoAboveImages images with keypoints) starts on Similar
-// images: exhaustive matching grows with the square of the count. Film scans do not
-// (`film`): Similar images is not measured on them yet (recommendMatch).
-export function initialMatchStrategy(positionCount, { video = false, images = 0, film = false } = {}) {
+// images: exhaustive matching grows with the square of the count. Film scans too: their
+// fiducials and data strip do not make them look alike once they are masked or few among
+// the scene's features (a 258-scan TMA block registered more cameras than with any other
+// pairing; CHANGELOG).
+export function initialMatchStrategy(positionCount, { video = false, images = 0 } = {}) {
   if (Number(positionCount) >= 2) return 'preselect'
   if (video) return 'sequential'
-  return !film && Number(images) > RETRIEVAL_TUNING.autoAboveImages ? 'retrieval' : 'exhaustive'
+  return Number(images) > RETRIEVAL_TUNING.autoAboveImages ? 'retrieval' : 'exhaustive'
 }
 
 // ── detect ──────────────────────────────────────────────────────────────────
@@ -86,13 +88,6 @@ function recommendMatch(p) {
     out.strategy = rec(
       'sequential',
       'Frames extracted from a video, in capture order — match each to the next few; enable loop closure if the video returns to where it started.',
-    )
-  } else if (p.kind === 'film' && p.sequentialNames && p.scale === 'large') {
-    // Film keeps capture order: every scan shows the same fiducials and data strip, which
-    // may make all of them look alike to Similar images (not measured on a film block yet).
-    out.strategy = rec(
-      'sequential',
-      'Large set of film scans with sequential filenames — match capture-order neighbours to avoid the O(N²) exhaustive cost; turn on Find revisits for a block of several strips.',
     )
   } else if (p.nImages > RETRIEVAL_TUNING.autoAboveImages) {
     // A large set without positions: pairs by appearance. Unlike capture order (file
