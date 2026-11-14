@@ -497,7 +497,8 @@ function diagnosticsLines(d) {
     out.push(
       `- **BA solver**: ${b.calls} calls, ${((b.ms ?? 0) / 1000).toFixed(1)}s, largest n ${b.maxN}; ` +
         `${b.solves} solves — ${b.cholesky} Cholesky, PCG ${b.pcgConverged} converged / ${b.pcgPartial} partial / ` +
-        `${b.pcgFallback} → Cholesky (${b.pcgIters} CG it, max ${b.pcgItersMax}); ` +
+        `${b.pcgFallback} → Cholesky (${b.pcgIters} CG it, max ${b.pcgItersMax})` +
+        `${b.implicit ? `, ${b.implicit} implicit` : ''}; ` +
         `policy ${policy.length ? policy.join(', ') : 'default'}`,
     )
   }

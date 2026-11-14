@@ -393,18 +393,24 @@ fn bundle_adjust_impl(
     let mut pts: Vec<V3> = (0..n_pts).map(|i| {
         [pts_flat[i*3] as f64, pts_flat[i*3+1] as f64, pts_flat[i*3+2] as f64]
     }).collect();
-    let obs: Vec<(usize, usize, f64, f64, f64, f64)> = (0..n_obs).map(|i| {
+    // (camera, point, u, v, weight u, weight v), kept as the caller gave them (u32, f32):
+    // 24 bytes an observation instead of 40 (48 natively) in f64 and usize. `ob` reads one
+    // back widened.
+    let obs: Vec<(u32, u32, f32, f32, f32, f32)> = (0..n_obs).map(|i| {
         let b = i * 2;
-        let wb = i * 2;
-        let wx = observation_weight.get(wb).copied().unwrap_or(1.0) as f64;
-        let wy = observation_weight.get(wb+1).copied().unwrap_or(1.0) as f64;
-        (obs_index[b] as usize, obs_index[b+1] as usize, obs_px[b] as f64, obs_px[b+1] as f64,
+        let wx = observation_weight.get(b).copied().unwrap_or(1.0);
+        let wy = observation_weight.get(b + 1).copied().unwrap_or(1.0);
+        (obs_index[b], obs_index[b + 1], obs_px[b], obs_px[b + 1],
          if wx.is_finite() && wx > 0.0 { wx } else { 1.0 }, if wy.is_finite() && wy > 0.0 { wy } else { 1.0 })
-    }).filter(|&(ci, pi, _, _, _, _)| ci < n_cam && pi < n_pts).collect();
+    }).filter(|&(ci, pi, _, _, _, _)| (ci as usize) < n_cam && (pi as usize) < n_pts).collect();
+    let ob = |o: usize| -> (usize, usize, f64, f64, f64, f64) {
+        let (ci, pi, u, v, wx, wy) = obs[o];
+        (ci as usize, pi as usize, u as f64, v as f64, wx as f64, wy as f64)
+    };
 
     // Per-point observations as indices into `obs`, in `obs` order (CSR) — the
     // structure the Schur reduction iterates.
-    let (pt_start, pt_obs) = csr(n_pts, obs.iter().map(|o| o.1));
+    let (pt_start, pt_obs) = csr(n_pts, obs.iter().map(|o| o.1 as usize));
 
     let camera_center = |cam: &(M3, V3)| -> V3 {
         let (r, t) = cam;
@@ -503,9 +509,12 @@ fn bundle_adjust_impl(
     let n_groups = if refine { g_count } else { 0 };
     // The reduced system's sparsity: camera c couples with every camera that shares a
     // point with it, and with those cameras' intrinsics groups; a group with whatever
-    // its cameras couple with. Built once, the observations do not change.
-    let pattern = {
-        let (cam_start, cam_obs) = csr(n_cam, obs.iter().map(|o| o.0));
+    // its cameras couple with. Built once, the observations do not change. Uncoupled
+    // (`coupled` false) it is B's alone, the reduced variables before the points are
+    // eliminated: a camera with its own group, a group with its cameras (the implicit
+    // solve keeps only that).
+    let build_pattern = |coupled: bool| {
+        let (cam_start, cam_obs) = csr(n_cam, obs.iter().map(|o| o.0 as usize));
         let (grp_start, grp_cams) = csr(n_groups, (0..if refine { n_cam } else { 0 }).map(|c| grp[c]));
         let (blk_start, blk_cams) = csr(n_pb, (0..n_cam).map(|c| pb[c]));
         let mut dims = vec![6usize; n_free];
@@ -513,10 +522,14 @@ fn bundle_adjust_impl(
         BlockPattern::new(dims, |r, touch| {
             let visit = |c: usize, touch: &mut dyn FnMut(usize)| {
                 if n_groups > 0 { touch(n_free + grp[c]); }
+                if !coupled {
+                    if slot[pb[c]] != FIXED { touch(slot[pb[c]]); }
+                    return;
+                }
                 for k in cam_start[c]..cam_start[c + 1] {
-                    let p = obs[cam_obs[k as usize] as usize].1;
+                    let p = obs[cam_obs[k as usize] as usize].1 as usize;
                     for q in pt_start[p]..pt_start[p + 1] {
-                        let c2 = obs[pt_obs[q as usize] as usize].0;
+                        let c2 = obs[pt_obs[q as usize] as usize].0 as usize;
                         if slot[pb[c2]] != FIXED { touch(slot[pb[c2]]); }
                         if n_groups > 0 { touch(n_free + grp[c2]); }
                     }
@@ -529,13 +542,29 @@ fn bundle_adjust_impl(
             else { for k in grp_start[r - n_free]..grp_start[r - n_free + 1] { visit(grp_cams[k as usize] as usize, &mut *touch); } }
         })
     };
+    let mut pattern = build_pattern(true);
     let solver = SolverOpts::from_flat(solver_flat);
     let mut solve_stats = SolveStats::default();
-    // The sparse direct solve's ordering, once for every LM iteration of this call.
-    let direct = if solver.direct == 1 && (pattern.n >= solver.pcg_min_n || pattern.n > DENSE_MAX_N) {
-        crate::sparse_chol::Symbolic::new(&pattern, SPARSE_MAX_BYTES / (8 * 36))
-            .filter(|sym| sym.factor_bytes() <= SPARSE_MAX_BYTES)
-    } else { None };
+    // The sparse direct solve's ordering, once for every LM iteration of this call, when
+    // the direct solve fits the memory (`direct_bytes`, solver slot 10): the ordering is
+    // given what is left once the reduced matrix and the per-observation and per-point
+    // data are counted, and gives up past it. Otherwise the reduced matrix is never
+    // stored (`implicit`): on a dense camera graph S alone outgrows wasm32 (BAL
+    // final-1936, 1,936 cameras that nearly all see each other: 2.2 GB, held twice).
+    let large = pattern.n >= solver.pcg_min_n || pattern.n > DENSE_MAX_N;
+    let (direct, implicit) = if solver.direct == 2 && large { (None, true) }
+    else if solver.direct == 1 && large {
+        let room = solver.memory.saturating_sub(direct_bytes(pattern.n_vals, 0, 0, obs.len(), n_pts));
+        // The factor and the group partials share one buffer: each must fit the room.
+        let parts = 8 * range_parts_len(&pattern, n_free) as u64;
+        let max_blocks = (room / (8 * 36)).min(usize::MAX as u64) as usize;
+        let sym = if max_blocks == 0 || parts > room { None } else {
+            crate::sparse_chol::Symbolic::new(&pattern, max_blocks).filter(|sym| sym.factor_bytes() as u64 <= room)
+        };
+        let implicit = sym.is_none();
+        (sym, implicit)
+    } else { (None, false) };
+    if implicit { pattern = build_pattern(false); }
     // Exact steps keep finding improvements of a few 10⁻⁶ of the cost long after the
     // model has stopped changing (1,600 aerial cameras: all 30 iterations ran, RMS
     // 0.46 px from the 13th on); a 10⁻⁵ stop ends them with the same final model.
@@ -555,7 +584,7 @@ fn bundle_adjust_impl(
     // writes were the cost). The full-matrix paths keep the index order (and their bits).
     let schur_order: Vec<usize> = if lower_only {
         let mut key: Vec<(usize, usize)> = (0..n_pts).map(|p| {
-            ((pt_start[p] as usize..pt_start[p + 1] as usize).map(|q| pb[obs[pt_obs[q] as usize].0]).min().unwrap_or(usize::MAX), p)
+            ((pt_start[p] as usize..pt_start[p + 1] as usize).map(|q| pb[obs[pt_obs[q] as usize].0 as usize]).min().unwrap_or(usize::MAX), p)
         }).collect();
         key.sort_unstable();
         key.into_iter().map(|(_, p)| p).collect()
@@ -564,7 +593,7 @@ fn bundle_adjust_impl(
     // the full-matrix paths keep their single loop.
     let range_plan = if lower_only { Some(RangePlan::new(&pattern, n_free, &schur_order, |p, visit: &mut dyn FnMut(usize)| {
         for q in pt_start[p] as usize..pt_start[p + 1] as usize {
-            let sl = slot[pb[obs[pt_obs[q] as usize].0]];
+            let sl = slot[pb[obs[pt_obs[q] as usize].0 as usize]];
             if sl != FIXED { visit(sl); }
         }
     })) } else { None };
@@ -618,7 +647,7 @@ fn bundle_adjust_impl(
     // The point an observation sees: X − τ·s·v (rolling shutter), or X itself, and the
     // shift direction −s·v (for τ's Jacobian).
     let seen_point = |o: usize, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> (V3, V3) {
-        let (ci, pi, _, oy, _, _) = obs[o];
+        let (ci, pi, _, oy, _, _) = ob(o);
         match rs[ci] {
             None => (pts[pi], [0.0; 3]),
             Some((v, h, _)) => {
@@ -635,7 +664,7 @@ fn bundle_adjust_impl(
     // here in observation order, so they give the plain loop's bits.
     // One observation's squared reprojection error, NaN when it projects nowhere.
     let sq_err = |o: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
-        let (ci, pi, ox, oy, _, _) = obs[o];
+        let (ci, pi, ox, oy, _, _) = ob(o);
         let pose = pose_of(ci, cams, gpar);
         let (r, t) = &pose;
         let e = eff(ci, gpar);
@@ -656,7 +685,7 @@ fn bundle_adjust_impl(
     // quadratic) GCP anchor term — same total objective the LM step below descends.
     let robust_cost = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| -> f64 {
         let terms = map_indexed(obs.len(), |o| {
-            let (ci, pi, ox, oy, wx, wy) = obs[o];
+            let (ci, pi, ox, oy, wx, wy) = ob(o);
             let pose = pose_of(ci, cams, gpar);
             let (r, t) = &pose;
             let e = eff(ci, gpar);
@@ -704,7 +733,7 @@ fn bundle_adjust_impl(
     // those were 160 B per observation, the largest term at thousands of cameras.
     struct Jac { ci: usize, ru: f64, rv: f64, wu: f64, wv: f64, ju: [f64; 6], jv: [f64; 6], jpu: [f64; 3], jpv: [f64; 3], jku: [f64; BLK_MAX], jkv: [f64; BLK_MAX] }
     let jac = |o: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| -> Option<Jac> {
-        let (ci, pi, ox, oy, obs_wx, obs_wy) = obs[o];
+        let (ci, pi, ox, oy, obs_wx, obs_wy) = ob(o);
         let (r, t) = &cams[pb[ci]];
         let Eff { fx, fy, cx, cy, k, p: tp, fisheye } = eff(ci, gpar);
         let (xs, sdir) = if rs_any { seen_point(o, pts, gpar) } else { (pts[pi], [0.0; 3]) };
@@ -817,6 +846,8 @@ fn bundle_adjust_impl(
     let want_cov = solver.covariance && refine;
     let mut cov_pass = false;
     let mut last_s: Option<Vec<f64>> = None;
+    // The implicit solve's counterpart: B, S's diagonal blocks, the points' C⁻¹.
+    let mut last_implicit: Option<(Vec<f64>, Vec<f64>, Vec<Option<M3>>)> = None;
     let mut lambda = 1e-3f64;              // LM damping
     let mut trace: Vec<f64> = Vec::new();  // RMS after each accepted iteration
     // The full-matrix paths (no RangePlan: the dense and PCG solves, below ~128 cameras)
@@ -835,7 +866,95 @@ fn bundle_adjust_impl(
     let chunk_range = |c: usize| (c * n_pts / point_chunks)..((c + 1) * n_pts / point_chunks);
     let mut share_s: Vec<Vec<f64>> = if range_plan.is_some() { Vec::new() } else { (0..point_chunks).map(|_| vec![0f64; pattern.n_vals]).collect() };
     let mut share_r: Vec<Vec<f64>> = if range_plan.is_some() { Vec::new() } else { (0..point_chunks).map(|_| vec![0f64; n]).collect() };
+    // The implicit solve's Jacobian cache: each observation's rows with its weight's root
+    // folded in (ju, jv, jpu, jpv, then jku, jkv over the group's kdim), in f32, filled
+    // once per iteration (the linearisation holds through every try and CG iteration).
+    // A product then reads them instead of re-deriving the projection: re-deriving made a
+    // CG iteration ~3× Ceres' (BAL trafalgar-257). Only when it fits the memory budget
+    // beside the rest; otherwise each product calls `eblocks`.
+    let jk = if refine { kdim } else { 0 };
+    let jstride = 18 + 2 * jk;
+    let use_jcache = implicit
+        && 2 * 8 * pattern.n_vals as u64 + MEM_PER_OBS * obs.len() as u64 + MEM_PER_POINT * n_pts as u64
+            + 4 * (jstride * obs.len()) as u64 <= solver.memory;
+    let mut jcache: Vec<f32> = Vec::new();
+    let mut jcache_outer = u32::MAX;
+    // The implicit solve's pieces, as functions of the state they read (also used for the
+    // lens σ after the loop). `fill_jcache`: the Jacobian cache at the given linearisation.
+    let fill_jcache = |jcache: &mut Vec<f32>, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| {
+        jcache.resize(jstride * obs.len(), 0.0);
+        let jp = SyncPtr::of(jcache);
+        for_each_index(obs.len().div_ceil(CHUNK), |k| {
+            for o in k * CHUNK..((k + 1) * CHUNK).min(obs.len()) {
+                // SAFETY: observation o belongs to chunk k alone.
+                let row = unsafe { jp.slice(o * jstride, jstride) };
+                let Some(j) = jac(o, cams, pts, gpar, dh) else { row.fill(0.0); continue };
+                let (su, sv) = (j.wu.max(0.0).sqrt(), j.wv.max(0.0).sqrt());
+                for a in 0..6 { row[a] = (su * j.ju[a]) as f32; row[6 + a] = (sv * j.jv[a]) as f32; }
+                for k in 0..3 { row[12 + k] = (su * j.jpu[k]) as f32; row[15 + k] = (sv * j.jpv[k]) as f32; }
+                for a in 0..jk { row[18 + a] = (su * j.jku[a]) as f32; row[18 + jk + a] = (sv * j.jkv[a]) as f32; }
+            }
+        });
+    };
+    // y = S·x = B·x − Σ_p E_p·C_p⁻¹·E_pᵀ·x, a point chunk at a time, each into its own
+    // share (`shares`: `share_r`'s buffers, free while the implicit solve runs), added in
+    // chunk order. `b`: B as the solve has it (damped); `cinv_store`: the points' C⁻¹.
+    #[allow(clippy::too_many_arguments)]
+    let implicit_product = |b: &[f64], cinv_store: &[Option<M3>], jcache: &[f32], shares: &mut Vec<Vec<f64>>,
+                            cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64, x: &[f64], y: &mut [f64]| {
+        for v in shares.iter_mut() { v.fill(0.0); }
+        let ps: Vec<SyncPtr<f64>> = shares.iter_mut().map(|v| SyncPtr::of(v)).collect();
+        for_each_index(point_chunks, |c| {
+            let p = ps[c];
+            let mut el: Vec<EBlock> = Vec::new();
+            for pi in chunk_range(c) {
+                let Some(cinv) = cinv_store[pi] else { continue };
+                if use_jcache {
+                    // E_o = √w·J_varᵀ ⊗ √w·J_p over the point's observations o.
+                    let qs = pt_start[pi] as usize..pt_start[pi + 1] as usize;
+                    let at = |o: usize| { let ci = obs[o].0 as usize; (slot[pb[ci]], group_off + if jk > 0 { grp[ci] * kdim } else { 0 }) };
+                    let mut t = [0f64; 3];
+                    for q in qs.clone() {
+                        let o = pt_obs[q] as usize;
+                        let j = &jcache[o * jstride..(o + 1) * jstride];
+                        let (sc, go) = at(o);
+                        let (mut su, mut sv) = (0.0, 0.0);
+                        if sc != FIXED { for a in 0..6 { su += j[a] as f64 * x[6 * sc + a]; sv += j[6 + a] as f64 * x[6 * sc + a]; } }
+                        for a in 0..jk { su += j[18 + a] as f64 * x[go + a]; sv += j[18 + jk + a] as f64 * x[go + a]; }
+                        for k in 0..3 { t[k] += j[12 + k] as f64 * su + j[15 + k] as f64 * sv; }
+                    }
+                    let z = mat3_vec(&cinv, &t);
+                    for q in qs {
+                        let o = pt_obs[q] as usize;
+                        let j = &jcache[o * jstride..(o + 1) * jstride];
+                        let (sc, go) = at(o);
+                        let pu = j[12] as f64 * z[0] + j[13] as f64 * z[1] + j[14] as f64 * z[2];
+                        let pv = j[15] as f64 * z[0] + j[16] as f64 * z[1] + j[17] as f64 * z[2];
+                        // SAFETY: chunk c alone writes its share.
+                        if sc != FIXED { for a in 0..6 { unsafe { *p.at(6 * sc + a) += j[a] as f64 * pu + j[6 + a] as f64 * pv; } } }
+                        for a in 0..jk { unsafe { *p.at(go + a) += j[18 + a] as f64 * pu + j[18 + jk + a] as f64 * pv; } }
+                    }
+                    continue;
+                }
+                eblocks(pi, cams, pts, gpar, dh, &mut el);
+                let mut t = [0f64; 3];
+                for eb in &el { for a in 0..eb.dim { for k in 0..3 { t[k] += eb.rows[a][k] * x[eb.off + a]; } } }
+                let z = mat3_vec(&cinv, &t);
+                // SAFETY: chunk c alone writes its share.
+                for eb in &el { for a in 0..eb.dim {
+                    unsafe { *p.at(eb.off + a) += eb.rows[a][0]*z[0] + eb.rows[a][1]*z[1] + eb.rows[a][2]*z[2]; }
+                } }
+            }
+        });
+        pattern.matvec(b, x, y);
+        for v in shares.iter() { for i in 0..n { y[i] -= v[i]; } }
+    };
 
+    // The reduced system's buffers, allocated once for every iteration and try (see
+    // sparse_chol.rs `factor_reusing`): the undamped assembly, the damped and reduced copy,
+    // the implicit solve's B, and `work`: the ranges' group partials during a Schur step,
+    // then the factor's storage (never both at once: the peak is the larger).
+    let (mut smat, mut s, mut b_damped, mut work): (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) = Default::default();
     for outer in 0.. {
         if outer >= max_iters && !cov_pass {
             if !want_cov { break; }
@@ -851,7 +970,8 @@ fn bundle_adjust_impl(
         // ── Assemble undamped blocks ────────────────────────────────────────────
         // S is the reduced-variable Hessian (camera poses + intrinsic groups) in the
         // block-sparse `pattern`; gr its gradient; per-point C (3×3) and gp (3).
-        let mut smat = vec![0f64; pattern.n_vals];
+        smat.clear();
+        smat.resize(pattern.n_vals, 0.0);
         let mut gr = vec![0f64; n];
         let mut cmat = vec![[[0f64; 3]; 3]; n_pts];
         let mut gpv = vec![[0f64; 3]; n_pts];
@@ -937,8 +1057,13 @@ fn bundle_adjust_impl(
             // added in range order); each range's points in index order, the loop's.
             let (sm_p, gr_p) = (SyncPtr::of(&mut smat), SyncPtr::of(&mut gr));
             let (cm_p, gp_p) = (SyncPtr::of(&mut cmat), SyncPtr::of(&mut gpv));
-            let mut parts: Vec<Vec<f64>> = (0..rp.n).map(|r| if r == 0 || !refine { Vec::new() } else { vec![0f64; rp.part_len()] }).collect();
-            let parts_p: Vec<SyncPtr<f64>> = parts.iter_mut().map(|v| SyncPtr::of(v)).collect();
+            // The other ranges' group partials, range r at (r − 1)·pl of `work`.
+            let pl = rp.part_len();
+            work.clear();
+            work.resize(if refine { (rp.n - 1) * pl } else { 0 }, 0.0);
+            let parts_p: Vec<SyncPtr<f64>> = (0..rp.n)
+                .map(|r| if r == 0 || !refine { SyncPtr::of(&mut []) } else { SyncPtr::of(&mut work[(r - 1) * pl..r * pl]) })
+                .collect();
             for_each_index(rp.n, |r| {
                 let part = parts_p[r];
                 for &pi in &rp.points_by_index[r] {
@@ -946,7 +1071,7 @@ fn bundle_adjust_impl(
                     let owner = rp.owner[pi] as usize == r;
                     for q in pt_start[pi]..pt_start[pi + 1] {
                         let o = pt_obs[q as usize] as usize;
-                        let sc = slot[pb[obs[o].0]];
+                        let sc = slot[pb[obs[o].0 as usize]];
                         let free = sc != FIXED;
                         let mine = free && rp.range(sc) == r;
                         if !mine && !owner { continue; }
@@ -992,7 +1117,7 @@ fn bundle_adjust_impl(
                 }
             });
             if refine {
-                for part in parts.iter().skip(1) {
+                for part in work.chunks(pl.max(1)).take(rp.n - 1) {
                     for &(base, len) in &rp.gg {
                         let o = rp.gg_at[&base];
                         for i in 0..len { smat[base + i] += part[o + i]; }
@@ -1084,7 +1209,7 @@ fn bundle_adjust_impl(
         for _try in 0..LM_MAX_TRIES {
             // Damp the reduced diagonal, then Schur-eliminate the (λ-damped) points:
             // S ← (S+λ) − Σ_p E·(C+λ)⁻¹·Eᵀ,  rhs ← −gr + Σ_p E·(C+λ)⁻¹·gp.
-            let mut s = smat.clone();
+            s.clone_from(&smat);
             let mut rhs = vec![0f64; n];
             for i in 0..n { rhs[i] = -gr[i]; }
             for b in 0..pattern.dims.len() {
@@ -1093,16 +1218,22 @@ fn bundle_adjust_impl(
             }
 
             let mut cinv_store: Vec<Option<M3>> = vec![None; n_pts];
-            let mut tmp_store: Vec<V3> = vec![[0.0; 3]; n_pts];
+            // The implicit solve: B damped, before the points' diagonal-block terms turn
+            // `s` into its preconditioner (S's diagonal blocks).
             let ok;
             if let Some(rp) = range_plan.as_ref() {
                 // Range by range, on the thread pool when there is one (RangePlan: every
                 // element has one writer, and gets its terms in Schur order).
                 let failed = std::sync::atomic::AtomicBool::new(false);
                 let (s_p, rhs_p) = (SyncPtr::of(&mut s), SyncPtr::of(&mut rhs));
-                let (ci_p, tmp_p) = (SyncPtr::of(&mut cinv_store), SyncPtr::of(&mut tmp_store));
-                let mut parts: Vec<Vec<f64>> = (0..rp.n).map(|r| if r == 0 { Vec::new() } else { vec![0f64; rp.part_len()] }).collect();
-                let parts_p: Vec<SyncPtr<f64>> = parts.iter_mut().map(|v| SyncPtr::of(v)).collect();
+                let ci_p = SyncPtr::of(&mut cinv_store);
+                // The other ranges' group partials in `work`, which the factor reuses next.
+                let pl = rp.part_len();
+                work.clear();
+                work.resize((rp.n - 1) * pl, 0.0);
+                let parts_p: Vec<SyncPtr<f64>> = (0..rp.n)
+                    .map(|r| if r == 0 { SyncPtr::of(&mut []) } else { SyncPtr::of(&mut work[(r - 1) * pl..r * pl]) })
+                    .collect();
                 for_each_index(rp.n, |r| {
                     let part = parts_p[r];
                     let mut el: Vec<EBlock> = Vec::new();
@@ -1118,7 +1249,7 @@ fn bundle_adjust_impl(
                         let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
                         let owner = rp.owner[pi] as usize == r;
                         // SAFETY (all writes below): RangePlan gives each element one writing range.
-                        if owner { unsafe { *ci_p.at(pi) = Some(cinv); *tmp_p.at(pi) = tmp; } }
+                        if owner { unsafe { *ci_p.at(pi) = Some(cinv); } }
                         for eb in &el {
                             let camera = eb.blk < rp.n_free;
                             if !(if camera { rp.range(eb.blk) == r } else { owner }) { continue; }
@@ -1164,7 +1295,7 @@ fn bundle_adjust_impl(
                 });
                 ok = !failed.load(std::sync::atomic::Ordering::Relaxed);
                 // The other ranges' group shares, in range order.
-                for part in parts.iter().skip(1) {
+                for part in work.chunks(pl.max(1)).take(rp.n - 1) {
                     for &(base, len) in &rp.gg {
                         let o = rp.gg_at[&base];
                         for i in 0..len { s[base + i] -= part[o + i]; }
@@ -1180,7 +1311,7 @@ fn bundle_adjust_impl(
                 let failed = std::sync::atomic::AtomicBool::new(false);
                 let s_ps: Vec<SyncPtr<f64>> = share_s.iter_mut().map(|v| SyncPtr::of(v)).collect();
                 let r_ps: Vec<SyncPtr<f64>> = share_r.iter_mut().map(|v| SyncPtr::of(v)).collect();
-                let (ci_p, tmp_p) = (SyncPtr::of(&mut cinv_store), SyncPtr::of(&mut tmp_store));
+                let ci_p = SyncPtr::of(&mut cinv_store);
                 for_each_index(point_chunks, |c| {
                     let (s_p, r_p) = (s_ps[c], r_ps[c]);
                     let mut el: Vec<EBlock> = Vec::new();
@@ -1197,7 +1328,7 @@ fn bundle_adjust_impl(
                         let cinv = match inv3(&cp) { Some(m) => m, None => { failed.store(true, std::sync::atomic::Ordering::Relaxed); return; } };
                         let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
                         // SAFETY (all writes below): chunk c alone writes its shares and its points.
-                        unsafe { *ci_p.at(pi) = Some(cinv); *tmp_p.at(pi) = tmp; }
+                        unsafe { *ci_p.at(pi) = Some(cinv); }
                         for eb in &el {
                             for a in 0..eb.dim {
                                 unsafe { *r_p.at(eb.off + a) += eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2]; }
@@ -1218,6 +1349,7 @@ fn bundle_adjust_impl(
                             let m = &ms[i1];
                             for eb2 in &el {
                                 if lower_only && eb2.blk > eb1.blk { continue; }
+                                if implicit && eb2.blk != eb1.blk { continue; }
                                 let base = pattern.at(eb1.blk, eb2.blk);
                                 if eb1.dim == 6 && eb2.dim == 6 {
                                     // Camera × camera, fixed size (the same sums as below).
@@ -1240,6 +1372,7 @@ fn bundle_adjust_impl(
                     }
                 });
                 ok = !failed.load(std::sync::atomic::Ordering::Relaxed);
+                if ok && implicit { b_damped.clone_from(&s); }
                 if ok {
                     for c in 0..point_chunks {
                         for (x, v) in s.iter_mut().zip(&share_s[c]) { *x += v; }
@@ -1247,16 +1380,47 @@ fn bundle_adjust_impl(
                     }
                 }
             }
-            if cov_pass { if ok { last_s = Some(s); } break; }
+            if cov_pass {
+                if ok {
+                    if implicit { last_implicit = Some((std::mem::take(&mut b_damped), std::mem::take(&mut s), cinv_store)); }
+                    else { last_s = Some(std::mem::take(&mut s)); }
+                }
+                break;
+            }
             if !ok { lambda = (lambda * 4.0).min(LAMBDA_MAX); continue; }
 
             prof::mark(2);
             let dsol = if let Some(sym) = direct.as_ref() {
                 solve_stats.solves += 1;
                 solve_stats.cholesky += 1;
-                match sym.factor(&pattern, &s) {
-                    Some(f) => f.solve(&pattern, &rhs),
-                    None => { lambda = (lambda * 4.0).min(LAMBDA_MAX); continue; }
+                match sym.factor_reusing(&pattern, &s, std::mem::take(&mut work)) {
+                    Ok(f) => { let x = f.solve(&pattern, &rhs); work = f.into_vals(); x }
+                    Err(buf) => { work = buf; lambda = (lambda * 4.0).min(LAMBDA_MAX); continue; }
+                }
+            } else if implicit {
+                if use_jcache && jcache_outer != outer {
+                    fill_jcache(&mut jcache, &cams, &pts, &gpar, dh);
+                    jcache_outer = outer;
+                }
+                let shares = std::cell::RefCell::new(std::mem::take(&mut share_r));
+                let matvec = |x: &[f64], y: &mut [f64]| {
+                    implicit_product(&b_damped, &cinv_store, &jcache, &mut shares.borrow_mut(), &cams, &pts, &gpar, dh, x, y)
+                };
+                let res = pcg_truncated(n, matvec, &pattern.diag_blocks(&s), &rhs, IMPLICIT_ETA, IMPLICIT_MAX_ITER);
+                share_r = shares.into_inner();
+                solve_stats.solves += 1;
+                solve_stats.implicit += 1;
+                let iters = res.iters();
+                solve_stats.pcg_iters += iters as u64;
+                solve_stats.pcg_iters_max = solve_stats.pcg_iters_max.max(iters as u32);
+                match res {
+                    PcgResult::Converged(x, _) => { solve_stats.pcg_converged += 1; x }
+                    PcgResult::Stalled(x, _) => { solve_stats.pcg_partial += 1; x }
+                    PcgResult::NotPositiveDefinite(_) => {
+                        solve_stats.pcg_npd += 1;
+                        lambda = (lambda * 4.0).min(LAMBDA_MAX);
+                        continue;
+                    }
                 }
             } else {
                 let ic = if solver.precond == 1 && (n >= solver.pcg_min_n || n > DENSE_MAX_N) { BlockIc::new(&pattern, &s) } else { None };
@@ -1269,9 +1433,11 @@ fn bundle_adjust_impl(
 
             prof::mark(3);
             // Back-substitute points: δp = −C⁻¹·gp − C⁻¹·(Σ_v E_vᵀ·δv).
-            // Every point on its own: on the pool, CHUNK points per task.
-            let mut dp = vec![[0f64; 3]; n_pts];
-            let dp_p = SyncPtr::of(&mut dp);
+            // Every point on its own: on the pool, CHUNK points per task. δp is written
+            // where the tentative points will be (`tent_pts`, turned into X + δX below),
+            // so the step needs no array of its own; C⁻¹·gp is recomputed, not kept.
+            let mut tent_pts = vec![[0f64; 3]; n_pts];
+            let dp_p = SyncPtr::of(&mut tent_pts);
             for_each_index(n_pts.div_ceil(CHUNK), |k| {
                 let mut el: Vec<EBlock> = Vec::new();
                 for pi in k * CHUNK..((k + 1) * CHUNK).min(n_pts) {
@@ -1288,7 +1454,8 @@ fn bundle_adjust_impl(
                     let ca = mat3_vec(&cinv, &acc);
                     // SAFETY: point pi belongs to chunk k alone.
                     let d = unsafe { dp_p.at(pi) };
-                    for k in 0..3 { d[k] = -tmp_store[pi][k] - ca[k]; }
+                    let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp, as the Schur step had it
+                    for k in 0..3 { d[k] = -tmp[k] - ca[k]; }
                 }
             });
 
@@ -1308,8 +1475,9 @@ fn bundle_adjust_impl(
                     for a in 0..kdim { tent_gpar[g][a] += dsol[goff + a]; }
                 }
             }
-            let mut tent_pts = pts.clone();
-            for pi in 0..n_pts { for k in 0..3 { tent_pts[pi][k] += dp[pi][k]; } }
+            // |δX|² first (for the step-size stop), then X + δX in place (= δX + X exactly).
+            let dp_sq = tent_pts.iter().map(|d| dot3(d, d)).sum::<f64>();
+            for pi in 0..n_pts { for k in 0..3 { tent_pts[pi][k] += pts[pi][k]; } }
 
             let new_cost = robust_cost(&tent_cams, &tent_pts, &tent_gpar, dh);
             prof::mark(4);
@@ -1325,7 +1493,7 @@ fn bundle_adjust_impl(
                 if lambda >= LAMBDA_MAX { break; }
                 // A rejected step too small to change the model ends it too: a converged
                 // model rejects every step to rounding, and more damping only shrinks them.
-                let step2 = dsol.iter().map(|v| v * v).sum::<f64>() + dp.iter().map(|d| dot3(d, d)).sum::<f64>();
+                let step2 = dsol.iter().map(|v| v * v).sum::<f64>() + dp_sq;
                 let size2 = pts.iter().map(|x| dot3(x, x)).sum::<f64>()
                     + free_cams.iter().map(|&c| dot3(&cams[c].1, &cams[c].1)).sum::<f64>()
                     + if refine { gpar.iter().map(|g| g.iter().map(|v| v * v).sum::<f64>()).sum::<f64>() } else { 0.0 };
@@ -1360,21 +1528,27 @@ fn bundle_adjust_impl(
     // cameras) S is singular along the 7 similarity directions; no lens term moves
     // under a similarity, so a minimal datum leaves their marginals as they are: hold
     // one camera and the scale along one baseline.
-    let lens_sigmas: Vec<f64> = if let (true, Some(mut s)) = (want_cov, last_s.take()) {
+    // In the implicit solve, S is B less the points' terms: the datum holds below go into
+    // B (the product) and S's diagonal blocks (the preconditioner) alike.
+    let cov_state = if !want_cov { None } else if let Some(s) = last_s.take() { Some((s, None)) }
+        else { last_implicit.take().map(|(b, pre, cinv)| (pre, Some((b, cinv)))) };
+    let lens_sigmas: Vec<f64> = if let Some((mut s, mut imp)) = cov_state {
         let n_fixed = n_pb - n_free;
         if camera_priors.is_empty() && anchors.is_empty() && n_fixed < 2 && n_free >= 2 {
-            let hold = |s: &mut Vec<f64>, k: usize, dir: Option<V3>| {
+            let hold = |s: &mut Vec<f64>, imp: &mut Option<(Vec<f64>, Vec<Option<M3>>)>, k: usize, dir: Option<V3>| {
                 let base = pattern.diag_at[k];
                 let big = 1e8 * (0..6).map(|i| s[base + i * 6 + i].abs()).fold(1.0, f64::max);
-                match dir {
-                    None => for i in 0..6 { s[base + i * 6 + i] += big; },
-                    Some(u) => for a in 0..3 { for b in 0..3 { s[base + a * 6 + b] += big * u[a] * u[b]; } },
+                for m in std::iter::once(&mut *s).chain(imp.as_mut().map(|(b, _)| b)) {
+                    match dir {
+                        None => for i in 0..6 { m[base + i * 6 + i] += big; },
+                        Some(u) => for a in 0..3 { for b in 0..3 { m[base + a * 6 + b] += big * u[a] * u[b]; } },
+                    }
                 }
             };
             // The datum camera: a fixed one if there is one (its slot is gone already),
             // else the first free one; the scale along the free camera farthest from it.
             let anchor_pb = (0..n_pb).find(|&b| slot[b] == FIXED).unwrap_or(free_cams[0]);
-            if slot[anchor_pb] != FIXED { hold(&mut s, slot[anchor_pb], None); }
+            if slot[anchor_pb] != FIXED { hold(&mut s, &mut imp, slot[anchor_pb], None); }
             let ca = camera_center(&cams[anchor_pb]);
             let far = free_cams.iter().copied().filter(|&b| b != anchor_pb)
                 .max_by(|&a, &b| {
@@ -1385,14 +1559,29 @@ fn bundle_adjust_impl(
                 // dC = −Rᵀ·dt, so the scale's motion (C − C_a) is R·(C − C_a) in −dt.
                 let c = camera_center(&cams[b]);
                 let u = normalize3(&mat3_vec(&cams[b].0, &[c[0] - ca[0], c[1] - ca[1], c[2] - ca[2]]));
-                hold(&mut s, slot[b], Some(u));
+                hold(&mut s, &mut imp, slot[b], Some(u));
             }
         }
         let n_lens = g_count * kdim;
         let mut var = vec![f64::NAN; n_lens];
         let unit = |i: usize| { let mut e = vec![0f64; n]; e[group_off + i] = 1.0; e };
         let mut st = SolveStats::default();
-        if let Some(f) = direct.as_ref().and_then(|sym| sym.factor(&pattern, &s)) {
+        if let Some((b, cinv)) = imp.as_ref() {
+            // PCG on the implicit S at the solution, one solve per lens term; a term whose
+            // solve does not converge keeps NaN.
+            let dh = huber_threshold(&cams, &pts, &gpar);
+            if use_jcache { fill_jcache(&mut jcache, &cams, &pts, &gpar, dh); }
+            let shares = std::cell::RefCell::new(std::mem::take(&mut share_r));
+            let diag = pattern.diag_blocks(&s);
+            for i in 0..n_lens {
+                let matvec = |x: &[f64], y: &mut [f64]| {
+                    implicit_product(b, cinv, &jcache, &mut shares.borrow_mut(), &cams, &pts, &gpar, dh, x, y)
+                };
+                if let PcgResult::Converged(x, _) = pcg_core_with(n, matvec, &diag, None, &unit(i), IMPLICIT_SIGMA_TOL, IMPLICIT_SIGMA_MAX_ITER) {
+                    var[i] = x[group_off + i];
+                }
+            }
+        } else if let Some(f) = direct.as_ref().and_then(|sym| sym.factor(&pattern, &s)) {
             for i in 0..n_lens { var[i] = f.solve(&pattern, &unit(i))[group_off + i]; }
         } else {
             let ic = if solver.precond == 1 && (n >= solver.pcg_min_n || n > DENSE_MAX_N) { BlockIc::new(&pattern, &s) } else { None };
@@ -1453,7 +1642,7 @@ fn bundle_adjust_impl(
     out.push(camera_prior_rms_after as f32);
     let st = &solve_stats;
     for v in [n as f64, st.solves as f64, st.cholesky as f64, st.pcg_converged as f64, st.pcg_partial as f64,
-              st.pcg_fallback as f64, st.pcg_npd as f64, st.pcg_iters as f64, st.pcg_iters_max as f64] {
+              st.pcg_fallback as f64, st.pcg_npd as f64, st.pcg_iters as f64, st.pcg_iters_max as f64, st.implicit as f64] {
         out.push(v as f32);
     }
     if solver.covariance {

@@ -177,6 +177,13 @@ export const REFERENCES = {
     venue: 'European Conference on Computer Vision (ECCV)',
     doi: '10.1007/978-3-642-15552-9_3',
   },
+  nash1990: {
+    authors: ['Stephen G. Nash', 'Ariela Sofer'],
+    year: 1990,
+    title: 'Assessing a search direction within a truncated-Newton method',
+    venue: 'Operations Research Letters 9(4), 219–221',
+    doi: '10.1016/0167-6377(90)90065-D',
+  },
   schonberger2016: {
     authors: ['Johannes L. Schönberger', 'Jan-Michael Frahm'],
     year: 2016,

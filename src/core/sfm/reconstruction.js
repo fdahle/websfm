@@ -494,6 +494,7 @@ export const BA_SOLVER_KEYS = [
   'pcgNotPd',
   'pcgIters',
   'pcgItersMax',
+  'implicit',
 ]
 
 // bundle.rs LENS_SIGMA_LEN: per lens group, the standard deviations of these terms
@@ -516,11 +517,23 @@ export function lensGroupOfCamera(sensorIds) {
 // for the refined lens terms' standard deviations (bundleAdjust ▸ lensSigma).
 export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
   const num = (v) => (v == null || v === '' ? NaN : Number(v))
-  const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial, functionTolerance, pcgPreconditioner, direct, warm } =
-    solver ?? {}
+  const {
+    pcgMinN,
+    pcgRelTol,
+    pcgMaxIter,
+    pcgAcceptPartial,
+    functionTolerance,
+    pcgPreconditioner,
+    direct,
+    warm,
+    memoryMb,
+  } = solver ?? {}
   // pcgPreconditioner: 'jacobi' (default) | 'ic0' (block incomplete Cholesky, opt-in).
   // direct: a sparse block Cholesky wherever PCG would run (bundle.rs, sparse_chol.rs).
+  // 'implicit' (2): always the implicit solve, as past the memory budget (bench, tests).
   // warm: a re-solve of a converged model; the direct solve stops earlier (bundle.rs).
+  // memoryMb: the budget past which the solve is implicit (slot 10; bundle/solve.rs
+  // BA_MEMORY_BUDGET when unset).
   return Float32Array.of(
     num(pcgMinN),
     num(pcgRelTol),
@@ -528,10 +541,11 @@ export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
     pcgAcceptPartial == null ? NaN : pcgAcceptPartial ? 1 : 0,
     num(functionTolerance),
     pcgPreconditioner === 'ic0' ? 1 : NaN,
-    direct == null ? NaN : direct ? 1 : 0,
+    direct == null ? NaN : direct === 'implicit' ? 2 : direct ? 1 : 0,
     warm ? 1 : NaN,
     NaN, // huber: the crate's adaptive threshold
     lensSigma ? 1 : NaN,
+    num(memoryMb),
   )
 }
 

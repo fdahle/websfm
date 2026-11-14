@@ -452,8 +452,12 @@ conda env with Ceres, glog, gflags and Eigen (`CERES_PREFIX`, default the colmap
 `final_cost` of a websfm run is the solver's own f64 cost; `mapping_ok` says BAL's formula,
 applied to the f32-rounded start, gives the solver's initial cost (the frame mapping
 holds). Don't score the f32 output with BAL's formula: a point close to a camera's plane
-turns the rounding into pixels (×10⁸ on the large Ladybug problems). `cholesky` and
-`pcg_iters` say which linear solve ran: past the 1 GiB sparse factor limit it is PCG.
+turns the rounding into pixels (×10⁸ on the large Ladybug problems). `cholesky`,
+`implicit` and `pcg_iters` say which linear solve ran: past the memory budget (3 GiB of
+predicted peak, bundle/solve.rs `direct_bytes`) it is PCG on the implicit reduced system.
+`peak_alloc_mb` is the most the solve allocated (a counting allocator). By hand:
+`bal <problem.txt> implicit` forces the implicit solve, `BAL_MEMORY_MB=<n>` sets the
+budget, and `ceres_bal <problem.txt> 100 20 iterative_schur` is Ceres' counterpart.
 
 `BAL_F32_START=1` gives Ceres the f32-rounded start the crate sees (on Ladybug that alone
 moves Ceres' result by several percent), and `BAL_TRACE=1` prints its per-iteration

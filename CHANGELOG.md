@@ -18,6 +18,23 @@ Notable changes to websfm. The format follows
   surveyed at 2 cm gives 2.24 cm). The figures describe the adjusted block; a DEM or
   orthophoto adds its own error.
 
+### Performance
+- **Bundle adjustment of very large projects fits in the browser.** When the exact solve
+  would need more memory than the browser gives a bundle adjustment, WebSfM now solves the
+  camera system iteratively without storing it, the way Ceres does for large problems. A
+  project of thousands of photos that mostly see each other (one building or site) would
+  before have run out of memory or taken hours; aerial blocks keep the exact solve to
+  about 10,000 photos. The log says when a solve ran this way. On Bundle Adjustment in the
+  Large: final-1936 from 3,929 s to 114 s at the same cost (Ceres 353 s), in 1.1 GB where
+  the old path needed its 2.2 GB reduced matrix twice; final-3068 from over 2 h to 226 s,
+  7 % below Ceres' final cost; final-4585 from over 2 h to 822 s, 0.3 % below Ceres' cost
+  (Ceres 1,018 s). The exact solve now runs wherever its predicted memory fits, instead of
+  stopping at a 1 GiB factor. Observations are also kept in the 32-bit form they arrive
+  in, and the solve's large buffers are allocated once instead of every step, which cuts a
+  bundle adjustment's peak memory by 13–18 % on mid-size problems (15 % in the browser on
+  final-961) with bit-identical results. In Chrome the three large problems took 156, 295
+  and 924 s in at most 2.0 GB.
+
 ### Fixed
 - **Escape closes the dialog opened last.** Escape now closes whichever dialog sits on
   top, every dialog included, where before it went down a fixed list that a new dialog

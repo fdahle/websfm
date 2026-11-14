@@ -479,6 +479,17 @@ describe('bundleAdjust', () => {
     expect(pcg.solver.pcgConverged + pcg.solver.pcgFallback + pcg.solver.pcgNotPd).toBe(pcg.solver.solves)
     expect(pcg.solver.pcgIters).toBeGreaterThan(0)
     expect(pcg.costAfter).toBeCloseTo(chol.costAfter, 2)
+    // The implicit solve (past the memory budget; forced here) reaches it too, through
+    // the WebAssembly build, and says so in its own stat.
+    const implicit = await bundleAdjust(perturbed, intrinsics, points3d, observations, {
+      maxIters: 30,
+      solver: { pcgMinN: 0, direct: 'implicit' },
+    })
+    expect(implicit.solver.cholesky).toBe(0)
+    expect(implicit.solver.implicit).toBe(implicit.solver.solves)
+    expect(implicit.solver.pcgIters).toBeGreaterThan(0)
+    expect(implicit.costAfter).toBeCloseTo(chol.costAfter, 2)
+    expect(chol.solver.implicit).toBe(0)
   })
 
   it('packs a solver policy with NaN for every unset slot', () => {
@@ -499,10 +510,14 @@ describe('bundleAdjust', () => {
     // Slot 6: the sparse direct solve (SolverOpts::direct).
     expect(baSolverFlat({ direct: true })[6]).toBe(1)
     expect(baSolverFlat({ direct: false })[6]).toBe(0)
+    expect(baSolverFlat({ direct: 'implicit' })[6]).toBe(2)
     expect(baSolverFlat({})[6]).toBeNaN()
     // Slot 7: a re-solve of a converged model (SolverOpts::warm).
     expect(baSolverFlat({ warm: true })[7]).toBe(1)
     expect(baSolverFlat({ warm: false })[7]).toBeNaN()
+    // Slot 10: the memory budget in MiB (SolverOpts::memory).
+    expect(baSolverFlat({ memoryMb: 512 })[10]).toBe(512)
+    expect(baSolverFlat({})[10]).toBeNaN()
   })
 
   it('returns null when there are no observations', async () => {

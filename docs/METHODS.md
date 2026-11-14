@@ -382,9 +382,35 @@ complement**, analytic Jacobians and **adaptive Huber** robustification (Triggs 
   grows with co-visibility, not cameras². Below 600 unknowns (~100 cameras) it is solved
   by dense Cholesky, above by a **sparse block Cholesky** (`sparse_chol.rs`). The Schur
   step is split over fixed contiguous camera ranges, so results are bit-identical on any
-  thread count. Past 1 GiB of factor (`SPARSE_MAX_BYTES`) it falls back to **conjugate
-  gradients with a block-Jacobi preconditioner**, inexact as Ceres' iterative Schur
-  (10⁻⁶, ≤ 200 iterations).
+  thread count.
+- **Past the memory budget: the implicit Schur solve.** Before ordering, the solve predicts
+  what the direct path would hold at its peak (`direct_bytes`: the reduced matrix twice,
+  the undamped assembly and the damped copy a try factors, plus the larger of the factor
+  and the Schur step's lens-group partials, which share one buffer; ≤ 64 B per observation
+  and ≤ 400 B per point, measured with a counting allocator on BAL; an observation is kept
+  as the caller's u32 and f32, the step written into the tentative points). These buffers
+  are allocated once per bundle adjustment, not per try: wasm32's linear memory never
+  shrinks, and per-try allocations fragmented it (BAL final-961 in Chrome: 2.2 → 1.9 GB
+  for a 1.8 GB native peak, the prediction within 5 %). Past
+  `BA_MEMORY_BUDGET` (3 GiB of wasm32's 4) the reduced system is **never stored**: only
+  B (camera blocks, lens groups, their couplings) is assembled, and PCG multiplies by
+  S = B − Σ_p E_p·C_p⁻¹·E_pᵀ through each point's coupling blocks (Agarwal et al. 2010,
+  Ceres' ITERATIVE_SCHUR), point chunks summed in a fixed order. The preconditioner is S's
+  diagonal blocks (Schur-Jacobi). Each LM step is a truncated-Newton step: CG stops once
+  the quadratic model stops falling, i·(Q_i − Q_{i−1})/Q_i < 0.1 (Nash & Sofer 1990, Ceres'
+  forcing value), at most 500 iterations; a residual test (‖r‖ ≤ 0.1·‖b‖) asked for far
+  more iterations than LM needs. The observations' weighted Jacobian rows are kept in f32
+  for the iteration when they fit the budget (re-deriving them each product cost ~3×),
+  else re-derived. The lens σ come from one CG solve of S·x = e_i per lens term on the
+  implicit S (to 10⁻⁸), the datum held in B and the preconditioner alike. An aerial block's camera graph is
+  a 2-D mesh, so its reduced matrix and factor stay small (0.55 GiB of factor at 10,000
+  cameras) and the direct solve holds there; a dense camera graph (thousands of photos of
+  one site) turns implicit first: BAL final-1936 holds S at 2.2 GB.
+  Memory alone decides: forced on problems the direct solve holds, the implicit solve was
+  2–3× faster on the dense "final" BAL problems but ended up to 2.7 % higher on a long
+  Ladybug sequence (docs/BENCHMARKS.md ▸ BAL).
+  The **explicit PCG** (`{ direct: false }`, block-Jacobi, 10⁻⁶, ≤ 200 iterations) is the
+  older path, kept for comparison.
 - **Robust cost**: Huber with δ = 2.5 × median residual (re-derived each iteration,
   ≥ 1 px), as IRLS weight `w = min(1, δ/‖r‖)`; step acceptance evaluates the loss that
   weight descends, ρ = q·(2w − w²).
@@ -1825,6 +1851,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Lowe, D. G. (2004). Distinctive image features from scale-invariant keypoints. International Journal of Computer Vision 60(2), 91–110. https://doi.org/10.1023/B:VISI.0000029664.99615.94
 - Mark, R. K. (1992). Multidirectional, oblique-weighted, shaded-relief image of the Island of Hawaii. U.S. Geological Survey Open-File Report 92-422. https://pubs.usgs.gov/of/1992/of92-422/
 - MicaSense (2017). MicaSense RedEdge and Altum image processing tutorials (imageprocessing). GitHub, MIT licence. https://github.com/micasense/imageprocessing
+- Nash, S. G. & Sofer, A. (1990). Assessing a search direction within a truncated-Newton method. Operations Research Letters 9(4), 219–221. https://doi.org/10.1016/0167-6377(90)90065-D
 - Nistér, D. (2004). An efficient solution to the five-point relative pose problem. IEEE Transactions on Pattern Analysis and Machine Intelligence 26(6), 756–770. https://doi.org/10.1109/TPAMI.2004.17
 - Olson, E. (2011). AprilTag: A robust and flexible visual fiducial system. IEEE International Conference on Robotics and Automation (ICRA), 3400–3407. https://doi.org/10.1109/ICRA.2011.5979561
 - Persson, M. & Nordberg, K. (2018). Lambda Twist: an accurate fast robust perspective three point (P3P) solver. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-030-01225-0_20

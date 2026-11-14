@@ -101,7 +101,9 @@ pub(crate) const PCG_MIN_N: usize = 600;
 //                   (sparse_chol.rs) wherever PCG would run, exactly instead of to a
 //                   capped tolerance: on a large aerial block block-Jacobi PCG stalls
 //                   at its cap (plan-sfm-scale ▸ S2). The ordering is computed once per
-//                   call; a fill past SPARSE_MAX_BYTES keeps PCG.
+//                   call. Where the direct solve's memory would pass `memory`, the
+//                   solve is implicit instead (`memory` below); 2 = always implicit
+//                   (tests, benches).
 //   function_tol    stop LM once an accepted step lowers the robust cost by less than
 //                   this fraction of it (Ceres' function_tolerance). 0 ⇒ run until no
 //                   step is accepted or `max_iters` — the original behaviour, which on
@@ -114,16 +116,23 @@ pub(crate) const PCG_MIN_N: usize = 600;
 //                   the median residual, ≥ 1 px); 0 ⇒ none, plain least squares (to
 //                   compare with another solver on the same objective: the BAL bench,
 //                   examples/bal.rs); > 0 ⇒ Huber at that fixed threshold (px).
+//   memory          slot 10, MiB: the most the direct solve may predict it holds at its
+//                   peak (`direct_bytes`); absent ⇒ BA_MEMORY_BUDGET. Past it the reduced
+//                   system is never stored: PCG runs on S implicitly (Ceres'
+//                   ITERATIVE_SCHUR), each product S·x through the points' coupling
+//                   blocks, preconditioned by S's diagonal blocks (Schur-Jacobi).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SolverOpts {
     pub pcg_min_n: usize, pub rel_tol: f64, pub max_iter: usize, pub accept_partial: bool, pub function_tol: f64,
     pub precond: u8, pub direct: u8, pub warm: u8, pub huber: Option<f64>,
     // Slot 9: also report each lens group's standard deviations (lens_sigmas).
     pub covariance: bool,
+    // Slot 10, in bytes.
+    pub memory: u64,
 }
 
 impl SolverOpts {
-    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None, covariance: false };
+    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None, covariance: false, memory: BA_MEMORY_BUDGET };
 
     pub(crate) fn from_flat(f: &[f32]) -> SolverOpts {
         let d = SolverOpts::DEFAULT;
@@ -136,10 +145,11 @@ impl SolverOpts {
             accept_partial: slot(3).map_or(d.accept_partial, |v| v != 0.0),
             function_tol: slot(4).map_or(d.function_tol, |v| v),
             precond: slot(5).filter(|v| *v == 1.0).map_or(d.precond, |_| 1),
-            direct: slot(6).map_or(d.direct, |v| if v == 1.0 { 1 } else { 0 }),
+            direct: slot(6).map_or(d.direct, |v| if v == 1.0 { 1 } else if v == 2.0 { 2 } else { 0 }),
             warm: slot(7).map_or(d.warm, |v| if v == 1.0 { 1 } else { 0 }),
             huber: slot(8).or(d.huber),
             covariance: slot(9).map_or(d.covariance, |v| v == 1.0),
+            memory: slot(10).map_or(d.memory, |v| (v * (1u64 << 20) as f64) as u64),
         }
     }
 }
@@ -156,14 +166,15 @@ pub(crate) struct SolveStats {
     pub pcg_npd: u32,       // PCG found the system not positive-definite
     pub pcg_iters: u64,     // CG iterations summed over all PCG attempts
     pub pcg_iters_max: u32, // most CG iterations in one attempt
+    pub implicit: u32,      // of the PCG attempts, those on the implicit S (memory)
 }
 
 // Output floats after [cost_before, cost_after, anchor_rms, prior_rms]:
 // [n, solves, cholesky, pcg_converged, pcg_partial, pcg_fallback, pcg_npd,
-//  pcg_iters, pcg_iters_max], then, when the solver's slot 9 asks for it, the lens
+//  pcg_iters, pcg_iters_max, implicit], then, when the solver's slot 9 asks for it, the lens
 // groups' standard deviations ([groups, then LENS_SIGMA_LEN per group]), then the
 // readout times (bundle_adjust_rs), then the per-iteration RMS trace.
-pub(crate) const BA_STATS_LEN: usize = 9;
+pub(crate) const BA_STATS_LEN: usize = 10;
 // Per lens group: σ of fx, cx, cy, k1, k2, k3, k4, p1, p2 (pixels for the first three);
 // NaN for a term the call did not refine.
 pub(crate) const LENS_SIGMA_LEN: usize = 9;
@@ -186,8 +197,34 @@ pub(crate) fn solve_reduced(n: usize, a: &[f64], b: &[f64], blocks: &[(usize, us
 // a 3,000-camera dense matrix alone (2.6 GB) would exhaust the 4 GiB wasm32 memory.
 pub(crate) const DENSE_MAX_N: usize = 4096;
 
-// The largest sparse Cholesky factor allowed (bytes of L); past it the solve stays PCG.
-pub(crate) const SPARSE_MAX_BYTES: usize = 1 << 30;
+// The most a bundle adjustment may predict it holds with the direct solve (solver slot
+// 10 overrides it). The wasm32 module has 4 GiB in all; the rest is headroom for the
+// allocator, the pool's stacks and the caller's arrays. Past it the solve is implicit.
+pub(crate) const BA_MEMORY_BUDGET: u64 = 3 << 30;
+
+// What the direct solve holds at its peak, measured natively on BAL problems with a
+// counting allocator (examples/bal.rs `peak_alloc_mb`): the reduced matrix twice (the
+// undamped assembly and the damped, Schur-reduced copy a try factors), the factor, and per
+// observation and point what the solve keeps in any case (the observation list and its
+// index, the caller's arrays copied in; a point's C, C⁻¹, gradient and tentative copy).
+// On the safe side: ladybug-1723 661 MB measured, 662 predicted; venice-1778 1,469 vs
+// 1,679; dubrovnik-356 244 vs 289.
+pub(crate) const MEM_PER_OBS: u64 = 64;
+pub(crate) const MEM_PER_POINT: u64 = 400;
+// `parts_bytes`: the Schur step's group partials (schur.rs `range_parts_len`), which hold
+// the storage the factor takes over (bundle.rs `work`), so the larger of the two counts.
+pub(crate) fn direct_bytes(s_vals: usize, factor_bytes: u64, parts_bytes: u64, n_obs: usize, n_pts: usize) -> u64 {
+    2 * 8 * s_vals as u64 + factor_bytes.max(parts_bytes) + MEM_PER_OBS * n_obs as u64 + MEM_PER_POINT * n_pts as u64
+}
+
+// The implicit solve's CG (`pcg_truncated`): Ceres' forcing value η for the
+// quadratic-model test, at most this many iterations (the last iterate taken). An
+// inexact step is all LM needs; it rejects one that does not lower the cost and damps.
+pub(crate) const IMPLICIT_ETA: f64 = 0.1;
+pub(crate) const IMPLICIT_MAX_ITER: usize = 500;
+// The lens σ in the implicit solve: each (S⁻¹)_ii from one CG solve to this residual.
+pub(crate) const IMPLICIT_SIGMA_TOL: f64 = 1e-8;
+pub(crate) const IMPLICIT_SIGMA_MAX_ITER: usize = 2000;
 
 // The dispatcher behind both storage forms: `matvec` and the diagonal blocks are the
 // matrix as PCG sees it, `to_dense` builds the n×n copy only when Cholesky runs.
@@ -359,6 +396,21 @@ pub(crate) fn pcg_core(n: usize, matvec: impl Fn(&[f64], &mut [f64]), diag: &[(u
 // `ic`, when given, replaces the block-Jacobi preconditioner built from `diag`.
 pub(crate) fn pcg_core_with(n: usize, matvec: impl Fn(&[f64], &mut [f64]), diag: &[(usize, usize, Vec<f64>)],
                             ic: Option<&BlockIc>, b: &[f64], rel_tol: f64, max_iter: usize) -> PcgResult {
+    pcg_run(n, matvec, diag, ic, b, rel_tol, 0.0, max_iter)
+}
+
+// CG for a truncated-Newton step (Ceres' LM inner solve): converged once the quadratic
+// model Q(x) = xᵀAx − 2bᵀx stops falling, i·(Q_i − Q_{i−1})/Q_i < `q_tol` at iteration i
+// (Nash & Sofer 1990), with no residual test. The residual test asks for a step far more
+// exact than LM needs: on BAL trafalgar-257 ‖r‖ ≤ 0.1·‖b‖ took 187 iterations a step.
+pub(crate) fn pcg_truncated(n: usize, matvec: impl Fn(&[f64], &mut [f64]), diag: &[(usize, usize, Vec<f64>)],
+                            b: &[f64], q_tol: f64, max_iter: usize) -> PcgResult {
+    pcg_run(n, matvec, diag, None, b, 0.0, q_tol, max_iter)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pcg_run(n: usize, matvec: impl Fn(&[f64], &mut [f64]), diag: &[(usize, usize, Vec<f64>)],
+           ic: Option<&BlockIc>, b: &[f64], rel_tol: f64, q_tol: f64, max_iter: usize) -> PcgResult {
     // Preconditioner: the inverse of each diagonal block, via its own small Cholesky.
     let mut inv_blocks: Vec<(usize, usize, Vec<f64>)> = Vec::with_capacity(diag.len());
     for (off, dim, blk) in if ic.is_some() { &diag[..0] } else { diag } {
@@ -393,6 +445,7 @@ pub(crate) fn pcg_core_with(n: usize, matvec: impl Fn(&[f64], &mut [f64]), diag:
     let mut p = z.clone();
     let mut rz: f64 = r.iter().zip(&z).map(|(u, v)| u * v).sum();
     let mut ap = vec![0f64; n];
+    let mut q0 = 0.0; // Q(x_0) = 0
     for k in 0..max_iter {
         matvec(&p, &mut ap);
         let pap: f64 = p.iter().zip(&ap).map(|(u, v)| u * v).sum();
@@ -401,6 +454,12 @@ pub(crate) fn pcg_core_with(n: usize, matvec: impl Fn(&[f64], &mut [f64]), diag:
         for i in 0..n { x[i] += alpha * p[i]; r[i] -= alpha * ap[i]; }
         let r_norm = r.iter().map(|v| v * v).sum::<f64>().sqrt();
         if r_norm <= rel_tol * b_norm { return PcgResult::Converged(x, k + 1); }
+        if q_tol > 0.0 {
+            // With r = b − Ax: Q = xᵀ(b − r) − 2bᵀx = −xᵀ(b + r).
+            let q1: f64 = -x.iter().zip(b.iter().zip(&r)).map(|(xi, (bi, ri))| xi * (bi + ri)).sum::<f64>();
+            if (k + 1) as f64 * (q1 - q0) / q1 < q_tol { return PcgResult::Converged(x, k + 1); }
+            q0 = q1;
+        }
         apply_m(&r, &mut z);
         let rz_new: f64 = r.iter().zip(&z).map(|(u, v)| u * v).sum();
         let beta = rz_new / rz;

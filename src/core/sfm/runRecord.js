@@ -247,7 +247,8 @@ export function logRunTotals({ hist, totalMs, stageTimes, solverTotals, baSolver
       `bundle adjustment solver — ${pluralize(T.calls, 'BA call')}, ${(T.ms / 1000).toFixed(1)}s` +
         `${T.threads > 1 ? ` on ${T.threads} threads` : ''}, largest n ${T.maxN}; ` +
         `${T.solves} solves: ${T.cholesky} Cholesky, PCG ${T.pcgConverged} converged / ${T.pcgPartial} partial / ` +
-        `${T.pcgFallback} → Cholesky / ${T.pcgNotPd} not PD (${T.pcgIters} CG it, max ${T.pcgItersMax}); ` +
+        `${T.pcgFallback} → Cholesky / ${T.pcgNotPd} not PD (${T.pcgIters} CG it, max ${T.pcgItersMax})` +
+        `${T.implicit ? `, ${T.implicit} implicit (past the memory budget)` : ''}; ` +
         `policy ${JSON.stringify(baSolver ?? {})}`,
       'info',
       'Reconstruction',

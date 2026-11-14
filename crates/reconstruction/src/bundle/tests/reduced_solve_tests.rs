@@ -84,6 +84,12 @@ fn solver_opts_parse_with_per_slot_defaults() {
     assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, -1.0]).huber, None);
     assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 0.0]).huber, Some(0.0));
     assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 2.0]).huber, Some(2.0));
+    // Slot 6 = 2: always the implicit solve. Slot 10: the memory budget in MiB.
+    assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 2.0]).direct, 2);
+    assert_eq!(SolverOpts::from_flat(&[f32::NAN; 10]).memory, BA_MEMORY_BUDGET);
+    let mut f = [f32::NAN; 11];
+    f[10] = 512.0;
+    assert_eq!(SolverOpts::from_flat(&f).memory, 512 << 20);
 }
 
 #[test]
@@ -584,4 +590,142 @@ fn small_systems_stay_on_cholesky() {
     let mut st = SolveStats::default();
     assert_eq!(solve_reduced(n, &a, &b, &blocks, &SolverOpts::DEFAULT, &mut st).unwrap(), chol_solve(n, &a, &b).unwrap());
     assert_eq!((st.solves, st.cholesky), (1, 1));
+}
+
+// A grid of cameras 10 above rough ground, each tilted up to 0.15 rad about x and y, a
+// point seen by its 3×3 neighbourhood; the shared focal 1 % off and refined (one
+// intrinsics group): (cameras, intrinsics, points, observation index, pixels). The tilts
+// matter: cameras of one orientation on a plane leave the focal free (depths and focal
+// scale together and every pixel stays), so a solve would wander along that valley.
+fn focal_grid(side: usize, seed: u64) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<u32>, Vec<f32>) {
+    let n_cam = side * side;
+    let mut rng = Lcg(seed);
+    let (mut cams, mut intr, mut rot) = (Vec::new(), Vec::new(), Vec::new());
+    for c in 0..n_cam {
+        let (x, y) = ((c % side) as f64, (c / side) as f64);
+        let (a, b) = (0.15 * rng.next(), 0.15 * rng.next());
+        let (ca, sa, cb, sb) = (a.cos(), a.sin(), b.cos(), b.sin());
+        // R = Rx(a)·Ry(b); t = −R·C with the centre C = (x, y, −10).
+        let r = [[cb, 0.0, sb], [sa * sb, ca, -sa * cb], [-ca * sb, sa, ca * cb]];
+        let ctr = [x, y, -10.0];
+        let t: Vec<f64> = (0..3).map(|i| -(r[i][0] * ctr[0] + r[i][1] * ctr[1] + r[i][2] * ctr[2])).collect();
+        for row in &r { cams.extend(row.iter().map(|v| *v as f32)); }
+        cams.extend(t.iter().map(|v| *v as f32));
+        rot.push((r, t));
+        intr.extend_from_slice(&[808.0, 808.0, 320.0, 240.0]); // truth 800
+    }
+    let (mut pts, mut idx, mut px) = (Vec::new(), Vec::new(), Vec::new());
+    for p in 0..n_cam * 30 {
+        let (x, y, z) = (rng.next() * 0.5 * side as f64 + 0.5 * side as f64 - 0.5, rng.next() * 0.5 * side as f64 + 0.5 * side as f64 - 0.5, 1.5 * rng.next());
+        let (cx0, cy0) = (x.round() as isize, y.round() as isize);
+        for dy in -1..=1 { for dx in -1..=1 {
+            let (gx, gy) = (cx0 + dx, cy0 + dy);
+            if gx < 0 || gy < 0 || gx >= side as isize || gy >= side as isize { continue }
+            let c = gy as usize * side + gx as usize;
+            let (r, t) = &rot[c];
+            let q: Vec<f64> = (0..3).map(|i| r[i][0] * x + r[i][1] * y + r[i][2] * z + t[i]).collect();
+            let (u, v) = (800.0 * q[0] / q[2] + 320.0, 800.0 * q[1] / q[2] + 240.0);
+            idx.extend_from_slice(&[c as u32, p as u32]);
+            px.extend_from_slice(&[(u + 0.3 * rng.next()) as f32, (v + 0.3 * rng.next()) as f32]);
+        }}
+        pts.extend_from_slice(&[(x + 0.02 * rng.next()) as f32, (y + 0.02 * rng.next()) as f32, (z + 0.02 * rng.next()) as f32]);
+    }
+    (cams, intr, pts, idx, px)
+}
+
+#[test]
+fn the_implicit_solve_reaches_the_direct_solves_minimum() {
+    let side = 8;
+    let (cams, intr, pts, idx, px) = focal_grid(side, 21);
+    let (n_cam, n_pts) = (side * side, pts.len() / 3);
+    let sensor = vec![0i32; n_cam];
+    let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+    // Slot 0 = 0 puts this small system where the large-system solves run; slot 4 a tight
+    // stop, so each run ends at the minimum, not wherever its steps happened to stop.
+    let run = |direct: f32, memory_mb: f32| {
+        let solver = [0.0, f32::NAN, f32::NAN, f32::NAN, 1e-12, f32::NAN, direct, f32::NAN, f32::NAN, f32::NAN, memory_mb];
+        bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &[], 60, &sensor, 1, &solver, &[], &[])
+    };
+    let d = run(1.0, f32::NAN);
+    assert!(d[base + 6] > 0.0 && d[base + 13] == 0.0, "the reference is the direct solve");
+    // With the Jacobian cache (the default budget holds it) and without (no budget).
+    for (memory_mb, what) in [(f32::NAN, "cached"), (0.0, "re-derived")] {
+        let i = run(2.0, memory_mb);
+        assert_eq!(i[base + 6], 0.0, "{what}: no Cholesky");
+        assert_eq!(i[base + 13], i[base + 5], "{what}: every solve implicit");
+        // Preconditioned by S's diagonal blocks (Schur-Jacobi) it takes 271 CG iterations
+        // in all here; by B's alone (the points' terms left out) 453.
+        assert!(i[base + 11] > 0.0 && i[base + 11] <= 350.0, "{what}: {} CG iterations", i[base + 11]);
+        // The direct solve's stop is floored at DIRECT_FUNCTION_TOL, so it may end a
+        // little higher; never lower.
+        let (rd, ri) = (d[base + 1] as f64, i[base + 1] as f64);
+        assert!(rd < 0.5 && ri <= rd * (1.0 + 1e-5) && ri >= rd * (1.0 - 1e-3), "{what}: rms {ri} vs direct {rd}");
+        // The refined focal agrees (the camera's effective fx).
+        let (fd, fi) = (d[n_cam * 12 + n_pts * 3] as f64, i[n_cam * 12 + n_pts * 3] as f64);
+        assert!((fd - 800.0).abs() < 2.0 && (fi - fd).abs() < 0.05, "{what}: focal {fi} vs direct {fd}");
+    }
+}
+
+#[test]
+fn the_direct_solve_turns_implicit_past_the_memory_budget() {
+    let side = 6;
+    let (cams, intr, pts, idx, px) = focal_grid(side, 5);
+    let (n_cam, n_pts) = (side * side, pts.len() / 3);
+    let sensor = vec![0i32; n_cam];
+    let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+    let run = |memory_mb: f32| {
+        let solver = [0.0, f32::NAN, f32::NAN, f32::NAN, 1e-6, f32::NAN, 1.0, f32::NAN, f32::NAN, f32::NAN, memory_mb];
+        bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &[], 20, &sensor, 1, &solver, &[], &[])
+    };
+    // This scene's direct solve holds a few MB (direct_bytes): within 64 MiB, not 1 MiB.
+    let fits = run(64.0);
+    assert!(fits[base + 6] > 0.0 && fits[base + 13] == 0.0, "direct within the budget");
+    let over = run(1.0);
+    assert!(over[base + 6] == 0.0 && over[base + 13] == over[base + 5], "implicit past it");
+    assert!(over[base + 1] < 0.5, "and still converges: rms {}", over[base + 1]);
+}
+
+#[test]
+fn truncated_cg_stops_early_on_a_descent_step() {
+    let (n, a, b, blocks) = ba_like(30, 11);
+    let diag = dense_diag_blocks(n, &a, &blocks);
+    let exact = chol_solve(n, &a, &b).unwrap();
+    let q = |x: &[f64]| -> f64 { // xᵀAx − 2bᵀx
+        let mut ax = vec![0f64; n];
+        dense_matvec(n, &a, x, &mut ax);
+        (0..n).map(|i| x[i] * ax[i] - 2.0 * b[i] * x[i]).sum()
+    };
+    let (PcgResult::Converged(loose, k_loose), PcgResult::Converged(tight, k_tight)) =
+        (pcg_truncated(n, |x, y| dense_matvec(n, &a, x, y), &diag, &b, 0.1, 1000),
+         pcg_truncated(n, |x, y| dense_matvec(n, &a, x, y), &diag, &b, 1e-12, 1000))
+        else { panic!("truncated CG should converge") };
+    assert!(k_loose < k_tight, "η 0.1 stops sooner: {k_loose} vs {k_tight} iterations");
+    // CG lowers Q monotonically from Q(0) = 0 toward Q(x*) = −bᵀx*: a loose step has
+    // gone most of the way, a tight one all of it.
+    let (q_loose, q_star) = (q(&loose), q(&exact));
+    assert!(q_loose < 0.0 && q_loose > q_star && q_loose < 0.5 * q_star, "Q {q_loose} vs optimum {q_star}");
+    let err = tight.iter().zip(&exact).map(|(u, v)| (u - v).abs()).fold(0.0, f64::max);
+    assert!(err < 1e-6, "η 1e-12 is the exact step (max |dx| {err:e})");
+}
+
+// The memory decision sizes the Schur step's group partials from the pattern alone
+// (range_parts_len); it must be what a RangePlan then holds, with many lens groups (each
+// camera its own, as BAL) and with one.
+#[test]
+fn range_parts_len_is_what_the_range_plan_holds() {
+    for (n_cam, own_groups) in [(40usize, true), (40, false), (300, true), (7, true)] {
+        let n_groups = if own_groups { n_cam } else { 1 };
+        let grp = |c: usize| if own_groups { c } else { 0 };
+        let mut dims = vec![6usize; n_cam];
+        dims.extend(std::iter::repeat(3).take(n_groups));
+        // A camera couples with its neighbours within 3 and their groups; a group with
+        // what its cameras couple with (bundle.rs build_pattern).
+        let near = |c: usize| c.saturating_sub(3)..(c + 4).min(n_cam);
+        let pat = BlockPattern::new(dims, |r, touch| {
+            let cams: Vec<usize> = if r < n_cam { vec![r] } else { (0..n_cam).filter(|&c| grp(c) == r - n_cam).collect() };
+            for c in cams { for c2 in near(c) { touch(c2); touch(n_cam + grp(c2)); } }
+        });
+        let rp = RangePlan::new(&pat, n_cam, &[], |_, _| {});
+        assert_eq!(range_parts_len(&pat, n_cam), (rp.n - 1) * rp.part_len(), "{n_cam} cameras, own groups {own_groups}");
+    }
 }

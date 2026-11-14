@@ -94,6 +94,13 @@ export const SFM_TUNING = {
   // 2026-10-16 on identical matches: quarry SfM 259 → 189 s, South Building 85 → 63 s,
   // same cameras, points, final reprojection and RTK camera fit (13.24 / 18.17 vs
   // 18.26 cm); synthetic 1,600 cameras 273 → 218 s. { direct: false } is the PCG path.
+  // Where the direct solve would hold more than the memory budget (bundle/solve.rs
+  // direct_bytes against BA_MEMORY_BUDGET, 3 GiB of wasm32's 4; `memoryMb` overrides it),
+  // the reduced system is never stored: PCG runs on it implicitly, through the points'
+  // coupling blocks (Ceres' ITERATIVE_SCHUR). Aerial blocks stay direct to ~10,000
+  // cameras; a dense camera graph (thousands of photos of one site) turns implicit
+  // first. BAL final-1936: 3,929 → 114 s, final-3068 from a 2 h timeout to 226 s
+  // (docs/BENCHMARKS.md ▸ BAL). { direct: 'implicit' } forces it (bench).
   // `threads`: the bundle adjustment's pool size cap (core/sfm/reconstruction.js
   // threadedWasm; one fewer than the machine's cores), 0 = the single-threaded build.
   // The result is the same bits either way. Fixed by the first call in a worker.

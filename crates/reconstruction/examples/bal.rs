@@ -2,7 +2,7 @@
 // 2010, grail.cs.washington.edu/projects/bal), for comparing it with Ceres on the same
 // objective (scripts/bench/bal/run.mjs). Prints one JSON line.
 //
-//   cargo run --release --features threads --example bal -- <problem.txt> [app|pcg] [max_iters]
+//   cargo run --release --features threads --example bal -- <problem.txt> [app|pcg|implicit] [max_iters]
 //
 // BAL's camera: x_c = R·X + t (R from an angle-axis), p = −x_c / z_c, a pixel f·d(p)·p
 // with d = 1 + k1·|p|² + k2·|p|⁴, the origin at the image centre. That is this crate's
@@ -16,10 +16,34 @@
 // Configurations: `app` is the app's solver policy (core/tuning.js SFM_TUNING.baSolver:
 // the sparse direct solve of the reduced system, a function tolerance of 1e-6 floored at
 // 1e-5 for exact steps); `pcg` the inexact one before it (block-Jacobi CG to 1e-6, at most
-// 200 iterations, the capped iterate taken).
+// 200 iterations, the capped iterate taken); `implicit` the app's solve past its memory
+// budget (PCG on the reduced system without storing it, solver slot 6 = 2).
 
 use reconstruction::bundle_adjust;
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Instant;
+
+// Bytes allocated now and at the peak, so a run can say what the solve held at most
+// (`peak_alloc_mb`: the peak during `bundle_adjust`, above what was allocated before it).
+// The wasm build holds about the same: its f64 data dominates, only its pointers are
+// half as wide.
+struct Counting;
+static NOW: AtomicUsize = AtomicUsize::new(0);
+static PEAK: AtomicUsize = AtomicUsize::new(0);
+unsafe impl GlobalAlloc for Counting {
+    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        let p = unsafe { System.alloc(l) };
+        if !p.is_null() { PEAK.fetch_max(NOW.fetch_add(l.size(), Relaxed) + l.size(), Relaxed); }
+        p
+    }
+    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        unsafe { System.dealloc(p, l) };
+        NOW.fetch_sub(l.size(), Relaxed);
+    }
+}
+#[global_allocator]
+static ALLOC: Counting = Counting;
 
 struct Bal { n_cam: usize, n_pts: usize, obs: Vec<(u32, u32, f64, f64)>, cams: Vec<[f64; 9]>, pts: Vec<[f64; 3]> }
 
@@ -69,7 +93,7 @@ fn bal_cost(b: &Bal, cams: &[([[f64; 3]; 3], [f64; 3], f64, f64, f64)], pts: &[[
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let path = args.get(1).expect("usage: bal <problem.txt> [app|pcg] [max_iters]");
+    let path = args.get(1).expect("usage: bal <problem.txt> [app|pcg|implicit] [max_iters]");
     let config = args.get(2).map(String::as_str).unwrap_or("app");
     let max_iters: u32 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(100);
     let t_read = Instant::now();
@@ -95,11 +119,15 @@ fn main() {
     let weight = vec![1.0f32; b.obs.len() * 2];
     let sensor_of_cam = vec![-1i32; b.n_cam]; // each camera its own focal, k1, k2
     let nan = f32::NAN;
-    // [pcg_min_n, rel_tol, max_iter, accept_partial, function_tol, precond, direct, warm, huber]
-    let solver_flat: [f32; 9] = match config {
-        "app" => [nan, 1e-6, 200.0, 1.0, 1e-6, nan, 1.0, nan, 0.0],
-        "pcg" => [nan, 1e-6, 200.0, 1.0, 1e-6, nan, 0.0, nan, 0.0],
-        other => panic!("unknown configuration {other} (app, pcg)"),
+    // [pcg_min_n, rel_tol, max_iter, accept_partial, function_tol, precond, direct, warm,
+    //  huber, covariance, memory MiB]. BAL_MEMORY_MB sets the memory slot: 0 makes `app`
+    // solve implicitly, a large value lets the direct solve take any size.
+    let memory_mb: f32 = std::env::var("BAL_MEMORY_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(nan);
+    let solver_flat: [f32; 11] = match config {
+        "app" => [nan, 1e-6, 200.0, 1.0, 1e-6, nan, 1.0, nan, 0.0, nan, memory_mb],
+        "pcg" => [nan, 1e-6, 200.0, 1.0, 1e-6, nan, 0.0, nan, 0.0, nan, memory_mb],
+        "implicit" => [nan, 1e-6, 200.0, 1.0, 1e-6, nan, 2.0, nan, 0.0, nan, memory_mb],
+        other => panic!("unknown configuration {other} (app, pcg, implicit)"),
     };
     let refine_mask = 1 | 4 | 8; // focal scale, k1, k2
     // The solver takes f32 in and gives f32 out (the app's arrays). Its own cost, in f64
@@ -117,19 +145,22 @@ fn main() {
     let start_pts: Vec<[f64; 3]> = pts_flat.chunks(3).map(|p| [p[0] as f64, p[1] as f64, p[2] as f64]).collect();
     let cost0_f32 = bal_cost(&b, &start, &start_pts);
 
+    let base = NOW.load(Relaxed);
+    PEAK.store(base, Relaxed);
     let t0 = Instant::now();
     let out = bundle_adjust(
         &cameras_flat, &intrinsics_flat, &pts_flat, &obs_index, &obs_px, &weight, &[], &[], &[],
         max_iters, &sensor_of_cam, refine_mask, &solver_flat, &[], &lens_flat,
     );
     let solve_s = t0.elapsed().as_secs_f64();
+    let peak_alloc_mb = (PEAK.load(Relaxed) - base) as f64 / (1 << 20) as f64;
     assert!(!out.is_empty(), "bundle_adjust refused the problem");
 
     let (nc, np) = (b.n_cam, b.n_pts);
     let o_cost = nc * 12 + np * 3 + nc * 8;
     let (rms0, rms1) = (out[o_cost] as f64, out[o_cost + 1] as f64);
-    let stats = &out[o_cost + 4..o_cost + 4 + 9];
-    let trace = &out[o_cost + 4 + 9..];
+    let stats = &out[o_cost + 4..o_cost + 4 + 10]; // BA_STATS_LEN
+    let trace = &out[o_cost + 4 + 10..];
     let n_obs = b.obs.len() as f64;
     // BAL_TRACE=1: the cost after each accepted iteration (½·Σ‖r‖², from the RMS trace),
     // to set beside `BAL_TRACE=1 ceres_bal`'s.
@@ -143,9 +174,9 @@ fn main() {
     println!(
         "{{\"file\":\"{}\",\"solver\":\"websfm-{}\",\"cameras\":{},\"points\":{},\"observations\":{},\
 \"initial_cost\":{:.10e},\"start_cost_f32\":{:.10e},\"solver_initial_cost\":{:.10e},\"final_cost\":{:.10e},\
-\"mapping_ok\":{},\"iterations\":{},\"linear_solves\":{},\"cholesky\":{},\"pcg_iters\":{},\"solve_s\":{:.3},\"read_s\":{:.3},\"threads\":{}}}",
+\"mapping_ok\":{},\"iterations\":{},\"linear_solves\":{},\"cholesky\":{},\"implicit\":{},\"pcg_iters\":{},\"solve_s\":{:.3},\"read_s\":{:.3},\"peak_alloc_mb\":{:.0},\"threads\":{}}}",
         path, config, nc, np, b.obs.len(), cost0, cost0_f32, solver0, solver1, mapping_ok,
-        trace.len(), stats[1] as u32, stats[2] as u32, stats[7] as u64, solve_s, read_s,
+        trace.len(), stats[1] as u32, stats[2] as u32, stats[9] as u32, stats[7] as u64, solve_s, read_s, peak_alloc_mb,
         if cfg!(feature = "threads") { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { 1 },
     );
 }

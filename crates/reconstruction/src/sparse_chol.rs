@@ -284,19 +284,28 @@ impl Symbolic {
     }
 
     pub(crate) fn factor(&self, pat: &BlockPattern, a: &[f64]) -> Option<Factor<'_>> {
-        self.factor_with(pat, a, PAR_UPDATE_FLOPS)
+        self.factor_with(pat, a, PAR_UPDATE_FLOPS, Vec::new()).ok()
+    }
+
+    /// `factor` into `buf`'s storage (cleared first), handed back on failure: a solve that
+    /// factors every LM try keeps one allocation instead of one per try. In wasm32's
+    /// linear memory, which never shrinks, a fresh factor and a fresh copy of S each try
+    /// fragmented it: BAL final-961 grew to 2.2 GB for a 1.8 GB peak.
+    pub(crate) fn factor_reusing(&self, pat: &BlockPattern, a: &[f64], buf: Vec<f64>) -> Result<Factor<'_>, Vec<f64>> {
+        self.factor_with(pat, a, PAR_UPDATE_FLOPS, buf)
     }
 
     // `par_flops`: the work from which a supernode is cut into row chunks (tests: 0).
-    fn factor_with(&self, pat: &BlockPattern, a: &[f64], par_flops: f64) -> Option<Factor<'_>> {
-        let mut v = self.scatter(pat, a);
-        self.factor_panels(&mut v, par_flops)?;
-        Some(Factor { sym: self, vals: v })
+    fn factor_with(&self, pat: &BlockPattern, a: &[f64], par_flops: f64, buf: Vec<f64>) -> Result<Factor<'_>, Vec<f64>> {
+        let mut v = self.scatter(pat, a, buf);
+        if self.factor_panels(&mut v, par_flops).is_none() { return Err(v) }
+        Ok(Factor { sym: self, vals: v })
     }
 
-    fn scatter(&self, pat: &BlockPattern, a: &[f64]) -> Vec<f64> {
+    fn scatter(&self, pat: &BlockPattern, a: &[f64], mut v: Vec<f64>) -> Vec<f64> {
         let nb = self.order.len();
-        let mut v = vec![0f64; self.n_vals];
+        v.clear();
+        v.resize(self.n_vals, 0.0);
         let mut pos = vec![0usize; nb];
         for (k, &b) in self.order.iter().enumerate() { pos[b] = k }
         // Scatter A into the panels, reading only its lower triangle (block row ≥ block
@@ -380,6 +389,9 @@ impl Symbolic {
 }
 
 impl Factor<'_> {
+    /// The factor's storage, for the next `factor_reusing`.
+    pub(crate) fn into_vals(self) -> Vec<f64> { self.vals }
+
     /// x with A x = b (b, x in the BlockPattern's own unknown order).
     pub(crate) fn solve(&self, pat: &BlockPattern, b: &[f64]) -> Vec<f64> {
         let s = self.sym;
@@ -651,7 +663,7 @@ mod tests {
     // the reference the new one must match bit for bit.
     fn factor_right_looking(sym: &Symbolic, pat: &BlockPattern, a: &[f64]) -> Option<Vec<f64>> {
         let this = sym;
-        let mut v = this.scatter(pat, a);
+        let mut v = this.scatter(pat, a, Vec::new());
         {
         let s_ = this;
         let _ = s_;
@@ -754,7 +766,7 @@ mod tests {
             let want = factor_right_looking(&sym, &pat, &vals).unwrap();
             // As the app runs it, and with every supernode cut into row chunks.
             for par in [PAR_UPDATE_FLOPS, 0.0] {
-                let got = sym.factor_with(&pat, &vals, par).unwrap();
+                let got = sym.factor_with(&pat, &vals, par, Vec::new()).ok().unwrap();
                 assert!(got.vals.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()),
                     "{rows}×{cols} r{radius} k{kdim}, par_flops {par}: the factors differ");
             }

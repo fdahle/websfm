@@ -47,6 +47,11 @@ fn truth(tilt_deg: f64) -> (Vec<(M3, V3)>, Vec<V3>) {
 // One solve from the truth with σ px noise on every observation (and σ_c m on every
 // camera prior, when there are priors): the solved fx and the reported σ of fx.
 fn trial(rng: &mut Rng, sigma_px: f64, prior_sigma: Option<f64>, tilt_deg: f64) -> (f64, f64) {
+    trial_with(rng, sigma_px, prior_sigma, tilt_deg, &[])
+}
+
+// `solver_slots`: (slot, value) pairs set on the solver policy.
+fn trial_with(rng: &mut Rng, sigma_px: f64, prior_sigma: Option<f64>, tilt_deg: f64, solver_slots: &[(usize, f32)]) -> (f64, f64) {
     let (cams, pts) = truth(tilt_deg);
     let (n_cam, n_pts) = (cams.len(), pts.len());
     let (mut obs_idx, mut obs_px) = (Vec::new(), Vec::new());
@@ -77,9 +82,10 @@ fn trial(rng: &mut Rng, sigma_px: f64, prior_sigma: Option<f64>, tilt_deg: f64) 
             prior_flat.extend(std::iter::repeat(0f32).take(18));
         }
     }
-    let mut solver = vec![f32::NAN; 10];
+    let mut solver = vec![f32::NAN; 11];
     solver[8] = 0.0; // plain least squares: Gaussian noise has no outliers to bound
     solver[9] = 1.0;
+    for &(i, v) in solver_slots { solver[i] = v; }
     let sensor = vec![0i32; n_cam];
     let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs_idx, &obs_px, &obs_w, &[], &[], &prior_flat, 50, &sensor,
                             1, &solver, &[], &[]);
@@ -120,4 +126,19 @@ fn a_nadir_block_without_control_reports_its_focal_undetermined() {
     let (_, free) = trial(&mut Rng(3), 0.5, None, 0.0);
     let (_, held) = trial(&mut Rng(3), 0.5, Some(0.03), 0.0);
     assert!(free > 50.0 * held, "nadir, no control: σ {free:.2} px vs {held:.2} px with priors");
+}
+
+// The implicit solve (past the memory budget) reports the σ the direct solve does: the
+// same (S⁻¹)_ii, from CG on S without storing it; with priors, and without control,
+// where the datum is held in B and in the preconditioner alike. Slot 0 = 0 puts this
+// small block where the large-system solves run.
+#[test]
+fn the_implicit_solve_reports_the_direct_solves_sigma() {
+    for (prior, tilt, what) in [(Some(0.03), 0.0, "camera priors"), (None, 10.0, "no control")] {
+        let (fd, sd) = trial_with(&mut Rng(11), 0.5, prior, tilt, &[(0, 0.0), (4, 1e-12), (6, 1.0)]);
+        let (fi, si) = trial_with(&mut Rng(11), 0.5, prior, tilt, &[(0, 0.0), (4, 1e-12), (6, 2.0)]);
+        assert!(sd.is_finite() && sd > 0.0, "{what}: direct σ {sd}");
+        assert!((fi - fd).abs() < 0.01 * sd, "{what}: focal {fi} vs {fd}");
+        assert!((si - sd).abs() < 1e-3 * sd, "{what}: σ {si} vs direct {sd}");
+    }
 }

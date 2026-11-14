@@ -46,6 +46,18 @@ import { demHoldSampler } from './demHoldGrid.js'
 import { frameFromSimilarity } from '../products/georef.js'
 import { cameraCenter } from './geometry.js'
 
+// The solver stats (core/sfm/reconstruction.js BA_SOLVER_KEYS) the run record sums.
+const SUMMED_SOLVER_KEYS = [
+  'solves',
+  'cholesky',
+  'pcgConverged',
+  'pcgPartial',
+  'pcgFallback',
+  'pcgNotPd',
+  'pcgIters',
+  'implicit',
+]
+
 export function createBundleSession(ctx) {
   const {
     cfg,
@@ -119,6 +131,7 @@ export function createBundleSession(ctx) {
     pcgNotPd: 0,
     pcgIters: 0,
     pcgItersMax: 0,
+    implicit: 0,
     threads: 1,
   }
   const noteBaSolver = (label, result) => {
@@ -128,15 +141,15 @@ export function createBundleSession(ctx) {
     T.calls++
     T.ms += result.ms ?? 0
     T.maxN = Math.max(T.maxN, s.n)
-    for (const k of ['solves', 'cholesky', 'pcgConverged', 'pcgPartial', 'pcgFallback', 'pcgNotPd', 'pcgIters'])
-      T[k] += s[k]
+    for (const k of SUMMED_SOLVER_KEYS) T[k] += s[k] ?? 0
     T.pcgItersMax = Math.max(T.pcgItersMax, s.pcgItersMax)
     T.threads = Math.max(T.threads, result.threads ?? 1)
     const pcg = s.pcgConverged + s.pcgPartial + s.pcgFallback + s.pcgNotPd
     log(
       `${label} solver — n ${s.n}, ${pluralize(s.solves, 'solve')}: ` +
         (pcg
-          ? `PCG ${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / ` +
+          ? `PCG${s.implicit ? ' on the implicit reduced system (past the memory budget)' : ''} ` +
+            `${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / ` +
             `${s.pcgNotPd} not PD, ${s.pcgIters} CG it (max ${s.pcgItersMax})`
           : `${s.cholesky} Cholesky`) +
         `; ${((result.ms ?? 0) / 1000).toFixed(1)}s`,

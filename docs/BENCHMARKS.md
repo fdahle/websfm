@@ -180,9 +180,58 @@ the same cost on 20 threads, each run capped at 2 h (`scripts/bench/bal/`). 2026
   than 1 % below it; 11 end more than 1 % above (dense Ladybug problems, dubrovnik-135,
   venice-1672).
 - **Speed depends on size**: about 1.1× Ceres' time below 500 cameras, 2.3× above 1,000.
-- **The largest problems are the weak result**: final-1936 takes 3,929 s against Ceres'
-  353 s, final-3068 and final-4585 do not finish in 2 h (Ceres: 144 s, 1,018 s), and
-  neither tool finishes final-13682.
+- **The largest problems**, on 2026-11-06: final-1936 took 3,929 s against Ceres' 353 s,
+  final-3068 and final-4585 did not finish in 2 h (Ceres: 144 s, 1,018 s), and neither
+  tool finishes final-13682. The implicit solve below replaces that path.
+
+### Past the memory budget: the implicit solve (2026-11-13)
+
+Where the direct solve would hold more than 3 GiB (the reduced matrix twice, its factor,
+the observations and points), WebSfM now solves the reduced system without storing it
+(PCG on the implicit Schur complement, as Ceres' ITERATIVE_SCHUR). These three dense
+"final" problems are where that happens: final-1936's reduced matrix alone is 2.2 GB, too
+big for the browser twice over. Same machine, 20 threads; peak = what the solve allocated
+at most (`peak_alloc_mb`).
+
+| problem | WebSfM before | WebSfM now | peak | in Chrome | Ceres SPARSE_SCHUR | Ceres ITERATIVE_SCHUR |
+| --- | --- | --- | --- | --- | --- | --- |
+| final-1936 | 3,929 s, cost 4,650,456 | **114 s**, 4,650,385 | 1.1 GB | 156 s, 1.1 GB | 353 s, 4,650,388 | 101 s, 4,650,391 |
+| final-3068 | > 2 h | **226 s**, 1,561,126 | 0.4 GB | 295 s, 0.5 GB | 144 s, 1,686,400 | 22 s, 1,701,437 |
+| final-4585 | > 2 h | **822 s**, 5,071,546 | 2.1 GB | 924 s, 2.0 GB | 1,018 s, 5,086,913 | 627 s, 5,099,288 |
+| final-13682 | > 2 h | ~2,300 s, 21,698,424 | 4.9 GB | – (past wasm32) | fails, 1,126,371,623 | – |
+
+final-13682 (13,682 cameras, 29 M observations) ran natively with the implicit solve
+forced and the Jacobian cache allowed, from a cost of 1,126,371,468 to 21,698,424 in 60
+iterations; Ceres' SPARSE_SCHUR ends without a successful step. Its 4.9 GB peak does not
+fit wasm32's 4 GiB, so in the browser it would need a Memory64 build. The time is the run's
+active time (it was paused for the browser runs).
+
+*In Chrome*: the app's threaded WebAssembly build (19 threads) in headless Chrome, the same
+inputs (dev probe), memory the WebAssembly memory's high-water mark. final-1936 and -4585
+end at the native cost to the last digit; final-3068 at 1,561,412 (+0.02 %, after 48
+iterations against 40), a path that diverges from rounding differences in the maths
+library. The direct solve in Chrome, final-961: 394 s against 248 s natively, the same
+final cost, 1.9 GB.
+
+- **The direct solve stays wherever it fits**, though the implicit one is often faster
+  there. WebSfM's implicit solve forced on problems the direct solve holds (time, then
+  final cost against the direct solve's): final-394 18 vs 29 s (+0.01 %), final-871 59 vs
+  104 s (+0.27 %), final-961 82 vs 248 s (−0.004 %), but ladybug-1723 stops at the
+  iteration cap 2.7 % above the direct solve's cost (22 vs 114 s), and venice-1778 is
+  slower (1,106 vs 877 s, −0.06 %).
+  Ceres shows the same split (its implicit solve on venice-1778: 1,051 s against 92 s).
+  Faster sometimes and worse sometimes, by nothing the problem size shows, is a trade-off,
+  so memory alone decides.
+- The memory model (`direct_bytes`, bundle/solve.rs) predicts the measured peak or a
+  little more (ladybug-1723 662 vs 661 MB, venice-1778 1,679 vs 1,469 MB). Keeping the
+  observations in the caller's 32-bit form and writing the step into the tentative points
+  cut the peak by 13–18 % on trafalgar-257 and dubrovnik-356, the results bit for bit the
+  same. An aerial block's
+  factor is 0.55 GiB at 10,000 cameras (synthetic grid, each camera overlapping three
+  rings of neighbours), so aerial projects stay on the direct solve.
+- Reproduce: `crates/reconstruction/examples/bal.rs <problem> app` (the memory-chosen
+  solve; `implicit` forces it, `BAL_MEMORY_MB` sets the budget) and
+  `ceres_bal <problem> 100 20 iterative_schur`.
 
 ---
 

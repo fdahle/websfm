@@ -2,7 +2,7 @@
 id: bundle-adjustment
 title: Bundle Adjustment
 summary: A joint, nonlinear refinement of every camera pose and 3D point together, minimizing total reprojection error across the whole reconstruction.
-refs: triggs2000, agarwal2010
+refs: triggs2000, agarwal2010, nash1990
 aliases: BA
 ---
 
@@ -16,7 +16,11 @@ keeps a long strip of images from drifting.
 WebSfM runs a Levenberg–Marquardt solver with a Schur complement (points
 eliminated first, cameras solved, points back-substituted) and analytic
 Jacobians, which scales far better than a dense solve as the point count grows.
-Optionally it also refines the shared per-sensor [camera intrinsics](help:camera-intrinsics)
+The camera system is solved exactly (a sparse Cholesky factorisation) while it fits
+in the browser's memory; on a very large project, with thousands of photos that
+mostly see each other, it is solved iteratively without being stored (conjugate
+gradients on the implicit camera system, as Ceres' iterative Schur), which reaches
+the same result in far less memory. Optionally it also refines the shared per-sensor [camera intrinsics](help:camera-intrinsics)
 in the same optimisation.
 
 <!-- TODO(image): assets/bundle-adjustment.svg - a small block of cameras and points before and after BA: before, each observation's projected point sits off its measured keypoint with a residual arrow; after, the arrows have shrunk. Include the sparse Jacobian block structure (camera blocks, point blocks) beside it to motivate the Schur complement. -->

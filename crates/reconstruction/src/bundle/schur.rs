@@ -109,6 +109,23 @@ impl RangePlan {
     pub(crate) fn part_len(&self) -> usize { self.gg_len + self.group_rows }
 }
 
+// The values a RangePlan's partials hold together ((n − 1)·part_len: every range but the
+// first keeps its own copy of the group × group blocks and the group gradient), from the
+// pattern alone, before any plan exists: the memory decision needs it. Large only when
+// there are many lens groups (BAL gives each camera its own: 474 MB on final-961).
+pub(crate) fn range_parts_len(pattern: &BlockPattern, n_free: usize) -> usize {
+    let n = (n_free / RANGE_MIN_CAMS).clamp(1, RANGE_MAX);
+    let mut gg_len = 0;
+    for r in n_free..pattern.dims.len() {
+        for k in pattern.row_ptr[r]..pattern.row_ptr[r + 1] {
+            let c = pattern.cols[k] as usize;
+            if c >= n_free && c <= r { gg_len += pattern.dims[r] * pattern.dims[c]; }
+        }
+    }
+    let group_off = if n_free < pattern.dims.len() { pattern.offs[n_free] } else { pattern.n };
+    (n - 1) * (gg_len + pattern.n - group_off)
+}
+
 // Group item indices 0..len by key (< n_keys), keeping item order within a key:
 // (start offsets, n_keys + 1 entries; the grouped item indices).
 pub(crate) fn csr(n_keys: usize, keys: impl Iterator<Item = usize> + Clone) -> (Vec<u32>, Vec<u32>) {
