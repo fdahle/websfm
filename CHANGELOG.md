@@ -51,9 +51,9 @@ Notable changes to websfm. The format follows
 - **Less memory for large Sparse Model runs.** Placing photos now keeps each waiting
   photo's matches to the model in a compact form, which was most of the memory the sparse
   reconstruction itself used while photos were being placed. On a synthetic block of
-  3,025 photos with 3,700 tie points each, the peak JavaScript memory fell from 2.04 to
-  1.61 GB with the same cameras and points (the browser allows a worker about 4 GB); at
-  1,024 photos the memory live while placing photos fell from 178 to 50 MB.
+  3,025 photos with 3,700 tie points each, the largest JavaScript memory sampled during
+  the run fell from 0.73 to 0.42 GB with the same cameras and points; at 1,024 photos the
+  memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
 - **Escape closes the dialog opened last.** Escape now closes whichever dialog sits on
