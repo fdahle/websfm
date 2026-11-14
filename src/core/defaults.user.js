@@ -171,6 +171,15 @@ export const MATCH_DEFAULTS = {
   minOverlap: 30, // preselect (footprint): min ground-overlap % (of the smaller footprint) to keep a pair
   sequentialOverlap: 10, // sequential: match each image to the next N capture-order images
   sequentialLoopClosure: false, // circular sequence: also connect its end back to its start
+  // Sequential: also match each image with the few images that look most like it
+  // (core/features/retrieval.js; how many: tuning.js ▸ RETRIEVAL_TUNING.revisitNeighbors),
+  // so a second pass over the same place joins the first. On by default: South Building
+  // (two laps) registered 85/128 cameras without it and 128/128 with it, for 131 more
+  // pairs (11 %) and 7 s.
+  sequentialRevisits: true,
+  // Similar images: match each image with this many of the images that look most like it
+  // (core/features/retrieval.js); a pair is kept when either image chose the other.
+  retrievalNeighbors: 20,
   lgMaxKeypoints: 2048, // per-image cap fed to LightGlue (plain path)
   lgTiled: false, // coarse-to-fine tiled guided matching (full density)
   lgTileBudget: 2048, // max keypoints per tile side when tiled (attention budget)

@@ -28,6 +28,20 @@ export const REFERENCES = {
     venue: 'IEEE Conference on Computer Vision and Pattern Recognition (CVPR)',
     doi: '10.1109/CVPR.2012.6248018',
   },
+  jegou2010: {
+    authors: ['Hervé Jégou', 'Matthijs Douze', 'Cordelia Schmid', 'Patrick Pérez'],
+    year: 2010,
+    title: 'Aggregating local descriptors into a compact image representation',
+    venue: 'IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 3304–3311',
+    doi: '10.1109/CVPR.2010.5540039',
+  },
+  arandjelovic2013: {
+    authors: ['Relja Arandjelović', 'Andrew Zisserman'],
+    year: 2013,
+    title: 'All about VLAD',
+    venue: 'IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 1578–1585',
+    doi: '10.1109/CVPR.2013.207',
+  },
   detone2018: {
     authors: ['Daniel DeTone', 'Tomasz Malisiewicz', 'Andrew Rabinovich'],
     year: 2018,

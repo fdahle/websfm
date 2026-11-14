@@ -112,10 +112,16 @@ export const WORKFLOW_BLOCKS = [
     ['matches'],
     { strategy: 'auto', matcher: 'bruteforce', preset: 'medium', overwrite: false, ...MATCH_DEFAULTS },
     [
-      { key: 'strategy', label: 'Pairing', type: 'select', options: ['auto', 'exhaustive', 'sequential', 'preselect'] },
+      {
+        key: 'strategy',
+        label: 'Pairing',
+        type: 'select',
+        options: ['auto', 'exhaustive', 'sequential', 'retrieval', 'preselect'],
+      },
       { key: 'matcher', label: 'Matcher', type: 'select', options: ['bruteforce', 'lightglue'] },
       { key: 'preset', label: 'Preset', type: 'select', options: PRESETS },
       { key: 'sequentialOverlap', label: 'Sequential overlap', type: 'number', min: 1 },
+      { key: 'retrievalNeighbors', label: 'Similar images per image', type: 'number', min: 1 },
       { key: 'overwrite', label: 'Replace existing matches', type: 'boolean' },
     ],
   ),
@@ -644,11 +650,16 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
   }
   if (type === 'match-features') {
     // 'auto' pairing is what the Match Features dialog opens on for this project:
-    // Preselect with camera positions, Sequential for video frames, else Exhaustive.
+    // Preselect with camera positions, Sequential for video frames, Similar images for a
+    // large set, else Exhaustive.
     // A workflow is a template, so it is decided per run, not when the block was added.
     const strategy =
       value.strategy === 'auto' || value.strategy == null
-        ? initialMatchStrategy(runtime.posedImageCount ?? 0, { video: !!runtime.video })
+        ? initialMatchStrategy(runtime.posedImageCount ?? 0, {
+            video: !!runtime.video,
+            film: !!runtime.film,
+            images: runtime.images ?? 0,
+          })
         : value.strategy
     return { ...MATCH_DEFAULTS, ...value, ...(MATCH_PRESETS[value.preset] || {}), strategy, useGpu: runtime.useGpu }
   }

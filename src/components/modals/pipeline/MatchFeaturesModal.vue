@@ -61,14 +61,26 @@ const hasPoses = computed(() => props.posedImageCount >= 2)
 const hasFootprints = computed(() => props.footprintImageCount >= 2)
 const preselectAvailable = computed(() => hasPoses.value || hasFootprints.value)
 
-// Video frames start on Sequential: they are in capture order (an initial value —
-// any choice the user makes stands).
-const strategy = ref(initialMatchStrategy(props.posedImageCount, { video: profile.value.kind === 'video' }))
+// Video frames start on Sequential: they are in capture order; a large set without
+// positions on Similar images (an initial value — any choice the user makes stands).
+const strategy = ref(
+  initialMatchStrategy(props.posedImageCount, {
+    video: profile.value.kind === 'video',
+    film: profile.value.kind === 'film',
+    images: props.detectedImageCount,
+  }),
+)
 const strategyTouched = ref(false)
 const strategies = computed(() => [
   { id: 'exhaustive', label: 'Exhaustive' },
   { id: 'sequential', label: 'Sequential' },
-  { id: 'preselect', label: 'Preselect', disabled: !preselectAvailable.value },
+  { id: 'retrieval', label: 'Similar images' },
+  {
+    id: 'preselect',
+    label: 'Preselect',
+    disabled: !preselectAvailable.value,
+    reason: 'Needs camera positions (EXIF GPS or imported poses) or footprints on at least two images',
+  },
 ])
 const preselectMethods = computed(() => [
   { id: 'position', label: 'Camera position', disabled: !hasPoses.value },
@@ -306,6 +318,13 @@ const numbers = computed(() => {
       integer: true,
       when: strategy.value === 'sequential',
     },
+    retrievalNeighbors: {
+      label: 'Similar images per image',
+      min: 1,
+      max: 100,
+      integer: true,
+      when: strategy.value === 'retrieval',
+    },
     maxNeighbors: {
       label: 'Neighbours per image',
       min: 1,
@@ -377,7 +396,7 @@ provideStepLayout('match-features')
 
     <SettingsStep step="1" title="Choose image pairs" :effect="pairsStep">
       <SettingsField
-        hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect prunes pairs by camera position or footprint overlap (EXIF GPS, imported poses, or footprints)."
+        hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Similar images pairs each image with the images that look most like it, for large sets without positions. Preselect prunes pairs by camera position or footprint overlap (EXIF GPS, imported poses, or footprints)."
       >
         <template #label><FieldHelp op="match-features" param="strategy">Pairing</FieldHelp></template>
         <SegmentedControl :model-value="strategy" :options="strategies" @update:model-value="selectStrategy" />
@@ -430,6 +449,49 @@ provideStepLayout('match-features')
           <label class="checkbox-row"
             ><input v-model="settings.sequentialLoopClosure" type="checkbox" class="checkbox" /> Enabled</label
           >
+        </SettingsField>
+        <SettingsField
+          hint="Also match each image with the few images that look most like it, wherever they are in the sequence, so a second pass over the same place joins the first."
+        >
+          <template #label
+            ><FieldHelp
+              op="match-features"
+              param="sequentialRevisits"
+              :value="settings.sequentialRevisits"
+              :default-value="MATCH_DEFAULTS.sequentialRevisits"
+              >Find revisits</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.sequentialRevisits" type="checkbox" class="checkbox" /> Enabled</label
+          >
+        </SettingsField>
+      </template>
+
+      <template v-if="strategy === 'retrieval'">
+        <SettingsField
+          label-for="retrievalNeighbors"
+          hint="Match each image with this many of the images that look most like it. Raise it for a set with much overlap between photos, lower it to match fewer pairs."
+        >
+          <template #label
+            ><FieldHelp
+              op="match-features"
+              param="retrievalNeighbors"
+              :value="settings.retrievalNeighbors"
+              :default-value="MATCH_DEFAULTS.retrievalNeighbors"
+              >Similar images per image</FieldHelp
+            ></template
+          >
+          <input
+            id="retrievalNeighbors"
+            v-model.number="settings.retrievalNeighbors"
+            :aria-invalid="numbers.bad.retrievalNeighbors"
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            class="field-input"
+          />
         </SettingsField>
       </template>
 

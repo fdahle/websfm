@@ -150,7 +150,20 @@ LightGlue.
 **Pairing**: exhaustive by default. Alternatives: preselection by camera position
 (`preselect.js`, the k nearest by horizontal distance, in a local azimuthal-equidistant
 metre frame for a geographic project) when positions exist, or a capture-order window
-(optionally wrapping end-to-start for a closed orbit).
+(optionally wrapping end-to-start for a closed orbit). Or by **image retrieval**
+(Similar images, `core/features/retrieval.js`): each image's descriptors (RootSIFT, or the
+learned detector's) are summarised in one **VLAD** vector (Jégou et al. 2010): a codebook
+of 64 words is learned by k-means++ and Lloyd on 20,000 descriptors sampled evenly from the
+project's own images (no trained vocabulary), every descriptor's residual to its nearest
+word is summed per word, each word's block is L2-normalised (intra-normalisation,
+Arandjelović & Zisserman 2013, against bursts of repeated texture), then signed square root
+and a global L2. Each image is paired with its k most similar by dot product (default 20;
+a pair is kept when either image chose the other). Images with different detectors get
+separate codebooks. On South Building (128 images; COLMAP's exhaustive verification as the
+truth) k = 15 chose 14 % of the pairs and kept 88 % of all verified inliers, 75 % of the
+pairs with ≥ 100; a larger codebook (256) or query expansion moved this by < 1 point and
+PCA whitening, learned on so few images, destroyed it. Like the other prefilters it turns
+the subset gate off.
 
 **Descriptor matching** (`core/features/bruteforce.js`, or the learned `lightglue.js`):
 mutual nearest neighbour (cross-check) and the **Lowe ratio test** `d1/d2 < ratio`, default
@@ -1814,8 +1827,8 @@ nothing, to show the user *where* a reconstruction is weak.
   28.6° on true pairs of one run. Hence no pre-SfM graph filter (§4); rotation averaging
   would first need a five-point E at match time where K is known (the init pair already
   tries one, §4.2).
-- **Sequential matching cannot see a revisit**: a two-lap set splits into two models; with
-  no image retrieval (vocabulary tree) it needs exhaustive matching.
+- **Sequential matching cannot see a revisit**: a two-lap set splits into two models; it
+  needs Similar images (image retrieval) or exhaustive matching.
 - **Doming without control**: with no GCPs or positions, a nadir block's height accuracy
   depends on the self-calibrated lens, decentring included (§4.6). Holding it to a reference
   DEM (§6.5) is the remedy where no control exists.
@@ -1844,6 +1857,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 
 - Agarwal, S., Snavely, N., Seitz, S. M. & Szeliski, R. (2010). Bundle adjustment in the large. European Conference on Computer Vision (ECCV). https://doi.org/10.1007/978-3-642-15552-9_3
 - Arandjelović, R. & Zisserman, A. (2012). Three things everyone should know to improve object retrieval. IEEE Conference on Computer Vision and Pattern Recognition (CVPR). https://doi.org/10.1109/CVPR.2012.6248018
+- Arandjelović, R. & Zisserman, A. (2013). All about VLAD. IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 1578–1585. https://doi.org/10.1109/CVPR.2013.207
 - ASPRS (2023). ASPRS Positional Accuracy Standards for Digital Geospatial Data, Edition 2, Version 1.0. American Society for Photogrammetry and Remote Sensing. https://publicdocuments.asprs.org/PositionalAccuracyStd-Ed2-V1
 - Barath, D., Noskova, J., Ivashechkin, M. & Matas, J. (2020). MAGSAC++, a fast, reliable and accurate robust estimator. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). https://arxiv.org/abs/1912.05909
 - Besl, P. J. & McKay, N. D. (1992). A method for registration of 3-D shapes. IEEE Transactions on Pattern Analysis and Machine Intelligence 14(2), 239–256. https://doi.org/10.1109/34.121791
@@ -1864,6 +1878,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Hartley, R. I. (1997). In defense of the eight-point algorithm. IEEE Transactions on Pattern Analysis and Machine Intelligence 19(6), 580–593. https://doi.org/10.1109/34.601246
 - Horn, B. K. P. (1981). Hill shading and the reflectance map. Proceedings of the IEEE 69(1), 14–47. https://doi.org/10.1109/PROC.1981.11918
 - Horn, B. K. P. (1987). Closed-form solution of absolute orientation using unit quaternions. Journal of the Optical Society of America A 4(4), 629–642. https://doi.org/10.1364/JOSAA.4.000629
+- Jégou, H., Douze, M., Schmid, C. & Pérez, P. (2010). Aggregating local descriptors into a compact image representation. IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 3304–3311. https://doi.org/10.1109/CVPR.2010.5540039
 - Kannala, J. & Brandt, S. S. (2006). A generic camera model and calibration method for conventional, wide-angle, and fish-eye lenses. IEEE Transactions on Pattern Analysis and Machine Intelligence 28(8), 1335–1340. https://doi.org/10.1109/TPAMI.2006.153
 - Kazhdan, M. & Hoppe, H. (2013). Screened Poisson surface reconstruction. ACM Transactions on Graphics 32(3), 29. https://doi.org/10.1145/2487228.2487237
 - Lindenberger, P., Sarlin, P.-E. & Pollefeys, M. (2023). LightGlue: local feature matching at light speed. IEEE/CVF International Conference on Computer Vision (ICCV). https://arxiv.org/abs/2306.13643

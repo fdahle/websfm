@@ -52,24 +52,42 @@ settings, for example how many pairs will be matched. Settings the current choic
 ignore are hidden or greyed with the reason.
 
 ## Pairing
-<!-- param: strategy  default: Preselect when images have camera positions, Sequential for video frames, otherwise Exhaustive -->
+<!-- param: strategy  default: Preselect when images have camera positions, Sequential for video frames, Similar images for more than 200 images (not film scans), otherwise Exhaustive -->
 Which pairs are matched. **Exhaustive** matches every pair: safe, but the time grows
 with the square of the image count. **Sequential** matches each image to the next few
-in capture order: for video, orbits and single strips. **Preselect** uses camera
-positions or footprints to match only pairs likely to overlap
+in capture order: for video, orbits and single strips. **Similar images** matches each
+image with the images that look most like it ([image retrieval](help:image-retrieval)):
+for large sets without positions, and for a capture that passes the same place twice.
+**Preselect** uses camera positions or footprints to match only pairs likely to overlap
 ([pair preselection](help:preselection)). If part of the block stays unregistered,
-widen the window or match exhaustively.
+widen the window, raise the similar images, or match exhaustively.
 
 ## Following images
 <!-- param: sequentialOverlap  default: 10 -->
 **Sequential**: each image is matched to this many following images in capture order.
-Ten suits a smooth orbit. Images from a second pass over the same place are never
-paired with the first; use Exhaustive for such a capture.
+Ten suits a smooth orbit. Images from a second pass over the same place are paired
+with the first by Find revisits.
 
 ## Close capture loop
 <!-- param: sequentialLoopClosure  default: off -->
 **Sequential**: also matches the last images to the first, so a complete orbit closes
 into a ring. Turn it on only when the capture returns to its start.
+
+## Find revisits
+<!-- param: sequentialRevisits  default: on -->
+**Sequential**: also matches each image with the few images that look most like it
+([image retrieval](help:image-retrieval)), wherever they are in the sequence, so a capture
+that passes the same place twice (two laps, a strip flown back) joins up, which capture
+order alone never does. It adds a few seconds and some pairs; turn it off only for a
+single pass with repetitive texture that might pair the wrong images.
+
+## Similar images per image
+<!-- param: retrievalNeighbors  default: 20 -->
+**Similar images**: each image is matched with this many of the images that look most
+like it; a pair is matched when either image chose the other. Raise it when photos
+overlap many others (dense aerial blocks, many views of one object) or when images stay
+unregistered; lower it to match fewer pairs. Finding the similar images takes a few
+seconds before matching starts.
 
 ## Preselect by
 <!-- param: preselectMethod  default: Camera position -->

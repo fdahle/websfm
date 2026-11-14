@@ -53,6 +53,8 @@ describe('selectionPairsEffect', () => {
       '2 selected images with every other image: 17 pairs.',
     )
     expect(selectionPairsEffect('preselect', { k: 2, n: 10 })).toMatch(/preselection chooses, those with one of them/)
+    expect(selectionPairsEffect('retrieval', { k: 2, n: 10 })).toMatch(/image similarity chooses/)
+    expect(selectionPairsEffect('sequential', { k: 2, n: 10 })).toMatch(/capture order chooses/)
     expect(selectionPairsEffect('exhaustive', { k: 0, n: 10 })).toMatch(/^None of the selected images/)
   })
 })

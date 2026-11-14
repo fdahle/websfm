@@ -409,6 +409,16 @@ export function detectFiducialSpots(url, options = {}, { onLog } = {}) {
   })
 }
 
+// Image retrieval (core/features/retrieval.js). The descriptors and samples are the
+// caller's disposable copies, so they are transferred; the vectors for top-k go shared
+// (core/bigArray.js sharedArray) or are cloned per call.
+export const retrievalCodebook = (samples, dim, opts, { avoidWorker } = {}) =>
+  call('retrievalCodebook', [samples, dim, opts], { transfer: [samples], avoid: avoidWorker })
+export const retrievalEncode = (desc, dim, codebook, words, { avoidWorker } = {}) =>
+  call('retrievalEncode', [desc, dim, codebook, words], { transfer: [desc], avoid: avoidWorker })
+export const retrievalTopK = (vectors, len, k, from, to, { avoidWorker } = {}) =>
+  call('retrievalTopK', [vectors, len, k, from, to], { avoid: avoidWorker })
+
 export function matchDescriptors(descA, descB, options = {}, { onTiming, avoidWorker } = {}) {
   // No transfer: structured-clone copies the descriptors so the caller's
   // in-memory buffers (reused across pairs) are not detached.

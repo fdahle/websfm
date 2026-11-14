@@ -3,12 +3,13 @@
 // can say *before* the run which settings are going to matter.
 
 import { sequentialPairs } from './sequentialPairs.js'
-import { MATCH_TUNING } from '../tuning.js'
+import { MATCH_TUNING, RETRIEVAL_TUNING } from '../tuning.js'
 
 /**
  * How many image pairs a strategy produces for `n` images with keypoints.
- * Returns `{ count, exact }` — preselection keeps each image's nearest cameras, so
- * only an upper bound is known before the positions are read (`exact: false`); a
+ * Returns `{ count, exact }` — preselection keeps each image's nearest cameras, and
+ * Similar images each image's most similar ones, so only an upper bound is known before
+ * the positions or descriptors are read (`exact: false`); a
  * footprint preselection depends on the polygons and returns `count: null`.
  */
 export function estimatePairCount(
@@ -17,8 +18,10 @@ export function estimatePairCount(
     strategy = 'exhaustive',
     sequentialOverlap = 10,
     sequentialLoopClosure = false,
+    sequentialRevisits = false,
     preselectMethod = 'position',
     maxNeighbors = 10,
+    retrievalNeighbors = 20,
   } = {},
 ) {
   const all = n > 1 ? (n * (n - 1)) / 2 : 0
@@ -28,11 +31,23 @@ export function estimatePairCount(
       Array.from({ length: n }, (_, i) => i),
       { overlap: sequentialOverlap, loopClosure: sequentialLoopClosure },
     ).length
+    // Find revisits adds up to `revisitNeighbors` per image outside the window, known only
+    // once the descriptors are read.
+    if (sequentialRevisits) {
+      return { count: Math.min(all, count + n * RETRIEVAL_TUNING.revisitNeighbors), exact: false }
+    }
     return { count, exact: true }
   }
   if (strategy === 'preselect') {
     if (preselectMethod === 'footprint') return { count: null, exact: false }
     return { count: Math.min(all, n * Math.max(1, maxNeighbors)), exact: false }
+  }
+  if (strategy === 'retrieval') {
+    // Each image keeps its k most similar; a pair counts once when both chose each other,
+    // so between n·k/2 and n·k. A set no larger than k + 1 is every pair.
+    const k = Math.max(1, Math.floor(retrievalNeighbors))
+    if (n <= k + 1) return { count: all, exact: true }
+    return { count: Math.min(all, n * k), exact: false }
   }
   return { count: all, exact: true }
 }
@@ -61,6 +76,12 @@ export function subsetGateStatus({
     return {
       active: false,
       reason: 'Not used with Preselect: camera positions or footprints have already chosen overlapping pairs.',
+    }
+  }
+  if (strategy === 'retrieval') {
+    return {
+      active: false,
+      reason: 'Not used with Similar images: image similarity has already chosen the likely overlapping pairs.',
     }
   }
   const minPairs = MATCH_TUNING.subsetGateMinPairs

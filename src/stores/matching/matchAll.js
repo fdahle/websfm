@@ -25,11 +25,12 @@ import { planBridgeRepair, bridgeKey, graphPieces } from '../../core/features/br
 import { gapDetectSettings, planGapRedetect } from '../../core/features/gapRedetect.js'
 import { laterPassSpan, pairPassEnd, spanFraction } from '../../core/features/matchProgress.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
+import { descriptorLoader, selectRetrievalPairs } from './retrievalRun.js'
 import { findRigs, rigMembership, rigPairs, rigSummary } from '../../core/sensors/rig.js'
 import { isImageEnabled } from '../../core/imageEnabled.js'
 import { lightGlueModelFor } from '../../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../../core/defaults.user.js'
-import { MATCH_TUNING } from '../../core/tuning.js'
+import { MATCH_TUNING, RETRIEVAL_TUNING } from '../../core/tuning.js'
 import { applyTuningOverrides } from '../tuningOverrides.js'
 import { buildScaleContext, describeScaleContext, resolveScaledPx } from '../../core/scaleContext.js'
 import { useFootprintsStore } from '../useFootprintsStore.js'
@@ -362,6 +363,19 @@ export function createMatchAll({
       }
     }
 
+    // Each image with the `k` that look most like it (stores/matching/retrievalRun.js),
+    // before any pair is matched: Similar images, and Sequential ▸ Find revisits.
+    const similarPairs = (k) =>
+      selectRetrievalPairs(ready, {
+        neighbors: k,
+        loadDescriptors: descriptorLoader({
+          projectId: projects.currentProjectId,
+          persisting: projects.isPersisting,
+        }),
+        log,
+        isCancelled: () => !!shouldCancel?.(),
+        onProgress: (f) => onProgress?.(0, 0, `Finding similar images (${Math.round(f * 100)} %)`, 0, 'retrieval'),
+      })
     let pairs = []
     if (strategy === 'sequential') {
       pairs = sequentialPairs(ready, {
@@ -372,6 +386,32 @@ export function createMatchAll({
         `Sequential pairing: each image ↔ next ${settings.sequentialOverlap} in capture order` +
           `${settings.sequentialLoopClosure ? ', with end-to-start loop closure' : ''}` +
           ` — ${pluralize(pairs.length, 'pair')}`,
+        'info',
+        'Matching',
+      )
+      if (settings.sequentialRevisits) {
+        const k = RETRIEVAL_TUNING.revisitNeighbors
+        const found = await similarPairs(k)
+        if (found.cancelled) return { cancelled: true }
+        const have = new Set(pairs.map(([a, b]) => pairId(a.uuid, b.uuid)))
+        const added = found.pairs.filter(([a, b]) => !have.has(pairId(a.uuid, b.uuid)))
+        pairs = [...pairs, ...added]
+        log(
+          `Find revisits: each image ↔ its ${k} most similar adds ${pluralize(added.length, 'pair')} outside the ` +
+            `capture-order window (${found.seconds.toFixed(1)} s)`,
+          'info',
+          'Matching',
+        )
+      }
+    } else if (strategy === 'retrieval') {
+      const k = settings.retrievalNeighbors
+      const found = await similarPairs(k)
+      if (found.cancelled) return { cancelled: true }
+      pairs = found.pairs
+      const all = (ready.length * (ready.length - 1)) / 2
+      log(
+        `Similar images: each image ↔ its ${k} most similar — ${pluralize(pairs.length, 'pair')} ` +
+          `(${((100 * pairs.length) / Math.max(1, all)).toFixed(1)} % of ${all}), ${found.seconds.toFixed(1)} s`,
         'info',
         'Matching',
       )
@@ -396,7 +436,8 @@ export function createMatchAll({
     // components (largest 85/128), 101 images left with zero correspondences to the
     // registered set. The gate's threshold is calibrated against strongly-overlapping
     // pairs; the weak links a chain depends on expect well under one subset putative.
-    let overlapPrefiltered = strategy === 'sequential'
+    // Similar images is one too: retrieval chose each image's likeliest partners.
+    let overlapPrefiltered = strategy === 'sequential' || strategy === 'retrieval'
     if (strategy === 'preselect') {
       const method = settings.preselectMethod ?? 'position'
       if (method === 'footprint') {
@@ -497,7 +538,7 @@ export function createMatchAll({
     if (gateApplies && overlapPrefiltered) {
       skipSubsetGate = true
       log(
-        `Subset gate disabled: ${strategy === 'sequential' ? 'capture order is' : 'preselection is'}` +
+        `Subset gate disabled: ${{ sequential: 'capture order is', retrieval: 'image similarity is' }[strategy] ?? 'preselection is'}` +
           ' the overlap prefilter',
         'info',
         'Matching',
@@ -1017,6 +1058,8 @@ export function createMatchAll({
         maxNeighbors: strategy === 'preselect' ? settings.maxNeighbors : null,
         sequentialOverlap: strategy === 'sequential' ? settings.sequentialOverlap : null,
         sequentialLoopClosure: strategy === 'sequential' ? settings.sequentialLoopClosure : null,
+        sequentialRevisits: strategy === 'sequential' ? !!settings.sequentialRevisits : null,
+        retrievalNeighbors: strategy === 'retrieval' ? settings.retrievalNeighbors : null,
         lgTiled: settings.matcher === 'lightglue' ? settings.lgTiled : null,
       },
     }

@@ -2,7 +2,7 @@
 id: preselection
 title: Pair Preselection
 aliases: preselection, pair preselection, preselect, pair selection
-summary: Choosing which image pairs to match before matching them, so an N-image set costs far less than comparing every pair — using camera positions, ground footprints, or capture order.
+summary: Choosing which image pairs to match before matching them, so an N-image set costs far less than comparing every pair — using camera positions, ground footprints, capture order or image similarity.
 ---
 Matching every image against every other is $O(N^2)$ pairs, and most of those
 pairs share no view at all — two photos from opposite ends of a survey have
@@ -10,7 +10,7 @@ nothing to match. **Preselection** is the step that decides *which* pairs are
 worth matching before paying to match them, turning a quadratic cost into
 something close to linear on large sets.
 
-WebSfM preselects three ways, in decreasing order of how much prior knowledge
+WebSfM preselects four ways, in decreasing order of how much prior knowledge
 each needs:
 
 - **By camera position.** When [camera poses](help:camera-pose) or EXIF GPS are
@@ -26,11 +26,13 @@ each needs:
   few in order, optionally closing the loop back to the start. This is the
   no-metadata fallback, and the starting choice for frames imported from a video
   (see [keyframe selection](help:keyframe-selection)).
+- **By appearance.** With neither positions nor an order, **Similar images** pairs each
+  image with the images that look most like it ([image retrieval](help:image-retrieval)),
+  from the features already detected.
 
 <!-- TODO(image): assets/preselection.svg - a grid of image thumbnails with the full N-by-N pair matrix faded in the background, and the sparse subset of actually-matched pairs highlighted: a narrow band near the diagonal for sequential, plus a few off-diagonal cells for loop closures. -->
 
-When none of these apply — an unordered set with no positions — matching stays
-**exhaustive**, and a cheaper *subset gate* does the pruning instead: it matches a
+When matching stays **exhaustive**, a cheaper *subset gate* does the pruning instead: it matches a
 small, spatially-uniform sample of each pair's [keypoints](help:keypoint) first
 and skips the full match when too few survive. That keeps exhaustive *coverage*
 (a loop closure anywhere in the [match graph](help:match-graph) is still found) at

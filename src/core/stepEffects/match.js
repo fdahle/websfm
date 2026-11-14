@@ -18,7 +18,8 @@ export function selectionPairsEffect(strategy, { k = 0, n = 0 } = {}) {
     const pairs = k * (n - k) + (k * (k - 1)) / 2
     return `${plural(k, 'selected image')} with every other image: ${plural(pairs, 'pair')}.`
   }
-  return `${plural(k, 'selected image')}: of the pairs the ${strategy === 'sequential' ? 'capture order' : 'preselection'} chooses, those with one of them.`
+  const chooser = { sequential: 'capture order', retrieval: 'image similarity' }[strategy] ?? 'preselection'
+  return `${plural(k, 'selected image')}: of the pairs the ${chooser} chooses, those with one of them.`
 }
 
 // What step 1 adds to its pair count when matched pairs exist.

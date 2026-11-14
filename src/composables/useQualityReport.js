@@ -505,6 +505,7 @@ export function useQualityReport() {
     const methods = methodsUsed({
       detector: imagesStore.images.find((im) => im.kpStatus === 'done')?.detector ?? null,
       matcher: matchesStore.matchRun?.matcher ?? null,
+      pairing: matchesStore.matchRun?.strategy ?? null,
       verifier: matchesStore.matchRun?.settings?.verifier ?? null,
       sparse: cameras.value.size > 0,
       fisheye:

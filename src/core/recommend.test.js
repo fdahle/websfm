@@ -25,6 +25,14 @@ describe('recommendSettings', () => {
     expect(initialMatchStrategy(2)).toBe('preselect')
   })
 
+  it('starts a large set without positions on Similar images', () => {
+    expect(initialMatchStrategy(0, { images: 200 })).toBe('exhaustive')
+    expect(initialMatchStrategy(0, { images: 201 })).toBe('retrieval')
+    expect(initialMatchStrategy(2, { images: 5000 })).toBe('preselect')
+    expect(initialMatchStrategy(0, { video: true, images: 5000 })).toBe('sequential')
+    expect(initialMatchStrategy(0, { film: true, images: 5000 })).toBe('exhaustive')
+  })
+
   it('starts video frames on sequential matching, unless positions exist', () => {
     expect(initialMatchStrategy(0, { video: true })).toBe('sequential')
     expect(initialMatchStrategy(5, { video: true })).toBe('preselect')
@@ -59,17 +67,17 @@ describe('recommendSettings', () => {
     expect(big.tileSize.value).toBe(1536)
   })
 
-  it('match strategy: poses → preselect, sequential → sequential, else exhaustive', () => {
+  it('match strategy: poses → preselect, a large set → similar images, else exhaustive', () => {
     expect(recommendSettings(profile({ hasPoses: true })).match.strategy.value).toBe('preselect')
     expect(recommendSettings(profile({ hasPoses: true })).match.preselectMethod.value).toBe('position')
     // Raw metadata alone is not enough: the reactive pose sync must first turn it
     // into matched project-CRS positions, at which point hasPoses becomes true.
     expect(recommendSettings(profile({ hasGps: true })).match.strategy.value).toBe('exhaustive')
-    // Sequential naming only downgrades to sequential matching on a LARGE set —
-    // on a medium set contiguous filenames don't justify skipping exhaustive.
-    expect(recommendSettings(profile({ sequentialNames: true, scale: 'large' })).match.strategy.value).toBe(
-      'sequential',
-    )
+    // A large set without positions pairs by appearance, whatever its file names; a
+    // medium one stays exhaustive.
+    const large = { nImages: 347, scale: 'large' }
+    expect(recommendSettings(profile(large)).match.strategy.value).toBe('retrieval')
+    expect(recommendSettings(profile({ ...large, sequentialNames: true })).match.strategy.value).toBe('retrieval')
     expect(recommendSettings(profile({ sequentialNames: true, scale: 'medium' })).match.strategy.value).toBe(
       'exhaustive',
     )

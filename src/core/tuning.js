@@ -395,6 +395,27 @@ export const MATCH_TUNING = {
   progressPostShare: 0.1,
 }
 
+// Image retrieval for Match Features ▸ Pairing ▸ Similar images (core/features/
+// retrieval.js). On South Building (128 images, against COLMAP's exhaustive verified
+// pairs) 64 words kept 88.5 % of all inliers at k = 15; 16 words 84.7 %, 256 words 89.6 %
+// (4× the encoding and similarity cost); query expansion gained < 1 point. A codebook
+// from 20 k descriptors in 8 iterations (4 s in one worker) kept 88.7 %, as 50 k in 15
+// (18 s) did: within the ±0.5 points two seeds differ by.
+export const RETRIEVAL_TUNING = {
+  words: 64, // codebook size (vector length = words × descriptor length)
+  trainSamples: 20_000, // descriptors the codebook is learned from, spread over the photos
+  minPerImage: 20, // at least this many from each photo
+  kmeansIterations: 8, // Lloyd iterations (stops earlier when nothing moves)
+  seed: 1, // the codebook's random seed: same project, same pairs
+  // Sequential ▸ Find revisits: each image's most similar images added to its window.
+  revisitNeighbors: 5,
+  // Match Features opens on Similar images for more images than this without camera
+  // positions (core/recommend.js initialMatchStrategy). Quarry 347 without priors: 347/347
+  // cameras at 8 % of the pairs in half the match time, against 346/347 exhaustively;
+  // South Building 128: the same cameras and accuracy either way, so exhaustive stays below.
+  autoAboveImages: 200,
+}
+
 // Dense MVS knobs read in core/dense/mvs.js but NOT exposed in DepthMapsModal /
 // DenseModal — the user-facing dense defaults live in defaults.user.js
 // (DEPTHMAP_DEFAULTS / DENSE_FUSE_DEFAULTS). `settings`/`opts` from the caller override.

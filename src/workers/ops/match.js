@@ -3,6 +3,7 @@ import { compareMatchSets } from '../../core/features/nnSelect.js'
 import { asKeypoints } from '../../core/features/keypoints.js'
 import { matchLightGlue, matchLightGlueTiled } from '../../core/features/lightglue.js'
 import { verifyMatches, verifyPointPairs } from '../../core/features/verify.js'
+import { trainCodebook, vladEncode, topKSimilar } from '../../core/features/retrieval.js'
 import { beginGpuMatchRun, endGpuMatchRun, matchDescriptorsGpu } from '../gpu/matchGpu.js'
 
 // Matching + geometric-verification ops. No worker-local pixel helpers needed —
@@ -68,5 +69,32 @@ export function makeMatchOps() {
     return { result: res, transfer: [res.inlierMask.buffer] }
   }
 
-  return { verifyPoints, match, matchGpuBegin, matchGpu, matchGpuEnd, matchLightGlue: matchLightGluePair, verify }
+  // Image retrieval (Pairing ▸ Similar images, core/features/retrieval.js): the codebook
+  // from the run's sampled descriptors, one photo's VLAD vector, and the k most similar
+  // photos for a block of rows (the vectors come shared where the page allows it).
+  async function retrievalCodebook([samples, dim, opts = {}]) {
+    const r = trainCodebook(samples, dim, opts)
+    return { result: r, transfer: [r.codebook] }
+  }
+  async function retrievalEncode([desc, dim, codebook, words]) {
+    const v = vladEncode(desc, dim, codebook, words)
+    return { result: v, transfer: [v] }
+  }
+  async function retrievalTopK([vectors, len, k, from, to]) {
+    const r = topKSimilar(vectors, len, k, from, to)
+    return { result: r, transfer: [r.index, r.score] }
+  }
+
+  return {
+    verifyPoints,
+    match,
+    matchGpuBegin,
+    matchGpu,
+    matchGpuEnd,
+    matchLightGlue: matchLightGluePair,
+    verify,
+    retrievalCodebook,
+    retrievalEncode,
+    retrievalTopK,
+  }
 }

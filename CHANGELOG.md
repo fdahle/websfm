@@ -6,6 +6,26 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Match large sets without positions in a fraction of the time.** Match Features ▸
+  Pairing ▸ **Similar images** pairs each photo with the 20 photos that look most like it,
+  found from the features already detected, instead of matching every pair; it is where the
+  dialog starts for more than 200 photos without camera positions. Each photo's
+  descriptors are summarised in one VLAD vector over a 64-word codebook learned from the
+  project itself (Jégou et al. 2010, with the intra-normalisation of Arandjelović &
+  Zisserman 2013), so it works with every detector and downloads nothing. Measured without
+  camera priors, WebGPU matching: quarry (347 photos) exhaustive 60,031 pairs in 156 s →
+  346 cameras, 129,274 points, RTK camera error 24.1 cm RMS; Similar images 4,881 pairs
+  (8 %) in 79 s → all 347 cameras, 130,544 points, 23.0 cm (10 per photo: 2,514 pairs in
+  43 s, 347 cameras, 23.5 cm). South Building (128): 1,568 pairs (19 %), the same 128
+  cameras and 4.8 mm median against COLMAP's model as exhaustive; 783 pairs (10 per
+  photo) 4.7 mm. Finding the similar photos took 6 s and 11–20 s. Film scans keep their
+  old start until it is measured on a film block.
+- **Sequential matching joins a second pass over the same place.** Match Features ▸
+  Sequential ▸ **Find revisits** (on by default) also matches each photo with the 5 photos
+  that look most like it, wherever they are in the sequence, so two laps or a strip flown
+  back become one model. South Building (two laps, no priors): Sequential alone left 43 of
+  128 photos apart even after re-detecting them at full size; with Find revisits, 131 more
+  pairs (found in 7 s) registered all 128 cameras, 5.2 mm median against COLMAP's model.
 - **The DEM's vertical accuracy in survey terms.** When a project has a DEM, the Quality
   Report export adds *DEM accuracy at the checkpoints (ASPRS 2023, NVA)*: the DEM's height
   at each checkpoint against its surveyed height, as RMSE_V with the checkpoints' declared

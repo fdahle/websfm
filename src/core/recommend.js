@@ -1,5 +1,6 @@
 import { pluralize } from './textFormat.js'
 import { clamp } from './stats.js'
+import { RETRIEVAL_TUNING } from './tuning.js'
 // Recommended settings (usability track U2).
 //
 // Turn a `DatasetProfile` (core/profile.js, U1) into derived pipeline settings —
@@ -26,10 +27,14 @@ const rec = (value, reason) => ({ value, reason })
 // images have usable camera positions. Kept pure so the modal's automatic initial
 // state and its availability gate share a directly testable rule.
 // A set of video frames (profile kind 'video') starts on Sequential instead of
-// Exhaustive: the frames are in capture order, and each overlaps its neighbours.
-export function initialMatchStrategy(positionCount, { video = false } = {}) {
+// Exhaustive: the frames are in capture order, and each overlaps its neighbours. A large
+// set (more than RETRIEVAL_TUNING.autoAboveImages images with keypoints) starts on Similar
+// images: exhaustive matching grows with the square of the count. Film scans do not
+// (`film`): Similar images is not measured on them yet (recommendMatch).
+export function initialMatchStrategy(positionCount, { video = false, images = 0, film = false } = {}) {
   if (Number(positionCount) >= 2) return 'preselect'
-  return video ? 'sequential' : 'exhaustive'
+  if (video) return 'sequential'
+  return !film && Number(images) > RETRIEVAL_TUNING.autoAboveImages ? 'retrieval' : 'exhaustive'
 }
 
 // ── detect ──────────────────────────────────────────────────────────────────
@@ -82,15 +87,19 @@ function recommendMatch(p) {
       'sequential',
       'Frames extracted from a video, in capture order — match each to the next few; enable loop closure if the video returns to where it started.',
     )
-  } else if (p.sequentialNames && p.scale === 'large') {
-    // Contiguous filenames alone don't prove a strip — cameras number files
-    // sequentially for any shoot — so sequential matching is only recommended
-    // when the set is large enough that exhaustive is prohibitively expensive and
-    // the naming at least gives an ordering to exploit. Enable loop closure by
-    // hand if the sequence actually loops back.
+  } else if (p.kind === 'film' && p.sequentialNames && p.scale === 'large') {
+    // Film keeps capture order: every scan shows the same fiducials and data strip, which
+    // may make all of them look alike to Similar images (not measured on a film block yet).
     out.strategy = rec(
       'sequential',
-      'Large set with sequential filenames — match capture-order neighbours to avoid the O(N²) exhaustive cost; enable loop closure if the sequence returns to its start.',
+      'Large set of film scans with sequential filenames — match capture-order neighbours to avoid the O(N²) exhaustive cost; turn on Find revisits for a block of several strips.',
+    )
+  } else if (p.nImages > RETRIEVAL_TUNING.autoAboveImages) {
+    // A large set without positions: pairs by appearance. Unlike capture order (file
+    // names), it needs no ordering and finds a second pass over the same place.
+    out.strategy = rec(
+      'retrieval',
+      `${pluralize(p.nImages, 'image')} without camera positions — match each with the images that look most like it instead of all ${(p.nImages * (p.nImages - 1)) / 2} pairs.`,
     )
   } else {
     out.strategy = rec(

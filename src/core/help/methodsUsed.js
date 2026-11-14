@@ -14,7 +14,7 @@ const DETECTORS = {
 
 /**
  * @param {{
- *   detector?: string|null, matcher?: string|null, verifier?: string|null,
+ *   detector?: string|null, matcher?: string|null, verifier?: string|null, pairing?: string|null,
  *   sparse?: boolean, fisheye?: boolean, georef?: boolean, demHold?: boolean, dense?: boolean,
  *   denseViewSelection?: string|null, densePlanarPrior?: boolean, denseGeomPass?: boolean,
  *   mesh?: boolean, textured?: boolean, dem?: boolean, demFill?: string|null,
@@ -28,6 +28,13 @@ export function methodsUsed(f = {}) {
   const out = []
   const det = DETECTORS[f.detector]
   if (det) out.push({ step: 'Features', ...det })
+  if (f.pairing === 'retrieval') {
+    out.push({
+      step: 'Pair selection',
+      method: 'Image retrieval: VLAD with intra-normalisation, on a codebook learned from the project',
+      refs: ['jegou2010', 'arandjelovic2013'],
+    })
+  }
   if (f.matcher) {
     const lg = f.matcher === 'lightglue'
     out.push({
