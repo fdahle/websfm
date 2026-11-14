@@ -960,25 +960,34 @@ window.bench = {
     } finally {
       DENSE_TUNING.filterMapsPerWorker = perWorker0
     }
-    // A digest of every saved depth plane (FNV-1a over the bytes, in uuid order): two runs'
-    // maps compare at a glance (the GPU path's banding must not change a byte).
+    // A digest of every saved depth plane (FNV-1a over the bytes, in image-name order), and
+    // one per map: two runs' maps compare at a glance (the GPU path's banding must not
+    // change a byte). By name, not uuid: a fresh project gives its images new uuids, so
+    // uuid order changed the digest of identical maps (ETH3D office, 11-14).
     let digest = null
+    const perMap = {}
     try {
       const opfs = await import('/src/utils/opfs.js')
-      const entries = await opfs.loadDepthFiles(
-        useProjectsStore().currentProjectId,
-        [...recon.depthMapsMeta].sort((a, b) => (a.uuid < b.uuid ? -1 : 1)),
-      )
+      const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+      const nameOf = new Map(useImagesStore().images.map((im) => [im.uuid, im.name]))
+      const name = (m) => nameOf.get(m.uuid) ?? m.uuid
+      const metas = [...recon.depthMapsMeta].sort((a, b) => (name(a) < name(b) ? -1 : name(a) > name(b) ? 1 : 0))
+      const entries = await opfs.loadDepthFiles(useProjectsStore().currentProjectId, metas)
       let h = 2166136261
       for (const e of entries) {
         const bytes = new Uint8Array(await e.files.depth.arrayBuffer())
-        for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 16777619) >>> 0
+        let m = 2166136261
+        for (let i = 0; i < bytes.length; i++) {
+          h = Math.imul(h ^ bytes[i], 16777619) >>> 0
+          m = Math.imul(m ^ bytes[i], 16777619) >>> 0
+        }
+        perMap[name(e)] = m.toString(16)
       }
       digest = h.toString(16)
     } catch {
       // no saved maps (a project that cannot save): no digest
     }
-    return { settings, seconds: (performance.now() - t0) / 1000, depthMaps: recon.depthMapCount, digest }
+    return { settings, seconds: (performance.now() - t0) / 1000, depthMaps: recon.depthMapCount, digest, perMap }
   },
 
   // Tools ▸ Images ▾ ▸ Reduce overlap, as ReduceOverlapModal runs it: every posed image
