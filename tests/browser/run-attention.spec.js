@@ -69,7 +69,11 @@ test('a running workflow holds a wake lock, titles the tab and notifies from a h
   })
   await expect.poll(calls).toContain('lock screen')
 
+  // The dialog is a lazily loaded chunk: Escape closes it once it is on screen.
+  const report = page.getByRole('dialog', { name: 'Quality Report' })
+  await expect(report).toBeVisible()
   await page.keyboard.press('Escape')
+  await expect(report).toHaveCount(0)
   await prompt.click()
   await type('continue')
   await expect(page.locator('.console-body')).toContainText('Workflow complete: Review only')
