@@ -286,6 +286,17 @@ export async function registerImages(ctx) {
     }
     return { pts3, pts2, newIdx }
   }
+  // The per-pass cache keeps every unregistered image's correspondences, so it holds them
+  // compact: point ids and keypoint indices only, the positions re-read from the image's
+  // keypoints when the image is attempted (`expand`, the same values in the same order).
+  // As objects they were most of the SfM worker's live heap in registration (1,024
+  // synthetic cameras at 3,700 keypoints a photo: 127 of 178 MB; dev/probes/sfm-scale).
+  const compact = (corr) => ({ pts3: Int32Array.from(corr.pts3), newIdx: Int32Array.from(corr.newIdx) })
+  const expand = (c, img) => ({
+    pts3: Array.from(c.pts3),
+    newIdx: Array.from(c.newIdx),
+    pts2: Array.from(c.newIdx, (idx) => ({ x: kpX(img.kp, idx), y: kpY(img.kp, idx) })),
+  })
 
   // Repeatedly sweep the unregistered images; each newly-registered camera adds
   // points that may let previously-deferred images register on the next pass.
@@ -342,7 +353,7 @@ export async function registerImages(ctx) {
       .filter((img) => !registeredUuids.has(img.uuid))
       .map((img) => {
         const corr = collectCorrespondences(img)
-        corrCache.set(img.uuid, { corr, version: modelVersion })
+        corrCache.set(img.uuid, { corr: compact(corr), version: modelVersion })
         return { img, score: nextViewScore(corr, img), links: countMatchesToRegistered(img.uuid) }
       })
       .sort((a, b) => b.score - a.score || b.links - a.links)
@@ -362,11 +373,13 @@ export async function registerImages(ctx) {
       const K = Kmap.get(img.uuid)
       // Reuse the scoring-time correspondences unless a registration next to this
       // image or an interim BA has changed them since.
+      let fresh = null
       if (corrCache.get(img.uuid).version !== modelVersion || stale.has(img.uuid)) {
-        corrCache.set(img.uuid, { corr: collectCorrespondences(img), version: modelVersion })
+        fresh = collectCorrespondences(img)
+        corrCache.set(img.uuid, { corr: compact(fresh), version: modelVersion })
         stale.delete(img.uuid)
       }
-      const { pts3, pts2, newIdx } = corrCache.get(img.uuid).corr
+      const { pts3, pts2, newIdx } = fresh ?? expand(corrCache.get(img.uuid).corr, img)
       if (pts3.length < minMatchesForRegistration) {
         const reason = `too few correspondences (${pts3.length}/${minMatchesForRegistration})`
         deferReasons.set(img.uuid, reason)
