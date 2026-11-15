@@ -72,7 +72,7 @@ impl RangePlan {
     pub(crate) fn new(pattern: &BlockPattern, n_free: usize, schur_order: &[usize],
            cams_of: impl Fn(usize, &mut dyn FnMut(usize))) -> RangePlan {
         let n = (n_free / RANGE_MIN_CAMS).clamp(1, RANGE_MAX);
-        let range = |b: usize| if n_free == 0 { 0 } else { b * n / n_free };
+        let range = |b: usize| (b * n).checked_div(n_free).unwrap_or(0);
         let n_pts = schur_order.iter().copied().max().map_or(0, |m| m + 1);
         let mut owner = vec![0u32; n_pts];
         let mut points: Vec<Vec<u32>> = vec![Vec::new(); n];
@@ -105,7 +105,7 @@ impl RangePlan {
         let points_by_index = points.iter().map(|l| { let mut v = l.clone(); v.sort_unstable(); v }).collect();
         RangePlan { n, n_free, points, points_by_index, owner, gg, gg_at, gg_len, group_rows: pattern.n - group_off, group_off }
     }
-    pub(crate) fn range(&self, b: usize) -> usize { if self.n_free == 0 { 0 } else { b * self.n / self.n_free } }
+    pub(crate) fn range(&self, b: usize) -> usize { (b * self.n).checked_div(self.n_free).unwrap_or(0) }
     pub(crate) fn part_len(&self) -> usize { self.gg_len + self.group_rows }
 }
 

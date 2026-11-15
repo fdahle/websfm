@@ -11,3 +11,14 @@ opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# Clippy (CI ▸ audit) minus the lints that flag this code's own idioms: index loops over
+# parallel arrays (needless_range_loop), `!(x > 0.0)`, which rejects NaN in the same test
+# (neg_cmp_op_on_partial_ord), wasm entry points that take one flat array per input
+# (too_many_arguments), tuples of matrices (type_complexity). Members opt in with
+# `[lints] workspace = true`; the vendored Poisson crate keeps its upstream code as it is.
+[workspace.lints.clippy]
+needless_range_loop = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"

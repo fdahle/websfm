@@ -506,7 +506,7 @@ fn gemm_nt(c: &mut [f64], a: &[f64], b: &[f64], m: usize, n: usize, w: usize) {
 // Rows lo..hi of gemm_nt's product (c holds them from its row 0), computed exactly as the
 // whole product computes them: `lo` must be even, so the row pairs are the same pairs.
 fn gemm_nt_rows(c: &mut [f64], a: &[f64], b: &[f64], n: usize, w: usize, lo: usize, hi: usize) {
-    debug_assert!(lo % 2 == 0);
+    debug_assert!(lo.is_multiple_of(2));
     let mut i = lo;
     while i + 2 <= hi {
         let (x0, x1) = (&a[i * w..(i + 1) * w], &a[(i + 1) * w..(i + 2) * w]);

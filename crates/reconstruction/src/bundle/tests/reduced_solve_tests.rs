@@ -17,7 +17,7 @@ fn ba_like(n_cam: usize, seed: u64) -> (usize, Vec<f64>, Vec<f64>, Vec<(usize, u
     let n = 6 * n_cam + 2 * kdim;
     let mut rng = Lcg(seed);
     let mut a = vec![0f64; n * n];
-    let mut add_row = |row: &[(usize, f64)], a: &mut Vec<f64>| {
+    let add_row = |row: &[(usize, f64)], a: &mut Vec<f64>| {
         for &(i, vi) in row { for &(j, vj) in row { a[i * n + j] += vi * vj; } }
     };
     for p in 0..n_cam * 40 {
@@ -358,7 +358,10 @@ fn sparse_cholesky_timing() {
 #[test]
 fn block_ic0_is_exact_without_fill_and_beats_jacobi_with_it() {
     // A chain (block tridiagonal) has no fill: IC(0) is the Cholesky factor itself.
-    let chain = BlockPattern::new(vec![6; 50], |r, touch| { if r > 0 { touch(r - 1); } if r + 1 < 50 { touch(r + 1); } });
+    let chain = BlockPattern::new(vec![6; 50], |r, touch| {
+        if r > 0 { touch(r - 1); }
+        if r + 1 < 50 { touch(r + 1); }
+    });
     let vals = spd_fill(&chain, 3, 0.05);
     let b: Vec<f64> = (0..chain.n).map(|i| (i as f64 * 0.37).sin()).collect();
     let exact = chol_solve(chain.n, &chain.to_dense(&vals), &b).unwrap();
@@ -717,7 +720,7 @@ fn range_parts_len_is_what_the_range_plan_holds() {
         let n_groups = if own_groups { n_cam } else { 1 };
         let grp = |c: usize| if own_groups { c } else { 0 };
         let mut dims = vec![6usize; n_cam];
-        dims.extend(std::iter::repeat(3).take(n_groups));
+        dims.extend(std::iter::repeat_n(3, n_groups));
         // A camera couples with its neighbours within 3 and their groups; a group with
         // what its cameras couple with (bundle.rs build_pattern).
         let near = |c: usize| c.saturating_sub(3)..(c + 4).min(n_cam);

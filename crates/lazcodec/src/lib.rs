@@ -198,7 +198,7 @@ impl LazEncoder {
     }
 
     fn push_impl(&mut self, points: &[u8]) -> Result<(), String> {
-        if points.len() > 8 * 1024 * 1024 || points.len() % self.point_size as usize != 0 {
+        if points.len() > 8 * 1024 * 1024 || !points.len().is_multiple_of(self.point_size as usize) {
             return Err("lazcodec: invalid or oversized record chunk".into());
         }
         self.compressor.as_mut().ok_or("lazcodec: encoder already finished")?
@@ -294,7 +294,7 @@ impl CopcEncoder {
     }
 
     fn push_impl(&mut self, points: &[u8]) -> Result<(), String> {
-        if points.len() > 8 * 1024 * 1024 || points.len() % self.point_size as usize != 0 {
+        if points.len() > 8 * 1024 * 1024 || !points.len().is_multiple_of(self.point_size as usize) {
             return Err("lazcodec: invalid or oversized record chunk".into());
         }
         self.compressor.as_mut().ok_or("lazcodec: encoder already finished")?
@@ -323,7 +323,7 @@ fn compress_points_impl(
     point_size: u16,
 ) -> Result<CompressedPoints, String> {
     let vlr = vlr_for_format(point_format, point_size)?;
-    if points.len() % point_size as usize != 0 {
+    if !points.len().is_multiple_of(point_size as usize) {
         return Err(format!(
             "lazcodec: point buffer {} is not a multiple of the {point_size}-byte record",
             points.len()

@@ -260,7 +260,7 @@ fn finalize_mesh(
     if trimming {
         let near = PointProximity::new(points, opts.trim_dist);
         let vert_near: Vec<bool> = verts.iter().map(|v| near.near(v[0], v[1], v[2])).collect();
-        for (ti, t) in tris.chunks_exact(3).enumerate() {
+        for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
             if t.iter().all(|&v| !vert_near[v as usize]) {
                 class[ti] = FAR;
                 stats.distance_removed_tris += 1;
@@ -274,7 +274,7 @@ fn finalize_mesh(
         stats.median_support = median;
         let thr = opts.density_ratio * median;
         let vs: Vec<f64> = verts.iter().map(|v| s.eval(v[0], v[1], v[2])).collect();
-        for (ti, t) in tris.chunks_exact(3).enumerate() {
+        for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
             if class[ti] != KEEP {
                 continue;
             }
@@ -396,7 +396,7 @@ impl PoissonMesher {
     /// Solve the next multigrid layer (coarsest first). Returns `true` while more layers
     /// remain. A no-op (`false`) once every layer is solved or on a degenerate build.
     pub fn solve_step(&mut self) -> bool {
-        self.builder.as_mut().map_or(false, |b| b.solve_step())
+        self.builder.as_mut().is_some_and(|b| b.solve_step())
     }
 
     /// Solve any remaining layers, then extract, clean up (see [`MeshOptions`]; each
@@ -463,7 +463,7 @@ fn compact(
     let mut remap = vec![u32::MAX; verts.len()];
     let mut out_verts: Vec<[f64; 3]> = Vec::new();
     let mut out_tris: Vec<u32> = Vec::with_capacity(tris.len());
-    for (ti, t) in tris.chunks_exact(3).enumerate() {
+    for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
         if !keep(ti) {
             continue;
         }
@@ -544,7 +544,7 @@ fn refill_holes(
     let mut low = UnionFind::new(verts.len());
     let mut kept = UnionFind::new(verts.len());
     let mut on_kept = vec![false; verts.len()];
-    for (ti, t) in tris.chunks_exact(3).enumerate() {
+    for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
         if class[ti] == FAR {
             continue;
         }
@@ -566,7 +566,7 @@ fn refill_holes(
         uf.union(t[1], t[2]);
     }
     let mut kept_area: HashMap<u32, f64> = HashMap::new();
-    for (ti, t) in tris.chunks_exact(3).enumerate() {
+    for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
         if class[ti] == KEEP {
             *kept_area.entry(kept.find(t[0])).or_insert(0.0) += tri_area(verts, t);
         }
@@ -579,7 +579,7 @@ fn refill_holes(
         border_area: f64, // largest kept piece this region touches
     }
     let mut regions: HashMap<u32, Region> = HashMap::new();
-    for (ti, t) in tris.chunks_exact(3).enumerate() {
+    for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
         if class[ti] != LOW {
             continue;
         }
@@ -600,7 +600,7 @@ fn refill_holes(
         }
     }
     let mut filled: Vec<u32> = Vec::new();
-    for (ti, t) in tris.chunks_exact(3).enumerate() {
+    for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
         if class[ti] != LOW {
             continue;
         }
@@ -641,7 +641,7 @@ fn drop_small_components(
 ) {
     let mut uf = UnionFind::new(verts.len());
     let mut on_kept = vec![false; verts.len()];
-    for (ti, t) in tris.chunks_exact(3).enumerate() {
+    for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
         if class[ti] == KEEP {
             uf.union(t[0], t[1]);
             uf.union(t[1], t[2]);
@@ -651,7 +651,7 @@ fn drop_small_components(
         }
     }
     let mut area: HashMap<u32, f64> = HashMap::new();
-    for (ti, t) in tris.chunks_exact(3).enumerate() {
+    for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
         if class[ti] == KEEP {
             *area.entry(uf.find(t[0])).or_insert(0.0) += tri_area(verts, t);
         }
@@ -711,7 +711,7 @@ fn drop_small_components(
     let largest = area.keys().map(|&r| measure(r)).fold(0.0, f64::max);
     let min = share * largest;
     stats.components_dropped = area.keys().filter(|&&r| measure(r) < min).count();
-    for (ti, t) in tris.chunks_exact(3).enumerate() {
+    for (ti, t) in tris.as_chunks::<3>().0.iter().enumerate() {
         if class[ti] == KEEP && measure(uf.find(t[0])) < min {
             class[ti] = SMALL;
             stats.component_dropped_tris += 1;
@@ -874,7 +874,7 @@ mod tests {
     fn canonical_triangles(pos: &[[f32; 3]], idx: &[u32]) -> Vec<[[u32; 3]; 3]> {
         let bits = |v: [f32; 3]| [v[0].to_bits(), v[1].to_bits(), v[2].to_bits()];
         let mut tris: Vec<[[u32; 3]; 3]> = idx
-            .chunks_exact(3)
+            .as_chunks::<3>().0.iter()
             .map(|t| {
                 let mut v = [
                     bits(pos[t[0] as usize]),
@@ -931,7 +931,7 @@ mod tests {
         }
         let depth = 5u32;
         let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-        for p in pos.chunks_exact(3) {
+        for p in pos.as_chunks::<3>().0 {
             for k in 0..3 {
                 lo[k] = lo[k].min(p[k] as f64);
                 hi[k] = hi[k].max(p[k] as f64);
@@ -1071,7 +1071,7 @@ mod tests {
         assert!(n_tris > 0, "trim removed everything");
         // Every surviving triangle must have at least one vertex within `trim` of the
         // input plane (|z| small and within the [-1,1]² footprint, generously padded).
-        for t in idx.chunks_exact(3) {
+        for t in idx.as_chunks::<3>().0 {
             let ok = t.iter().any(|&vi| {
                 let v = verts[vi as usize];
                 v[2].abs() <= trim + 1e-3 && v[0].abs() <= 1.0 + trim && v[1].abs() <= 1.0 + trim
@@ -1140,7 +1140,7 @@ mod tests {
         let verts: Vec<[f64; 3]> = pos.iter().map(|p| [p[0] as f64, p[1] as f64, p[2] as f64]).collect();
         let mut uf = UnionFind::new(nv as usize);
         let mut edges: HashMap<(u32, u32), u32> = HashMap::new();
-        for t in idx.chunks_exact(3) {
+        for t in idx.as_chunks::<3>().0 {
             uf.union(t[0], t[1]);
             uf.union(t[1], t[2]);
             for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
@@ -1149,7 +1149,7 @@ mod tests {
         }
         let (mut total, mut off) = (0.0, 0.0);
         let mut comp: HashMap<u32, f64> = HashMap::new();
-        for t in idx.chunks_exact(3) {
+        for t in idx.as_chunks::<3>().0 {
             let a = tri_area(&verts, t);
             total += a;
             *comp.entry(uf.find(t[0])).or_insert(0.0) += a;
@@ -1306,8 +1306,8 @@ mod tests {
             "check" => {
                 let bytes = std::fs::read(&path).unwrap();
                 let r: Vec<f64> = bytes
-                    .chunks_exact(8)
-                    .map(|c| f64::from_le_bytes(c.try_into().unwrap()))
+                    .as_chunks::<8>().0.iter()
+                    .map(|c| f64::from_le_bytes(*c))
                     .collect();
                 assert_eq!(r.len(), w.len(), "node count changed");
                 let scale = r.iter().fold(0.0f64, |m, v| m.max(v.abs()));

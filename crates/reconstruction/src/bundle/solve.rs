@@ -140,10 +140,10 @@ impl SolverOpts {
         SolverOpts {
             // `as usize` saturates, so +∞ means "never".
             pcg_min_n: slot(0).map_or(d.pcg_min_n, |v| v as usize),
-            rel_tol: slot(1).filter(|v| *v > 0.0).map_or(d.rel_tol, |v| v),
+            rel_tol: slot(1).filter(|v| *v > 0.0).unwrap_or(d.rel_tol),
             max_iter: slot(2).filter(|v| *v >= 1.0).map_or(d.max_iter, |v| v as usize),
             accept_partial: slot(3).map_or(d.accept_partial, |v| v != 0.0),
-            function_tol: slot(4).map_or(d.function_tol, |v| v),
+            function_tol: slot(4).unwrap_or(d.function_tol),
             precond: slot(5).filter(|v| *v == 1.0).map_or(d.precond, |_| 1),
             direct: slot(6).map_or(d.direct, |v| if v == 1.0 { 1 } else if v == 2.0 { 2 } else { 0 }),
             warm: slot(7).map_or(d.warm, |v| if v == 1.0 { 1 } else { 0 }),

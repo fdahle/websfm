@@ -21,3 +21,6 @@ itertools = "0.14"
 nalgebra = "0.33"
 nalgebra-sparse = "0.10"
 parry3d-f64 = "0.21"
+
+# Upstream code kept as it is: not under the workspace clippy settings.
+[lints]

@@ -785,7 +785,7 @@ mod tests {
             assert!(chunk[3] > 0.0, "response should be positive");
             // Descriptor values should be in [0, 1] after normalisation.
             for &d in &chunk[5..] {
-                assert!(d >= 0.0 && d <= 1.0001, "descriptor value out of range: {}", d);
+                assert!((0.0..=1.0001).contains(&d), "descriptor value out of range: {}", d);
             }
         }
     }

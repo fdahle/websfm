@@ -17,3 +17,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-bindgen = "0.2"
 laz = { version = "0.12", default-features = false }
+
+[lints]
+workspace = true

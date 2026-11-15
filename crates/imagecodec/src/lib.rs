@@ -436,14 +436,14 @@ mod tests {
     fn bilevel_unpacks_to_black_and_white() {
         // 10 × 2: rows padded to 2 bytes. Row 0 = 1000000001, row 1 = 0111111110.
         let rows = [0b1000_0000, 0b0100_0000, 0b0111_1111, 0b1000_0000];
-        let gray = |rgba: &[u8]| rgba.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>();
+        let gray = |rgba: &[u8]| rgba.as_chunks::<4>().0.iter().map(|p| p[0]).collect::<Vec<_>>();
         let d = decode_tiff(&gray_tiff(10, 2, 1, 1, &rows)).unwrap(); // BlackIsZero
         assert_eq!((d.width, d.height, d.bits_per_sample), (10, 2, 1));
         let rgba = d.rgba();
         let g = gray(&rgba);
         assert_eq!(&g[..10], &[255, 0, 0, 0, 0, 0, 0, 0, 0, 255]);
         assert_eq!(&g[10..], &[0, 255, 255, 255, 255, 255, 255, 255, 255, 0]);
-        assert!(rgba.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2] && p[3] == 255));
+        assert!(rgba.as_chunks::<4>().0.iter().all(|p| p[0] == p[1] && p[1] == p[2] && p[3] == 255));
         // WhiteIsZero, the fax default: a set bit is black.
         let g = gray(&decode_tiff(&gray_tiff(10, 2, 1, 0, &rows)).unwrap().rgba());
         assert_eq!(&g[..10], &[0, 255, 255, 255, 255, 255, 255, 255, 255, 0]);

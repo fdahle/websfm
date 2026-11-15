@@ -216,7 +216,7 @@ impl GuidedSearch {
                     any = true;
                     let cd = &desc[DIM * iu..DIM * iu + DIM];
                     let mut d = NONE;
-                    for rf in refs.chunks_exact(DIM) { d = d.min(dist2_below(rf, cd, d.min(second))); }
+                    for rf in refs.as_chunks::<DIM>().0 { d = d.min(dist2_below(rf, cd, d.min(second))); }
                     if d < best {
                         second = best;
                         best = d;

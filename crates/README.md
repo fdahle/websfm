@@ -12,7 +12,13 @@ in the compute worker. Members (see `Cargo.toml`):
 - `reconstruction/` — the big one:
   - `pose.rs` — incremental PnP registration (P3P + MSAC + Gauss-Newton polish).
   - `bundle.rs` — LM bundle adjustment (Schur complement, analytic Jacobians,
-    adaptive Huber; optional shared per-sensor intrinsics refinement).
+    adaptive Huber; optional shared per-sensor intrinsics refinement): the wasm entry
+    points and the LM loop. Its parts in `bundle/`: `problem.rs` (the inputs parsed),
+    `layout.rs` (the reduced system's variables and sparsity), `model.rs` (projection,
+    costs, one observation's Jacobian), `normal.rs` (the solve plan, assembly, Schur
+    elimination, back-substitution), `implicit.rs` (S·x without S), `sigma.rs` (the
+    lens σ), `camera.rs` (lens models), `schur.rs` (coupling blocks, `RangePlan`),
+    `solve.rs` (the reduced solves).
   - `mvs.rs` — dense PatchMatch depth maps (one of the **three lockstep
     kernels** — see `src/workers/gpu/README.md`).
   - `linalg.rs`, `lib.rs` — glue + linear algebra.
@@ -32,6 +38,11 @@ same commit. A source edit without the rebuilt wasm is a silent no-op at runtime
 
 `build:wasm` runs `wasm-pack build … --target web` for all three crates and
 strips the generated `.gitignore` files so the output stays tracked.
+
+Clippy runs in CI (▸ `audit`, reported, not gating):
+`cargo clippy --manifest-path crates/Cargo.toml --workspace --all-targets --locked`.
+It is clean. The lints that flag this code's own idioms are allowed once, with the
+reason, in `crates/Cargo.toml` ▸ `[workspace.lints.clippy]`; fix anything else it reports.
 
 ## Threads
 
@@ -56,7 +67,7 @@ worker of a cross-origin isolated page (shared memory, and a thread may block in
 threads; anywhere else, Node tests included, it uses the plain build. Both give the
 **same bits**, whatever the thread count: the work is cut into ranges fixed by the
 camera count alone, every element of the reduced system has one writing range and gets
-its terms in a fixed order (`bundle.rs` `RangePlan`), and every sum over observations
+its terms in a fixed order (`bundle/schur.rs` `RangePlan`), and every sum over observations
 is taken in index order. Keep it that way: a parallel reduction whose order depends on
 the thread count would make a reconstruction differ between machines. (Against the
 single loop before threads: the same bits without self-calibration; with it, the

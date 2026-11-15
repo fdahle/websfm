@@ -42,7 +42,7 @@ fn rig_of(strips: usize, per_strip: usize) -> Rig {
                 let pc = mat3_vec(&ri, x);
                 let c = [pc[0] + ti[0], pc[1] + ti[1], pc[2] + ti[2]];
                 let (u, v) = (F * c[0] / c[2] + W / 2.0, F * c[1] / c[2] + H / 2.0);
-                if c[2] > 0.0 && u >= 0.0 && u <= W && v >= 0.0 && v <= H {
+                if c[2] > 0.0 && (0.0..=W).contains(&u) && (0.0..=H).contains(&v) {
                     obs_idx.extend_from_slice(&[(3 * k + b) as u32, pi as u32]);
                     obs_px.extend_from_slice(&[u as f32, v as f32]);
                 }
@@ -66,7 +66,7 @@ fn inputs(g: &Rig, seed_err: f64) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<i32>, Ve
             capture.push(k as i32);
             sensor.push(b as i32);
             match o {
-                None => of.extend(std::iter::repeat(0.0f32).take(13)),
+                None => of.extend(std::iter::repeat_n(0.0f32, 13)),
                 Some((ro, to)) => {
                     let rs = mat3_mul(&so3_exp(&[seed_err, -seed_err, 0.5 * seed_err]), ro);
                     of.push(1.0);

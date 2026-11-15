@@ -165,7 +165,7 @@ const MAX_SOURCES: usize = 16;
 
 #[inline]
 fn mean_best_costs(costs: impl Iterator<Item = f64>, best_k: usize) -> f64 {
-    let target = best_k.max(1).min(MAX_SOURCES);
+    let target = best_k.clamp(1, MAX_SOURCES);
     let mut lowest = [f64::INFINITY; MAX_SOURCES];
     let mut kept = 0usize;
     for c in costs {
@@ -392,7 +392,7 @@ fn acmh_region_offset(r: usize, k: usize) -> (i64, i64) {
     };
     match r % 4 {
         1 => { ox = -ox; oy = -oy; }
-        2 => { let t = ox; ox = oy; oy = t; }
+        2 => { std::mem::swap(&mut ox, &mut oy); }
         3 => { let t = ox; ox = -oy; oy = -t; }
         _ => {}
     }
@@ -513,11 +513,11 @@ pub fn plane_costs(
     let patch = Patch::new(radius, window_step.max(1) as i32, Bilateral::new(sigma_spatial as f64, sigma_color as f64));
     let bk = best_k.max(1) as usize;
     let mut out = Vec::with_capacity(hyps.len() / 6 * (srcs.len() + 1));
-    for h in hyps.chunks_exact(6) {
+    for h in hyps.as_chunks::<6>().0 {
         let (u, v) = (h[0] as usize, h[1] as usize);
         let (depth, n) = (h[2] as f64, [h[3] as f64, h[4] as f64, h[5] as f64]);
         if h[0] < 0.0 || h[1] < 0.0 || u >= rw || v >= rh {
-            out.extend(std::iter::repeat(INVALID as f32).take(srcs.len()));
+            out.extend(std::iter::repeat_n(INVALID as f32, srcs.len()));
             out.push(2.0);
             continue;
         }
@@ -638,8 +638,7 @@ pub fn compute_depth_map(
     let rand_normal = |r: &mut Xorshift| -> V3 {
         let a = randf(r) * std::f64::consts::PI - std::f64::consts::FRAC_PI_2; // ±90°
         let b = randf(r) * std::f64::consts::PI - std::f64::consts::FRAC_PI_2;
-        let n = normalize3(&[a.sin() * 0.5, b.sin() * 0.5, -1.0]);
-        n
+        normalize3(&[a.sin() * 0.5, b.sin() * 0.5, -1.0])
     };
 
     // Init: seeded depth where the sparse cloud projected, else random in range.

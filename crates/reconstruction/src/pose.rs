@@ -232,7 +232,7 @@ pub(crate) fn refine_pose(
             let sp = skew(&p);
             let mut ju = [0f64; 6];
             let mut jv = [0f64; 6];
-            for k in 0..3 { ju[k] = dudc[k]; jv[k] = dvdc[k]; }
+            ju[..3].copy_from_slice(&dudc); jv[..3].copy_from_slice(&dvdc);
             for k in 0..3 {
                 let colk = [-sp[0][k], -sp[1][k], -sp[2][k]];
                 ju[3 + k] = dudc[0] * colk[0] + dudc[1] * colk[1] + dudc[2] * colk[2];

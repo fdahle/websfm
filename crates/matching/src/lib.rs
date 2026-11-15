@@ -1483,7 +1483,7 @@ mod tests {
 
     fn kernel_pairs(out: &[f32]) -> Vec<(usize, usize)> {
         let mut v: Vec<(usize, usize)> = out
-            .chunks_exact(3)
+            .as_chunks::<3>().0.iter()
             .map(|c| (c[0] as usize, c[1] as usize))
             .collect();
         v.sort_unstable();
@@ -1638,7 +1638,7 @@ mod tests {
         let pairs = kernel_pairs(&out);
         assert!(pairs.contains(&(0, 0)), "identical row should match itself");
         // Find the (0,0) triple and confirm distance ≈ 0.
-        for c in out.chunks_exact(3) {
+        for c in out.as_chunks::<3>().0 {
             if c[0] as usize == 0 && c[1] as usize == 0 {
                 assert!(c[2].abs() < 1e-3, "self-match distance should be ~0, got {}", c[2]);
             }

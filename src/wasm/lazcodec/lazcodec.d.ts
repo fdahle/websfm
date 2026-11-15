@@ -163,9 +163,9 @@ export interface InitOutput {
     readonly lazdecoder_point_size: (a: number) => number;
     readonly lazencoder_finish: (a: number) => [number, number, number];
     readonly lazencoder_new: (a: number, b: number) => [number, number, number];
-    readonly lazencoder_push: (a: number, b: number, c: number) => [number, number];
     readonly lazencoder_drain: (a: number) => [number, number, number, number];
     readonly __wbg_lazencoder_free: (a: number, b: number) => void;
+    readonly lazencoder_push: (a: number, b: number, c: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __externref_table_dealloc: (a: number) => void;

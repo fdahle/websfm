@@ -79,7 +79,7 @@ fn trial_with(rng: &mut Rng, sigma_px: f64, prior_sigma: Option<f64>, tilt_deg: 
             for k in 0..3 { prior_flat.push((-c[k] + sc * rng.gauss()) as f32); }
             let w = (1.0 / (sc * sc)) as f32;
             prior_flat.extend_from_slice(&[w, 0.0, 0.0, 0.0, w, 0.0, 0.0, 0.0, w]);
-            prior_flat.extend(std::iter::repeat(0f32).take(18));
+            prior_flat.extend(std::iter::repeat_n(0f32, 18));
         }
     }
     let mut solver = vec![f32::NAN; 11];
