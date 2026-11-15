@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { planBridgeRepair, bridgeKey } from './bridgeRepair.js'
+import { planBridgeRepair, bridgeKey, retryIsWorse } from './bridgeRepair.js'
 
 const ok = (idA, idB, inlierCount = 50) => ({ idA, idB, status: 'done', inlierCount, rawCount: 200 })
 const rejected = (idA, idB, rawCount) => ({ idA, idB, status: 'done', inlierCount: 0, rawCount })
@@ -79,9 +79,55 @@ describe('planBridgeRepair', () => {
     expect(r.pairs.map((p) => p.idA + p.idB).sort()).toEqual(['va', 'wx'])
   })
 
+  it('takes the core from the main block even when a detached piece is larger', () => {
+    // Main block: a0–a3 (6 images, strong) joined to b0–b2 and c0–c2 (strong) by 20-inlier
+    // pairs; a detached piece d0–d6 (7 images) larger than the core. b and c hang by a
+    // thread on a, and the near miss a1–b1 is proposed; nothing points at d as a core.
+    const chain = (p, n) => Array.from({ length: n - 1 }, (_, i) => ok(`${p}${i}`, `${p}${i + 1}`, 200))
+    const ids = [
+      ['a', 6],
+      ['b', 3],
+      ['c', 3],
+      ['d', 7],
+    ].flatMap(([p, n]) => Array.from({ length: n }, (_, i) => `${p}${i}`))
+    const entries = [
+      ...chain('a', 6),
+      ...chain('b', 3),
+      ...chain('c', 3),
+      ...chain('d', 7),
+      ok('a5', 'b0', 20),
+      ok('a0', 'c0', 20),
+      rejected('a1', 'b1', 40),
+      rejected('a2', 'd0', 40),
+    ]
+    const r = planBridgeRepair({ imageIds: ids, entries, opts: { weakInliers: 30, weakCut: 100 } })
+    expect(r).toMatchObject({ mainSize: 12, pieces: 1, weakPieces: 2, weakImages: 6 })
+    expect(r.pairs.map((p) => `${p.idA}${p.idB}`)).toEqual(expect.arrayContaining(['a1b1', 'a2d0']))
+  })
+
   it('leaves out pairs an earlier round tried', () => {
     const entries = [...base, rejected('a', 'x', 30), rejected('c', 'x', 12)]
     const r = planBridgeRepair({ imageIds, entries, tried: new Set([bridgeKey('x', 'a')]) })
     expect(r.pairs.map((p) => p.idA + p.idB)).toEqual(['cx'])
+  })
+})
+
+describe('retryIsWorse', () => {
+  const weak = { status: 'done', inlierCount: 20, weak: true }
+  it('keeps a weak bridge over a rejection, a failure or a cancelled retry', () => {
+    expect(retryIsWorse({ status: 'done', inlierCount: 0 }, weak)).toBe(true)
+    expect(retryIsWorse({ status: 'error', inlierCount: 0 }, weak)).toBe(true)
+    expect(retryIsWorse(undefined, weak)).toBe(true)
+  })
+  it('takes an accepted retry, and a weak one only with more inliers', () => {
+    expect(retryIsWorse({ status: 'done', inlierCount: 45 }, weak)).toBe(false)
+    expect(retryIsWorse({ status: 'done', inlierCount: 25, weak: true }, weak)).toBe(false)
+    expect(retryIsWorse({ status: 'done', inlierCount: 15, weak: true }, weak)).toBe(true)
+  })
+  it('treats a gated or skipped retry as a rejection', () => {
+    expect(retryIsWorse({ status: 'done', inlierCount: 0, gated: true }, weak)).toBe(true)
+    expect(retryIsWorse({ status: 'done', inlierCount: 0, skipped: true }, { status: 'done', inlierCount: 0 })).toBe(
+      false,
+    )
   })
 })

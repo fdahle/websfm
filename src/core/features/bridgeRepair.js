@@ -60,10 +60,14 @@ export function graphPieces({ imageIds, entries, opts = {} }) {
   // Pieces inside the main block that hang on it by a thread: apart without the pairs of
   // fewer than weakInliers inliers, and joined to the rest by fewer than weakCut in all.
   if (weakInliers > 0 && main.length) {
-    const strong = componentsOf(accepted.filter((e) => e.inlierCount >= weakInliers))
+    // The core is the largest strong piece of the main block, not of the whole graph: a
+    // detached piece larger than any strong part of a block held by weak pairs would
+    // otherwise become the target of every part of the block. (A strong piece lies wholly
+    // inside or outside the main block, so its first image tells which.)
+    const strong = componentsOf(accepted.filter((e) => e.inlierCount >= weakInliers)).filter((c) => inMain.has(c[0]))
     const core = new Set(strong[0])
     for (const c of strong.slice(1)) {
-      if (c.length < minComponent || !inMain.has(c[0])) continue
+      if (c.length < minComponent) continue
       const set = new Set(c)
       let cut = 0
       for (const e of accepted)
@@ -143,4 +147,23 @@ export function planBridgeRepair({ imageIds, entries, scoreUnmatched = null, tri
     if (!any) break
   }
   return out
+}
+
+/**
+ * Whether a pair matched again came out worse than it was: by class (accepted, then
+ * weak, then rejected, then not finished: failed or cancelled), then by inliers. Bridge
+ * repair keeps the first outcome then.
+ */
+export function retryIsWorse(now, before) {
+  const rank = (e) =>
+    e?.status !== 'done'
+      ? -1
+      : e.inlierCount > 0 && !e.weak && !e.gated && !e.skipped
+        ? 2
+        : e.weak && e.inlierCount > 0
+          ? 1
+          : 0
+  const a = rank(now),
+    b = rank(before)
+  return a !== b ? a < b : (now?.inlierCount ?? 0) < (before?.inlierCount ?? 0)
 }

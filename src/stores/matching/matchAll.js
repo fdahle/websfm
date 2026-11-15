@@ -21,7 +21,7 @@ import {
   preselectByFootprintOverlap,
   footprintOverlap,
 } from '../../core/features/preselect.js'
-import { planBridgeRepair, bridgeKey, graphPieces } from '../../core/features/bridgeRepair.js'
+import { planBridgeRepair, bridgeKey, graphPieces, retryIsWorse } from '../../core/features/bridgeRepair.js'
 import { gapDetectSettings, planGapRedetect } from '../../core/features/gapRedetect.js'
 import { laterPassSpan, pairPassEnd, spanFraction } from '../../core/features/matchProgress.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
@@ -52,6 +52,8 @@ export function createMatchAll({
   beginBatch,
   endBatch,
   bumpGeneration,
+  holdMatches,
+  readPairMatches,
 }) {
   // Camera positions (project CRS) from imported poses, keyed by image **uuid** —
   // the key every preselect step downstream uses (pairId is uuid-based). Poses link
@@ -187,10 +189,32 @@ export function createMatchAll({
       lgMaxKeypoints: Math.round(settings.lgMaxKeypoints * (settings.bridgeLgKeypointScale ?? 1)),
     }
     const work = plan.pairs.map(({ idA, idB }) => [byUuid.get(idA), byUuid.get(idB)])
+    // A pair matched again keeps its first outcome when the retry does worse: matchPair
+    // replaces the entry before it starts, and a weak bridge (the graph's link to its
+    // piece) retried at these gates can be rejected, fail, or be cancelled mid-pair.
+    const before = new Map()
     for (const [a, b] of work) {
-      const known = matchStore.value.get(pairId(a.uuid, b.uuid))
-      if (known) untally(known)
-      else pairs.push([a, b])
+      const pid = pairId(a.uuid, b.uuid)
+      const known = matchStore.value.get(pid)
+      if (!known) {
+        pairs.push([a, b])
+        continue
+      }
+      untally(known)
+      if (known.status === 'done' && known.inlierCount > 0) {
+        const m = await readPairMatches(pid)
+        if (m?.length) before.set(pid, { entry: known, matches: m.slice() })
+      }
+    }
+    const keepBetter = (pid) => {
+      const old = before.get(pid)
+      const now = matchStore.value.get(pid)
+      if (!old || !retryIsWorse(now, old.entry)) return
+      if (now?.status === 'done') untally(now)
+      matchStore.value.set(pid, old.entry)
+      holdMatches(pid, old.entry, old.matches)
+      tally(pid, old.entry)
+      touch()
     }
     const cache = createDescriptorCache({ pairs: work, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
     let cursor = 0
@@ -201,7 +225,11 @@ export function createMatchAll({
       while (cursor < work.length) {
         if (isCancelled()) return
         const [a, b] = work[cursor++]
-        await matchPair(a, b, repairSettings, tally, cache, gpuRun)
+        try {
+          await matchPair(a, b, repairSettings, tally, cache, gpuRun)
+        } finally {
+          keepBetter(pairId(a.uuid, b.uuid))
+        }
         cache.release(a.uuid)
         cache.release(b.uuid)
         const e = matchStore.value.get(pairId(a.uuid, b.uuid))

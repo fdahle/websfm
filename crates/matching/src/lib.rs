@@ -1054,7 +1054,9 @@ pub fn verify_matches_hf(
     let h_inliers = if (f_inliers as u32) < h_skip_below {
         0
     } else if use_magsac {
-        magsac(Model::Homography, &pa, &pb, thresh_sq, max_iters as usize)
+        // At the gate RANSAC's H uses (H_GATE_FACTOR, see ransac_homography): at F's own
+        // threshold a planar pair read H/F ≈ 0.66 here too, below the 0.8 flag.
+        magsac(Model::Homography, &pa, &pb, H_GATE_FACTOR * thresh_sq, max_iters as usize)
             .map_or(0, |(_, m, _)| m.iter().filter(|&&x| x).count())
     } else {
         ransac_homography(&pa, &pb, thresh_sq, max_iters as usize)
@@ -1233,10 +1235,13 @@ mod tests {
             pa.extend_from_slice(&[(ax + g(&mut rng)) as f32, (ay + g(&mut rng)) as f32]);
             pb.extend_from_slice(&[(bx + g(&mut rng)) as f32, (by + g(&mut rng)) as f32]);
         }
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, 0, &[]);
-        let f_inliers = out[10..].iter().filter(|&&v| v > 0.5).count() as f64;
-        let ratio = out[9] as f64 / f_inliers;
-        assert!(ratio >= 0.9, "H/F {ratio:.2} on a planar pair");
+        // Both verifiers: RANSAC (0) and MAGSAC++ (1, bridge repair's).
+        for verifier in [0, 1] {
+            let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0, verifier, &[]);
+            let f_inliers = out[10..].iter().filter(|&&v| v > 0.5).count() as f64;
+            let ratio = out[9] as f64 / f_inliers;
+            assert!(ratio >= 0.9, "H/F {ratio:.2} on a planar pair (verifier {verifier})");
+        }
     }
 
     #[test]

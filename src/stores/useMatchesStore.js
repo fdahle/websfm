@@ -438,6 +438,8 @@ export const useMatchesStore = registerProjectStore(
       beginBatch,
       endBatch,
       bumpGeneration,
+      holdMatches,
+      readPairMatches,
     })
 
     // Drop every pair involving `uuid`. Re-detecting an image (or clearing its

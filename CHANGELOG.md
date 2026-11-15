@@ -97,6 +97,17 @@ Notable changes to websfm. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Bridge repair aims at the main block.** When matching leaves part of a block joined
+  only by a few weak pairs, Match Features now repairs it against the main block itself.
+  Before, a separate group of photos larger than any well-tied part of the main block
+  could become the target instead: every part of the main block was then reported as
+  "hanging by a thread" and only pairs towards the separate group were tried. A weak pair
+  retried by bridge repair now also keeps its first result when the retry comes out
+  worse, fails or is cancelled, so a block cannot lose the link it had. And with MAGSAC++
+  (bridge repair's, or Match Features ▸ Estimator), a pair of a flat scene or a
+  pure rotation is labelled as such again: its homography is tested at the same tolerance
+  RANSAC's has used since 0.8 (a planar pair at 1 px noise read H/F 0.66 instead of
+  ≥ 0.9, below the 0.8 flag), so it no longer seeds the reconstruction.
 - **Sparse Model no longer refuses large blocks that fit in memory.** Its memory check now
   counts the keypoints in each match and the tracks they join into before the run, instead
   of guessing them from the number of keypoints, so it sizes the bundle adjustment from
