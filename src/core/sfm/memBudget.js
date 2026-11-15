@@ -64,6 +64,10 @@ export const SPARSE_MEMORY_MODEL = {
   // memory: less than the bundle adjustment before it takes there, so solverWasmBytes
   // covers it.
   guidedHeapPerKeypoint: 24,
+  // With a track census (trackCensus.js): the observations guided extension may add to
+  // the matched keypoints, as a fraction of them. It added 0.8 % on a 60-image Mill19
+  // subset (1,982 of 261 k); 5 % leaves room.
+  guidedObservationAllowance: 0.05,
 }
 
 /**
@@ -79,6 +83,7 @@ export function projectSparsePeakBreakdownBytes(
     imageCount = 0,
     descriptorBytesPerKeypoint = 0,
     guided = descriptorBytesPerKeypoint > 0,
+    census = null,
   } = {},
   model = SPARSE_MEMORY_MODEL,
 ) {
@@ -86,10 +91,15 @@ export function projectSparsePeakBreakdownBytes(
   const K = Math.max(0, keypointCount)
   const M = Math.max(0, matchCount)
   const D = guided ? K * Math.max(0, descriptorBytesPerKeypoint) : 0
-  // Track observations are bounded by accepted matches and, in practice, by the
-  // number of keypoints participating across overlapping cameras.
-  const O = Math.min(M, Math.ceil(K * 0.85))
   const m = model
+  // Observations and points. With a census of the matches (trackCensus.js) they are the
+  // keypoints in some match (+ what guided extension may add) and points within
+  // census.points; without one, a guess from the keypoint count, about twice what
+  // a 60-image subset of a 1,940-image block measured.
+  const O = census
+    ? Math.ceil(census.observations * (1 + (guided ? m.guidedObservationAllowance : 0)))
+    : Math.min(M, Math.ceil(K * 0.85))
+  const P = census ? censusPoints(census, O) : null
   const up = (v) => Math.ceil(v * m.margin)
   const rendererHeapBytes = up(K * m.rendererHeapPerKeypoint)
   // The descriptors are built one image at a time and transferred, so at most all of
@@ -98,7 +108,7 @@ export function projectSparsePeakBreakdownBytes(
   const guidedHeapBytes = guided ? up(K * m.guidedHeapPerKeypoint) : 0
   const workerHeapBytes =
     up(m.workerHeapBase + O * m.workerHeapPerObservation + K * m.workerHeapPerKeypoint) + guidedHeapBytes
-  const solverWasmBytes = projectSolverWasmBytes({ cameras: C, observations: O }, m)
+  const solverWasmBytes = projectSolverWasmBytes({ cameras: C, observations: O, points: P }, m)
   // Descriptors are held once: every sub-run shares them (sfm.js cloneSfmInput).
   const workerBufferBytes =
     up(K * m.workerBufPerKeypoint + M * m.workerBufPerMatch + O * m.workerBufPerObservation + D) + solverWasmBytes
@@ -112,6 +122,9 @@ export function projectSparsePeakBreakdownBytes(
     // The solver's linear memory, a hard per-module ceiling (wasmSolverSafe).
     solverWasmBytes,
     wasmSolverSafe: solverWasmBytes <= WASM_SOLVER_LIMIT_BYTES,
+    // What the solver was sized for (points null: from the observations).
+    observations: O,
+    points: P,
     // Per isolate, heap + buffers: what the device has to hold for each.
     rendererBytes: rendererHeapBytes + rendererBufferBytes,
     workerBytes: workerHeapBytes + workerBufferBytes,
@@ -119,6 +132,15 @@ export function projectSparsePeakBreakdownBytes(
     // so this must never be compared to either isolate's jsHeapSizeLimit.
     totalBytes: rendererHeapBytes + rendererBufferBytes + workerHeapBytes + workerBufferBytes,
   }
+}
+
+// Points from a census: its tracks, at most half its observations (two views a point).
+// A track with two keypoints of one image becomes two points, filtering removes others;
+// on a 60-image Mill19 subset the run held 84.6 k points before filtering against
+// 86.9 k tracks (49.5 k in the final model), and 261 k observations against 351 k
+// matched keypoints.
+function censusPoints(census, observations) {
+  return Math.min(Math.ceil(observations / 2), census.tracks)
 }
 
 // wasm32 linear memory is 4 GiB; keep headroom for the allocator, the module's own

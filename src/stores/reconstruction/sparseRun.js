@@ -28,6 +28,7 @@ import {
 import { keypointSetFrom, keypointSetTransfer } from '../../core/sfm/keypointSet.js'
 import { useMatchesStore } from '../useMatchesStore.js'
 import { packMatchPairs, inNameOrder } from '../../core/sfm/matchCodec.js'
+import { createTrackCensus } from '../../core/sfm/trackCensus.js'
 import * as opfs from '../../utils/opfs.js'
 import { toMatchSpace, rootSiftToU8 } from '../../core/features/siftDescriptors.js'
 import { unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
@@ -359,12 +360,13 @@ export function createSparseRun({
       // without it (logged, recorded in the summary, flagged by the verdict) rather than
       // being refused or dying in the worker.
       let guided = settings.guidedTrackExtension ?? SFM_TUNING.guidedTrackExtension
-      const project = (withGuided) =>
+      const project = (withGuided, census = null) =>
         projectSparsePeakBreakdownBytes({
           keypointCount,
           matchCount,
           imageCount: imgs.length,
           descriptorBytesPerKeypoint: withGuided ? 128 : 0,
+          census,
         })
       const heap = globalThis.performance?.memory
       const hardwareBudget = deviceBudget({
@@ -393,14 +395,37 @@ export function createSparseRun({
           fallbackBudgetBytes: hardwareBudget,
         }),
       })
-      let plan = planSparseRun({ guided, project, decide: decideMemory })
+      const ceiling = (d) => (d.limitBytes ? ` ≤ ${formatBytes(d.limitBytes)} ceiling` : '')
+      const refuse = (peak, decisions) => {
+        reconStatus.value = 'error'
+        const parts = []
+        if (!decisions.renderer.heapSafe) parts.push('renderer heap')
+        if (!decisions.worker.heapSafe) parts.push('worker heap')
+        if (!decisions.renderer.buffersSafe || !decisions.worker.buffersSafe) parts.push('device memory')
+        if (peak.wasmSolverSafe === false) parts.push('bundle-adjustment (wasm) memory')
+        const where = parts.join(' and ') || 'memory'
+        log(
+          `Sparse reconstruction stopped before start because the projected ${where} would exceed ` +
+            'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set' +
+            (peak.wasmSolverSafe === false
+              ? " (fewer keypoints per image lowers the solver's observation count)"
+              : '') +
+            '.',
+          'error',
+          'Reconstruction',
+        )
+      }
 
+      // 1. Before anything is read: the renderer has to hold the input it builds (the
+      // keypoints and matches; guided extension's descriptors are judged in 2). Its peak
+      // does not depend on the tracks. Renderer OOM is not catchable, so this is first.
+      let pre = decideMemory(project(false))
       // A reload restores the saved sparse model, so "reload and retry" alone does
       // not create renderer headroom. If the only thing preventing a rerun is the
       // replaceable current result, unload it in memory (the saved copy stays on disk),
       // discard idle worker heaps, yield for collection, and measure again.
       // An extension builds on the loaded model, so it is never released.
-      if (!plan.decisions.renderer.safe && !base) {
+      if (!pre.renderer.safe && !base) {
         const released = releaseReplaceableModelForRerun()
         if (released.released) {
           // Idle workers' heaps only: photo ingest or a map preview running beside it
@@ -414,57 +439,20 @@ export function createSparseRun({
             'Compute',
           )
           await new Promise((resolve) => setTimeout(resolve, 50))
-          plan = planSparseRun({ guided, project, decide: decideMemory })
+          pre = decideMemory(project(false))
         }
       }
-      const { peak, decisions } = plan
-      let guidedSkippedForMemory = null
-      if (plan.guidedDropped) {
-        guided = false
-        const w = plan.withGuidedPeak
-        const reason =
-          `worker heap ${formatBytes(w.workerHeapBytes)} / buffers ` +
-          `${formatBytes(w.workerBufferBytes)} projected with it, ` +
-          `${formatBytes(peak.workerHeapBytes)} / ${formatBytes(peak.workerBufferBytes)} without`
-        guidedSkippedForMemory = { reason, withBytes: w.workerBytes, withoutBytes: peak.workerBytes }
+      if (!pre.renderer.safe) {
         log(
-          `Sparse memory preflight: guided track extension turned off for this run so it fits — ${reason}. ` +
-            'The model is complete without it; lower the keypoint cap or the preselection neighbours to keep it.',
-          'warn',
-          'Reconstruction',
-        )
-      }
-      const decisionSafe = plan.safe
-      const ceiling = (d) => (d.limitBytes ? ` ≤ ${formatBytes(d.limitBytes)} ceiling` : '')
-      log(
-        `Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, ` +
-          `${matchCount.toLocaleString()} matches${guided ? ', guided extension on' : ''}; renderer heap ` +
-          `${decisions.renderer.usedBytes != null ? `${formatBytes(decisions.renderer.usedBytes)} current + ` : ''}` +
-          `${formatBytes(peak.rendererHeapBytes)}${ceiling(decisions.renderer)}, ` +
-          `input buffers ${formatBytes(peak.rendererBufferBytes)}; ` +
-          `worker projected heap ${formatBytes(peak.workerHeapBytes)}${ceiling(decisions.worker)}, ` +
-          `buffers ${formatBytes(peak.workerBufferBytes)}` +
-          `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}` +
-          ` (of which bundle adjustment ${formatBytes(peak.solverWasmBytes)} ≤ ${formatBytes(WASM_SOLVER_LIMIT_BYTES)} wasm memory)`,
-        decisionSafe ? 'info' : 'error',
-        'Compute',
-      )
-      if (!decisionSafe) {
-        reconStatus.value = 'error'
-        const parts = []
-        if (!decisions.renderer.heapSafe) parts.push('renderer heap')
-        if (!decisions.worker.heapSafe) parts.push('worker heap')
-        if (!decisions.renderer.buffersSafe || !decisions.worker.buffersSafe) parts.push('device memory')
-        if (!peak.wasmSolverSafe) parts.push('bundle-adjustment (wasm) memory')
-        const where = parts.join(' and ') || 'memory'
-        log(
-          `Sparse reconstruction stopped before start because the projected ${where} would exceed ` +
-            'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set' +
-            (!peak.wasmSolverSafe ? " (fewer keypoints per image lowers the solver's observation count)" : '') +
-            '.',
+          `Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, ` +
+            `${matchCount.toLocaleString()} matches; renderer heap ` +
+            `${pre.renderer.usedBytes != null ? `${formatBytes(pre.renderer.usedBytes)} current + ` : ''}` +
+            `${formatBytes(pre.renderer.estimateBytes)}${ceiling(pre.renderer)}, ` +
+            `input buffers ${formatBytes(pre.renderer.bufferBytes)}`,
           'error',
-          'Reconstruction',
+          'Compute',
         )
+        refuse({}, { renderer: pre.renderer, worker: { heapSafe: true, buffersSafe: true } })
         return
       }
 
@@ -499,9 +487,59 @@ export function createSparseRun({
       // Millions of tuple arrays are catastrophic to clone. Each pair's matches are a
       // fresh packed copy (the stream hands views into its read windows), transferred.
       const packedPairMatches = new Map()
+      // The census counts what the matches let the solver hold (trackCensus.js).
+      const imageIndex = new Map(imgs.map((img, i) => [img.uuid, i]))
+      const census = createTrackCensus(imgs.map((img) => keypointSets.get(img.uuid)?.n ?? 0))
       await useMatchesStore().streamPairMatches(reconstructionPairs, (e, m) => {
-        packedPairMatches.set(e, packMatchPairs(m))
+        const packed = packMatchPairs(m)
+        packedPairMatches.set(e, packed)
+        const a = imageIndex.get(e.idA),
+          b = imageIndex.get(e.idB)
+        if (a != null && b != null) census.add(a, b, packed)
       })
+      const tracks = census.finish()
+
+      // 2. With the tracks counted: the worker, the solver's wasm memory and guided
+      // extension's descriptors. When guided extension is what pushes the run past a
+      // ceiling, the run goes ahead without it rather than being refused.
+      const plan = planSparseRun({ guided, project: (g) => project(g, tracks), decide: decideMemory })
+      const { peak, decisions } = plan
+      let guidedSkippedForMemory = null
+      if (plan.guidedDropped) {
+        guided = false
+        const w = plan.withGuidedPeak
+        const reason =
+          `worker heap ${formatBytes(w.workerHeapBytes)} / buffers ` +
+          `${formatBytes(w.workerBufferBytes)} projected with it, ` +
+          `${formatBytes(peak.workerHeapBytes)} / ${formatBytes(peak.workerBufferBytes)} without`
+        guidedSkippedForMemory = { reason, withBytes: w.workerBytes, withoutBytes: peak.workerBytes }
+        log(
+          `Sparse memory preflight: guided track extension turned off for this run so it fits — ${reason}. ` +
+            'The model is complete without it; lower the keypoint cap or the preselection neighbours to keep it.',
+          'warn',
+          'Reconstruction',
+        )
+      }
+      log(
+        `Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, ` +
+          `${matchCount.toLocaleString()} matches → ${tracks.observations.toLocaleString()} keypoints in ` +
+          `${tracks.tracks.toLocaleString()} tracks${guided ? ', guided extension on' : ''}; renderer heap ` +
+          `${decisions.renderer.usedBytes != null ? `${formatBytes(decisions.renderer.usedBytes)} current + ` : ''}` +
+          `${formatBytes(peak.rendererHeapBytes)}${ceiling(decisions.renderer)}, ` +
+          `input buffers ${formatBytes(peak.rendererBufferBytes)}; ` +
+          `worker projected heap ${formatBytes(peak.workerHeapBytes)}${ceiling(decisions.worker)}, ` +
+          `buffers ${formatBytes(peak.workerBufferBytes)}` +
+          `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}` +
+          ` (of which bundle adjustment ${formatBytes(peak.solverWasmBytes)} for ` +
+          `${peak.observations.toLocaleString()} observations, ${peak.points.toLocaleString()} points ` +
+          `≤ ${formatBytes(WASM_SOLVER_LIMIT_BYTES)} wasm memory)`,
+        plan.safe ? 'info' : 'error',
+        'Compute',
+      )
+      if (!plan.safe) {
+        refuse(peak, decisions)
+        return
+      }
 
       const imageNameByUuid = new Map(imgs.map((img) => [img.uuid, img.name]))
       const input = {

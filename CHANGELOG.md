@@ -88,6 +88,14 @@ Notable changes to websfm. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Sparse Model no longer refuses large blocks that fit in memory.** Its memory check now
+  counts the keypoints in each match and the tracks they join into before the run, instead
+  of guessing them from the number of keypoints, so it sizes the bundle adjustment from
+  what the matches hold. Mill19 building (1,940 photos, 17.5 M keypoints, Similar images):
+  the old guess put the bundle adjustment at 3.6 GB, over the 3.5 GB WebAssembly ceiling,
+  and refused; the count gives 11.0 M observations and 2.3 M points (the largest
+  adjustment held 9.7 M and 2.2 M), 2.3 GB, and the run registers 1,935 cameras in 601 s.
+  A 60-photo subset gives the same model as before.
 - **Film: clicked fiducials and reseau crosses no longer shift the frame by half a scan
   pixel.** Detect fiducials, the template retry, a click in the viewer, Detect reseau and
   imported marks now all store a fiducial at the same point of its pixel, so a scan

@@ -150,3 +150,30 @@ describe('bundle-adjustment solver memory (wasm32)', () => {
     expect(huge.wasmSolverSafe).toBe(false)
   })
 })
+
+describe('sizing the solver from a track census', () => {
+  const counts = { keypointCount: 17_473_890, matchCount: 18_294_999, imageCount: 1940 }
+  it('takes the observations and points the matches allow, not a guess from the keypoints', () => {
+    const census = { observations: 9e6, tracks: 2.5e6 }
+    const p = projectSparsePeakBreakdownBytes({ ...counts, census })
+    expect(p.observations).toBe(9e6)
+    expect(p.points).toBe(2.5e6)
+    expect(p.solverWasmBytes).toBe(projectSolverWasmBytes({ cameras: 1940, observations: 9e6, points: 2.5e6 }))
+    // The guess (0.85 × keypoints, three views a point) refused this block at 3.6 GiB.
+    const guess = projectSparsePeakBreakdownBytes(counts)
+    expect(guess.wasmSolverSafe).toBe(false)
+    expect(p.wasmSolverSafe).toBe(true)
+  })
+  it('adds guided extension’s allowance to the observations only when it runs', () => {
+    const census = { observations: 1e6, tracks: 3e5 }
+    const lean = projectSparsePeakBreakdownBytes({ ...counts, census })
+    const guided = projectSparsePeakBreakdownBytes({ ...counts, census, descriptorBytesPerKeypoint: 128 })
+    expect(lean.observations).toBe(1e6)
+    expect(guided.observations).toBe(Math.ceil(1e6 * (1 + SPARSE_MEMORY_MODEL.guidedObservationAllowance)))
+    expect(guided.points).toBe(lean.points)
+  })
+  it('never counts more points than half the observations', () => {
+    const p = projectSparsePeakBreakdownBytes({ ...counts, census: { observations: 1e6, tracks: 9e5 } })
+    expect(p.points).toBe(5e5)
+  })
+})
