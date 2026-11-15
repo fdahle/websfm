@@ -4,6 +4,7 @@ import {
   parseNvm,
   parseTransformsJson,
   parseOpenSfm,
+  parseOpenMvg,
   buildNvmParts,
   buildOpenMvg,
   parseBundler,
@@ -43,10 +44,83 @@ describe('SfM interop readers', () => {
     expect(parsed.images[0].K).toMatchObject({ cx: 399.5, cy: 299.5 })
   })
 
+  it('keeps an OpenSfM lens, and says which projections it cannot keep', () => {
+    const shot = { rotation: [0, 0, 0], translation: [0, 0, 0] }
+    const cam = { width: 800, height: 600, focal: 1 }
+    const parsed = parseOpenSfm({
+      cameras: {
+        b: { ...cam, projection_type: 'brown', k1: -0.1, k2: 0.02, k3: 0.001, p1: 1e-4, p2: -2e-4 },
+        f: { ...cam, projection_type: 'fisheye', k1: 0.05, k2: -0.01 },
+        p: { ...cam, projection_type: 'perspective', k1: 0, k2: 0 },
+        s: { ...cam, projection_type: 'spherical' },
+      },
+      shots: {
+        'b.jpg': { ...shot, camera: 'b' },
+        'f.jpg': { ...shot, camera: 'f' },
+        'p.jpg': { ...shot, camera: 'p' },
+        's.jpg': { ...shot, camera: 's' },
+      },
+    })
+    const [b, f, p, s] = parsed.images
+    expect(b.lens).toEqual({ k1: -0.1, k2: 0.02, k3: 0.001, p1: 1e-4, p2: -2e-4 })
+    expect(f.lens).toEqual({ fisheye: true, k1: 0.05, k2: -0.01, k3: 0, k4: 0 })
+    expect(p.lens).toBeUndefined()
+    expect(s.lens).toBeUndefined()
+    expect(parsed.warnings.join(' ')).toMatch(/spherical cameras have no WebSfM lens/)
+  })
+
   it('reads an NVM camera and measurement', () => {
     const parsed = parseNvm('NVM_V3\n1\na.jpg 1000 1 0 0 0 1 2 3 0\n1\n0 0 0 255 0 0 1 0 7 10 20\n0')
     expect(parsed.images[0].t).toEqual([-1, -2, -3])
     expect(parsed.points[0].views[0].name).toBe('a.jpg')
+    // Measurements are about the image centre, which the import adds once it knows it.
+    expect(parsed.viewsCentered).toBe(true)
+  })
+
+  it('round-trips an NVM measurement to the same pixel', () => {
+    // A model as sfmProject.js builds it: points2D in COLMAP's pixels (+½), K in WebSfM's;
+    // a WebSfM pixel (59.5, 49.5) about the centre of a 100 × 80 image.
+    const im = {
+      imageId: 1,
+      name: 'a.jpg',
+      q: [1, 0, 0, 0],
+      t: [0, 0, 0],
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+    }
+    const model = {
+      images: [{ ...im, K: { fx: 100, cx: 49.5, cy: 39.5 }, width: 100, height: 80, points2D: [[60, 50, 1]] }],
+      points3D: [{ point3dId: 1, xyz: [0, 0, 1], rgb: [0, 0, 0], error: 0, track: [[1, 0]] }],
+    }
+    const back = parseNvm(joinParts(buildNvmParts(model)))
+    const v = back.points[0].views[0]
+    // importers.js: a view about the centre plus the default principal point (w − 1)/2.
+    expect([v.x + (100 - 1) / 2, v.y + (80 - 1) / 2]).toEqual([59.5, 49.5])
+  })
+
+  it('writes OpenMVG observations in the pixels of its principal point', () => {
+    const im = {
+      imageId: 1,
+      cameraId: 1,
+      name: 'a.jpg',
+      q: [1, 0, 0, 0],
+      t: [0, 0, 0],
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+    }
+    const model = {
+      images: [{ ...im, K: { fx: 100, cx: 49.5, cy: 39.5 }, width: 100, height: 80, points2D: [[60, 50, 1]] }],
+      points3D: [{ point3dId: 1, xyz: [0, 0, 1], rgb: [0, 0, 0], error: 0, track: [[1, 0]] }],
+    }
+    const doc = buildOpenMvg(model)
+    expect(doc.structure.at(0).value.observations[0].value.x).toEqual([59.5, 49.5])
+    expect(parseOpenMvg(joinParts(jsonParts(doc))).points[0].views[0]).toMatchObject({ x: 59.5, y: 49.5 })
   })
 })
 
@@ -104,7 +178,7 @@ describe('NVM / OpenMVG writers — streamed', () => {
   }
   it('NVM text is unchanged and splits into parts', () => {
     expect(joinParts(buildNvmParts(model))).toBe(
-      'NVM_V3\n\n2\na.jpg 100 1 0 0 0 -1 -2 -3 0 0\nb.jpg 90 1 0 0 0 0 0 0 0 0\n\n1\n0.5 1 2 10 20 30 2 0 0 10 10 1 1 2 1\n\n0\n',
+      'NVM_V3\n\n2\na.jpg 100 1 0 0 0 -1 -2 -3 0 0\nb.jpg 90 1 0 0 0 0 0 0 0 0\n\n1\n0.5 1 2 10 20 30 2 0 0 9.5 9.5 1 1 1.5 0.5\n\n0\n',
     )
     expect([...buildNvmParts(model, { partChars: 8 })].length).toBeGreaterThan(3)
   })

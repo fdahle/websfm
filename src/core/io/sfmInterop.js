@@ -2,6 +2,7 @@
 // normalize to the same world-to-camera/OpenCV boundary consumed by the store.
 
 import { PART_CHARS, lineParts, lazyArray } from './parts.js'
+import { COLMAP_PX } from './colmapModel.js'
 
 const transpose3 = (m) => [
   [m[0][0], m[1][0], m[2][0]],
@@ -119,6 +120,8 @@ export function parseNvm(text) {
     format: 'VisualSFM NVM v3',
     images,
     points,
+    // NVM measurements are about the principal point (the image centre), as Bundler's.
+    viewsCentered: true,
     warnings: ['NVM principal points are inferred from the loaded image dimensions'],
   }
 }
@@ -164,15 +167,43 @@ export function parseOpenMvg(data) {
   return { format: 'OpenMVG sfm_data.json', images, points, warnings: [] }
 }
 
+// An OpenSfM camera's lens as WebSfM's (core/sfm/distortion.js), null for none; `type`
+// set when its projection has no WebSfM lens. OpenSfM's distortion acts on the same
+// normalised ray coordinates (x/z, y/z) as WebSfM's, its Brown terms in OpenCV's order
+// and signs, its fisheyes Kannala–Brandt in the angle.
+export function lensFromOpenSfm(c) {
+  const k = (n) => (Number.isFinite(c?.[n]) ? c[n] : 0)
+  const type = c?.projection_type ?? 'perspective'
+  const brown = (lens) => (Object.values(lens).some((v) => v) ? lens : null)
+  switch (type) {
+    case 'perspective':
+    case 'radial':
+      return { lens: brown({ k1: k('k1'), k2: k('k2'), k3: 0, p1: 0, p2: 0 }) }
+    case 'simple_radial':
+      return { lens: brown({ k1: k('k1'), k2: 0, k3: 0, p1: 0, p2: 0 }) }
+    case 'brown':
+      return { lens: brown({ k1: k('k1'), k2: k('k2'), k3: k('k3'), p1: k('p1'), p2: k('p2') }) }
+    case 'fisheye':
+      return { lens: { fisheye: true, k1: k('k1'), k2: k('k2'), k3: 0, k4: 0 } }
+    case 'fisheye_opencv':
+      return { lens: { fisheye: true, k1: k('k1'), k2: k('k2'), k3: k('k3'), k4: k('k4') } }
+    default:
+      return { lens: null, type }
+  }
+}
+
 export function parseOpenSfm(data) {
   const raw = typeof data === 'string' ? JSON.parse(data) : data
   const root = Array.isArray(raw) ? raw[0] : raw
   if (!root?.shots || !root?.cameras) throw new Error('Not OpenSfM reconstruction.json')
+  const unsupported = new Set()
   const images = Object.entries(root.shots).map(([name, shot], i) => {
     const c = root.cameras[shot.camera] ?? {},
       R = angleAxisToRotation(shot.rotation ?? [0, 0, 0]),
       scale = Math.max(c.width ?? 0, c.height ?? 0)
     const f = (c.focal_x ?? c.focal ?? 0) * scale
+    const { lens, type } = lensFromOpenSfm(c)
+    if (type) unsupported.add(type)
     return {
       externalId: name,
       imageId: name,
@@ -188,6 +219,7 @@ export function parseOpenSfm(data) {
       },
       R,
       t: shot.translation,
+      ...(lens ? { lens } : {}),
     }
   })
   const points = Object.values(root.points ?? {}).map((x) => ({
@@ -200,7 +232,12 @@ export function parseOpenSfm(data) {
     format: 'OpenSfM reconstruction.json',
     images,
     points,
-    warnings: ['OpenSfM reconstruction.json does not preserve point observations; tracks are unavailable'],
+    warnings: [
+      'OpenSfM reconstruction.json does not preserve point observations; tracks are unavailable',
+      ...(unsupported.size
+        ? [`OpenSfM ${[...unsupported].join(', ')} cameras have no WebSfM lens: imported as pinhole cameras`]
+        : []),
+    ],
   }
 }
 
@@ -310,7 +347,10 @@ export function* buildNvmParts(model, { partChars = PART_CHARS } = {}) {
         .map(([imageId, point2dIdx]) => {
           const im = model.images[imageId - 1],
             px = im?.points2D?.[point2dIdx]
-          return im && px ? `${imageId - 1} ${point2dIdx} ${px[0] - im.K.cx} ${px[1] - im.K.cy}` : null
+          // points2D are in COLMAP's pixels (+½), K in WebSfM's.
+          return im && px
+            ? `${imageId - 1} ${point2dIdx} ${px[0] - COLMAP_PX - im.K.cx} ${px[1] - COLMAP_PX - im.K.cy}`
+            : null
         })
         .filter(Boolean)
       return `${p.xyz.join(' ')} ${p.rgb.join(' ')} ${obs.length}${obs.length ? ` ${obs.join(' ')}` : ''}`
@@ -371,7 +411,11 @@ export function buildOpenMvg(model) {
           color: p.rgb,
           observations: p.track.map(([imageId, point2dIdx]) => ({
             key: imageId,
-            value: { id_feat: point2dIdx, x: model.images[imageId - 1].points2D[point2dIdx].slice(0, 2) },
+            // In WebSfM's pixels, as principal_point: points2D are COLMAP's (+½).
+            value: {
+              id_feat: point2dIdx,
+              x: model.images[imageId - 1].points2D[point2dIdx].slice(0, 2).map((v) => v - COLMAP_PX),
+            },
           })),
         },
       }

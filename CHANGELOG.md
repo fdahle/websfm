@@ -108,6 +108,27 @@ Notable changes to websfm. The format follows
   pure rotation is labelled as such again: its homography is tested at the same tolerance
   RANSAC's has used since 0.8 (a planar pair at 1 px noise read H/F 0.66 instead of
   ≥ 0.9, below the 0.8 flag), so it no longer seeds the reconstruction.
+- **COLMAP exports agree with their own cameras.** Export ▸ COLMAP (and NVM, OpenMVG)
+  now writes every keypoint of a photo in the frame of its PINHOLE camera. Before, only
+  the keypoints a 3D point observes were moved out of the lens (or the film scan's
+  pixels): the others, and the database's, sat up to the whole distortion off their
+  camera, which COLMAP's `point_triangulator` and `mapper` then used as they were. Pair
+  geometries fitted to the keypoints as detected are left out for those photos (COLMAP
+  estimates them again), a workspace with the original photos says they still carry the
+  lens (Export ▸ Undistorted images writes photos that match), and every model export
+  says when cameras were solved with a rolling shutter, which these formats cannot hold.
+- **NVM and OpenMVG files round-trip to the same pixel.** An imported NVM model put every
+  measurement half an image off (they are about the image centre, and were read as
+  pixels); NVM and OpenMVG exports wrote their measurements half a pixel off the camera
+  beside them. A model without a principal point (NVM, Bundler) now takes the image
+  centre exactly.
+- **OpenSfM import keeps the lens.** Import ▸ Other SfM now reads an OpenSfM camera's
+  distortion (perspective, Brown, fisheye) instead of importing it as a pinhole, and says
+  which projections it cannot keep (spherical, dual).
+- **Metashape export: only control is control.** A GCP turned off, or one without a
+  height, is no longer exported as an enabled marker reference (one without a height went
+  in at 0 m and pulled the block down in Metashape); GCP accuracies in a feet CRS are
+  converted to the metres Metashape reads.
 - **Sparse Model no longer refuses large blocks that fit in memory.** Its memory check now
   counts the keypoints in each match and the tracks they join into before the run, instead
   of guessing them from the number of keypoints, so it sizes the bundle adjustment from

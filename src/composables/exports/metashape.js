@@ -5,6 +5,7 @@ import { applySimilarity } from '../../core/products/georef.js'
 import { ensureProjection, transform, metresPerCrsUnit, isGeographic } from '../../core/crs.js'
 import { heightShifter } from '../../core/verticalDatum.js'
 import { stem } from '../../core/io/nameMatch.js'
+import { isGroundControl } from '../../core/io/gcp.js'
 import {
   fitMetashapeFrame,
   metashapeCameraFrames,
@@ -153,7 +154,7 @@ export function createMetashapeExport({
         const fixed = mul(G0, E0) // geocentric → local frame axes
         enuToFrame = (lon, lat) => mul(fixed, T(enuRows(lon, lat)))
       }
-      geo = { toGeodetic: (p) => toWgs(p), enuToFrame }
+      geo = { toGeodetic: (p) => toWgs(p), enuToFrame, metresPerUnit: unit }
     }
     const frames = metashapeCameraFrames(
       out.map((o) => o.cam),
@@ -173,14 +174,17 @@ export function createMetashapeExport({
       if (geo && g.role !== 'marker' && Number.isFinite(g.x) && Number.isFinite(g.y)) {
         const shiftG = await heightShifter(g.verticalDatum ?? 'unknown', 'ellipsoidal').catch(() => null)
         const [lon, lat, h] = toWgs([g.x, g.y, g.z ?? 0], shiftG)
-        const acc = [g.accuracyX, g.accuracyY].filter((v) => v > 0)
+        // Accuracies in the project CRS's units, Metashape's in metres.
+        const acc = [g.accuracyX, g.accuracyY].filter((v) => v > 0).map((v) => v * geo.metresPerUnit)
         reference = {
           x: lon,
           y: lat,
           z: h,
           sxy: acc.length ? acc.reduce((a, b) => a + b, 0) / acc.length : null,
-          sz: g.accuracyZ > 0 ? g.accuracyZ : null,
-          enabled: g.role === 'control',
+          sz: g.accuracyZ > 0 ? g.accuracyZ * geo.metresPerUnit : null,
+          // Control in Metashape only where it is in WebSfM: not a GCP turned off, nor
+          // one without a height (written at 0 here, it would pull the block down).
+          enabled: isGroundControl(g),
         }
       }
       if (!reference && !locations.length) continue

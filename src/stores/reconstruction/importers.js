@@ -139,8 +139,10 @@ export function createImporters({
         K: {
           fx: im.K?.fx,
           fy: im.K?.fy ?? im.K?.fx,
-          cx: im.K?.cx ?? (width ? width / 2 : 0),
-          cy: im.K?.cy ?? (height ? height / 2 : 0),
+          // No principal point (NVM, Bundler): the image centre, (w − 1)/2 with pixel
+          // centres at whole numbers.
+          cx: im.K?.cx ?? (width ? (width - 1) / 2 : 0),
+          cy: im.K?.cy ?? (height ? (height - 1) / 2 : 0),
         },
       }
     })

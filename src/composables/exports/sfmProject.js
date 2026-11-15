@@ -1,7 +1,8 @@
 import { toRaw } from 'vue'
 import { computeSourceOf } from '../../utils/image.js'
-import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
-import { distortionOf } from '../../core/sfm/distortion.js'
+import { makeFrameModelResolver, makeScanCentreToPinhole } from '../../core/sfm/displayFrame.js'
+import { distortionOf, hasDistortion } from '../../core/sfm/distortion.js'
+import { Keypoints, KP_STRIDE, asKeypoints } from '../../core/features/keypoints.js'
 import { buildColmapModel, serializeColmapModelBinParts, serializeColmapModelParts } from '../../core/io/colmapModel.js'
 import { downloadBlob } from '../../utils/download.js'
 import { partsToBlob } from '../../utils/blobParts.js'
@@ -15,7 +16,7 @@ import { buildTransformsJson } from '../../core/io/transforms.js'
 import { undistortImage } from '../../workers/computeClient.js'
 import { toScaledPx } from '../../core/sfm/geometry.js'
 import { pluralize } from '../../core/textFormat.js'
-import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
+import { hasMovingShutter, rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
 import { defaultExportName, exportFileName } from '../../core/exportNames.js'
 
 // The SfM project exports, split out of useExports: a COLMAP model (text or
@@ -44,6 +45,16 @@ export function createSfmProjectExports({
   async function doExportColmap({ format, includeImages = false, fileName } = {}) {
     const cloud = sparseCloud()
     if (!cloud) return
+    // These formats have no rolling-shutter model: a camera goes out on its principal
+    // row's pose, and its other rows are off by what the shutter moved them.
+    const moving = [...cloud.cameras.values()].filter(hasMovingShutter).length
+    if (moving)
+      log(
+        `${pluralize(moving, 'camera')} ${moving === 1 ? 'was' : 'were'} solved with a rolling shutter, which this format ` +
+          'cannot hold: written on the pose of the middle row. Export ▸ Undistorted images corrects the photos for it.',
+        'warn',
+        'Export',
+      )
     if (format === 'metashape') return doExportMetashape({ fileName })
     if (format === 'transforms') {
       doExportModel({ format: 'transforms', fileName })
@@ -76,6 +87,45 @@ export function createSfmProjectExports({
     // disk here, past the keypoint cache, rather than assume they are resident.
     for (const im of exportImages) im.keypoints = (await imagesStore.readKeypoints(imgByUuid.get(im.uuid))) ?? []
     const exported = new Set(exportImages.map((im) => im.uuid))
+
+    // Every keypoint in its camera's frame. The cameras are PINHOLE (the bundle
+    // adjustment's frame) and so are the observations, but keypoints are stored as
+    // detected: through a lens, or in a film scan's pixels. Moved into the pinhole frame
+    // as the solve moved them (extendModel.js does the same), or the keypoints no point
+    // observes, and the database's, would sit up to the whole distortion off their camera.
+    const frameModel = makeFrameModelResolver({
+      calibration: cloud.calibration ? toRaw(cloud.calibration) : null,
+      summary: toRaw(summary?.value ?? null),
+      sensors: sensors.value,
+    })
+    const remapped = new Set()
+    const unmapped = []
+    for (const im of exportImages) {
+      const f = frameModel(imgByUuid.get(im.uuid))
+      if (f.filmMissing) {
+        unmapped.push(im.name)
+        continue
+      }
+      if (!hasDistortion(f.dist) && !hasDistortion(f.selfCal) && !f.fiducial) continue
+      const toPinhole = makeScanCentreToPinhole({ K: im.K, dist: f.dist, selfCal: f.selfCal, fiducial: f.fiducial })
+      const kps = asKeypoints(im.keypoints)
+      const data = kps.data.slice()
+      for (let k = 0; k < kps.length; k++) {
+        const p = toPinhole(kps.x(k), kps.y(k))
+        data[KP_STRIDE * k] = p.x
+        data[KP_STRIDE * k + 1] = p.y
+      }
+      im.keypoints = new Keypoints(data, kps.rgb)
+      remapped.add(im.uuid)
+    }
+    if (unmapped.length)
+      log(
+        `${pluralize(unmapped.length, 'film scan')} without an interior orientation from the last sparse run ` +
+          `(${unmapped.slice(0, 3).join(', ')}${unmapped.length > 3 ? ' …' : ''}): their keypoints are written in scan ` +
+          'pixels, not in their cameras’ frame. Re-run Sparse Model first.',
+        'warn',
+        'Export',
+      )
 
     // Warn if we're about to fall back to raw store keypoints for a project whose BA
     // frame differs from scan/distorted space (distortion, film, or self-cal) but no
@@ -187,6 +237,9 @@ export function createSfmProjectExports({
               : (pair.F ?? null),
           E: pair.E ?? null,
           H: pair.H ?? null,
+          // Fitted to the keypoints as detected: moved into the pinhole frame they no
+          // longer hold (COLMAP estimates them again from the inlier matches).
+          ...(remapped.has(pair.idA) || remapped.has(pair.idB) ? { F: null, E: null, H: null } : {}),
         })
       })
       const database = await exportColmapDatabase({ cameras: model.cameras, images: model.images, features, pairs })
@@ -204,6 +257,14 @@ export function createSfmProjectExports({
       // the image set into memory (only a CRC pass, a slice at a time).
       if (includeImages) {
         for (const im of exportImages) if (im.file) entries.push({ name: `images/${im.name}`, data: im.file })
+        if (remapped.size)
+          log(
+            `COLMAP workspace: ${pluralize(remapped.size, 'photo')} ${remapped.size === 1 ? 'goes' : 'go'} in as taken, with a lens ` +
+              'or film frame the PINHOLE cameras have taken out. Use Export ▸ Undistorted images for photos that ' +
+              'match their cameras (COLMAP dense, OpenMVS).',
+            'warn',
+            'Export',
+          )
       }
       downloadBlob(`${name}.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
       log(`COLMAP workspace export: database + sparse model${includeImages ? ' + images' : ''}`, 'success', 'Export')

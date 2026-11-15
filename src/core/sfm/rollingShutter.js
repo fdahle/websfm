@@ -138,15 +138,17 @@ export function readoutSummary(cameras, groupOf) {
 //   cameras  Map uuid → { R, t, K, rs? }
 //   points   SparsePoints (pos, vstart, vcam, viewUuids)
 // → Map uuid → warp
+/** Whether a solved camera's rows were read out while it moved: a readout time and a velocity. */
+export function hasMovingShutter(cam) {
+  const rs = cam?.rs
+  if (!(rs?.h > 0) || !Number.isFinite(rs.tau) || !rs.v?.every(Number.isFinite)) return false
+  return Math.abs(rs.tau) * Math.hypot(...rs.v) > 0
+}
+
 export function rollingShutterWarps(cameras, points, { minShiftPx = 0.01, maxSamples = 4096 } = {}) {
   const out = new Map()
   const want = new Map()
-  for (const [uuid, cam] of cameras) {
-    const rs = cam.rs
-    if (!(rs?.h > 0) || !Number.isFinite(rs.tau) || !rs.v?.every(Number.isFinite)) continue
-    if (!(Math.abs(rs.tau) * Math.hypot(...rs.v) > 0)) continue
-    want.set(uuid, [])
-  }
+  for (const [uuid, cam] of cameras) if (hasMovingShutter(cam)) want.set(uuid, [])
   if (!want.size || !points?.pos) return out
   const { pos, vstart, vcam, viewUuids } = points
   const n = points.length
