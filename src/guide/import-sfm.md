@@ -30,7 +30,8 @@ whatever lens the project's camera groups have.
   their folder. Bundler's radial distortion (k1, k2) is left out.
 - **VisualSFM:** an `.nvm` file.
 - **OpenMVG:** `sfm_data.json`.
-- **OpenSfM:** `reconstruction.json`, cameras and points without their tracks.
+- **OpenSfM:** `reconstruction.json`, cameras with their lens (perspective, Brown or
+  fisheye) and points without their tracks.
 - **NeRF / 3DGS:** `transforms.json`, cameras only.
 
 Each becomes an imported sparse model, which the pipeline never overwrites. To bring in
