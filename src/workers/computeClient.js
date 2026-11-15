@@ -416,8 +416,9 @@ export const retrievalCodebook = (samples, dim, opts, { avoidWorker } = {}) =>
   call('retrievalCodebook', [samples, dim, opts], { transfer: [samples], avoid: avoidWorker })
 export const retrievalEncode = (desc, dim, codebook, words, { avoidWorker } = {}) =>
   call('retrievalEncode', [desc, dim, codebook, words], { transfer: [desc], avoid: avoidWorker })
-export const retrievalTopK = (vectors, len, k, from, to, { avoidWorker } = {}) =>
-  call('retrievalTopK', [vectors, len, k, from, to], { avoid: avoidWorker })
+// `extra` > 0: k plus up to `extra` spread-out picks from the `pool` best (diverseSimilar).
+export const retrievalTopK = (vectors, len, k, from, to, { avoidWorker, extra = 0, pool = 0 } = {}) =>
+  call('retrievalTopK', [vectors, len, k, from, to, extra, pool], { avoid: avoidWorker })
 
 export function matchDescriptors(descA, descB, options = {}, { onTiming, avoidWorker } = {}) {
   // No transfer: structured-clone copies the descriptors so the caller's

@@ -3,7 +3,7 @@ import { compareMatchSets } from '../../core/features/nnSelect.js'
 import { asKeypoints } from '../../core/features/keypoints.js'
 import { matchLightGlue, matchLightGlueTiled } from '../../core/features/lightglue.js'
 import { verifyMatches, verifyPointPairs } from '../../core/features/verify.js'
-import { trainCodebook, vladEncode, topKSimilar } from '../../core/features/retrieval.js'
+import { trainCodebook, vladEncode, topKSimilar, diverseSimilar } from '../../core/features/retrieval.js'
 import { beginGpuMatchRun, endGpuMatchRun, matchDescriptorsGpu } from '../gpu/matchGpu.js'
 
 // Matching + geometric-verification ops. No worker-local pixel helpers needed —
@@ -80,7 +80,11 @@ export function makeMatchOps() {
     const v = vladEncode(desc, dim, codebook, words)
     return { result: v, transfer: [v] }
   }
-  async function retrievalTopK([vectors, len, k, from, to]) {
+  async function retrievalTopK([vectors, len, k, from, to, extra = 0, pool = 0]) {
+    if (extra > 0) {
+      const r = diverseSimilar(vectors, len, k, extra, pool, from, to)
+      return { result: r, transfer: [r.index] }
+    }
     const r = topKSimilar(vectors, len, k, from, to)
     return { result: r, transfer: [r.index, r.score] }
   }

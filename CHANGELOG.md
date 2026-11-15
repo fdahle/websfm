@@ -8,8 +8,17 @@ Notable changes to websfm. The format follows
 ### Added
 - **Match large sets without positions in a fraction of the time.** Match Features ▸
   Pairing ▸ **Similar images** pairs each photo with the 20 photos that look most like it,
-  found from the features already detected, instead of matching every pair; it is where the
-  dialog starts for more than 200 photos without camera positions. Each photo's
+  and up to 20 more spread over the scene, found from the features already detected,
+  instead of matching every pair; it is where the dialog starts for more than 200 photos
+  without camera positions. The spread-out picks tie each strip to its neighbouring
+  strips: on Mill19 building (1,940 oblique photos, 17.5 M keypoints, no positions) the 20
+  most similar were all from a photo's own strip, and a strip of 77 hung off one end,
+  105–355 m from PixSfM's poses; with them 31,871 pairs (1.7 %, matched in 570 s against
+  5.4 h exhaustively) placed 1,931 cameras with the worst 5.5 m off and the median 0.26 m
+  (k 50: 62,151 pairs, 1,054 s, worst 4.0 m). On South Building and quarry they added
+  16–23 % pairs for the same cameras and accuracy; on a TMA block 165 cameras against 167
+  (earlier runs of k 20 alone gave 164 and 167). The same project gives the same pairs on
+  every run. Each photo's
   descriptors are summarised in one VLAD vector over a 64-word codebook learned from the
   project itself (Jégou et al. 2010, with the intra-normalisation of Arandjelović &
   Zisserman 2013), so it works with every detector and downloads nothing. Measured without

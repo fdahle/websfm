@@ -4,6 +4,7 @@
 
 import { sequentialPairs } from './sequentialPairs.js'
 import { MATCH_TUNING, RETRIEVAL_TUNING } from '../tuning.js'
+import { spreadExtras } from './retrieval.js'
 
 /**
  * How many image pairs a strategy produces for `n` images with keypoints.
@@ -43,11 +44,13 @@ export function estimatePairCount(
     return { count: Math.min(all, n * Math.max(1, maxNeighbors)), exact: false }
   }
   if (strategy === 'retrieval') {
-    // Each image keeps its k most similar; a pair counts once when both chose each other,
-    // so between n·k/2 and n·k. A set no larger than k + 1 is every pair.
+    // Each image keeps its k most similar and up to as many spread out (retrieval.js
+    // spreadExtras); a pair counts once when both chose each other, so at most n·(k + e).
+    // A set no larger than k + e + 1 is every pair.
     const k = Math.max(1, Math.floor(retrievalNeighbors))
-    if (n <= k + 1) return { count: all, exact: true }
-    return { count: Math.min(all, n * k), exact: false }
+    const width = k + spreadExtras(k)
+    if (n <= width + 1) return { count: all, exact: true }
+    return { count: Math.min(all, n * width), exact: false }
   }
   return { count: all, exact: true }
 }

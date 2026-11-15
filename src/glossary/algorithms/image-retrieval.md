@@ -3,7 +3,7 @@ id: image-retrieval
 title: Image Retrieval
 aliases: image retrieval, VLAD, similar images, visual similarity
 summary: Finding which photos look alike from their features alone, before matching any pair, so a large unordered set is matched only where photos probably overlap.
-refs: jegou2010, arandjelovic2013
+refs: jegou2010, arandjelovic2013, malkov2020
 ---
 **Image retrieval** ranks a set of photos by how alike they look, the way a search engine
 finds similar pictures. WebSfM uses it to choose the pairs to match (Match Features ▸
@@ -18,7 +18,11 @@ their words are summed per word. Each word's share is normalised to the same len
 facade full of identical windows does not outvote everything else in the photo. Two photos
 whose vectors point the same way probably show the same place.
 
-Each photo is then paired with its most similar photos. Retrieval only proposes pairs:
+Each photo is then paired with its most similar photos, and with a few more that spread
+over the scene: in a dense block the most similar photos are all from the photo's own
+strip, so further down the ranking a photo is skipped when it looks more like one already
+taken than like the photo itself. That leaves one or two photos of each neighbouring strip,
+which tie the strips together. Retrieval only proposes pairs:
 every pair is still matched and checked with [RANSAC](help:ransac), so a wrong guess costs
 time, never accuracy. What it can miss is a pair that overlaps but looks different, such
 as two views of a building from very different angles; more similar images per photo

@@ -28,6 +28,22 @@ export function seededRandom(seed = 1) {
 }
 
 /**
+ * Photo `i`'s codebook sample: sampleRows with a generator of its own, seeded from the
+ * run's seed and its index. Photos are loaded in parallel and finish in any order; one
+ * generator shared between them gave each photo the offset of whichever draw it came to,
+ * so the codebook, and with it the pairs, changed from run to run.
+ *
+ * @param {Float32Array} desc
+ * @param {number} dim
+ * @param {number} n
+ * @param {number} seed
+ * @param {number} i
+ */
+export function sampleImageRows(desc, dim, n, seed, i) {
+  return sampleRows(desc, dim, n, seededRandom((seed ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0))
+}
+
+/**
  * `n` rows of an N×dim descriptor buffer, spread evenly over it (every (N/n)-th row from a
  * seeded offset), copied. All rows when N ≤ n.
  *
@@ -269,6 +285,64 @@ export function topKSimilar(vectors, len, k, from = 0, to = Math.floor(vectors.l
     }
   }
   return { index, score, k }
+}
+
+function dot(vectors, len, a, b) {
+  const oa = a * len,
+    ob = b * len
+  let s = 0
+  for (let d = 0; d < len; d++) s += vectors[oa + d] * vectors[ob + d]
+  return s
+}
+
+/** How many spread-out picks Similar images adds to `k` (RETRIEVAL_TUNING.spreadOut). */
+export function spreadExtras(k) {
+  return Math.max(0, Math.round(k * RETRIEVAL_TUNING.spreadOut))
+}
+
+/**
+ * For rows [from, to): the `k` most similar rows as topKSimilar gives them, then up to
+ * `extra` more that spread over the scene. Down the ranking past the first k (at most
+ * `pool` deep), a candidate is taken unless it looks more like an extra already taken
+ * than like the row's own photo, so the extras do not crowd along one strip or orbit:
+ * after one photo of a parallel strip, its strip-mates are skipped and the next extra
+ * comes from elsewhere. (The neighbour-selection rule of graph-based search, Malkov &
+ * Yashunin 2020, applied to the extras only: the first k flank the photo on all sides and would rule out
+ * nearly everything.) A photo mid-strip spends its first two extras further along its
+ * own strip, one each way, before any reaches a parallel one. A row ends in −1 where
+ * fewer qualify.
+ *
+ * @param {Float32Array} vectors  N×len
+ * @param {number} len
+ * @param {number} k
+ * @param {number} extra
+ * @param {number} pool  candidates ranked per row (≥ k)
+ * @param {number} [from]
+ * @param {number} [to]
+ * @returns {{ index: Int32Array, k: number }}  (to−from)×(k+extra), −1 past the picks
+ */
+export function diverseSimilar(vectors, len, k, extra, pool, from = 0, to = Math.floor(vectors.length / len)) {
+  const width = k + extra
+  const depth = Math.max(k, pool)
+  const ranked = topKSimilar(vectors, len, depth, from, to)
+  const rows = Math.max(0, to - from)
+  const index = new Int32Array(rows * width).fill(-1)
+  const taken = new Int32Array(extra)
+  for (let r = 0; r < rows; r++) {
+    for (let q = 0; q < k; q++) index[r * width + q] = ranked.index[r * depth + q]
+    let have = 0
+    for (let q = k; q < depth && have < extra; q++) {
+      const c = ranked.index[r * depth + q]
+      if (c < 0) break
+      const toQuery = ranked.score[r * depth + q]
+      let covered = false
+      for (let t = 0; t < have && !covered; t++) covered = dot(vectors, len, c, taken[t]) > toQuery
+      if (covered) continue
+      taken[have] = c
+      index[r * width + k + have++] = c
+    }
+  }
+  return { index, k: width }
 }
 
 /**

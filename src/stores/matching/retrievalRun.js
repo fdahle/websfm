@@ -10,7 +10,7 @@
 // compared, nor matched, across groups); each group gets its own codebook.
 import * as opfs from '../../utils/opfs.js'
 import { POOL_SIZE, retrievalCodebook, retrievalEncode, retrievalTopK } from '../../workers/computeClient.js'
-import { retrievalPairs, sampleRows, samplesPerImage, seededRandom } from '../../core/features/retrieval.js'
+import { retrievalPairs, sampleImageRows, samplesPerImage } from '../../core/features/retrieval.js'
 import { toMatchSpace } from '../../core/features/siftDescriptors.js'
 import { sharedArray } from '../../core/bigArray.js'
 import { RETRIEVAL_TUNING } from '../../core/tuning.js'
@@ -47,10 +47,13 @@ async function pooled(items, limit, fn, isCancelled) {
  */
 export async function selectRetrievalPairs(
   images,
-  { neighbors, loadDescriptors, log, isCancelled = () => false, onProgress, avoidWorker } = {},
+  { neighbors, extra: extraPicks = 0, loadDescriptors, log, isCancelled = () => false, onProgress, avoidWorker } = {},
 ) {
   const t0 = performance.now()
   const k = Math.max(1, Math.floor(neighbors))
+  // Spread-out picks on top of the k (core/features/retrieval.js diverseSimilar).
+  const extra = Math.max(0, Math.floor(extraPicks || 0))
+  const width = k + extra
   const groups = new Map()
   for (const img of images) {
     const key = `${img.detector ?? 'sift'}/${img.descDim ?? 128}`
@@ -67,7 +70,7 @@ export async function selectRetrievalPairs(
   for (const [key, group] of groups) {
     if (isCancelled()) return { pairs: [], groups: groups.size, seconds: 0, cancelled: true }
     const n = group.length
-    if (n <= k + 1) {
+    if (n <= width + 1) {
       for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) pairs.push([group[i], group[j]])
       ticks += 2 * n
       continue
@@ -77,14 +80,13 @@ export async function selectRetrievalPairs(
     // 1. Codebook from an even sample of every photo.
     const tStart = performance.now()
     const per = samplesPerImage(n)
-    const rand = seededRandom(RETRIEVAL_TUNING.seed)
     const parts = new Array(n)
     await pooled(
       group,
       workers,
       async (img, i) => {
         const d = await loadDescriptors(img)
-        parts[i] = d ? sampleRows(d, dim, per, rand) : new Float32Array(0)
+        parts[i] = d ? sampleImageRows(d, dim, per, RETRIEVAL_TUNING.seed, i) : new Float32Array(0)
         tick()
       },
       isCancelled,
@@ -125,17 +127,21 @@ export async function selectRetrievalPairs(
     const tEncode = performance.now()
 
     // 3. Top-k over blocks of rows.
-    const index = new Int32Array(n * k)
+    const index = new Int32Array(n * width)
     const blocks = []
     const rowsPer = Math.ceil(n / workers)
     for (let from = 0; from < n; from += rowsPer) blocks.push([from, Math.min(n, from + rowsPer)])
     await Promise.all(
       blocks.map(async ([from, to]) => {
-        const r = await retrievalTopK(vectors, len, k, from, to, { avoidWorker })
-        index.set(r.index, from * k)
+        const r = await retrievalTopK(vectors, len, k, from, to, {
+          avoidWorker,
+          extra,
+          pool: RETRIEVAL_TUNING.diversePool,
+        })
+        index.set(r.index, from * width)
       }),
     )
-    for (const [i, j] of retrievalPairs(index, k)) pairs.push([group[i], group[j]])
+    for (const [i, j] of retrievalPairs(index, width)) pairs.push([group[i], group[j]])
     const tTop = performance.now()
     log?.(
       `Similar images (${key}): ${sampleLen / dim} descriptors sampled in ${((tSampled - tStart) / 1000).toFixed(1)} s, ` +

@@ -26,6 +26,7 @@ import { gapDetectSettings, planGapRedetect } from '../../core/features/gapRedet
 import { laterPassSpan, pairPassEnd, spanFraction } from '../../core/features/matchProgress.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
 import { descriptorLoader, selectRetrievalPairs } from './retrievalRun.js'
+import { spreadExtras } from '../../core/features/retrieval.js'
 import { findRigs, rigMembership, rigPairs, rigSummary } from '../../core/sensors/rig.js'
 import { isImageEnabled } from '../../core/imageEnabled.js'
 import { lightGlueModelFor } from '../../core/features/learnedDetectors.js'
@@ -365,9 +366,10 @@ export function createMatchAll({
 
     // Each image with the `k` that look most like it (stores/matching/retrievalRun.js),
     // before any pair is matched: Similar images, and Sequential ▸ Find revisits.
-    const similarPairs = (k) =>
+    const similarPairs = (k, extra = 0) =>
       selectRetrievalPairs(ready, {
         neighbors: k,
+        extra,
         loadDescriptors: descriptorLoader({
           projectId: projects.currentProjectId,
           persisting: projects.isPersisting,
@@ -405,12 +407,14 @@ export function createMatchAll({
       }
     } else if (strategy === 'retrieval') {
       const k = settings.retrievalNeighbors
-      const found = await similarPairs(k)
+      const extra = spreadExtras(k)
+      const found = await similarPairs(k, extra)
       if (found.cancelled) return { cancelled: true }
       pairs = found.pairs
       const all = (ready.length * (ready.length - 1)) / 2
       log(
-        `Similar images: each image ↔ its ${k} most similar — ${pluralize(pairs.length, 'pair')} ` +
+        `Similar images: each image ↔ its ${k} most similar${extra > 0 ? ` + up to ${extra} spread over the scene` : ''} — ` +
+          `${pluralize(pairs.length, 'pair')} ` +
           `(${((100 * pairs.length) / Math.max(1, all)).toFixed(1)} % of ${all}), ${found.seconds.toFixed(1)} s`,
         'info',
         'Matching',

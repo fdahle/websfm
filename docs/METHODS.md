@@ -150,23 +150,35 @@ LightGlue.
 **Pairing**: exhaustive by default. Alternatives: preselection by camera position
 (`preselect.js`, the k nearest by horizontal distance, in a local azimuthal-equidistant
 metre frame for a geographic project) when positions exist, or a capture-order window
-(optionally wrapping end-to-start for a closed orbit). Or by **image retrieval**
-(Similar images, `core/features/retrieval.js`): each image's descriptors (RootSIFT, or the
-learned detector's) are summarised in one **VLAD** vector (Jégou et al. 2010): a codebook
-of 64 words is learned by k-means++ and Lloyd on 20,000 descriptors sampled evenly from the
+(optionally wrapping end-to-start for a closed orbit). Or by **image retrieval** (Similar
+images, `core/features/retrieval.js`): each image's descriptors (RootSIFT, or the learned
+detector's) are summarised in one **VLAD** vector (Jégou et al. 2010): a codebook of 64
+words is learned by k-means++ and Lloyd on 20,000 descriptors sampled evenly from the
 project's own images (no trained vocabulary), every descriptor's residual to its nearest
 word is summed per word, each word's block is L2-normalised (intra-normalisation,
-Arandjelović & Zisserman 2013, against bursts of repeated texture), then signed square root
-and a global L2. Each image is paired with its k most similar by dot product (default 20;
-a pair is kept when either image chose the other). Images with different detectors get
-separate codebooks. On South Building (128 images; COLMAP's exhaustive verification as the
-truth) k = 15 chose 14 % of the pairs and kept 88 % of all verified inliers, 75 % of the
-pairs with ≥ 100; a larger codebook (256) or query expansion moved this by < 1 point and
-PCA whitening, learned on so few images, destroyed it. Like the other prefilters it turns
-the subset gate off. It is the start for more than 200 images without positions, film
-scans included: the fiducials and data strip every scan shares are a small part of its
-descriptors (masked, or outnumbered by the scene), and on a three-camera TMA block it
-found the links between cameras that a capture-order window misses.
+Arandjelović & Zisserman 2013, against bursts of repeated texture), then signed square
+root and a global L2. Each image is paired with its k most similar by dot product (default
+20; a pair is kept when either image chose the other), and with up to k more that spread
+over the scene: down its 200 best past the first k, a candidate is taken unless it is more
+similar to an extra already taken than to the image itself (the neighbour-selection rule
+of graph-based nearest-neighbour search, Malkov & Yashunin 2020, applied to the extras
+only, since the first k flank the image on every side). In a dense block the k most
+similar are all from the image's own strip; on Mill19 building (1,940 oblique photos, no
+positions) a strip of 77 then had no pair with its parallel strips, hung off one end and
+came out 105–355 m off PixSfM's poses, while with the extras it had 115 such pairs and the
+worst camera was 5.5 m off, for a third more pairs (k = 50 instead: twice the pairs, worst
+4.0 m). On 128–347-image sets the extras added 16–23 % pairs and changed neither the
+cameras nor their accuracy. The codebook's sample is drawn per image with a generator
+seeded by the image's index, so the same project gives the same pairs whatever order the
+parallel loads finish in. Images with different detectors get separate codebooks. On South
+Building (128 images; COLMAP's exhaustive verification as the truth) k = 15 chose 14 % of
+the pairs and kept 88 % of all verified inliers, 75 % of the pairs with ≥ 100; a larger
+codebook (256) or query expansion moved this by < 1 point and PCA whitening, learned on so
+few images, destroyed it. Like the other prefilters it turns the subset gate off. It is
+the start for more than 200 images without positions, film scans included: the fiducials
+and data strip every scan shares are a small part of its descriptors (masked, or
+outnumbered by the scene), and on a three-camera TMA block it found the links between
+cameras that a capture-order window misses.
 
 **Descriptor matching** (`core/features/bruteforce.js`, or the learned `lightglue.js`):
 mutual nearest neighbour (cross-check) and the **Lowe ratio test** `d1/d2 < ratio`, default
@@ -1895,6 +1907,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Kazhdan, M. & Hoppe, H. (2013). Screened Poisson surface reconstruction. ACM Transactions on Graphics 32(3), 29. https://doi.org/10.1145/2487228.2487237
 - Lindenberger, P., Sarlin, P.-E. & Pollefeys, M. (2023). LightGlue: local feature matching at light speed. IEEE/CVF International Conference on Computer Vision (ICCV). https://arxiv.org/abs/2306.13643
 - Lowe, D. G. (2004). Distinctive image features from scale-invariant keypoints. International Journal of Computer Vision 60(2), 91–110. https://doi.org/10.1023/B:VISI.0000029664.99615.94
+- Malkov, Y. A. & Yashunin, D. A. (2020). Efficient and robust approximate nearest neighbor search using hierarchical navigable small world graphs. IEEE Transactions on Pattern Analysis and Machine Intelligence 42(4), 824–836. https://doi.org/10.1109/TPAMI.2018.2889473
 - Mark, R. K. (1992). Multidirectional, oblique-weighted, shaded-relief image of the Island of Hawaii. U.S. Geological Survey Open-File Report 92-422. https://pubs.usgs.gov/of/1992/of92-422/
 - MicaSense (2017). MicaSense RedEdge and Altum image processing tutorials (imageprocessing). GitHub, MIT licence. https://github.com/micasense/imageprocessing
 - Nash, S. G. & Sofer, A. (1990). Assessing a search direction within a truncated-Newton method. Operations Research Letters 9(4), 219–221. https://doi.org/10.1016/0167-6377(90)90065-D

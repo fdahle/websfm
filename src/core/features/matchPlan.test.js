@@ -34,16 +34,18 @@ describe('estimatePairCount', () => {
     expect(estimatePairCount(100, { strategy: 'preselect', preselectMethod: 'footprint' }).count).toBeNull()
   })
 
-  it('bounds Similar images by n·k, and counts every pair when the set is no larger than k + 1', () => {
+  it('bounds Similar images by n·(k + spread-out picks), every pair when the set is no larger', () => {
+    // k 20 and up to 20 spread out (RETRIEVAL_TUNING.spreadOut 1).
     expect(estimatePairCount(100, { strategy: 'retrieval', retrievalNeighbors: 20 })).toEqual({
-      count: 2000,
+      count: 4000,
       exact: false,
     })
-    // 21 images, k 20: each image chooses all the others.
-    expect(estimatePairCount(21, { strategy: 'retrieval', retrievalNeighbors: 20 })).toEqual({
-      count: 210,
+    // 41 images, k 20 + 20: each image chooses all the others.
+    expect(estimatePairCount(41, { strategy: 'retrieval', retrievalNeighbors: 20 })).toEqual({
+      count: 820,
       exact: true,
     })
+    expect(estimatePairCount(42, { strategy: 'retrieval', retrievalNeighbors: 20 }).exact).toBe(false)
   })
 })
 

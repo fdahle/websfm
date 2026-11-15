@@ -84,10 +84,10 @@ single pass with repetitive texture that might pair the wrong images.
 ## Similar images per image
 <!-- param: retrievalNeighbors  default: 20 -->
 **Similar images**: each image is matched with this many of the images that look most
-like it; a pair is matched when either image chose the other. Raise it when photos
-overlap many others (dense aerial blocks, many views of one object) or when images stay
-unregistered; lower it to match fewer pairs. Finding the similar images takes a few
-seconds before matching starts.
+like it, and up to as many more spread over the scene, so a strip is tied to its
+neighbouring strips and not only to itself. A pair is matched when either image chose
+the other. Raise it when images stay unregistered; lower it to match fewer pairs.
+Finding the similar images takes a few seconds before matching starts.
 
 ## Preselect by
 <!-- param: preselectMethod  default: Camera position -->

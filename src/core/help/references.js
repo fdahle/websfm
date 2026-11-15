@@ -21,6 +21,13 @@ export const REFERENCES = {
     venue: 'International Journal of Computer Vision 60(2), 91–110',
     doi: '10.1023/B:VISI.0000029664.99615.94',
   },
+  malkov2020: {
+    authors: ['Yu. A. Malkov', 'D. A. Yashunin'],
+    year: 2020,
+    title: 'Efficient and robust approximate nearest neighbor search using hierarchical navigable small world graphs',
+    venue: 'IEEE Transactions on Pattern Analysis and Machine Intelligence 42(4), 824–836',
+    doi: '10.1109/TPAMI.2018.2889473',
+  },
   arandjelovic2012: {
     authors: ['Relja Arandjelović', 'Andrew Zisserman'],
     year: 2012,

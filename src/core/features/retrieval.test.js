@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   seededRandom,
+  diverseSimilar,
+  sampleImageRows,
   sampleRows,
   trainCodebook,
   vladEncode,
@@ -244,5 +246,62 @@ describe('retrieval finds photos of the same place', () => {
     for (let i = 0; i < photos.length; i++) {
       for (let q = 0; q < k; q++) expect(photos[index[i * k + q]].place).toBe(photos[i].place)
     }
+  })
+})
+
+describe('diverseSimilar', () => {
+  // Two strips as unit vectors: strip A on the equator at 0°, 5°, … 45°; strip B on a
+  // circle tilted 50° out of it. Dot products are exact cosines: every A photo looks
+  // more like A0 (≥ cos 45° = 0.71) than any B photo does (≤ cos 50° = 0.64).
+  const deg = Math.PI / 180
+  const rows = []
+  for (let a = 0; a <= 45; a += 5) rows.push([Math.cos(a * deg), Math.sin(a * deg), 0])
+  for (let b = 0; b <= 45; b += 5)
+    rows.push([Math.cos(b * deg) * Math.cos(50 * deg), Math.sin(b * deg) * Math.cos(50 * deg), Math.sin(50 * deg)])
+  const vectors = new Float32Array(rows.flat())
+  const A = (a) => a / 5,
+    B = (b) => 10 + b / 5
+
+  it('keeps the plain k and spreads the extras past the photo’s own strip', () => {
+    const plain = topKSimilar(vectors, 3, 5, 0, 1)
+    expect([...plain.index]).toEqual([A(5), A(10), A(15), A(20), A(25)])
+    const r = diverseSimilar(vectors, 3, 3, 3, 19, 0, 1)
+    expect(r.k).toBe(6)
+    // The first k as topKSimilar ranks them; then A20 (the next down the ranking), A25…A45
+    // skipped (each looks more like A20 than like A0), B0 taken (it looks more like A0 than
+    // like A20), B5…B45 skipped (more like B0); nothing left for the third extra.
+    expect([...r.index]).toEqual([A(5), A(10), A(15), A(20), B(0), -1])
+  })
+
+  it('gives every row the same picks whichever block of rows it is ranked in', () => {
+    const whole = diverseSimilar(vectors, 3, 4, 3, 19)
+    const parts = [diverseSimilar(vectors, 3, 4, 3, 19, 0, 7), diverseSimilar(vectors, 3, 4, 3, 19, 7, 20)]
+    expect([...parts[0].index, ...parts[1].index]).toEqual([...whole.index])
+    // Every row reaches the other strip. A photo mid-strip spends its first two extras
+    // further along its own strip, one each way, so three extras are needed here.
+    for (let i = 0; i < 20; i++) {
+      const picks = [...whole.index.slice(i * 7, i * 7 + 7)].filter((j) => j >= 0)
+      expect(picks.some((j) => j < 10 !== i < 10)).toBe(true)
+    }
+  })
+
+  it('stops at the pool', () => {
+    // A pool as deep as k leaves nothing for the extras.
+    expect([...diverseSimilar(vectors, 3, 3, 2, 3, 0, 1).index]).toEqual([A(5), A(10), A(15), -1, -1])
+  })
+})
+
+describe('sampleImageRows', () => {
+  const desc = (i) => Float32Array.from({ length: 50 * 4 }, (_, j) => i * 1000 + j)
+  it('gives each photo the same sample whatever order the photos are sampled in', () => {
+    const forward = [0, 1, 2, 3].map((i) => sampleImageRows(desc(i), 4, 7, 1, i))
+    const backward = [3, 2, 1, 0].map((i) => sampleImageRows(desc(i), 4, 7, 1, i)).reverse()
+    expect(backward).toEqual(forward)
+  })
+  it('varies the offset between photos and with the seed', () => {
+    const first = (seed, i) => sampleImageRows(desc(0), 4, 7, seed, i)[0]
+    const offsets = new Set([0, 1, 2, 3, 4, 5].map((i) => first(1, i)))
+    expect(offsets.size).toBeGreaterThan(1)
+    expect([0, 1, 2, 3].map((i) => first(2, i))).not.toEqual([0, 1, 2, 3].map((i) => first(1, i)))
   })
 })

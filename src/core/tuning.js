@@ -414,6 +414,15 @@ export const RETRIEVAL_TUNING = {
   // cameras at 8 % of the pairs in half the match time, against 346/347 exhaustively;
   // South Building 128: the same cameras and accuracy either way, so exhaustive stays below.
   autoAboveImages: 200,
+  // Similar images: besides its k most similar, each image takes up to k × spreadOut more
+  // that spread over the scene (retrieval.js diverseSimilar), from its `diversePool`
+  // best. Without them a 1,940-image oblique block (Mill19 building) matched every photo
+  // only with its own strip, and a strip of 77 hung off one end, 105–355 m out; with them
+  // it is tied to its neighbours (worst camera 5.5 m against PixSfM) for a third more
+  // pairs. 128–347-image sets: the same cameras and accuracy, +16–23 % pairs. Few
+  // candidates qualify: spreadOut 0.5 and 1 gave nearly the same pairs.
+  spreadOut: 1,
+  diversePool: 200,
 }
 
 // Dense MVS knobs read in core/dense/mvs.js but NOT exposed in DepthMapsModal /
