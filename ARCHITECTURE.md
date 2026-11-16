@@ -29,10 +29,9 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 - **`src/stores/`**: Pinia stores. They own the reactive state and its persistence,
   and they turn reactive data into plain arrays before posting it to a worker.
 - **`src/workers/`**: `computeClient.js` is a typed async client over a worker pool.
-  The op handlers live in `workers/ops/<domain>.js`, one module per domain (detect,
-  match, sfm, dense, products, mesh, texture, cloud, lod, laz, tiles3d, export, io,
-  tiff, undistort, segment, reflectance, referenceGcps, webTiles). WebGPU kernels are
-  in `workers/gpu/`. A call carries no run identity: a run's Cancel resets the workers
+  The op handlers live in `workers/ops/<domain>.js`, one module per domain (`detect.js`,
+  `match.js`, `sfm.js`, `dem.js` …; the folder is the list). WebGPU kernels are in
+  `workers/gpu/`. A call carries no run identity: a run's Cancel resets the workers
   holding a job that is not background work (`computeClient.js` `cancelRun`).
 - **`src/core/`**: pure computation with no Vue, Pinia, OPFS or DOM. It takes plain
   data in and returns plain data, and reports through injected `onLog`/`onProgress`
@@ -120,7 +119,7 @@ to the algorithm; the other steps differ only in file names.
 | add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
 | add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |
 | add per-project state | a store in `stores/` | register it with `registerProjectStore` (`stores/projectStores.js`) so it saves and reopens with the project |
-| change a WebGPU kernel | `workers/gpu/` | PatchMatch exists twice (WGSL, Rust `mvs.rs`) and changes in both; `tests/bench/patchmatchCases.js` holds both to the same accuracy (`npm test` for Rust, the nightly browser suite and `scripts/bench/gpu-depth-check.mjs` for WGSL) ([`workers/gpu/README.md`](src/workers/gpu/README.md)) |
+| change a WebGPU kernel | `workers/gpu/`.| PatchMatch exists twice (WGSL, Rust `mvs.rs`) and changes in both; `tests/bench/patchmatchCases.js` holds both to the same accuracy (`npm test` for Rust, the nightly browser suite and `scripts/bench/gpu-depth-check.mjs` for WGSL) ([`workers/gpu/README.md`](src/workers/gpu/README.md)) |
 | add or change a processing dialog | its `SettingsStep`s in `components/modals/` | the effect lines in `core/stepEffects/<dialog>.js` and their test ([CONTRIBUTING](CONTRIBUTING.md#dialogs-of-a-processing-step)) |
 | mark a feature experimental | an entry in `core/help/experimental.js` | an `ExperimentalBadge` where the feature shows; remove both once it is checked on real data |
 | explain a concept | a new entry in `src/glossary/<category>/` | aliases auto-link it in all help text |

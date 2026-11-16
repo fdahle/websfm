@@ -62,12 +62,12 @@ Optionally cuts triangles farther than this many point spacings from any point. 
 only for smooth extrapolated sheets that Gentle keeps.
 
 ## Fill small holes
-<!-- param: fillHoles default: true -->
+<!-- param: fillHoles default: On -->
 Closes small holes that trimming opened inside solid surface. The open edges of a scan
 are never closed.
 
 ## Remove floating pieces
-<!-- param: removeFloaters default: true -->
+<!-- param: removeFloaters default: On -->
 Drops disconnected pieces supported by few points: fusion noise and clutter. If a real
 separate object disappears, lower **Floating piece size** or turn this off; clutter
 that stays is well supported, so remove it from the cloud.

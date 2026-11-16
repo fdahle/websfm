@@ -24,12 +24,12 @@ of photo is a seam. Triangles that face away from every photo are handled by **F
 photo sees**.
 
 ## Use masks
-<!-- param: useMasks default: true -->
+<!-- param: useMasks default: On -->
 Leaves out the pixels [image masks](guide:masks) exclude, so people, vehicles or sky
 never end up in the texture.
 
 ## Ignore what only some photos see
-<!-- param: photoConsistency default: false -->
+<!-- param: photoConsistency default: Off -->
 Compares the colours all photos show for each triangle and drops a photo that disagrees
 with the rest: removes people and cars that moved. Needs three photos of a triangle and
 one extra low-resolution read. Off by default because on a still scene it also drops
@@ -64,7 +64,7 @@ The most atlas pages the texture may use; the resolution drops to fit. Raise it 
 large model at full detail. Each 4096 page needs about 64 MB of graphics memory.
 
 ## Level colours
-<!-- param: levelColours default: true -->
+<!-- param: levelColours default: On -->
 Evens out brightness and white balance between photos, starting from each photo's EXIF
 exposure, then smooths each chart so the two sides of every seam meet
 ([seam levelling](help:seam-levelling)). Turn it off only to see the photos as taken.

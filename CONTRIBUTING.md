@@ -114,7 +114,10 @@ adds, removes or renames a setting, operation or user-visible feature:
 
 1. Update the matching guide section and its `default:` marker, and any glossary
    entry whose text describes the old behaviour. (The unit tests check that every
-   help link resolves; nothing checks the `default:` values, so look at them.)
+   help link resolves, and `guideDefaults.test.js` that a `default:` marker names the
+   value its `FieldHelp` field starts from: the number, On/Off, or the option's id or
+   label. A default that depends on the project ("Auto: … when …") is still yours to
+   check.)
 2. A setting that has a guide section gets its label wrapped as
    `<FieldHelp op="…" param="…" :value="settings.x" :default-value="X_DEFAULTS.x">Label</FieldHelp>`.
    Pass the `*_DEFAULTS` constant, and leave both values out for selects.

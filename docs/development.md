@@ -45,6 +45,14 @@ cargo test --manifest-path crates/Cargo.toml --workspace --release
 npm run test:mutation   # how many deliberate bugs the tests catch (Stryker, by hand)
 ```
 
+`npm test` also keeps the documentation in step with the code: every file a doc links
+or names in backticks exists (`src/core/help/docLinks.test.js`), every guide `default:`
+marker names the app's default (`guideDefaults.test.js`), `docs/features.md` matches the
+ribbon (`features.test.js`), and every help link, reference and license resolves. When
+one of them fails after a rename, fix the doc, not the test. Prefer writing "the folder
+is the list" to listing a folder's modules by hand: a list in prose is the part no test
+can keep current.
+
 ### Writing tests that catch bugs
 
 A test written by running the code and pasting its output only proves the code still

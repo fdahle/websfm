@@ -16,7 +16,7 @@ it to 4, 2 and 1. If the cloud wouldn't fit the memory budget,
 fusion raises the step itself (up to 4 px) and says so.
 
 ## Auto thresholds
-<!-- param: auto default: Enabled -->
+<!-- param: auto default: On -->
 Picks the view count from the number of depth maps and keeps a loose cost gate, since
 the depth maps are already checked. Leave it on unless you are diagnosing noise against
 completeness. A "weak cost distribution" warning points at calibration or depth-map
