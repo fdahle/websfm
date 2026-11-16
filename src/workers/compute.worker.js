@@ -24,6 +24,7 @@ import { makeTextureOps } from './ops/texture.js'
 import { makeCloudOps } from './ops/cloud.js'
 import { makeTiffOps } from './ops/tiff.js'
 import { makeSegmentOps } from './ops/segment.js'
+import { makeOcrOps } from './ops/ocr.js'
 import { makeIoOps } from './ops/io.js'
 import { makeReferenceGcpOps } from './ops/referenceGcps.js'
 import { makeUndistortOps } from './ops/undistort.js'
@@ -103,6 +104,7 @@ const ops = {
   ...makeCloudOps(),
   ...makeTiffOps(),
   ...makeSegmentOps({ rasterize }),
+  ...makeOcrOps({ rasterize }),
   ...makeIoOps({ lazCodec }),
   ...makeReferenceGcpOps({ rasterize }),
   ...makeExportOps({ lazCodec }),

@@ -2,38 +2,41 @@
 // Pure: lines in, polygons in native pixels out; the canvas drawing is
 // utils/maskCanvas.js.
 //
-// Two rules beyond "mask every line":
-// - A line only counts when it reads as text (its recognition score): the detector
-//   also boxes crevasses, roads and field edges, which read as one or two unsure
-//   characters.
-// - Text a camera prints at the same place on every frame (the data strip, the frame
-//   counter) is masked on every frame of that camera, including frames where it was
-//   not found (cloud, glare, a smudged print): boxes found on enough frames, in
+// Which lines are masked:
+// - Sure text, masked where it was found: read with at least SURE_TEXT_SCORE and at
+//   least SURE_TEXT_CHARS letters or digits. The detector also boxes buildings, field
+//   edges and crevasses; they read as nonsense with less confidence, or as one or two
+//   characters (a T-shaped roof as "T" at 0.95).
+// - Recurring text: a line read with at least MIN_TEXT_SCORE that a camera prints at the
+//   same place on enough of its frames (the data strip, the frame counter, the dials of
+//   a data card) is masked on every frame of that camera, including frames where it
+//   was not found (cloud, glare, a smudged print): boxes found on enough frames, in
 //   coordinates the frames share, are drawn on all of them (as hist_sfm's
-//   text_regions does).
+//   text_regions does). The scene moves between frames, so what is not text does not
+//   recur.
 
 import { growPolygon, polyBounds } from './quad.js'
 
-// A line reading with less confidence than this is no text (terrain, film grain).
+// A line read with less confidence than this is no text (terrain, film grain).
 export const MIN_TEXT_SCORE = 0.5
-// A box read as only one or two characters needs this much confidence.
-export const MIN_SHORT_TEXT_SCORE = 0.8
+export const SURE_TEXT_SCORE = 0.9
+export const SURE_TEXT_CHARS = 3
 
-/** Whether a found line is text to mask (it was read, and reads as text). */
-export function isTextLine(line, minScore = MIN_TEXT_SCORE) {
-  if (line.textScore == null) return line.score != null
-  const chars = [...(line.text ?? '')].filter((c) => /[\p{L}\p{N}]/u.test(c)).length
-  if (chars === 0) return false
-  return line.textScore >= (chars <= 2 ? Math.max(minScore, MIN_SHORT_TEXT_SCORE) : minScore)
+const alnumCount = (text) => [...(text ?? '')].filter((c) => /[\p{L}\p{N}]/u.test(c)).length
+
+/** Whether a line may be text: read, with at least MIN_TEXT_SCORE and a letter or digit. */
+export function isTextCandidate(line) {
+  return line.textScore >= MIN_TEXT_SCORE && alnumCount(line.text) > 0
 }
 
-/**
- * A line's box in native pixels, grown by `padPx` on every side. `scale` is the
- * detection raster's size over the native one.
- */
-export function linePolygon(line, scale, padPx) {
-  const native = line.quad.map(([x, y]) => [x / scale, y / scale])
-  return growPolygon(native, padPx)
+/** Whether a line is text for sure, masked on its own frame alone. */
+export function isSureText(line) {
+  return line.textScore >= SURE_TEXT_SCORE && alnumCount(line.text) >= SURE_TEXT_CHARS
+}
+
+/** A line's box (native pixels) grown by `padPx` on every side. */
+export function linePolygon(line, padPx) {
+  return growPolygon(line.quad, padPx)
 }
 
 // Intersection over the smaller box: a short read inside a long one still matches.
@@ -51,6 +54,17 @@ function quantile(values, q) {
   const lo = Math.floor(pos),
     hi = Math.ceil(pos)
   return s[lo] + (s[hi] - s[lo]) * (pos - lo)
+}
+
+// Text on fewer frames than this is not taken as recurring: with two, two buildings
+// boxed at the same place on two frames would be.
+export const MIN_RECURRING_FRAMES = 3
+
+// Boxes of one cluster are the same print: within a factor of 4 in area.
+function similarSize(a, b) {
+  const area = (r) => Math.max(1e-12, (r[2] - r[0]) * (r[3] - r[1]))
+  const k = area(a) / area(b)
+  return k <= 4 && k >= 0.25
 }
 
 // The box most of a cluster's members agree on: the outer quartiles of their edges,
@@ -80,19 +94,20 @@ function typicalBox(members) {
  * Boxes where text recurs on the frames of one camera. `frames` is
  * `[{ id, boxes: [[x0, y0, x1, y1]] }]` in coordinates every frame shares (film mm
  * through the fiducials, or the fraction of the photo). A box seen on at least
- * max(2, ⌈minShare · frames⌉) frames is returned, in the same coordinates.
+ * max(MIN_RECURRING_FRAMES, ⌈minShare · frames⌉) frames is returned, in the same
+ * coordinates.
  */
 export function recurringBoxes(frames, minShare = 0.2) {
   const clusters = []
   for (const { id, boxes } of frames)
     for (const box of boxes) {
-      const hit = clusters.find((c) => overlapSmaller(c.box, box) >= 0.5)
+      const hit = clusters.find((c) => overlapSmaller(c.box, box) >= 0.5 && similarSize(c.box, box))
       if (hit) {
         hit.members.push({ id, box })
         hit.box = typicalBox(hit.members)
       } else clusters.push({ box, members: [{ id, box }] })
     }
-  const needed = Math.max(2, Math.ceil(minShare * frames.length))
+  const needed = Math.max(MIN_RECURRING_FRAMES, Math.ceil(minShare * frames.length))
   return clusters.filter((c) => new Set(c.members.map((m) => m.id)).size >= needed).map((c) => typicalBox(c.members))
 }
 

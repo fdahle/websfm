@@ -64,9 +64,10 @@ export function cropQuad(gray, w, h, quad, maxWidth = OCR_TUNING.recMaxWidth) {
     vy = (p3[1] - p0[1]) / outH
   for (let j = 0; j < outH; j++)
     for (let i = 0; i < outW; i++) {
-      // Sample at the output pixel's centre; raster pixel centres are at integers.
-      const sx = p0[0] + (i + 0.5) * ux + (j + 0.5) * vx - 0.5
-      const sy = p0[1] + (i + 0.5) * uy + (j + 0.5) * vy - 0.5
+      // Sample at the output pixel's centre. Quads are in pixel-index coordinates
+      // (a raster pixel's centre at integers), as the detector gives them.
+      const sx = p0[0] + (i + 0.5) * ux + (j + 0.5) * vx
+      const sy = p0[1] + (i + 0.5) * uy + (j + 0.5) * vy
       data[j * outW + i] = bilinear(gray, w, h, sx, sy)
     }
   return { data, w: outW, h: outH }

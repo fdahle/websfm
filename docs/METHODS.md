@@ -821,6 +821,39 @@ marks, or estimates a robust centred layout from the batch with a declared scan 
 scale; both validate per-image fits and need a calibrated focal length. Uncalibrated
 detections do not affect reconstruction.
 
+### 5.3 Text on the photos
+
+**Auto Mask ▸ Text** (`core/ocr/`, `composables/useTextMask.js`) masks the text printed on
+or beside the photograph (frame numbers, the data strip, data cards, annotations), whose
+identical copies on every frame of a camera would otherwise match between frames. The
+photo is read at most 2,560 px on its long side (about 1/4 of a 10k film scan, where the
+data line is 20–30 px high) with PaddleOCR's PP-OCRv5 mobile models on ONNX Runtime Web,
+one photo per worker:
+
+- **Detection** (DB, Liao et al. 2020): the network gives each pixel a text probability.
+  It reads 960-px tiles overlapping by 128 px whose probability maps are stitched before
+  any box is found, so a line across a seam stays one box (960-px tiles: 8.5 s and 350 MB
+  for a 10k scan on one thread; 1,280: 15.5 s and 603 MB). Regions above 0.3 become their
+  minimum-area rectangles, kept at a mean probability ≥ 0.6 and grown by DB's unclip
+  (area · 1.5 / perimeter), PaddleOCR's post-processing exactly.
+- **Recognition** (CTC, Graves et al. 2006): each box is cut out upright 48 px high and
+  read in both ways it can lie (a wide box as it is and turned half round, a tall one a
+  quarter turn either way), keeping the reading with the higher mean character
+  probability; data strips run along a side, and frames are scanned upside down.
+- **What is masked**: a line read at ≥ 0.9 with at least three letters or digits, where it
+  was found. Buildings, field edges and crevasses are detected too; on a Casa Grande frame
+  with a town (300 boxes) every one of them read below 0.9 or as one or two characters
+  ("T" at 0.95 for a roof), while the printed "ARIZ CSR-D", "1:25,000" and "9-6-78" read at
+  0.98–1.00. With **Recurring text** on, lines read at ≥ 0.5 are clustered per camera in
+  shared coordinates (film mm through the fiducial fit when every frame has one, else
+  fractions of the photo; overlap ≥ 0.5 of the smaller box, areas within 4×), and a cluster
+  on at least max(3, 20 %) of the frames is masked on all of them as the boxes' outer
+  quartiles (as hist_sfm's `text_regions`), so dials and a frame counter are masked where
+  glare hid them. The scene moves between frames, so what is not text does not recur.
+
+The lines read (text, score, box) are kept on the image record (`textLines`), so a second
+run with other settings only redraws the masks.
+
 ---
 
 ## 6. Ground control points & georeferencing
@@ -1896,6 +1929,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - DeTone, D., Malisiewicz, T. & Rabinovich, A. (2018). SuperPoint: self-supervised interest point detection and description. CVPR Workshops. https://arxiv.org/abs/1712.07629
 - Fischler, M. A. & Bolles, R. C. (1981). Random sample consensus: a paradigm for model fitting with applications to image analysis and automated cartography. Communications of the ACM 24(6), 381–395. https://doi.org/10.1145/358669.358692
 - Galliani, S., Lasinger, K. & Schindler, K. (2015). Massively parallel multiview stereopsis by surface normal diffusion. IEEE International Conference on Computer Vision (ICCV). https://doi.org/10.1109/ICCV.2015.106
+- Graves, A., Fernández, S., Gomez, F. & Schmidhuber, J. (2006). Connectionist temporal classification: labelling unsegmented sequence data with recurrent neural networks. International Conference on Machine Learning (ICML), 369–376. https://doi.org/10.1145/1143844.1143891
 - Garland, M. & Heckbert, P. S. (1997). Surface simplification using quadric error metrics. SIGGRAPH 97, 209–216. https://doi.org/10.1145/258734.258849
 - Garrido-Jurado, S., Muñoz-Salinas, R., Madrid-Cuevas, F. J. & Marín-Jiménez, M. J. (2014). Automatic generation and detection of highly reliable fiducial markers under occlusion. Pattern Recognition 47(6), 2280–2292. https://doi.org/10.1016/j.patcog.2014.01.005
 - Hartley, R. & Zisserman, A. (2004). Multiple View Geometry in Computer Vision (2nd edition). Cambridge University Press. https://doi.org/10.1017/CBO9780511811685
@@ -1905,6 +1939,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Jégou, H., Douze, M., Schmid, C. & Pérez, P. (2010). Aggregating local descriptors into a compact image representation. IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 3304–3311. https://doi.org/10.1109/CVPR.2010.5540039
 - Kannala, J. & Brandt, S. S. (2006). A generic camera model and calibration method for conventional, wide-angle, and fish-eye lenses. IEEE Transactions on Pattern Analysis and Machine Intelligence 28(8), 1335–1340. https://doi.org/10.1109/TPAMI.2006.153
 - Kazhdan, M. & Hoppe, H. (2013). Screened Poisson surface reconstruction. ACM Transactions on Graphics 32(3), 29. https://doi.org/10.1145/2487228.2487237
+- Liao, M., Wan, Z., Yao, C., Chen, K. & Bai, X. (2020). Real-time scene text detection with differentiable binarization. AAAI Conference on Artificial Intelligence 34(07), 11474–11481. https://doi.org/10.1609/aaai.v34i07.6812
 - Lindenberger, P., Sarlin, P.-E. & Pollefeys, M. (2023). LightGlue: local feature matching at light speed. IEEE/CVF International Conference on Computer Vision (ICCV). https://arxiv.org/abs/2306.13643
 - Lowe, D. G. (2004). Distinctive image features from scale-invariant keypoints. International Journal of Computer Vision 60(2), 91–110. https://doi.org/10.1023/B:VISI.0000029664.99615.94
 - Malkov, Y. A. & Yashunin, D. A. (2020). Efficient and robust approximate nearest neighbor search using hierarchical navigable small world graphs. IEEE Transactions on Pattern Analysis and Machine Intelligence 42(4), 824–836. https://doi.org/10.1109/TPAMI.2018.2889473

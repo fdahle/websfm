@@ -1,30 +1,37 @@
 import { describe, it, expect } from 'vitest'
-import { isTextLine, linePolygon, recurringBoxes, boxPolygon, coveredShare, mappedBox } from './textMask.js'
+import {
+  isSureText,
+  isTextCandidate,
+  linePolygon,
+  recurringBoxes,
+  boxPolygon,
+  coveredShare,
+  mappedBox,
+} from './textMask.js'
 import { polyBounds } from './quad.js'
 
-describe('isTextLine', () => {
-  it('keeps a line read surely, drops one read unsurely', () => {
-    expect(isTextLine({ text: 'F31 USN GS', textScore: 0.95 })).toBe(true)
-    expect(isTextLine({ text: 'Fa', textScore: 0.38 })).toBe(false)
+describe('isSureText and isTextCandidate', () => {
+  it('takes a line read surely with three letters or digits as sure text', () => {
+    expect(isSureText({ text: 'ARIZ CSR-D', textScore: 1 })).toBe(true)
+    expect(isSureText({ text: '1:25,000', textScore: 0.98 })).toBe(true)
+    expect(isSureText({ text: 'Fa', textScore: 0.38 })).toBe(false)
   })
 
-  it('asks more of a read of one or two characters (terrain reads as single letters)', () => {
-    expect(isTextLine({ text: 'o', textScore: 0.6 })).toBe(false)
-    expect(isTextLine({ text: '142', textScore: 0.6 })).toBe(true)
-    expect(isTextLine({ text: '5', textScore: 0.88 })).toBe(true)
+  it('never takes one or two characters as sure, however confident (a roof read as "T")', () => {
+    expect(isSureText({ text: 'T', textScore: 0.95 })).toBe(false)
+    expect(isSureText({ text: '24', textScore: 1 })).toBe(false)
+    expect(isTextCandidate({ text: '24', textScore: 1 })).toBe(true)
   })
 
-  it('drops a read with no letter or digit', () => {
-    expect(isTextLine({ text: '.,', textScore: 0.99 })).toBe(false)
-  })
-
-  it('keeps every found line when nothing was read', () => {
-    expect(isTextLine({ quad: [], score: 0.7 })).toBe(true)
+  it('takes nothing read unsurely or without a letter or digit', () => {
+    expect(isTextCandidate({ text: 'Fa', textScore: 0.38 })).toBe(false)
+    expect(isTextCandidate({ text: '.,', textScore: 0.99 })).toBe(false)
+    expect(isTextCandidate({ quad: [], score: 0.7 })).toBe(false)
   })
 })
 
 describe('linePolygon', () => {
-  it('scales a box to native pixels and pads it', () => {
+  it('pads a box on every side', () => {
     const line = {
       quad: [
         [10, 10],
@@ -33,7 +40,7 @@ describe('linePolygon', () => {
         [10, 12],
       ],
     }
-    expect(polyBounds(linePolygon(line, 0.25, 5)).map((v) => Math.round(v * 1e9) / 1e9)).toEqual([35, 35, 85, 53])
+    expect(polyBounds(linePolygon(line, 5)).map((v) => Math.round(v * 1e9) / 1e9)).toEqual([5, 5, 25, 17])
   })
 })
 
@@ -58,8 +65,25 @@ describe('recurringBoxes', () => {
     expect(y1).toBeCloseTo(0.4, 9)
   })
 
-  it('needs at least two frames, however few there are', () => {
-    expect(recurringBoxes([{ id: 'a', boxes: [strip(0)] }], 0.2)).toEqual([])
+  it('needs at least three frames, however few there are', () => {
+    expect(recurringBoxes(frames.slice(0, 1), 0.2)).toEqual([])
+    expect(
+      recurringBoxes(
+        [
+          { id: 'a', boxes: [strip(0)] },
+          { id: 'b', boxes: [strip(0)] },
+        ],
+        0.2,
+      ),
+    ).toEqual([])
+  })
+
+  it('does not cluster a small box with a much larger one at the same place', () => {
+    const fr = ['a', 'b', 'c'].map((id, i) => ({
+      id,
+      boxes: [i === 0 ? [0.1, 0.1, 0.5, 0.5] : [0.2, 0.2, 0.22, 0.22]],
+    }))
+    expect(recurringBoxes(fr, 0.2)).toEqual([])
   })
 
   it('keeps one misplaced frame from growing the box over the photo', () => {

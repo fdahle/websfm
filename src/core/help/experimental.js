@@ -21,6 +21,10 @@ export const EXPERIMENTAL = {
     feature: 'Reflectance map',
     unchecked: 'reflectance against a held-out calibration panel on a real flight',
   },
+  textMask: {
+    feature: 'Auto mask ▸ Text',
+    unchecked: 'whether masking the text improves the tie points and cameras of a real film block',
+  },
   targetTags: {
     feature: 'AprilTag and ArUco detection',
     unchecked: 'detection on real photos of printed tags',

@@ -903,12 +903,16 @@ export const FIDUCIAL_SPOT_DEFAULTS = {
   maskDarkPixels: false,
 }
 
-// Auto Mask's border rule (AutoMaskModal.vue; src/guide/masks.md border / linked /
-// existing): the outer pixels excluded on each side of an image.
+// Auto Mask (AutoMaskModal.vue; src/guide/masks.md border / linked / existing /
+// textPad / textRecurring): masks from a rule, the outer pixels of each side or the
+// text on the photos.
 export const AUTO_MASK_DEFAULTS = {
+  rule: 'border', // 'border' | 'text'
   border: 40, // px excluded on each side
   linked: true, // editing one side sets all four
   existing: 'merge', // 'merge' (union with the image's mask) | 'replace'
+  textPad: 20, // px added around each text box
+  textRecurring: true, // mask text a camera prints at the same place on every photo
 }
 
 // Masks ▸ Import folder (MaskManagerModal.vue; src/guide/masks.md importExisting):

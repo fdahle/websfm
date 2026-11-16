@@ -6,6 +6,21 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Mask the text on film scans.** Tools ▸ Images ▾ ▸ Auto mask ▸ **Text** finds and reads
+  the frame numbers, data strips, data cards and annotations on the photos and masks them,
+  so the same print on every frame no longer matches between frames; text a camera prints
+  at the same place is masked on all of its photos, even where glare hid it. It runs
+  PaddleOCR's PP-OCRv5 mobile detector and English recogniser in the browser (13 MB,
+  downloaded once with your permission), one photo per worker, and keeps what it read on
+  each photo, so a second run with other settings only redraws the masks. A line is
+  masked when it reads with at least 0.9 confidence and three letters or digits, or, with
+  Recurring text, when a reading of at least 0.5 sits at the same place on at least three
+  frames (and 20 %) of a camera, placed through the fiducials where every frame has them.
+  On a Casa Grande scan with a town the detector boxed 300 regions, the buildings among
+  them reading below 0.9 or as one or two characters, while "ARIZ CSR-D", "1:25,000" and
+  "9-6-78" printed on the photograph read at 0.98–1.00; on TMA scans the side data line
+  ("F31 USN GS T 12A … 27 68"), the frame number and the data card read at 0.93–1.00. A
+  10k-px scan is read at 1/4 in 960-px tiles: about 8.5 s on one thread and 350 MB.
 - **Match large sets without positions in a fraction of the time.** Match Features ▸
   Pairing ▸ **Similar images** pairs each photo with the 20 photos that look most like it,
   and up to 20 more spread over the scene, found from the features already detected,

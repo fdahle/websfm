@@ -307,6 +307,22 @@ export const REFERENCES = {
     doi: '10.1007/978-3-319-10602-1_54',
   },
 
+  // ── Text on the photos ──
+  liao2020: {
+    authors: ['Minghui Liao', 'Zhaoyi Wan', 'Cong Yao', 'Kai Chen', 'Xiang Bai'],
+    year: 2020,
+    title: 'Real-time scene text detection with differentiable binarization',
+    venue: 'AAAI Conference on Artificial Intelligence 34(07), 11474–11481',
+    doi: '10.1609/aaai.v34i07.6812',
+  },
+  graves2006: {
+    authors: ['Alex Graves', 'Santiago Fernández', 'Faustino Gomez', 'Jürgen Schmidhuber'],
+    year: 2006,
+    title: 'Connectionist temporal classification: labelling unsegmented sequence data with recurrent neural networks',
+    venue: 'International Conference on Machine Learning (ICML), 369–376',
+    doi: '10.1145/1143844.1143891',
+  },
+
   // ── Orthophoto, rasters, point-cloud tools ──
   burt1983: {
     authors: ['Peter J. Burt', 'Edward H. Adelson'],

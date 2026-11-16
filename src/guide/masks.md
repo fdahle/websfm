@@ -29,8 +29,31 @@ bottom band over a data strip.
 
 ## If a mask exists
 <!-- param: existing  default: Merge -->
-**Merge** adds the border to an existing mask; **Replace** keeps only the border. With
-all margins at 0, Replace removes the masks.
+**Merge** adds the border or the text to an existing mask; **Replace** keeps only the
+new one. With all margins at 0, or on a photo without text, Replace removes the mask.
+
+## Mask text
+**Auto mask ▸ Text** finds and reads the text on each photo (frame numbers, the data
+strip, a data card, annotations written on the print) and masks it, so tie points are
+not matched between copies of the same print. Text is read with PaddleOCR in the browser
+(a one-time download of about 13 MB, with your permission); what it reads is kept, so a
+second run with other settings only redraws the masks. A line counts as text when it
+reads clearly with at least three letters or digits: buildings and field edges are found
+too, but read as nonsense, and stay unmasked.
+
+## Padding
+<!-- param: textPad  default: 20 -->
+Pixels added around each text box. Raise it when a mask leaves the edges of the
+letters, or for bold or blurred print; at 0 the boxes follow the letters closely.
+
+## Recurring text
+<!-- param: textRecurring  default: on -->
+Masks text that a camera prints at the same place on its photos (the data strip, the
+frame counter, the dials of a data card) on every photo of that camera, including those
+where it was not read, such as under glare. Placed through the
+[fiducials](help:fiducial-marks) where every photo has them, else by its position on the
+photo. It needs text found on at least three photos of a camera. Turn it off to mask only
+what was read on each photo.
 
 ## Paint a mask
 Open an image and choose **Tools ▸ Images ▾ ▸ Edit mask**. The toolbox has **Brush**

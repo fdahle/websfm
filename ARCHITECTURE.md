@@ -49,6 +49,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   | `core/sensors/`, `core/radiometry/` | camera rigs, multispectral band calibration and reflectance |
   | `core/stepEffects/` | the effect lines of the processing dialogs' steps, from the same rules the run applies |
   | `core/models/`, `core/segment/` | the learned-model registry and cache, Smart Select (SAM2) |
+  | `core/ocr/` | finding and reading text on photos (PP-OCR), and the text regions Auto Mask ▸ Text masks |
   | `core/eval/` | the statistics behind the Quality Report |
   | `core/help/` | glossary, user guide, ribbon command tables, shortcuts, references, Experimental features |
   | `core/i18n/` | the UI's words by language: `<lang>/<area>.js` catalogues (ICU MessageFormat), `msg()` and `render()` |

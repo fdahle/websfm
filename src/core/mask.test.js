@@ -3,6 +3,7 @@ import {
   maskLookupFromRgba,
   normalizeMaskPixels,
   paintBorderExclude,
+  paintPolygonsExclude,
   invertMaskPixels,
   anyExcluded,
   hasMaskTransparency,
@@ -288,5 +289,54 @@ describe('unionMaskPixels', () => {
     ])
     unionMaskPixels(data, base)
     expect(Array.from(maskLookupFromRgba(data, 3, 1))).toEqual([1, 1, 0])
+  })
+})
+
+describe('paintPolygonsExclude', () => {
+  it('excludes the pixels whose centres lie inside a polygon, at the stored scale', () => {
+    const w = 10,
+      h = 6
+    const data = new Uint8Array(w * h * 4)
+    // A 4 × 2 px box from (2, 1) to (6, 3) in native px, stored at scale 1.
+    paintPolygonsExclude(
+      data,
+      w,
+      h,
+      [
+        [
+          [2, 1],
+          [6, 1],
+          [6, 3],
+          [2, 3],
+        ],
+      ],
+      1,
+    )
+    const masked = []
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (data[(y * w + x) * 4 + 3] === 255) masked.push([x, y])
+    expect(masked).toHaveLength(8)
+    expect(masked[0]).toEqual([2, 1])
+    expect(masked[7]).toEqual([5, 2])
+    expect(Array.from(data.slice((1 * w + 2) * 4, (1 * w + 2) * 4 + 4))).toEqual([255, 0, 0, 255])
+  })
+
+  it('fills a turned box and scales native polygons to a reduced mask', () => {
+    const w = 20,
+      h = 20
+    const data = new Uint8Array(w * h * 4)
+    // A diamond of native radius 16 around (20, 20), stored at half scale: radius 8 around (10, 10).
+    const diamond = [
+      [20, 4],
+      [36, 20],
+      [20, 36],
+      [4, 20],
+    ]
+    paintPolygonsExclude(data, w, h, [diamond], 0.5)
+    const at = (x, y) => data[(y * w + x) * 4 + 3] === 255
+    expect(at(10, 10)).toBe(true)
+    expect(at(10, 3)).toBe(true)
+    expect(at(3, 3)).toBe(false)
+    expect(at(17, 10)).toBe(true)
+    expect(at(18, 10)).toBe(false)
   })
 })

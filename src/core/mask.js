@@ -135,6 +135,48 @@ export function paintBorderExclude(data, w, h, { top = 0, right = 0, bottom = 0,
   return data
 }
 
+// Paint convex polygons (native px, scaled by the stored mask's `scale`) excluded
+// into RGBA `data` of a w×h mask: every pixel whose centre lies inside one. Auto Mask ▸
+// Text draws its text boxes with it (core/ocr/textMask.js gives them padded).
+export function paintPolygonsExclude(data, w, h, polygons, scale = 1) {
+  for (const poly of polygons) {
+    const pts = poly.map(([x, y]) => [x * scale, y * scale])
+    let ymin = Infinity,
+      ymax = -Infinity
+    for (const [, y] of pts) {
+      if (y < ymin) ymin = y
+      if (y > ymax) ymax = y
+    }
+    const r0 = Math.max(0, Math.ceil(ymin - 0.5)),
+      r1 = Math.min(h - 1, Math.floor(ymax - 0.5))
+    for (let row = r0; row <= r1; row++) {
+      const yc = row + 0.5
+      let xl = Infinity,
+        xr = -Infinity
+      for (let i = 0; i < pts.length; i++) {
+        const [ax, ay] = pts[i],
+          [bx, by] = pts[(i + 1) % pts.length]
+        if ((ay <= yc && by >= yc) || (by <= yc && ay >= yc)) {
+          const x = ay === by ? Math.min(ax, bx) : ax + ((yc - ay) * (bx - ax)) / (by - ay)
+          const x2 = ay === by ? Math.max(ax, bx) : x
+          if (x < xl) xl = x
+          if (x2 > xr) xr = x2
+        }
+      }
+      const c0 = Math.max(0, Math.ceil(xl - 0.5)),
+        c1 = Math.min(w - 1, Math.floor(xr - 0.5))
+      for (let col = c0; col <= c1; col++) {
+        const o = (row * w + col) * 4
+        data[o] = 255
+        data[o + 1] = 0
+        data[o + 2] = 0
+        data[o + 3] = 255
+      }
+    }
+  }
+  return data
+}
+
 // The size a mask for a w×h image is stored at. Native, except for an image past
 // the canvas limit (needsPyramid — where no native-size canvas can exist): then
 // reduced so its long side is MASK_LARGE_LONG_SIDE (the cap on such an image's

@@ -68,7 +68,6 @@ export const I18N_PENDING = [
   'src/components/modals/georef/GeoreferenceModal.vue',
   'src/components/modals/georef/ScaleBarsModal.vue',
   'src/components/modals/georef/Sentinel2Modal.vue',
-  'src/components/modals/images/AutoMaskModal.vue',
   'src/components/modals/images/DetectTargetsModal.vue',
   'src/components/modals/images/FiducialCalibrateModal.vue',
   'src/components/modals/images/FiducialDetectModal.vue',

@@ -507,6 +507,19 @@ export const alignTerrain = (request, { onLog } = {}) =>
 // encoder/decoder sessions load once AND the per-uuid embedding cache (held in
 // workers/ops/segment.js module scope) is on the worker every call reaches.
 //
+// Text on one photo (workers/ops/ocr.js): `{ lines: [{ quad, score, text, textScore,
+// angle }], natW, natH, … }`, quads in native pixels. Spread over the pool, one photo
+// per worker; `read: false` finds the lines without reading them.
+export function readPhotoText(url, options = {}, { onLog } = {}) {
+  return call('readPhotoText', [url, options], {
+    onEvent: onLog
+      ? (ev, a) => {
+          if (ev === 'log') onLog(...a)
+        }
+      : undefined,
+  })
+}
+
 // segmentEncode: run the image encoder once, cache embeddings under `uuid`.
 // Streams first-run init/log lines. Resolves to { uuid, width, height, ms }.
 export function segmentEncode(uuid, url, options = {}, { onLog } = {}) {

@@ -6,6 +6,7 @@ import { createDetection } from './images/detection.js'
 import { createImageFiducials } from './images/fiducials.js'
 import { createImageGroups } from './images/imageGroups.js'
 import { createMaskImport } from './images/maskImport.js'
+import { createPhotoText } from './images/photoText.js'
 import { createKeypointCache } from './images/keypointCache.js'
 import { defineStore } from 'pinia'
 import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult } from '../utils/tiff.js'
@@ -248,6 +249,8 @@ export const useImagesStore = defineStore('images', () => {
           groupId: img.groupId ?? null,
           // Disabled: left out of every later run (core/imageEnabled.js); absent ⇒ on.
           ...(img.enabled === false ? { enabled: false } : {}),
+          // The text read on the photo (images/photoText.js); absent ⇒ never read.
+          ...(img.textLines ? { textLines: img.textLines } : {}),
           // Fiducial detections (F4) are spots on the raster — tiny, and persisted
           // inline (independent of keypoint indices).
           fiducialDetections: img.fiducialDetections?.length ? img.fiducialDetections.map((d) => ({ ...d })) : [],
@@ -613,6 +616,9 @@ export const useImagesStore = defineStore('images', () => {
     removeImage: (id) => removeImage(id),
   })
 
+  // The text on the photos (images/photoText.js): Auto Mask ▸ Text.
+  const { readPhotoTexts, hasPhotoText } = createPhotoText({ images, log, save, whenComputeReady })
+
   // Masks ▸ Import folder (images/maskImport.js).
   const { planMaskImport, importMaskFiles } = createMaskImport({ imageById, images, log, updateMask })
 
@@ -710,6 +716,7 @@ export const useImagesStore = defineStore('images', () => {
       fiducialDetections: Array.isArray(record.fiducialDetections)
         ? record.fiducialDetections.map((d) => ({ ...d }))
         : [],
+      textLines: record.textLines ?? null,
       pyramidIndex: record.pyramidIndex ? markRaw(record.pyramidIndex) : null,
       computePyramid: null,
     }))
@@ -937,6 +944,8 @@ export const useImagesStore = defineStore('images', () => {
     selectedId,
     imageGroups,
     estimateImageQuality,
+    readPhotoTexts,
+    hasPhotoText,
     keypointReadyImages,
     // Keypoints on demand (the "Keypoints: on disk" section at the top).
     ensureKeypoints,

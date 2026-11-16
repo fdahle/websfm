@@ -8,6 +8,7 @@ import {
   maskStorageSize,
   normalizeMaskPixels,
   paintBorderExclude,
+  paintPolygonsExclude,
   scaleBorderSides,
   unionMaskPixels,
   upsampleLookupNearest,
@@ -107,6 +108,23 @@ export async function buildBorderMask(nativeW, nativeH, nativeSides, base = null
   }
   const id = ctx.getImageData(0, 0, w, h)
   paintBorderExclude(id.data, w, h, sides)
+  ctx.putImageData(id, 0, 0)
+  return canvas.convertToBlob({ type: 'image/png' })
+}
+
+// A mask PNG Blob for a w×h image (at maskStorageSize) excluding convex `polygons`
+// (native px), on top of `base` when given (merge), as buildBorderMask. Auto Mask ▸ Text.
+export async function buildPolygonMask(nativeW, nativeH, polygons, base = null) {
+  const { w, h, scale } = maskStorageSize(nativeW, nativeH)
+  const canvas = new OffscreenCanvas(w, h)
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (base) {
+    const bmp = await createImageBitmap(await maskBlob(base))
+    ctx.drawImage(bmp, 0, 0, w, h)
+    bmp.close()
+  }
+  const id = ctx.getImageData(0, 0, w, h)
+  paintPolygonsExclude(id.data, w, h, polygons, scale)
   ctx.putImageData(id, 0, 0)
   return canvas.convertToBlob({ type: 'image/png' })
 }
