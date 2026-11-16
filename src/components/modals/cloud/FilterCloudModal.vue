@@ -15,6 +15,8 @@ import { usePresetSettings } from '../../../composables/usePresetSettings.js'
 import { FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META } from '../../../core/defaults.user.js'
 import { filterCloudEffects, filterCloudShorts } from '../../../core/stepEffects/filterCloud.js'
 import { withShorts } from '../../../core/stepEffects/format.js'
+import I18nText from '../../I18nText.vue'
+import { t } from '../../../composables/useI18n.js'
 
 // Filter Cloud — remove noise from a dense cloud. Non-destructive: the run adds a
 // NEW cloud. Defaults are the single source of truth in core/defaults.user.js;
@@ -61,7 +63,8 @@ const { baseId, activePreset, selectPreset } = usePresetSettings({
 // 0 ⇒ auto. Voxel auto uses the dense merge cell when we know it; the core module
 // falls back to its own estimate otherwise.
 const voxelAuto = computed(() => (settings.value.voxelCell > 0 ? settings.value.voxelCell : props.mergeCell))
-// What each step does to this cloud (core/stepEffects/filterCloud.js).
+// What each step does to this cloud (core/stepEffects/filterCloud.js): messages,
+// SettingsStep draws them in the user's language.
 const effects = computed(() =>
   withShorts(
     filterCloudEffects(settings.value, { mergeCell: props.mergeCell }),
@@ -85,7 +88,7 @@ function run() {
       },
       range: { zMin: nz(s.zMin), zMax: nz(s.zMax), lumaMin: nz(s.lumaMin), lumaMax: nz(s.lumaMax) },
     },
-    name: `${source.value?.name ?? 'Cloud'} (filtered)`,
+    name: t('filterCloud.resultName', { name: source.value?.name ?? t('common.cloud') }),
   })
 }
 
@@ -96,13 +99,10 @@ provideStepLayout('filter-cloud')
 
 <template>
   <ModalShell
-    :title="startMethod === 'sor' ? 'Remove Outliers' : startMethod === 'voxel' ? 'Subsample Cloud' : 'Filter Cloud'"
+    :title="t(`filterCloud.title.${startMethod === 'sor' || startMethod === 'voxel' ? startMethod : 'filter'}`)"
     @close="emit('close')"
   >
-    <WarnBox v-if="!clouds.length">
-      No dense cloud is available. Build one first (<strong>Reconstruct ▸ Dense Model</strong>), or import one. To clean
-      the sparse model, use <strong>Tools ▸ Model ▾ ▸ Gradual selection…</strong>.
-    </WarnBox>
+    <WarnBox v-if="!clouds.length"><I18nText k="filterCloud.noCloud" /></WarnBox>
 
     <template v-else>
       <PresetCards
@@ -112,30 +112,51 @@ provideStepLayout('filter-cloud')
         @select="selectPreset"
       />
 
-      <SettingsGroup title="Source">
+      <SettingsGroup :title="t('common.source')">
         <SourcePicker
           id="filter-src"
           v-model="sourceId"
-          label="Cloud"
+          :label="t('common.cloud')"
           :items="clouds"
-          hint="The filter adds a new cloud; this one is left untouched."
+          :hint="t('filterCloud.sourceHint')"
         />
       </SettingsGroup>
 
-      <SettingsStep step="1" title="Elevation / brightness range" :effect="effects.range" :inactive="!has('range')">
+      <SettingsStep step="1" :title="t('filterCloud.step.range')" :effect="effects.range" :inactive="!has('range')">
         <label class="checkbox-row"
-          ><input type="checkbox" class="checkbox" :checked="has('range')" @change="toggle('range')" /> Enabled</label
+          ><input type="checkbox" class="checkbox" :checked="has('range')" @change="toggle('range')" />
+          {{ t('common.enabled') }}</label
         >
         <template v-if="has('range')">
-          <SettingsField hint="Leave empty for unbounded.">
-            <template #label><FieldHelp op="filter-cloud" param="zRange">Elevation (Z)</FieldHelp></template>
+          <SettingsField :hint="t('filterCloud.field.zRange.hint')">
+            <template #label
+              ><FieldHelp op="filter-cloud" param="zRange">{{
+                t('filterCloud.field.zRange.label')
+              }}</FieldHelp></template
+            >
             <div class="input-row">
-              <input v-model.number="settings.zMin" type="number" step="any" class="field-input" placeholder="min" />
-              <input v-model.number="settings.zMax" type="number" step="any" class="field-input" placeholder="max" />
+              <input
+                v-model.number="settings.zMin"
+                type="number"
+                step="any"
+                class="field-input"
+                :placeholder="t('common.min')"
+              />
+              <input
+                v-model.number="settings.zMax"
+                type="number"
+                step="any"
+                class="field-input"
+                :placeholder="t('common.max')"
+              />
             </div>
           </SettingsField>
-          <SettingsField unit="0–255" hint="Rec. 709 luma. Ignored on a cloud with no colour.">
-            <template #label><FieldHelp op="filter-cloud" param="lumaRange">Brightness</FieldHelp></template>
+          <SettingsField unit="0–255" :hint="t('filterCloud.field.lumaRange.hint')">
+            <template #label
+              ><FieldHelp op="filter-cloud" param="lumaRange">{{
+                t('filterCloud.field.lumaRange.label')
+              }}</FieldHelp></template
+            >
             <div class="input-row">
               <input
                 v-model.number="settings.lumaMin"
@@ -144,7 +165,7 @@ provideStepLayout('filter-cloud')
                 max="255"
                 step="1"
                 class="field-input"
-                placeholder="min"
+                :placeholder="t('common.min')"
               />
               <input
                 v-model.number="settings.lumaMax"
@@ -153,7 +174,7 @@ provideStepLayout('filter-cloud')
                 max="255"
                 step="1"
                 class="field-input"
-                placeholder="max"
+                :placeholder="t('common.max')"
               />
             </div>
           </SettingsField>
@@ -162,24 +183,25 @@ provideStepLayout('filter-cloud')
 
       <SettingsStep
         step="2"
-        title="Voxel downsample"
+        :title="t('filterCloud.step.voxel')"
         :effect="effects.voxel"
         :inactive="!has('voxel')"
         :more="(has('voxel') || has('isolated') || has('sor')) && has('voxel') ? 1 : 0"
       >
         <label class="checkbox-row"
-          ><input type="checkbox" class="checkbox" :checked="has('voxel')" @change="toggle('voxel')" /> Enabled</label
+          ><input type="checkbox" class="checkbox" :checked="has('voxel')" @change="toggle('voxel')" />
+          {{ t('common.enabled') }}</label
         >
 
         <template #tuning>
           <template v-if="(has('voxel') || has('isolated') || has('sor')) && has('voxel')">
             <SettingsField
               label-for="filter-voxel"
-              unit="units"
+              :unit="t('common.units')"
               :hint="
                 mergeCell > 0 && !(settings.voxelCell > 0)
-                  ? `0 = auto (the dense run's merge cell, ${mergeCell.toPrecision(3)})`
-                  : '0 = auto (about one point spacing)'
+                  ? t('filterCloud.field.voxelCell.hintMerge', { cell: mergeCell })
+                  : t('filterCloud.field.voxelCell.hintAuto')
               "
             >
               <template #label
@@ -188,7 +210,7 @@ provideStepLayout('filter-cloud')
                   param="voxelCell"
                   :value="settings.voxelCell"
                   :default-value="FILTER_CLOUD_DEFAULTS.voxelCell"
-                  >Cell size</FieldHelp
+                  >{{ t('filterCloud.field.voxelCell.label') }}</FieldHelp
                 ></template
               >
               <input
@@ -206,22 +228,22 @@ provideStepLayout('filter-cloud')
 
       <SettingsStep
         step="3"
-        title="Isolated clusters"
+        :title="t('filterCloud.step.isolated')"
         :effect="effects.isolated"
         :inactive="!has('isolated')"
         :more="(has('voxel') || has('isolated') || has('sor')) && has('isolated') ? 3 : 0"
       >
         <label class="checkbox-row"
           ><input type="checkbox" class="checkbox" :checked="has('isolated')" @change="toggle('isolated')" />
-          Enabled</label
+          {{ t('common.enabled') }}</label
         >
 
         <template #tuning>
           <template v-if="(has('voxel') || has('isolated') || has('sor')) && has('isolated')">
             <SettingsField
               label-for="filter-iso-cell"
-              unit="units"
-              hint="Occupancy grid cell. 0 = auto (about 4× the point spacing)."
+              :unit="t('common.units')"
+              :hint="t('filterCloud.field.isolatedCell.hint')"
             >
               <template #label
                 ><FieldHelp
@@ -229,7 +251,7 @@ provideStepLayout('filter-cloud')
                   param="isolatedCell"
                   :value="settings.isolatedCell"
                   :default-value="FILTER_CLOUD_DEFAULTS.isolatedCell"
-                  >Cell size</FieldHelp
+                  >{{ t('filterCloud.field.isolatedCell.label') }}</FieldHelp
                 ></template
               >
               <input
@@ -241,17 +263,14 @@ provideStepLayout('filter-cloud')
                 class="field-input"
               />
             </SettingsField>
-            <SettingsField
-              label-for="filter-iso-nb"
-              hint="A low-support cell needs this many of its 26 neighbours occupied to survive."
-            >
+            <SettingsField label-for="filter-iso-nb" :hint="t('filterCloud.field.isolatedMinNeighbors.hint')">
               <template #label
                 ><FieldHelp
                   op="filter-cloud"
                   param="isolatedMinNeighbors"
                   :value="settings.isolatedMinNeighbors"
                   :default-value="FILTER_CLOUD_DEFAULTS.isolatedMinNeighbors"
-                  >Min occupied neighbours</FieldHelp
+                  >{{ t('filterCloud.field.isolatedMinNeighbors.label') }}</FieldHelp
                 ></template
               >
               <input
@@ -266,8 +285,8 @@ provideStepLayout('filter-cloud')
             </SettingsField>
             <SettingsField
               label-for="filter-iso-sup"
-              unit="points"
-              hint="Cells holding more points than this are never tested — they are real surface."
+              :unit="t('filterCloud.field.isolatedMaxSupport.unit')"
+              :hint="t('filterCloud.field.isolatedMaxSupport.hint')"
             >
               <template #label
                 ><FieldHelp
@@ -275,7 +294,7 @@ provideStepLayout('filter-cloud')
                   param="isolatedMaxSupport"
                   :value="settings.isolatedMaxSupport"
                   :default-value="FILTER_CLOUD_DEFAULTS.isolatedMaxSupport"
-                  >Max tested support</FieldHelp
+                  >{{ t('filterCloud.field.isolatedMaxSupport.label') }}</FieldHelp
                 ></template
               >
               <input
@@ -294,28 +313,26 @@ provideStepLayout('filter-cloud')
 
       <SettingsStep
         step="4"
-        title="Statistical outliers"
+        :title="t('filterCloud.step.sor')"
         :effect="effects.sor"
         :inactive="!has('sor')"
         :more="(has('voxel') || has('isolated') || has('sor')) && has('sor') ? 2 : 0"
       >
         <label class="checkbox-row"
-          ><input type="checkbox" class="checkbox" :checked="has('sor')" @change="toggle('sor')" /> Enabled</label
+          ><input type="checkbox" class="checkbox" :checked="has('sor')" @change="toggle('sor')" />
+          {{ t('common.enabled') }}</label
         >
 
         <template #tuning>
           <template v-if="(has('voxel') || has('isolated') || has('sor')) && has('sor')">
-            <SettingsField
-              label-for="filter-sor-k"
-              hint="How many nearest neighbours the per-point mean distance averages over."
-            >
+            <SettingsField label-for="filter-sor-k" :hint="t('filterCloud.field.sorK.hint')">
               <template #label
                 ><FieldHelp
                   op="filter-cloud"
                   param="sorK"
                   :value="settings.sorK"
                   :default-value="FILTER_CLOUD_DEFAULTS.sorK"
-                  >Neighbours</FieldHelp
+                  >{{ t('filterCloud.field.sorK.label') }}</FieldHelp
                 ></template
               >
               <input
@@ -328,18 +345,14 @@ provideStepLayout('filter-cloud')
                 class="field-input"
               />
             </SettingsField>
-            <SettingsField
-              label-for="filter-sor-std"
-              unit="σ"
-              hint="Drop points above mean + ratio × σ. Lower is more aggressive."
-            >
+            <SettingsField label-for="filter-sor-std" unit="σ" :hint="t('filterCloud.field.sorStdRatio.hint')">
               <template #label
                 ><FieldHelp
                   op="filter-cloud"
                   param="sorStdRatio"
                   :value="settings.sorStdRatio"
                   :default-value="FILTER_CLOUD_DEFAULTS.sorStdRatio"
-                  >Std-dev ratio</FieldHelp
+                  >{{ t('filterCloud.field.sorStdRatio.label') }}</FieldHelp
                 ></template
               >
               <input
@@ -360,20 +373,20 @@ provideStepLayout('filter-cloud')
     <template #footer>
       <ShowAdvancedSettings />
 
-      <button class="btn" @click="emit('close')">Cancel</button>
+      <button class="btn" @click="emit('close')">{{ t('common.cancel') }}</button>
       <button
         class="btn btn-primary"
         :disabled="!source || !settings.methods.length"
         :title="
           !source
-            ? 'No dense cloud yet: build one with Reconstruct ▸ Dense Model, or import one'
+            ? t('filterCloud.disabled.noCloud')
             : !settings.methods.length
-              ? 'Turn on at least one filter'
+              ? t('filterCloud.disabled.noFilter')
               : null
         "
         @click="run"
       >
-        Filter
+        {{ t('filterCloud.run') }}
       </button>
     </template>
   </ModalShell>

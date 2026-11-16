@@ -7,11 +7,13 @@
 // `optionLabel` words each item (see useSourcePick.js for the shared ones).
 import SettingsField from './SettingsField.vue'
 import { cloudOptionLabel } from '../../../composables/useSourcePick.js'
+import { t, tx } from '../../../composables/useI18n.js'
 
+// `label` and `hint`: a string or a message (core/i18n); no label reads "Source".
 defineProps({
   id: { type: String, required: true },
-  label: { type: String, default: 'Source' },
-  hint: { type: String, default: '' },
+  label: { type: [String, Object], default: '' },
+  hint: { type: [String, Object], default: '' },
   items: { type: Array, default: () => [] },
   optionLabel: { type: Function, default: cloudOptionLabel },
   variant: { type: String, default: 'field' },
@@ -21,13 +23,13 @@ const model = defineModel({ default: null })
 
 <template>
   <div v-if="variant === 'inline'" class="source-row">
-    <label class="field-label" :for="id">{{ label }}</label>
+    <label class="field-label" :for="id">{{ tx(label) || t('common.source') }}</label>
     <select v-if="items.length > 1" :id="id" v-model="model" class="field-select source-select">
       <option v-for="it in items" :key="it.id" :value="it.id">{{ optionLabel(it) }}</option>
     </select>
     <span v-else-if="items.length" class="field-hint source-value">{{ optionLabel(items[0]) }}</span>
   </div>
-  <SettingsField v-else :label="label" :label-for="id" :hint="hint">
+  <SettingsField v-else :label="tx(label) || t('common.source')" :label-for="id" :hint="tx(hint)">
     <select :id="id" v-model="model" class="field-select">
       <option v-for="it in items" :key="it.id" :value="it.id">{{ optionLabel(it) }}</option>
     </select>

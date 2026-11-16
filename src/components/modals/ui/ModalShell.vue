@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useModalStackEntry } from '../../../composables/useModalStack.js'
+import { t } from '../../../composables/useI18n.js'
 // Shared modal chrome (WS5): overlay + centered panel + header (title/close) + scrollable
 // body slot + footer slot. Clicking the backdrop closes (@click.self) and Escape closes
 // (@keydown.esc, stopped here so App's global Escape handler does not also act). While
@@ -53,7 +54,14 @@ useModalStackEntry(close)
         <slot name="header"
           ><span class="modal-title">{{ title }}</span></slot
         >
-        <button v-if="dismissible" class="modal-close" type="button" title="Close" aria-label="Close" @click="close">
+        <button
+          v-if="dismissible"
+          class="modal-close"
+          type="button"
+          :title="t('common.close')"
+          :aria-label="t('common.close')"
+          @click="close"
+        >
           ×
         </button>
       </div>

@@ -74,7 +74,7 @@ describe('useSourcePick', () => {
 
 describe('option labels', () => {
   it('reads as the dialogs always did', () => {
-    expect(cloudOptionLabel(A)).toBe(`A — ${(1200).toLocaleString()} points`)
+    expect(cloudOptionLabel(A)).toBe('A — 1,200 points')
     expect(meshOptionLabel(M)).toBe('M — 10 triangles')
     expect(referenceOptionLabel(M)).toBe('M (mesh)')
     expect(referenceOptionLabel(A)).toBe('A')

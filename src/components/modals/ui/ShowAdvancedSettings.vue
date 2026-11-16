@@ -1,5 +1,6 @@
 <script setup>
 import { useStepLayout } from '../../../composables/useStepLayout.js'
+import { t } from '../../../composables/useI18n.js'
 
 // The footer's "Show advanced settings" (dev/planning/plan-dialog-layout.md): the
 // advanced fields of every open step, remembered as Settings ▸ Display ▸ Expand
@@ -15,7 +16,7 @@ const layout = useStepLayout()
       :checked="layout.showAdvanced.value"
       @change="(e) => layout.setShowAdvanced(e.target.checked)"
     />
-    Show advanced settings
+    {{ t('common.showAdvanced') }}
   </label>
 </template>
 

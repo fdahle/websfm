@@ -176,6 +176,33 @@ give a disabled `ChoiceCards` option its `reason`. The ribbon does the same thro
 `commandReason`. A unit test (`src/components/disabledReasons.test.js`) fails on a
 disabled control without a `title`.
 
+## Text in the UI
+
+WebSfM is being prepared for more languages, German first. The words a user reads live
+in catalogues, not in the code, so a translation is a new catalogue rather than a
+change to every component:
+
+- **Catalogues:** `src/core/i18n/en/<area>.js`, one per area, in ICU MessageFormat:
+  `{n, number}` formats a number in the user's language, `{n, plural, one {# point}
+  other {# points}}` picks the form. A key is `<area>.<path>` (`filterCloud.step.sor`).
+- **In a template:** `{{ t('filterCloud.run') }}`, `:title="t('…')"`, from
+  `composables/useI18n.js`. A message with a bold menu path is `<I18nText k="…" />`,
+  with `<strong>…</strong>` in its catalogue text.
+- **From `src/core/` and the workers:** return a message, `msg('area.key', params)`,
+  never a finished sentence; the UI shows it with `tx(m)`, and `SettingsStep`,
+  `PresetCards` and `SourcePicker` take one as it is. A parameter may be a number,
+  another message, or an array of messages (shown as a list: "a and b").
+- **Numbers on screen** are message parameters, so they get the language's decimal sign.
+  Numbers written to files stay `toFixed`, which always writes a dot.
+- **Logs, console commands and bug reports stay in English.**
+- **Tests check the English:** render with `renderAll(…)` before comparing. The unit tests
+  fail on a key the code names that the English catalogue lacks, a message that does not
+  parse, another language's message with different arguments, and a short fact over
+  `SHORT_MAX` in any language.
+- **A converted `.vue` file** joins the `vue/no-bare-strings-in-template` list in
+  `eslint.config.js`, so bare English in its template fails the lint from then on. A new
+  dialog or component is written this way from the start.
+
 ## Menu labels
 
 A menu item or a small button ends in **…** when it needs more from you before it acts:

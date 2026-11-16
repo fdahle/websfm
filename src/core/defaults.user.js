@@ -4,7 +4,9 @@
 // Nothing here is a "dev-only" tuning number — those live in `tuning.js`.
 //
 // Pure data module: no Vue/Pinia/OPFS, so it bundles into the worker unchanged and
-// core code can import it directly.
+// core code can import it directly. Card labels and blurbs are messages (core/i18n):
+// their words are in the catalogues.
+import { msg } from './i18n/index.js'
 
 // Tie-point (feature) detection — SIFT. Mirrored by DetectFeaturesModal.vue's
 // `siftSettings` ref. NOTE: the worker op (workers/ops/keypoints.js) keeps its own,
@@ -682,11 +684,11 @@ export const FILTER_CLOUD_PRESETS = {
   medium: {},
   strong: { methods: ['isolated', 'sor'], sorStdRatio: 1.0 },
 }
-export const FILTER_CLOUD_PRESET_META = [
-  { id: 'light', label: 'Light', blurb: 'Outlier removal only · trims obvious flyers' },
-  { id: 'medium', label: 'Balanced', blurb: 'Outlier removal at 1.5σ · default' },
-  { id: 'strong', label: 'Strong', blurb: 'Isolated clusters + 1.0σ · may bite into thin detail' },
-]
+export const FILTER_CLOUD_PRESET_META = ['light', 'medium', 'strong'].map((id) => ({
+  id,
+  label: msg(`filterCloud.preset.${id}.label`),
+  blurb: msg(`filterCloud.preset.${id}.blurb`),
+}))
 
 // Crop. Bounds are prefilled from the source cloud's bbox by the modal; a null
 // component means "unbounded on that side", so a Z-only crop needs no X/Y numbers.

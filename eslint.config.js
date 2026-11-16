@@ -65,6 +65,57 @@ export default [
       'vue/multi-word-component-names': 'off',
     },
   },
+  // UI text by language (CONTRIBUTING ▸ Text in the UI): a template converted to
+  // t('area.key') keeps no bare English, in its text or in the attributes a user reads.
+  // A file joins this list once it is converted; the list grows until it is every .vue.
+  {
+    files: [
+      'src/components/I18nText.vue',
+      'src/components/modals/cloud/FilterCloudModal.vue',
+      'src/components/modals/ui/ModalShell.vue',
+      'src/components/modals/ui/PresetCards.vue',
+      'src/components/modals/ui/SettingsField.vue',
+      'src/components/modals/ui/SettingsGroup.vue',
+      'src/components/modals/ui/SettingsStep.vue',
+      'src/components/modals/ui/ShowAdvancedSettings.vue',
+      'src/components/modals/ui/SourcePicker.vue',
+      'src/components/modals/ui/WarnBox.vue',
+    ],
+    rules: {
+      'vue/no-bare-strings-in-template': [
+        'error',
+        {
+          // Symbols and units that read the same in every language.
+          allowlist: [
+            '(',
+            ')',
+            ',',
+            '.',
+            ':',
+            '·',
+            '—',
+            '–',
+            '▸',
+            '▾',
+            '…',
+            '×',
+            '±',
+            'σ',
+            '°',
+            '%',
+            'px',
+            'm',
+            '0–255',
+          ],
+          attributes: {
+            '/.+/': ['title', 'aria-label', 'aria-placeholder', 'aria-description', 'placeholder', 'alt'],
+            '/^[A-Z]/': ['label', 'hint', 'unit', 'note'],
+          },
+          directives: ['v-text'],
+        },
+      ],
+    },
+  },
   {
     files: ['**/*.test.js', 'scripts/**/*.mjs', '*.config.js', 'tests/**/*.js'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },

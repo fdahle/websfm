@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { filterCloudEffects } from './filterCloud.js'
+import { filterCloudEffects as effects } from './filterCloud.js'
+import { renderAll } from '../i18n/index.js'
 import { FILTER_CLOUD_DEFAULTS } from '../defaults.user.js'
+
+// In English, as the dialog shows them.
+const filterCloudEffects = (s, project) => renderAll(effects(s, project))
 
 describe('filterCloudEffects', () => {
   it('describes each enabled filter, and says Off for the rest', () => {

@@ -51,6 +51,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   | `core/models/`, `core/segment/` | the learned-model registry and cache, Smart Select (SAM2) |
   | `core/eval/` | the statistics behind the Quality Report |
   | `core/help/` | glossary, user guide, ribbon command tables, shortcuts, references, Experimental features |
+  | `core/i18n/` | the UI's words by language: `<lang>/<area>.js` catalogues (ICU MessageFormat), `msg()` and `render()` |
 
   Modules several stages share sit at the top of `core/`: CRS, defaults and tuning, the
   project format and its migrations.
@@ -115,6 +116,7 @@ to the algorithm; the other steps differ only in file names.
 | add or change a setting | the `*_DEFAULTS` in `core/defaults.user.js` and the dialog in `components/modals/` | the guide section in `src/guide/` (see [CONTRIBUTING](CONTRIBUTING.md#keep-the-in-app-help-in-step)) |
 | tune an internal threshold | `core/tuning.js` | the test that pins it |
 | add a ribbon command | `core/help/ribbonTabs.js`: its `tip` (what it does) and `guide` (its article) | `composables/useCommandDispatch.js`; it becomes a console command automatically (`core/help/commands.js`); `npm run docs:features` adds it to [docs/features.md](docs/features.md) |
+| add or change text a user reads | its message in `core/i18n/en/<area>.js` | `t('area.key')` in the template, `msg('area.key', …)` from core ([CONTRIBUTING](CONTRIBUTING.md#text-in-the-ui)) |
 | add or change a keyboard shortcut | its entry in `core/help/shortcuts.js` | the handler asks `matches(e, id)`, a tooltip shows `keyLabel(id)` (`utils/shortcutLabels.js`); the Shortcuts dialog lists it by itself |
 | add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
 | add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |

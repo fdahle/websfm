@@ -10,8 +10,10 @@
 // (hover text carrying the full reasons), which is how a dataset-derived
 // recommendation is surfaced: as one more card, or as a mark on an existing one,
 // never as a competing banner above the hero. See core/recommendUi.js.
-//   presets: [{ id, label, blurb, badge?, title? }]
+//   presets: [{ id, label, blurb, badge?, title? }]: each text a string or a message
+// (core/i18n), drawn in the user's language.
 import { computed } from 'vue'
+import { t, tx } from '../../../composables/useI18n.js'
 const props = defineProps({
   modelValue: { type: String, default: 'medium' }, // active preset id, or 'custom'
   presets: { type: Array, required: true },
@@ -19,14 +21,14 @@ const props = defineProps({
   // The parent passes the base preset the current custom values were edited from.
   baseId: { type: String, default: 'medium' },
   // Optional one-line note under the cards (e.g. why a card is recommended).
-  note: { type: String, default: '' },
+  note: { type: [String, Object], default: '' },
 })
 const emit = defineEmits(['select'])
 
 const isCustom = computed(() => props.modelValue === 'custom')
 // When custom, highlight the base card (the one being modified) rather than nothing.
 const highlightId = computed(() => (isCustom.value ? props.baseId : props.modelValue))
-const baseLabel = computed(() => props.presets.find((p) => p.id === props.baseId)?.label ?? props.baseId)
+const baseLabel = computed(() => tx(props.presets.find((p) => p.id === props.baseId)?.label ?? props.baseId))
 </script>
 
 <template>
@@ -37,21 +39,21 @@ const baseLabel = computed(() => props.presets.find((p) => p.id === props.baseId
       type="button"
       class="preset-card"
       :class="{ active: highlightId === p.id, modified: isCustom && p.id === baseId }"
-      :title="p.title || null"
+      :title="tx(p.title) || null"
       @click="emit('select', p.id)"
     >
       <span class="preset-card-label">
-        {{ p.label }}
-        <span v-if="p.badge" class="preset-card-badge">{{ p.badge }}</span>
+        {{ tx(p.label) }}
+        <span v-if="p.badge" class="preset-card-badge">{{ tx(p.badge) }}</span>
       </span>
-      <span v-if="p.blurb" class="preset-card-blurb">{{ p.blurb }}</span>
+      <span v-if="p.blurb" class="preset-card-blurb">{{ tx(p.blurb) }}</span>
     </button>
   </div>
   <div v-if="isCustom" class="preset-modified">
-    <span>{{ baseLabel }} · modified</span>
-    <button type="button" class="link-btn" @click="emit('select', baseId)">Reset</button>
+    <span>{{ t('common.preset.modified', { preset: baseLabel }) }}</span>
+    <button type="button" class="link-btn" @click="emit('select', baseId)">{{ t('common.reset') }}</button>
   </div>
-  <div v-else-if="note" class="preset-note">{{ note }}</div>
+  <div v-else-if="note" class="preset-note">{{ tx(note) }}</div>
 </template>
 
 <style scoped src="./modal.css"></style>

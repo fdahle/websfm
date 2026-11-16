@@ -13,6 +13,7 @@ import { alignIcpShorts } from './alignIcp.js'
 import { fiducialDetectShorts } from './fiducialDetect.js'
 import { contoursShorts } from './contours.js'
 import { outputEffect } from './output.js'
+import { CATALOGS, renderAll } from '../i18n/index.js'
 import {
   RECONSTRUCT_DEFAULTS,
   DENSE_FUSE_DEFAULTS,
@@ -32,7 +33,8 @@ import {
 // The short facts of a processing dialog's step chain (dev plan ▸ dialog layout): one
 // chip each, so a few words, never a sentence.
 const estimate = { width: 8452, height: 6120, gsd: 0.0312, approx: true }
-const SHORTS = {
+// As the dialogs get them: a string, or a message (core/i18n) the dialog renders.
+const RAW = {
   sparse: sparseShorts(RECONSTRUCT_DEFAULTS, {
     linkedImages: 347,
     pairs: 5210,
@@ -61,15 +63,19 @@ const SHORTS = {
   ),
   contours: contoursShorts(CONTOUR_DEFAULTS, { interval: 2, levels: 48, unit: 'm', onMap: true }),
 }
+const inLanguage = (lang) => Object.fromEntries(Object.entries(RAW).map(([d, s]) => [d, renderAll(s, lang)]))
+const SHORTS = inLanguage('en')
 
 describe('step chain facts', () => {
-  it('stay a few words: every short fact fits one chip', () => {
-    for (const [dialog, shorts] of Object.entries(SHORTS))
-      for (const [step, short] of Object.entries(shorts)) {
-        expect(typeof short, `${dialog}.${step}`).toBe('string')
-        expect(short.length, `${dialog}.${step}: "${short}"`).toBeLessThanOrEqual(SHORT_MAX)
-        expect(short, `${dialog}.${step}`).not.toMatch(/\.$/)
-      }
+  it('stay a few words: every short fact fits one chip, in every language', () => {
+    for (const lang of Object.keys(CATALOGS))
+      for (const [dialog, shorts] of Object.entries(inLanguage(lang)))
+        for (const [step, short] of Object.entries(shorts)) {
+          const at = `${lang} ${dialog}.${step}`
+          expect(typeof short, at).toBe('string')
+          expect(short.length, `${at}: "${short}"`).toBeLessThanOrEqual(SHORT_MAX)
+          expect(short, at).not.toMatch(/\.$/)
+        }
   })
   it('state the numbers a run uses', () => {
     expect(SHORTS.sparse).toEqual({

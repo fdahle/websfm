@@ -1,5 +1,6 @@
 import { computed, ref, unref } from 'vue'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
+import { t } from './useI18n.js'
 
 // The cloud / mesh a tool dialog acts on (Tools ▸ Point Cloud ▾ / Mesh ▾, Build Mesh,
 // Filter Cloud, …), and — called a second time with `exclude` — the reference it is
@@ -51,10 +52,10 @@ export function useSourcePick(items, { initialId = null, exclude = null } = {}) 
   return { id, item, options }
 }
 
-// Option labels shared by the pickers (what each dialog's <option> text has always read).
+// Option labels shared by the pickers (what each dialog's <option> text has always read),
+// in the user's language (core/i18n/<lang>/common.js ▸ sourceOption).
 // An outdated cloud (built on an input that changed since) stays on offer, named so —
 // a user who picks it has a reason; the main one says so too.
-const n = (v) => (v ?? 0).toLocaleString()
 export function statusTags(item) {
   const cloud = cloudOf(item)
   if (!cloud) return ''
@@ -62,12 +63,18 @@ export function statusTags(item) {
   const tags = [recon.isMainProduct(cloud) && 'main', recon.productStatus(cloud).outdated && 'outdated']
   return tags
     .filter(Boolean)
-    .map((t) => ` · ${t}`)
+    .map((tag) => ` · ${t(`common.sourceOption.${tag}`)}`)
     .join('')
 }
 /** "Name — 1,234 points" */
-export const cloudOptionLabel = (c) => `${c.name} — ${n(c.count)} points${statusTags(c)}`
+export const cloudOptionLabel = (c) =>
+  t('common.sourceOption.cloud', { name: c.name, count: c.count ?? 0, tags: statusTags(c) })
 /** "Name — 1,234 triangles" (a mesh's `count` is its triangle count) */
-export const meshOptionLabel = (m) => `${m.name} — ${n(m.count)} triangles${statusTags(m)}`
+export const meshOptionLabel = (m) =>
+  t('common.sourceOption.mesh', { name: m.name, count: m.count ?? 0, tags: statusTags(m) })
 /** A reference: a cloud by name, a mesh marked " (mesh)". */
-export const referenceOptionLabel = (c) => `${c.name}${c.kind === 'mesh' ? ' (mesh)' : ''}${statusTags(c)}`
+export const referenceOptionLabel = (c) =>
+  t(c.kind === 'mesh' ? 'common.sourceOption.referenceMesh' : 'common.sourceOption.reference', {
+    name: c.name,
+    tags: statusTags(c),
+  })

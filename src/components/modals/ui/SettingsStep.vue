@@ -2,6 +2,8 @@
 import { computed, onMounted, onUpdated, ref, useSlots } from 'vue'
 import { useStepLayout } from '../../../composables/useStepLayout.js'
 import ExperimentalBadge from '../../layout/ExperimentalBadge.vue'
+import { isMsg } from '../../../core/i18n/index.js'
+import { t, tx } from '../../../composables/useI18n.js'
 
 // One numbered stage of a pipeline modal: "① Resize → ② Tile → ③ Detect → ④ Keep".
 // It says *where in the order of operations* its fields act and what they do to this
@@ -29,8 +31,12 @@ const props = defineProps({
 })
 const slots = useSlots()
 const layout = useStepLayout()
-const long = computed(() => (typeof props.effect === 'string' ? props.effect : (props.effect?.long ?? '')))
-const short = computed(() => (typeof props.effect === 'object' ? (props.effect?.short ?? '') : ''))
+// `effect` is a string, a message (core/i18n), or { short, long } of either.
+const pair = computed(() =>
+  props.effect && typeof props.effect === 'object' && !isMsg(props.effect) ? props.effect : null,
+)
+const long = computed(() => tx(pair.value ? (pair.value.long ?? '') : props.effect))
+const short = computed(() => tx(pair.value?.short ?? ''))
 if (layout && slots.default) layout.startOpen(props.step)
 const open = computed(() => !!layout && layout.isOpen(props.step))
 const hasAdvanced = computed(() => !!slots.tuning && props.more !== 0)
@@ -79,11 +85,11 @@ onUpdated(countAdvanced)
       </div>
       <div v-if="$slots.default" class="step-fields"><slot /></div>
       <div v-if="hasAdvanced" v-show="layout.showAdvanced.value && advancedCount" class="step-advanced">
-        <div class="step-advanced-label">Advanced</div>
+        <div class="step-advanced-label">{{ t('common.advanced') }}</div>
         <div ref="advancedEl" class="step-fields"><slot name="tuning" /></div>
       </div>
       <div v-if="hasAdvanced && advancedCount && !layout.showAdvanced.value" class="step-advanced-hidden">
-        {{ advancedCount }} advanced setting{{ advancedCount === 1 ? '' : 's' }} hidden
+        {{ t('common.advancedHidden', { n: advancedCount }) }}
       </div>
     </template>
   </div>
