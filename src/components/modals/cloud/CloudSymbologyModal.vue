@@ -54,8 +54,9 @@ function apply(close = false) {
 <template>
   <ModalShell title="Point cloud symbology" @close="emit('close')">
     <div class="cloud-heading">
-      <strong>{{ cloud.name }}</strong
-      ><span>{{ countOf(cloud).toLocaleString() }} {{ cloud.kind === 'mesh' ? 'vertices' : 'points' }}</span>
+      <strong>{{ cloud.name }}</strong><span
+        >{{ countOf(cloud).toLocaleString() }} {{ cloud.kind === 'mesh' ? 'vertices' : 'points' }}</span
+      >
     </div>
     <SettingsField label="Colour by" label-for="cloud-style-field">
       <select id="cloud-style-field" v-model="draft.field" class="field-input field-select">
@@ -96,8 +97,7 @@ function apply(close = false) {
       </SettingsField>
       <div class="ramp" :style="{ background: rampCss(draft.ramp) }"></div>
       <div class="range-labels">
-        <span>{{ displayedRange?.min.toLocaleString() }}</span
-        ><span>{{ displayedRange?.max.toLocaleString() }}</span>
+        <span>{{ displayedRange?.min.toLocaleString() }}</span><span>{{ displayedRange?.max.toLocaleString() }}</span>
       </div>
       <SettingsField label="Range" label-for="cloud-style-range">
         <select id="cloud-style-range" v-model="draft.range" class="field-input field-select">

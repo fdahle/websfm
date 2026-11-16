@@ -29,8 +29,7 @@ const emit = defineEmits(['back', 'stop'])
     @close="emit('stop')"
   >
     <div class="tb-line">
-      Marking <strong>{{ props.name }}</strong
-      >: click the point in {{ needed }} photos.
+      Marking <strong>{{ props.name }}</strong>: click the point in {{ needed }} photos.
     </div>
     <div class="tb-line sb-progress">
       <span v-for="i in needed" :key="i" class="sb-dot" :class="{ on: i <= marked.length }" />

@@ -49,8 +49,7 @@ const source = computed(() => SOURCES[props.kind] ?? SOURCES.colmap)
     <p class="hint">{{ source.hint }}</p>
     <div class="choices" :style="{ gridTemplateColumns: `repeat(${source.choices.length}, 1fr)` }">
       <button v-for="c in source.choices" :key="c.id" class="choice" type="button" @click="$emit('choose', c.id)">
-        <strong>{{ c.title }}</strong
-        ><span>{{ c.text }}</span>
+        <strong>{{ c.title }}</strong><span>{{ c.text }}</span>
       </button>
     </div>
     <template #footer><button class="btn" @click="$emit('close')">Cancel</button></template>

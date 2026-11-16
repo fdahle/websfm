@@ -21,8 +21,7 @@ const number = (value) => Number(value).toLocaleString(undefined, { maximumFract
       <template v-else-if="layer.legend.ramp">
         <div class="ramp" :style="{ background: rampCss(layer.legend.ramp) }"></div>
         <div class="legend-range">
-          <span>{{ number(layer.legend.min) }}</span
-          ><span>{{ number(layer.legend.max) }}</span>
+          <span>{{ number(layer.legend.min) }}</span><span>{{ number(layer.legend.max) }}</span>
         </div>
       </template>
       <div v-else-if="layer.legend.field === 'single'" class="legend-entry">

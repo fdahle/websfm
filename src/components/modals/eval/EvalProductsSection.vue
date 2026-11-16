@@ -195,8 +195,7 @@ const hist = computed(() => {
           />
           <div class="legend-bar" :style="{ background: legendGradient }"></div>
           <div class="legend-labels">
-            <span>{{ fmt(-range) }}</span
-            ><span>0</span><span>{{ fmt(range) }} {{ unit }}</span>
+            <span>{{ fmt(-range) }}</span><span>0</span><span>{{ fmt(range) }} {{ unit }}</span>
           </div>
           <div class="viz-foot">Blue: DEM below the reference · red: above · grey: no reference height</div>
         </figure>
@@ -216,8 +215,7 @@ const hist = computed(() => {
             <div class="hist-mark median" :style="{ left: hist.medianAt + '%' }" title="median"></div>
           </div>
           <div class="legend-labels">
-            <span>{{ fmt(hist.lo) }}</span
-            ><span>{{ fmt(hist.hi) }} {{ unit }}</span>
+            <span>{{ fmt(hist.lo) }}</span><span>{{ fmt(hist.hi) }} {{ unit }}</span>
           </div>
           <div class="viz-foot">
             Dashed: zero · solid: median.
