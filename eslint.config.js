@@ -71,6 +71,8 @@ export default [
   {
     files: [
       'src/components/I18nText.vue',
+      'src/components/layout/Ribbon.vue',
+      'src/components/layout/RibbonMenu.vue',
       'src/components/modals/cloud/FilterCloudModal.vue',
       'src/components/modals/ui/AdvancedDisclosure.vue',
       'src/components/modals/ui/ChoiceCards.vue',
@@ -122,6 +124,9 @@ export default [
             'px',
             'm',
             '0–255',
+            '−',
+            '+',
+            'WebSfM',
           ],
           attributes: {
             '/.+/': ['title', 'aria-label', 'aria-placeholder', 'aria-description', 'placeholder', 'alt'],

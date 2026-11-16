@@ -2,7 +2,7 @@
 // new product goes. By default it is added beside the existing ones and becomes the
 // main one; Replace puts it in the main one's place (core/products/productSet.js).
 // Messages (core/i18n): the words are in core/i18n/<lang>/dialog.js ▸ output.
-import { msg } from '../i18n/index.js'
+import { msg } from '../i18n/msg.js'
 
 /**
  * @param {boolean} replace the dialog's Replace option

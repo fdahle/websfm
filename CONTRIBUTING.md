@@ -188,12 +188,19 @@ change to every component:
 - **In a template:** `{{ t('filterCloud.run') }}`, `:title="t('…')"`, from
   `composables/useI18n.js`. A message with a bold menu path is `<I18nText k="…" />`,
   with `<strong>…</strong>` in its catalogue text.
-- **From `src/core/` and the workers:** return a message, `msg('area.key', params)`,
+- **From `src/core/` and the workers:** return a message, `msg('area.key', params)`
+  (from `core/i18n/msg.js`, which carries no catalogues),
   never a finished sentence; the UI shows it with `tx(m)`, and `SettingsStep`,
   `PresetCards` and `SourcePicker` take one as it is. A parameter may be a number,
   another message, or an array of messages (shown as a list: "a and b").
 - **Numbers on screen** are message parameters, so they get the language's decimal sign.
   Numbers written to files stay `toFixed`, which always writes a dot.
+- **The ribbon** stays worded in its tables (`core/help/ribbonTabs.js`, the reasons in
+  `commands.js`); `core/help/ribbonText.js` gives each text its key
+  (`ribbon.cmd.<id>.label`, `ribbon.group.<name>` …) and another language words them in
+  `<lang>/ribbon.js`. A reused entry that changes its label gives it a `labelId`. A menu
+  path in a message (`Reconstruct ▸ Dense Model`) must name the ribbon as that language
+  words it; a unit test checks.
 - **A link or button inside a sentence** is a tag the component draws through a slot,
   `Import as <first>{first}</first>` with `<template #first="{ text }">`, so each
   language keeps its own word order.

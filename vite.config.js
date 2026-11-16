@@ -189,6 +189,10 @@ export default defineConfig(({ mode }) => {
         'Cross-Origin-Opener-Policy': 'same-origin',
         'Cross-Origin-Embedder-Policy': 'require-corp',
       },
+      // Bench output, the Rust build and the private notes change nothing the app
+      // serves; watching their ~20,000 entries ran a second dev server (Playwright
+      // beside `npm run dev`) out of the system's file watchers (ENOSPC).
+      watch: { ignored: ['**/bench-out/**', '**/crates/target/**', '**/dev/**', '**/test-results/**'] },
     },
     preview: {
       headers: {

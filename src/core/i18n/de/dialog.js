@@ -1,10 +1,9 @@
 // Deutsch: die Teile, die viele Dialoge teilen (en/dialog.js ist die Referenz).
-// Menüpfade bleiben englisch, solange das Menüband nicht übersetzt ist.
 export default {
   noSource: {
     cloud:
-      'Noch keine dichte Punktwolke. Mit <strong>Reconstruct ▸ Dense Model</strong> erstellen oder eine importieren.',
-    mesh: 'Noch kein Mesh. Mit <strong>Reconstruct ▸ Mesh</strong> erstellen oder eines importieren.',
+      'Noch keine dichte Punktwolke. Mit <strong>Rekonstruktion ▸ Dense-Modell</strong> erstellen oder eine importieren.',
+    mesh: 'Noch kein Mesh. Mit <strong>Rekonstruktion ▸ Mesh</strong> erstellen oder eines importieren.',
   },
 
   rasterSize: {
@@ -23,7 +22,7 @@ export default {
     cell: '{whole, select, yes {{g, number, ::precision-integer}} other {{g, number, ::@@@}}}',
     capped:
       'Ein Raster hat höchstens {max, number} px je Seite, daher nutzt der Lauf {gsd} statt {requested} {unit}. ' +
-      'Für eine feinere Zelle den Bereich begrenzen (Tools ▸ Model ▸ Region).',
+      'Für eine feinere Zelle den Bereich begrenzen (Werkzeuge ▸ Modell ▸ Region).',
   },
 
   output: {
@@ -89,7 +88,7 @@ export default {
 
   crs: {
     inDegrees: '{crs} ist in Grad, daher kann das Modell nicht darauf eingepasst werden.',
-    chooseProjected: 'Wählen Sie ein projiziertes CRS in Project Settings.',
+    chooseProjected: 'Wählen Sie ein projiziertes CRS in den Projekteinstellungen.',
     productsNeedProjected: 'DEMs und Orthofotos lassen sich nur in einem projizierten CRS georeferenzieren.',
     use: '{code} · {name} verwenden',
     from:

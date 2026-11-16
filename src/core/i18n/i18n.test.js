@@ -102,6 +102,33 @@ describe('catalogues', () => {
     }
   })
 
+  // A menu path in a message ("Reconstruct ▸ Dense Model") names the ribbon as that
+  // language words it: on each side of every ▸ stands a tab, group, section or command
+  // label of the same language. A renamed button fails here, not in a user's hands.
+  it('name menu paths as the ribbon words them, in each language', () => {
+    const bad = []
+    for (const lang of Object.keys(CATALOGS)) {
+      const text = (key) => render(msg(key), lang).replace(/-\n/g, '').replace(/\n/g, ' ').replace(/…$/, '')
+      const names = Object.keys(en)
+        .filter((k) => /^ribbon\.(tab|group|section)\.|^ribbon\.cmd\..*\.label$/.test(k))
+        .map(text)
+        .sort((a, b) => b.length - a.length)
+      for (const [key, source] of Object.entries(CATALOGS[lang])) {
+        if (key.startsWith('ribbon.cmd.') && !key.endsWith('.tip')) continue
+        const plain = source.replace(/<\/?\w+>/g, '')
+        let at = plain.indexOf('▸')
+        while (at >= 0) {
+          const before = plain.slice(0, at).replace(/\s*▾?\s*$/, '')
+          const after = plain.slice(at + 1).trimStart()
+          if (!names.some((n) => before.endsWith(n)) || !names.some((n) => after.startsWith(n)))
+            bad.push(`${lang} ${key}: …${plain.slice(Math.max(0, at - 25), at + 30)}…`)
+          at = plain.indexOf('▸', at + 1)
+        }
+      }
+    }
+    expect(bad).toEqual([])
+  })
+
   // Every key the code names exists in English: t('a.b'), msg('a.b'), <I18nText k="a.b">.
   // A key built in a template literal (`a.${x}`) needs some key under its fixed prefix.
   it('have every key the code names', () => {

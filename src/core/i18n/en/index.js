@@ -3,5 +3,6 @@
 import common from './common.js'
 import dialog from './dialog.js'
 import filterCloud from './filterCloud.js'
+import ribbon from './ribbon.js'
 
-export default { common, dialog, filterCloud }
+export default { common, dialog, filterCloud, ribbon }

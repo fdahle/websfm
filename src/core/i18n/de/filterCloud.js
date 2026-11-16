@@ -1,5 +1,4 @@
-// Deutsch: Punktwolke filtern (en/filterCloud.js ist die Referenz). Menüpfade bleiben
-// englisch, solange das Menüband nicht übersetzt ist.
+// Deutsch: Punktwolke filtern (en/filterCloud.js ist die Referenz).
 export default {
   title: {
     filter: 'Punktwolke filtern',
@@ -7,14 +6,14 @@ export default {
     voxel: 'Punktwolke ausdünnen',
   },
   noCloud:
-    'Keine dichte Punktwolke vorhanden. Erstellen Sie zuerst eine (<strong>Reconstruct ▸ Dense Model</strong>) ' +
+    'Keine dichte Punktwolke vorhanden. Erstellen Sie zuerst eine (<strong>Rekonstruktion ▸ Dense-Modell</strong>) ' +
     'oder importieren Sie eine. Um das dünne Modell zu bereinigen, nutzen Sie ' +
-    '<strong>Tools ▸ Model ▾ ▸ Gradual selection…</strong>.',
+    '<strong>Werkzeuge ▸ Modell ▾ ▸ Schrittweise Auswahl…</strong>.',
   sourceHint: 'Der Filter erzeugt eine neue Punktwolke; diese bleibt unverändert.',
   run: 'Filtern',
   resultName: '{name} (gefiltert)',
   disabled: {
-    noCloud: 'Noch keine dichte Punktwolke: mit Reconstruct ▸ Dense Model erstellen oder eine importieren',
+    noCloud: 'Noch keine dichte Punktwolke: mit Rekonstruktion ▸ Dense-Modell erstellen oder eine importieren',
     noFilter: 'Mindestens einen Filter einschalten',
   },
   preset: {

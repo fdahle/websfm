@@ -10,6 +10,7 @@
 // English (`render(m)` without a language), so a report reads the same to us whatever the
 // user's language.
 import { IntlMessageFormat } from 'intl-messageformat'
+import { msg, isMsg } from './msg.js'
 import en from './en/index.js'
 import de from './de/index.js'
 
@@ -33,11 +34,10 @@ export function flatten(tree, prefix = '', out = {}) {
   return out
 }
 
-// A message: its catalogue key and its parameters. A parameter may be a number (the
-// message formats it), a string (left as it is: a unit, a name), another message, or an
-// array of them (joined as a list: "a, b and c").
-export const msg = (key, params) => (params ? { key, params } : { key })
-export const isMsg = (v) => v != null && typeof v === 'object' && typeof v.key === 'string'
+// A message: its catalogue key and its parameters (msg.js). A parameter may be a number
+// (the message formats it), a string (left as it is: a unit, a name), another message,
+// or an array of them (joined as a list: "a, b and c").
+export { msg, isMsg }
 
 // Inline tags a message may hold, as rich text: the UI draws them (`I18nText.vue`),
 // plain rendering drops the tag and keeps its text.

@@ -6,7 +6,7 @@
 // Pure data module: no Vue/Pinia/OPFS, so it bundles into the worker unchanged and
 // core code can import it directly. Card labels and blurbs are messages (core/i18n):
 // their words are in the catalogues.
-import { msg } from './i18n/index.js'
+import { msg } from './i18n/msg.js'
 
 // Tie-point (feature) detection — SIFT. Mirrored by DetectFeaturesModal.vue's
 // `siftSettings` ref. NOTE: the worker op (workers/ops/keypoints.js) keeps its own,

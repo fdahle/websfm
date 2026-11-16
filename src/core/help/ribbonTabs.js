@@ -1438,7 +1438,10 @@ export const PICTURE_TAB = {
       commands: [
         {
           id: 'img-toggle-keypoints',
-          labelFn: (s) => (s?.kpCount ? `KP\n${s.kpCount}` : 'Keypoints'),
+          label: 'Keypoints',
+          // With keypoints detected, the button counts them (`countKey` of the image view).
+          countLabel: 'KP\n{n}',
+          countKey: 'kpCount',
           icon: 'keypoints',
           activeKey: 'showKeypoints',
           disableKey: 'kpNotDone',
@@ -1497,8 +1500,9 @@ export function rasterTab(r) {
             label: isOrtho ? 'Orthophoto' : 'DEM',
             commands: [
               // The Reconstruct / Export commands themselves, relabelled.
-              { ...(isOrtho ? GEN_ORTHO : GEN_DEM), label: 'Rebuild' },
-              { ...(isOrtho ? EXPORT_ORTHO : EXPORT_DEM), label: 'Export', icon: 'download' },
+              // `labelId`: the relabel's own catalogue key (core/help/ribbonText.js).
+              { ...(isOrtho ? GEN_ORTHO : GEN_DEM), label: 'Rebuild', labelId: 'raster-rebuild' },
+              { ...(isOrtho ? EXPORT_ORTHO : EXPORT_DEM), label: 'Export', labelId: 'raster-export', icon: 'download' },
               { id: 'raster-symbology', label: 'Symbology…', icon: 'settings' },
               { id: 'raster-toggle-map', label: 'In\nLayers', icon: 'layers', activeKey: 'rasterVisible' },
               { id: 'raster-remove', label: 'Remove', icon: 'remove', danger: true },
@@ -1548,7 +1552,7 @@ export function allGroups() {
 
 /** A ribbon label as one line of text: 'Geo-\nreference' → 'Georeference'. */
 export function labelText(cmd) {
-  const label = cmd.label ?? cmd.labelFn?.(null) ?? cmd.id
+  const label = cmd.label ?? cmd.id
   return label.replace(/-\n/g, '').replace(/\n/g, ' ')
 }
 

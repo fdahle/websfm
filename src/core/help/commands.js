@@ -106,6 +106,18 @@ export function commandReason(cmd, state) {
   return guardReason(cmd?.needs, state)
 }
 
+/**
+ * The same reason as a catalogue key (core/help/ribbonText.js), for the ribbon to word
+ * in the user's language; '' when the command can run. commandReason stays English for
+ * the console.
+ */
+export function commandReasonKey(cmd, state) {
+  if (cmd?.disabled) return 'ribbon.reason.comingSoon'
+  if (cmd?.aerialOnly && state?.sceneType === 'object') return 'ribbon.reason.aerialOnly'
+  const need = unmetNeed(cmd?.needs, state)
+  return need ? `ribbon.need.${need}` : ''
+}
+
 // Ribbon command id → its table entry (the first one; duplicates are the same
 // shared object, see ribbonTabs.js).
 const RIBBON_BY_ID = new Map()
@@ -409,11 +421,17 @@ export function getCommand(name) {
  * Same wording as the ribbon's disabled-button tooltip.
  */
 export function guardReason(needs, state) {
+  const need = unmetNeed(needs, state)
+  return need ? NEED_CHECKS[need].reason : ''
+}
+
+/** The first of `needs` that `state` does not meet, or null. */
+export function unmetNeed(needs, state) {
   for (const need of needs ?? []) {
     const check = NEED_CHECKS[need]
-    if (check && !check.ok(state ?? {})) return check.reason
+    if (check && !check.ok(state ?? {})) return need
   }
-  return ''
+  return null
 }
 
 /**

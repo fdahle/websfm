@@ -4,7 +4,9 @@ import Icon from '../Icon.vue'
 import RibbonMenu from './RibbonMenu.vue'
 import BetaBadge from './BetaBadge.vue'
 import { newCount } from '../../composables/useWhatsNew.js'
-import { commandReason } from '../../core/help/commands.js'
+import { commandReasonKey } from '../../core/help/commands.js'
+import { cmdKey, slug } from '../../core/help/ribbonText.js'
+import { useI18n } from '../../composables/useI18n.js'
 import {
   TABS,
   CAMERA_GROUP,
@@ -21,6 +23,20 @@ import {
 // its floating toolbox in the view. Prerequisites go through the one shared
 // guard table (core/help/commands.js NEED_CHECKS), so the ribbon and the console
 // command line can never disagree about why something is unavailable.
+// Words: the tables stay English; this draws them in the user's language through the
+// catalogue keys core/help/ribbonText.js gives them (ribbon.cmd.<id>.label …).
+const { t, tx, locale } = useI18n()
+const words = {
+  label: (cmd) => t(cmdKey(cmd, 'label')),
+  tip: (cmd) => (cmd.tip ? t(cmdKey(cmd, 'tip')) : null),
+  blurb: (cmd) => (cmd.blurb ? t(cmdKey(cmd, 'blurb')) : cmd.blurb),
+  section: (text) => t(`ribbon.section.${slug(text)}`),
+  group: (text) => t(`ribbon.group.${slug(text)}`),
+  tab: (text) => t(`ribbon.tab.${slug(text)}`),
+}
+// A stepper's aria-label names it mid-sentence: lower case in English ("Smaller point
+// size"); German keeps its nouns capitalised.
+const midSentence = (label) => (locale.value === 'en' ? label.toLowerCase() : label)
 const props = defineProps({
   activeView: { type: String, default: 'viewer' },
   // App.vue `commandState`: the counts/flags NEED_CHECKS reads.
@@ -168,29 +184,27 @@ function isDisabled(cmd) {
 
 function disabledReason(cmd) {
   // Coming-soon, aerial-only and prerequisites: the console's checks too.
-  const base = commandReason(cmd, { ...props.state, sceneType: props.sceneType })
-  if (base) return base
+  const base = commandReasonKey(cmd, { ...props.state, sceneType: props.sceneType })
+  if (base) return t(base)
   const m = measureCtx.value?.measure
   // On the map, profile and volume move to its DEM (ViewerMap setMeasureTool).
   const onDem = measureCtx.value?.kind === 'dem'
   if (cmd.demOnly && !onDem && (props.activeRaster || !props.mapMeasure?.targets?.some((t) => t.kind === 'dem')))
-    return props.activeRaster ? 'Needs a DEM — this is an orthophoto' : 'Needs a DEM on the map'
-  if (cmd.measureTool && !m?.available)
-    return 'Measuring needs a current frame with linear coordinates (not geographic, not an outdated frame)'
-  if (cmd.measureTool && cmd.demOnly && onDem && !m?.heights)
-    return 'Needs the DEM elevation values, which are not loaded yet'
-  if (cmd.needsSavedMeasurements && !m?.savedCount) return 'No saved measurements on this raster yet'
+    return props.activeRaster ? t('ribbon.ui.needsDemNotOrtho') : t('ribbon.ui.needsDemOnMap')
+  if (cmd.measureTool && !m?.available) return t('ribbon.ui.measureNeedsFrame')
+  if (cmd.measureTool && cmd.demOnly && onDem && !m?.heights) return t('ribbon.ui.needsDemHeights')
+  if (cmd.needsSavedMeasurements && !m?.savedCount) return t('ribbon.ui.noSavedMeasurements')
   // A computed product in the local frame has no map position (productLayers.js).
-  if (cmd.activeKey === 'rasterVisible' && props.activeRaster?.mapBlocked) return props.activeRaster.mapBlocked
+  if (cmd.activeKey === 'rasterVisible' && props.activeRaster?.mapBlocked) return tx(props.activeRaster.mapBlocked)
   if (cmd.id === 'raster-style' && props.activeRaster?.imported && !props.activeRaster.styleable)
-    return 'Nothing to style — an 8-bit raster with up to 3 bands is shown as it is'
+    return t('ribbon.ui.nothingToStyle')
   if (cmd.basemap && props.viewState.mapBasemapReasons?.[cmd.basemap])
-    return props.viewState.mapBasemapReasons[cmd.basemap]
+    return tx(props.viewState.mapBasemapReasons[cmd.basemap])
   const s = props.imageViewState
-  if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return 'Detect keypoints first'
-  if (cmd.disableKey === 'noMask' && !s?.hasMask) return 'No mask available'
-  if (cmd.disableKey === 'noDepth' && !s?.hasDepth) return 'No depth map available'
-  if (cmd.disableKey === 'noGcps' && !s?.gcpCount) return 'No GCPs on this image'
+  if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return t('ribbon.ui.detectKeypointsFirst')
+  if (cmd.disableKey === 'noMask' && !s?.hasMask) return t('ribbon.ui.noMask')
+  if (cmd.disableKey === 'noDepth' && !s?.hasDepth) return t('ribbon.ui.noDepth')
+  if (cmd.disableKey === 'noGcps' && !s?.gcpCount) return t('ribbon.ui.noGcps')
   return ''
 }
 
@@ -204,7 +218,15 @@ function menuRows(cmd) {
   return cmd.menu
     .filter((row) => row.section || !isHidden(row))
     .map((row) =>
-      row.section ? row : { ...row, reason: disabledReason(row), active: isToggleRow(row) ? isActive(row) : undefined },
+      row.section
+        ? { section: words.section(row.section) }
+        : {
+            ...row,
+            label: words.label(row),
+            blurb: words.blurb(row),
+            reason: disabledReason(row),
+            active: isToggleRow(row) ? isActive(row) : undefined,
+          },
     )
 }
 // A menu whose tool is running shows as on, so a mode entered from a menu is
@@ -220,7 +242,8 @@ function menuDisabledReason(cmd) {
 }
 
 function cmdLabel(cmd) {
-  return cmd.labelFn ? cmd.labelFn(props.imageViewState) : cmd.label
+  const n = cmd.countKey && props.imageViewState?.[cmd.countKey]
+  return n ? t(cmdKey(cmd, 'countLabel'), { n }) : words.label(cmd)
 }
 
 function run(cmd) {
@@ -248,7 +271,7 @@ function step(cmd, dir) {
       <button
         v-if="persistenceEnabled"
         class="project-btn"
-        :title="currentProjectName || 'Project'"
+        :title="currentProjectName || t('ribbon.ui.project')"
         @mousedown.stop
         @click="emit('command', 'open-project-picker')"
       >
@@ -265,20 +288,20 @@ function step(cmd, dir) {
         :class="{ active: tab.id === activeTab }"
         @click="activeTab = tab.id"
       >
-        {{ tab.label }}<span v-if="tabHasBadge(tab)" class="tab-dot" aria-label="new"></span>
+        {{ words.tab(tab.label) }}<span v-if="tabHasBadge(tab)" class="tab-dot" :aria-label="t('ribbon.ui.new')"></span>
       </button>
 
       <template v-if="activeImageId">
         <div class="ctx-separator"></div>
         <button class="tab ctx-tab" :class="{ active: activeTab === 'picture' }" @click="activeTab = 'picture'">
-          {{ activeImageName || 'Image' }}
+          {{ activeImageName || t('ribbon.ui.image') }}
         </button>
       </template>
 
       <template v-if="activeRaster">
         <div class="ctx-separator"></div>
         <button class="tab ctx-tab" :class="{ active: activeTab === 'raster' }" @click="activeTab = 'raster'">
-          {{ activeRaster.name || rasterTab.label }}
+          {{ activeRaster.name || words.tab(rasterTab.label) }}
         </button>
       </template>
     </div>
@@ -291,14 +314,14 @@ function step(cmd, dir) {
               <!-- A stacked pair of two half-height rows in one button's footprint -->
               <div v-if="item.pair" class="cmd-pair">
                 <template v-for="cmd in item.pair" :key="cmd.id">
-                  <div v-if="cmd.stepper" class="stepper" :title="cmd.label">
+                  <div v-if="cmd.stepper" class="stepper" :title="words.label(cmd)">
                     <Icon :name="cmd.icon" class="cmd-icon-sm" />
-                    <span class="cmd-label-sm stepper-label">{{ cmd.label }}</span>
+                    <span class="cmd-label-sm stepper-label">{{ words.label(cmd) }}</span>
                     <button
                       class="step-btn"
-                      :aria-label="`Smaller ${cmd.label.toLowerCase()}`"
+                      :aria-label="t('ribbon.ui.smaller', { what: midSentence(words.label(cmd)) })"
                       :disabled="stepperValue(cmd) <= cmd.min"
-                      :title="stepperValue(cmd) <= cmd.min ? 'Already the smallest' : null"
+                      :title="stepperValue(cmd) <= cmd.min ? t('ribbon.ui.smallest') : null"
                       @click="step(cmd, -1)"
                     >
                       −
@@ -306,9 +329,9 @@ function step(cmd, dir) {
                     <span class="step-val">{{ stepperText(cmd) }}</span>
                     <button
                       class="step-btn"
-                      :aria-label="`Larger ${cmd.label.toLowerCase()}`"
+                      :aria-label="t('ribbon.ui.larger', { what: midSentence(words.label(cmd)) })"
                       :disabled="stepperValue(cmd) >= cmd.max"
-                      :title="stepperValue(cmd) >= cmd.max ? 'Already the largest' : null"
+                      :title="stepperValue(cmd) >= cmd.max ? t('ribbon.ui.largest') : null"
                       @click="step(cmd, 1)"
                     >
                       +
@@ -320,7 +343,7 @@ function step(cmd, dir) {
                     class="cmd cmd-small"
                     :class="{ active: isActive(cmd), disabled: isDisabled(cmd) }"
                     :aria-disabled="isDisabled(cmd)"
-                    :title="isDisabled(cmd) ? disabledReason(cmd) : (cmd.tip ?? cmdLabel(cmd))"
+                    :title="isDisabled(cmd) ? disabledReason(cmd) : (words.tip(cmd) ?? cmdLabel(cmd))"
                     @click="run(cmd)"
                   >
                     <Icon :name="cmd.icon" class="cmd-icon-sm" />
@@ -330,7 +353,7 @@ function step(cmd, dir) {
               </div>
               <RibbonMenu
                 v-else-if="item.menu"
-                :label="item.label"
+                :label="words.label(item)"
                 :icon="item.icon"
                 :rows="menuRows(item)"
                 :reason="menuDisabledReason(item)"
@@ -343,7 +366,7 @@ function step(cmd, dir) {
                 class="cmd"
                 :class="{ active: isActive(item), danger: item.danger, disabled: isDisabled(item) }"
                 :aria-disabled="isDisabled(item)"
-                :title="isDisabled(item) ? disabledReason(item) : (item.tip ?? '')"
+                :title="isDisabled(item) ? disabledReason(item) : (words.tip(item) ?? '')"
                 @click="run(item)"
               >
                 <Icon :name="item.icon" class="cmd-icon" />
@@ -353,7 +376,7 @@ function step(cmd, dir) {
             </template>
           </div>
           <div class="group-label">
-            {{ group.label }}<span v-if="group.dynamic" class="group-badge">{{ group.dynamic }}</span>
+            {{ words.group(group.label) }}<span v-if="group.dynamic" class="group-badge">{{ group.dynamic }}</span>
           </div>
         </div>
       </template>

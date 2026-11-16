@@ -2,7 +2,7 @@
 // one-line effects under its numbered steps, in the order core/products/cloudEdit.js
 // runs the enabled filters — range, voxel, isolated clusters, statistical outliers.
 // Each line is a message (core/i18n); its words are in core/i18n/<lang>/filterCloud.js.
-import { msg } from '../i18n/index.js'
+import { msg } from '../i18n/msg.js'
 
 const span = (lo, hi) => {
   const a = Number.isFinite(lo),
