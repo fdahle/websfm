@@ -11,10 +11,16 @@
 // user's language.
 import { IntlMessageFormat } from 'intl-messageformat'
 import en from './en/index.js'
+import de from './de/index.js'
 
 // language id → { dotted key → ICU message }. Add a language here with its catalogue.
-export const CATALOGS = { en: flatten(en) }
-export const LANGUAGES = [{ id: 'en', label: 'English' }]
+export const CATALOGS = { en: flatten(en), de: flatten(de) }
+// A `preview` language is partly translated: it is never picked from the browser's
+// languages, only chosen by hand (the console's `lang`), until it covers the app.
+export const LANGUAGES = [
+  { id: 'en', label: 'English' },
+  { id: 'de', label: 'Deutsch', preview: true },
+]
 export const FALLBACK = 'en'
 
 // Nested catalogue objects → { 'area.group.name': message }.
@@ -77,11 +83,13 @@ export function render(m, locale = FALLBACK, catalogs = CATALOGS) {
 }
 
 // The same, keeping inline tags: an array of strings and { tag, children } parts.
-export function renderRich(m, locale = FALLBACK, catalogs = CATALOGS) {
+// `extraTags` names more tags the caller draws itself (I18nText's slots: a link or a
+// button inside a sentence, `Import as <pose>{pose}</pose>`).
+export function renderRich(m, locale = FALLBACK, catalogs = CATALOGS, extraTags = []) {
   if (!isMsg(m)) return [m ?? '']
   const f = formatter(m.key, locale, catalogs)
   if (!f) return [m.key]
-  const tags = Object.fromEntries(RICH_TAGS.map((tag) => [tag, (children) => ({ tag, children })]))
+  const tags = Object.fromEntries([...RICH_TAGS, ...extraTags].map((tag) => [tag, (children) => ({ tag, children })]))
   const out = f.format(params(m.params, locale, catalogs, tags))
   return Array.isArray(out) ? out : [out]
 }

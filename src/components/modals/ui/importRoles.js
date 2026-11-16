@@ -7,10 +7,11 @@
    width:100% clips whatever the user just picked. Reserve room for the SELECTED
    label only: the column grows with the choice, instead of every column being
    padded out to the widest option in the list. */
+import { tx } from '../../../composables/useI18n.js'
 
 /** @param {string} roleId @param {{id:string,label:string}[]} options */
 export function roleSelectStyle(roleId, options) {
-  const label = options.find((o) => o.id === roleId)?.label ?? ''
+  const label = tx(options.find((o) => o.id === roleId)?.label ?? '')
   // ch is generous for a proportional font, and this is only a floor.
   // +34px ≈ horizontal padding + borders + the dropdown arrow.
   return { minWidth: `calc(${Math.max(label.length, 6)}ch + 34px)` }

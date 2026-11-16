@@ -1,4 +1,6 @@
 <script setup>
+// A role's label: a string or a message (core/i18n).
+import { tx } from '../../../composables/useI18n.js'
 import { roleSelectStyle } from './importRoles.js'
 
 // The column-mapping preview of the delimited-text import dialogs (GcpImportModal,
@@ -29,7 +31,7 @@ const emit = defineEmits(['set-role']) // (columnIndex, roleId)
               :value="columnRoles[i - 1] || 'ignore'"
               @change="emit('set-role', i - 1, $event.target.value)"
             >
-              <option v-for="o in roleOptions" :key="o.id" :value="o.id">{{ o.label }}</option>
+              <option v-for="o in roleOptions" :key="o.id" :value="o.id">{{ tx(o.label) }}</option>
             </select>
           </th>
         </tr>

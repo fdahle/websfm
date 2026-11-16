@@ -3,14 +3,15 @@
 // SettingsFields, so the modal reads as purpose-grouped sections ("Registration",
 // "Optimization", …) rather than a flat divided checklist. Replaces the bare-divider
 // SettingsSection for grouped content. Renders the heading then its slotted fields.
+import { tx } from '../../../composables/useI18n.js'
 defineProps({
-  title: { type: String, required: true },
+  title: { type: [String, Object], required: true }, // a string or a message (core/i18n)
 })
 </script>
 
 <template>
   <div class="settings-group">
-    <div class="settings-group-title">{{ title }}</div>
+    <div class="settings-group-title">{{ tx(title) }}</div>
     <div class="settings-group-fields"><slot /></div>
   </div>
 </template>

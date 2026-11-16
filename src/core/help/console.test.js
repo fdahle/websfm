@@ -309,3 +309,23 @@ describe('consoleSettings', () => {
     expect(tuningKeys('sfm')).toContain('sfm.baSolver.pcgRelTol')
   })
 })
+
+describe('lang', () => {
+  const languages = () => [
+    { id: 'en', label: 'English' },
+    { id: 'de', label: 'Deutsch', preview: true },
+  ]
+  it('shows the language and the choices, a preview one marked', () => {
+    const env = fakeEnv({ language: () => 'en', languages })
+    runConsoleLine('lang', env)
+    expect(last(env)[1]).toBe('Language: en. Available: en (English), de (Deutsch, preview: partly translated)')
+  })
+  it('sets a language it has, and refuses one it lacks', () => {
+    const env = fakeEnv({ language: () => 'en', languages, setLanguage: vi.fn() })
+    runConsoleLine('language DE', env)
+    expect(env.setLanguage).toHaveBeenCalledWith('de')
+    runConsoleLine('lang fr', env)
+    expect(env.setLanguage).toHaveBeenCalledTimes(1)
+    expect(last(env)[0]).toBe('error')
+  })
+})

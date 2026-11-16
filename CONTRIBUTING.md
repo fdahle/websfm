@@ -194,14 +194,25 @@ change to every component:
   another message, or an array of messages (shown as a list: "a and b").
 - **Numbers on screen** are message parameters, so they get the language's decimal sign.
   Numbers written to files stay `toFixed`, which always writes a dot.
+- **A link or button inside a sentence** is a tag the component draws through a slot,
+  `Import as <first>{first}</first>` with `<template #first="{ text }">`, so each
+  language keeps its own word order.
+- **Languages:** `src/core/i18n/<lang>/` holds a language's catalogue; a key it lacks
+  shows in English. A `preview` language (German, for now) is never picked from the
+  browser's language, only by typing `lang de` in the command line, until it covers
+  the app. Add the German for the keys you add when you can. German keeps a technical
+  term in English where people in the field say it in English (Outlier, Preset, GCP,
+  GSD, Mesh, DEM, Cluster); everyday words and the sentences around them are German
+  (*Abbrechen*, *Punktwolke*, *Ausgabe*).
 - **Logs, console commands and bug reports stay in English.**
 - **Tests check the English:** render with `renderAll(…)` before comparing. The unit tests
   fail on a key the code names that the English catalogue lacks, a message that does not
   parse, another language's message with different arguments, and a short fact over
   `SHORT_MAX` in any language.
-- **A converted `.vue` file** joins the `vue/no-bare-strings-in-template` list in
-  `eslint.config.js`, so bare English in its template fails the lint from then on. A new
-  dialog or component is written this way from the start.
+- **A converted file** joins the `vue/no-bare-strings-in-template` list in
+  `eslint.config.js`: bare English in its template fails the lint, and English in its
+  template expressions or script fails `src/components/bareText.test.js`. A new dialog
+  or component is written this way from the start.
 
 ## Menu labels
 

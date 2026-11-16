@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { formatLatLon } from '../../../core/crsSuggest.js'
+import { t } from '../../../composables/useI18n.js'
 
 // A quiet line under a CRS control while the project CRS is geographic: why a
 // georeferenced product is impossible in degrees, plus a one-click projected CRS
@@ -15,10 +16,12 @@ const props = defineProps({
 })
 const emit = defineEmits(['apply'])
 
-const where = computed(() =>
+const fromLine = computed(() =>
   props.suggestion
-    ? `${props.suggestion.count.toLocaleString()} camera position${props.suggestion.count === 1 ? '' : 's'} around ` +
-      formatLatLon(props.suggestion.lat, props.suggestion.lon)
+    ? t('dialog.crs.from', {
+        count: props.suggestion.count,
+        where: formatLatLon(props.suggestion.lat, props.suggestion.lon),
+      })
     : '',
 )
 </script>
@@ -27,16 +30,16 @@ const where = computed(() =>
   <div class="crs-suggestion">
     <span class="reason">
       <template v-if="context === 'product'">
-        {{ currentCrs }} is in degrees, so the model cannot be fitted to it.
-        {{ suggestion ? '' : 'Choose a projected CRS in Project Settings.' }}
+        {{ t('dialog.crs.inDegrees', { crs: currentCrs }) }}
+        {{ suggestion ? '' : t('dialog.crs.chooseProjected') }}
       </template>
-      <template v-else> DEMs and orthophotos can only be georeferenced in a projected CRS. </template>
+      <template v-else> {{ t('dialog.crs.productsNeedProjected') }} </template>
     </span>
     <template v-if="suggestion">
       <button type="button" class="link-btn" @click="emit('apply', suggestion)">
-        Use {{ suggestion.code }} · {{ suggestion.name }}
+        {{ t('dialog.crs.use', { code: suggestion.code, name: suggestion.name }) }}
       </button>
-      <span class="reason">From {{ where }}. Changing the CRS reprojects existing positions and GCPs.</span>
+      <span class="reason">{{ fromLine }}</span>
     </template>
   </div>
 </template>

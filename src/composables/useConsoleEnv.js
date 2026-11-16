@@ -8,6 +8,7 @@ import { useMeasurementsStore } from '../stores/useMeasurementsStore.js'
 import { useWorkflowsStore } from '../stores/useWorkflowsStore.js'
 import { tuningOverrides, setTuningOverride } from '../stores/tuningOverrides.js'
 import { useLog } from './useLog.js'
+import { useI18n } from './useI18n.js'
 
 const SOURCE = 'Console'
 
@@ -20,6 +21,7 @@ const SOURCE = 'Console'
 // (useWorkflowWiring), matchStats (useWorkspaceState).
 export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchStats }) {
   const { log, clear } = useLog()
+  const i18n = useI18n()
   const imagesStore = useImagesStore()
   const { images } = storeToRefs(imagesStore)
   const matchesStore = useMatchesStore()
@@ -133,6 +135,9 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
     },
     setPairEnabled: (pid, on) => matchesStore.setPairEnabled(pid, on),
     selectImage: (id) => imagesStore.selectImage(id),
+    language: () => i18n.locale.value,
+    languages: () => i18n.languages,
+    setLanguage: (id) => i18n.setLanguage(id),
     tuning: { get: tuningOverrides, set: setTuningOverride },
   }
 }

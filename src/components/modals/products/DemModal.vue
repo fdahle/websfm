@@ -366,7 +366,7 @@ provideStepLayout('dem')
       v-model="settings.replaceMain"
       step="5"
       op="dem"
-      noun="DEM"
+      kind="dem"
       :plan="output"
       :default-value="DEM_DEFAULTS.replaceMain"
     />

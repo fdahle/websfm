@@ -1,4 +1,5 @@
 <script setup>
+import { t, tx } from '../../../composables/useI18n.js'
 import { ref, watch, useSlots } from 'vue'
 import { useVirtualList } from '../../../composables/useVirtualList.js'
 import { useTableSort } from '../../../composables/useTableSort.js'
@@ -20,7 +21,8 @@ const props = defineProps({
   rows: { type: Array, default: () => [] },
   sortKey: { type: String, default: null },
   sortDir: { type: String, default: 'desc' }, // 'asc' | 'desc'
-  emptyText: { type: String, default: 'Nothing to show.' },
+  // A string or a message (core/i18n); a column's `label` too.
+  emptyText: { type: [String, Object], default: '' },
   // Extra classes per row, e.g. the one under review: (row) => ({ active: … }).
   rowClass: { type: Function, default: null },
 })
@@ -105,7 +107,7 @@ function fmt(col, row) {
             :class="[col.align ? `align-${col.align}` : '', { sortable: col.sortable !== false }]"
             @click="toggle(col)"
           >
-            {{ col.label }}<span v-if="col.sortable !== false" class="dt-arrow">{{ arrow(col) }}</span>
+            {{ tx(col.label) }}<span v-if="col.sortable !== false" class="dt-arrow">{{ arrow(col) }}</span>
           </th>
         </tr>
       </thead>
@@ -137,7 +139,7 @@ function fmt(col, row) {
         </tr>
       </tbody>
     </table>
-    <div v-else class="dt-empty">{{ emptyText }}</div>
+    <div v-else class="dt-empty">{{ tx(emptyText) || t('common.nothingToShow') }}</div>
   </div>
 </template>
 

@@ -3,6 +3,8 @@
 // detector-row/detector-btn pattern. v-model binds the selected option id.
 //   options: [{ id, label, disabled?, reason? }]   // a disabled option can't be selected;
 //   `reason` is its tooltip, saying why (CONTRIBUTING ▸ Disabled controls say why)
+// An option's label and reason: a string or a message (core/i18n).
+import { tx } from '../../../composables/useI18n.js'
 defineProps({
   modelValue: { type: [String, Number, Boolean], default: null },
   options: { type: Array, required: true },
@@ -20,10 +22,10 @@ defineEmits(['update:modelValue'])
       :class="{ active: modelValue === o.id }"
       :aria-pressed="modelValue === o.id"
       :disabled="o.disabled"
-      :title="o.disabled ? o.reason || null : null"
+      :title="o.disabled ? tx(o.reason) || null : null"
       @click="!o.disabled && $emit('update:modelValue', o.id)"
     >
-      {{ o.label }}
+      {{ tx(o.label) }}
     </button>
   </div>
 </template>

@@ -367,8 +367,7 @@ provideStepLayout('mesh')
       v-model="settings.replaceMain"
       step="6"
       op="mesh"
-      noun="mesh"
-      nouns="meshes"
+      kind="mesh"
       :plan="output"
       :default-value="MESH_DEFAULTS.replaceMain"
     />

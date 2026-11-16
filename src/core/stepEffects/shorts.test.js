@@ -101,6 +101,8 @@ describe('step chain facts', () => {
       a: { short: 'a', long: 'Long a.' },
       warn: 'Careful.',
     })
-    expect(outputEffect(false, { main: 'DEM', replaceable: true, newName: 'DEM 2' }, 'DEM').short).toBe('adds "DEM 2"')
+    expect(renderAll(outputEffect(false, { main: 'DEM', replaceable: true, newName: 'DEM 2' }, 'dem')).short).toBe(
+      'adds "DEM 2"',
+    )
   })
 })

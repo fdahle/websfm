@@ -1,5 +1,7 @@
 <script setup>
 import { computed } from 'vue'
+import I18nText from '../../I18nText.vue'
+import { t } from '../../../composables/useI18n.js'
 
 // The "Import as" question of the delimited-text import dialogs (GcpImportModal,
 // CameraImportModal): the same file can be ground control, camera positions or
@@ -18,39 +20,36 @@ const props = defineProps({
 })
 const emit = defineEmits(['pick'])
 
-const KINDS = [
-  { id: 'gcp', label: 'Ground Control Points' },
-  { id: 'pose', label: 'Camera Positions' },
-  { id: 'sensor', label: 'Camera Intrinsics' },
-]
+const KINDS = ['gcp', 'pose', 'sensor']
 // Correction links list the camera kinds first: from one camera kind, the
 // likelier slip is the other camera kind.
 const CORRECTION_ORDER = ['pose', 'sensor', 'gcp']
 
-const labelOf = (id) => KINDS.find((k) => k.id === id)?.label ?? id
+const labelOf = (id) => (KINDS.includes(id) ? t(`dialog.importKind.${id}`) : id)
 const corrections = computed(() => CORRECTION_ORDER.filter((id) => id !== props.active))
 </script>
 
 <template>
   <template v-if="!declared">
-    <label class="section-label kind-label">Import as</label>
+    <label class="section-label kind-label">{{ t('dialog.importKind.label') }}</label>
     <div class="kind-toggle">
-      <button
-        v-for="k in KINDS"
-        :key="k.id"
-        class="kind-btn"
-        :class="{ active: k.id === active }"
-        @click="emit('pick', k.id)"
-      >
-        {{ k.label }}
+      <button v-for="k in KINDS" :key="k" class="kind-btn" :class="{ active: k === active }" @click="emit('pick', k)">
+        {{ labelOf(k) }}
       </button>
     </div>
   </template>
   <p v-else class="kind-note">
-    Importing as <b>{{ labelOf(active) }}</b>. Not right? Import as
-    <template v-for="(id, i) in corrections" :key="id"
-      >{{ i ? ' or ' : '' }}<button class="kind-link" @click="emit('pick', id)">{{ labelOf(id) }}</button></template
-    >.
+    <I18nText
+      k="dialog.importKind.declared"
+      :params="{ kind: labelOf(active), first: labelOf(corrections[0]), second: labelOf(corrections[1]) }"
+    >
+      <template #first="{ text }"
+        ><button class="kind-link" @click="emit('pick', corrections[0])">{{ text }}</button></template
+      >
+      <template #second="{ text }"
+        ><button class="kind-link" @click="emit('pick', corrections[1])">{{ text }}</button></template
+      >
+    </I18nText>
   </p>
 </template>
 

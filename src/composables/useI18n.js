@@ -1,8 +1,9 @@
 import { ref } from 'vue'
 import { FALLBACK, LANGUAGES, msg, render, renderAll, renderRich } from '../core/i18n/index.js'
 
-// The UI language, for this browser: the one chosen in Settings, else the first of the
-// browser's languages WebSfM has, else English. Text in a template is `t('area.key',
+// The UI language, for this browser: the one chosen (the console's `lang`; Settings
+// later), else the first of the browser's languages WebSfM has in full (not a
+// `preview` one), else English. Text in a template is `t('area.key',
 // params)`; a message that came from core (a step effect, a preset card) is `tx(m)`,
 // and a plain string passes through `tx` unchanged. Both read `locale`, so whatever
 // shows them redraws when the language changes. Rich text (bold menu paths) goes
@@ -18,7 +19,8 @@ function initial() {
     // Storage blocked: fall through to the browser's languages.
   }
   const wanted = typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])
-  return wanted.map((l) => String(l ?? '').slice(0, 2)).find((l) => IDS.includes(l)) ?? FALLBACK
+  const full = LANGUAGES.filter((l) => !l.preview).map((l) => l.id)
+  return wanted.map((l) => String(l ?? '').slice(0, 2)).find((l) => full.includes(l)) ?? FALLBACK
 }
 
 const locale = ref(initial())
@@ -38,7 +40,7 @@ export function setLanguage(id) {
 export const t = (key, params) => render(msg(key, params), locale.value)
 export const tx = (m) => render(m, locale.value)
 export const txAll = (obj) => renderAll(obj, locale.value)
-export const txRich = (m) => renderRich(m, locale.value)
+export const txRich = (m, extraTags) => renderRich(m, locale.value, undefined, extraTags)
 
 export function useI18n() {
   return { locale, t, tx, txAll, txRich, setLanguage, languages: LANGUAGES }

@@ -492,7 +492,7 @@ provideStepLayout('orthophoto')
       v-model="settings.replaceMain"
       step="6"
       op="orthophoto"
-      noun="orthophoto"
+      kind="ortho"
       :plan="output"
       :default-value="ORTHO_DEFAULTS.replaceMain"
     />

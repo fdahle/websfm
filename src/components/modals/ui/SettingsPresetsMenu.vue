@@ -2,6 +2,7 @@
 // The dialog header's Presets ▾ (composables/useDialogSettings.js): apply or delete a
 // saved preset, save the current settings as one, or reset to the defaults.
 import { computed, ref, nextTick, onBeforeUnmount } from 'vue'
+import { t } from '../../../composables/useI18n.js'
 
 // `dialog`: what useDialogSettings returned.
 const props = defineProps({ dialog: { type: Object, required: true } })
@@ -46,14 +47,20 @@ function save() {
       :aria-expanded="open"
       :title="
         source === 'last'
-          ? 'Opened on the settings of the last run in this project'
+          ? t('dialog.presets.titleLast')
           : source
-            ? `Preset ${source}`
-            : 'Save these settings, or bring back a saved set'
+            ? t('dialog.presets.titleNamed', { name: source })
+            : t('dialog.presets.title')
       "
       @click="toggle"
     >
-      Presets{{ source === 'last' ? ' · last run' : source ? ` · ${source}` : '' }} ▾
+      {{
+        source === 'last'
+          ? t('dialog.presets.buttonLast')
+          : source
+            ? t('dialog.presets.buttonNamed', { name: source })
+            : t('dialog.presets.button')
+      }}
     </button>
     <div v-if="open" class="presets-panel" role="menu">
       <ul v-if="presets.length" class="presets-list">
@@ -71,16 +78,32 @@ function save() {
           >
             {{ p.name }}
           </button>
-          <button type="button" class="presets-delete" :title="`Delete ${p.name}`" @click="emit('delete', p.name)">
+          <button
+            type="button"
+            class="presets-delete"
+            :title="t('dialog.presets.delete', { name: p.name })"
+            @click="emit('delete', p.name)"
+          >
             ×
           </button>
         </li>
       </ul>
-      <p v-else class="presets-empty">No saved presets for this dialog yet.</p>
+      <p v-else class="presets-empty">{{ t('dialog.presets.none') }}</p>
       <form class="presets-save" @submit.prevent="save">
-        <input ref="input" v-model="name" type="text" maxlength="60" placeholder="Name these settings" />
-        <button type="submit" class="btn" :disabled="!name.trim()" :title="name.trim() ? null : 'Type a name first'">
-          Save
+        <input
+          ref="input"
+          v-model="name"
+          type="text"
+          maxlength="60"
+          :placeholder="t('dialog.presets.namePlaceholder')"
+        />
+        <button
+          type="submit"
+          class="btn"
+          :disabled="!name.trim()"
+          :title="name.trim() ? null : t('dialog.presets.typeName')"
+        >
+          {{ t('dialog.presets.save') }}
         </button>
       </form>
       <button
@@ -94,7 +117,7 @@ function save() {
           }
         "
       >
-        Reset to defaults
+        {{ t('dialog.presets.reset') }}
       </button>
     </div>
   </div>

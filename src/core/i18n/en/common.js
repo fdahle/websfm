@@ -22,6 +22,7 @@ export default {
     outdated: 'outdated',
   },
   close: 'Close',
+  nothingToShow: 'Nothing to show.',
   advanced: 'Advanced',
   showAdvanced: 'Show advanced settings',
   advancedHidden: '{n, plural, one {# advanced setting hidden} other {# advanced settings hidden}}',

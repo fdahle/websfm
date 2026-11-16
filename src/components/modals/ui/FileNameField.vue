@@ -1,6 +1,7 @@
 <script setup>
 import SettingsField from './SettingsField.vue'
 import { fileSafe } from '../../../core/exportNames.js'
+import { t } from '../../../composables/useI18n.js'
 
 // The optional File name of an export dialog: empty keeps the default name, shown as
 // the placeholder (core/exportNames.js defaultExportName); a typed one names every
@@ -13,12 +14,12 @@ defineProps({
 
 <template>
   <SettingsField
-    label="File name"
+    :label="t('dialog.fileName.label')"
     label-for="export-file-name"
     :hint="
       model && fileSafe(model) !== model.trim()
-        ? `Saved as ${fileSafe(model)}; the extension is added.`
-        : 'Optional. The extension is added; a world file or .prj beside it takes the same name.'
+        ? t('dialog.fileName.savedAs', { name: fileSafe(model) })
+        : t('dialog.fileName.hint')
     "
   >
     <input

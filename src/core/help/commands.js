@@ -241,6 +241,12 @@ export const VERBS = [
   },
   { verb: 'clear', names: ['clear', 'cls'], usage: ['clear'], help: 'Clear the console' },
   {
+    verb: 'lang',
+    names: ['lang', 'language'],
+    usage: ['lang', 'lang <id>   (en, de)'],
+    help: 'Show or set the interface language (de is a preview, partly translated)',
+  },
+  {
     verb: 'run',
     names: ['run'],
     needs: ['project'],

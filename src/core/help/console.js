@@ -13,6 +13,7 @@
 //   matchPairs() → [{ nameA, nameB, idA, idB, inliers, enabled, weak, used }]
 //   pairState(uuidA, uuidB) → { pid, enabled, inliers } | null, setPairEnabled(pid, on)
 //   selectImage(id)
+//   language() → id, languages() → [{ id, label, preview? }], setLanguage(id)
 //   tuning: { get(group) → overrides, set(group, path, value | undefined) }
 // }
 
@@ -214,6 +215,24 @@ const VERB_HANDLERS = {
 
   clear(rest, env) {
     env.clear()
+  },
+
+  // The interface language: a preview language (partly translated) is only chosen here.
+  lang(rest, env, log) {
+    const all = env.languages?.() ?? []
+    const id = rest.trim().toLowerCase()
+    const name = (l) => `${l.id} (${l.label}${l.preview ? ', preview: partly translated' : ''})`
+    if (!id) {
+      log(`Language: ${env.language?.() ?? 'en'}. Available: ${all.map(name).join(', ')}`)
+      return
+    }
+    const lang = all.find((l) => l.id === id)
+    if (!lang) {
+      log(`No such language: ${id}. Available: ${all.map((l) => l.id).join(', ')}`, 'error')
+      return
+    }
+    env.setLanguage(id)
+    log(`Language set to ${name(lang)}; this browser remembers it.`)
   },
 
   run(rest, env, log, cmd) {

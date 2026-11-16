@@ -16,6 +16,7 @@ import SettingsField from './SettingsField.vue'
 import CrsSuggestion from './CrsSuggestion.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
 import FieldHelp from '../../guide/FieldHelp.vue'
+import { t } from '../../../composables/useI18n.js'
 
 const props = defineProps({
   id: { type: String, required: true },
@@ -34,15 +35,10 @@ const props = defineProps({
 const crs = defineModel({ type: String, default: 'local' })
 const emit = defineEmits(['apply-crs-suggestion'])
 
-const BLOCKED_REASON = {
-  geographic: ' — geographic CRS',
-  evidence: ' — needs ≥3 camera positions or GCPs',
-}
-// The same, as the option's tooltip.
-const BLOCKED_TITLE = {
-  geographic: 'The project CRS is geographic (degrees): choose a projected CRS to get metres',
-  evidence: 'Georeferencing needs at least three camera positions or GCPs',
-}
+// After the option's name, and the same as its tooltip (dialog.frame.blocked…).
+const BLOCKERS = ['geographic', 'evidence']
+const blockedReason = (b) => (BLOCKERS.includes(b) ? t(`dialog.frame.blocked.${b}`) : '')
+const blockedTitle = (b) => t(`dialog.frame.blockedTitle.${BLOCKERS.includes(b) ? b : 'other'}`)
 
 const appliedCrsSuggestion = ref(false)
 function applyCrsSuggestion(suggestion) {
@@ -62,24 +58,20 @@ watch(
 <template>
   <SettingsField
     :label-for="id"
-    :hint="
-      hasScale
-        ? 'Local uses a camera-estimated orientation and the current highest-ranked scale evidence, so coordinates are metric but have no CRS.'
-        : `Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world ${realWorld} & GSD.`
-    "
+    :hint="hasScale ? t('dialog.frame.hintScaled') : t('dialog.frame.hint', { what: realWorld })"
   >
     <template #label>
-      <FieldHelp v-if="helpOp" :op="helpOp" param="crs">Coordinate frame</FieldHelp>
-      <GlossaryTerm v-else id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
+      <FieldHelp v-if="helpOp" :op="helpOp" param="crs">{{ t('dialog.frame.label') }}</FieldHelp>
+      <GlossaryTerm v-else id="coordinate-reference-system">{{ t('dialog.frame.label') }}</GlossaryTerm>
     </template>
     <select :id="id" v-model="crs" class="field-input field-select">
-      <option value="local">{{ hasScale ? 'Local (metres, no CRS)' : 'Local (model units)' }}</option>
+      <option value="local">{{ hasScale ? t('dialog.frame.localScaled') : t('dialog.frame.local') }}</option>
       <option
         value="project"
         :disabled="!canGeoreference"
-        :title="canGeoreference ? null : (BLOCKED_TITLE[georeferenceBlocker] ?? 'The model is not georeferenced yet')"
+        :title="canGeoreference ? null : blockedTitle(georeferenceBlocker)"
       >
-        {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : (BLOCKED_REASON[georeferenceBlocker] ?? '') }}
+        {{ projectCrs || t('dialog.frame.project') }}{{ canGeoreference ? '' : blockedReason(georeferenceBlocker) }}
       </option>
     </select>
     <CrsSuggestion

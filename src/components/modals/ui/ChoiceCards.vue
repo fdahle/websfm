@@ -9,6 +9,8 @@
 //   options: [{ id, label, blurb?, disabled?, reason? }]
 // `reason` says why a disabled card cannot be chosen (its tooltip; CONTRIBUTING ▸
 // Disabled controls say why).
+// An option's label, blurb and reason: a string or a message (core/i18n).
+import { tx } from '../../../composables/useI18n.js'
 defineProps({
   modelValue: { type: [String, Number, Boolean], default: null },
   options: { type: Array, required: true },
@@ -28,12 +30,12 @@ defineEmits(['update:modelValue'])
       :aria-checked="modelValue === o.id"
       :data-id="o.id"
       :disabled="o.disabled"
-      :title="o.disabled ? o.reason || null : null"
+      :title="o.disabled ? tx(o.reason) || null : null"
       @click="!o.disabled && $emit('update:modelValue', o.id)"
     >
       <span v-if="$slots.visual" class="choice-card-visual"><slot name="visual" :option="o" /></span>
-      <span class="choice-card-label">{{ o.label }}</span>
-      <span v-if="o.blurb" class="choice-card-blurb">{{ o.blurb }}</span>
+      <span class="choice-card-label">{{ tx(o.label) }}</span>
+      <span v-if="o.blurb" class="choice-card-blurb">{{ tx(o.blurb) }}</span>
     </button>
   </div>
 </template>

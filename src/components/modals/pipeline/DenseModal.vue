@@ -308,7 +308,7 @@ provideStepLayout('dense-cloud')
       v-model="settings.replaceMain"
       step="5"
       op="dense-cloud"
-      noun="dense cloud"
+      kind="dense"
       :plan="output"
       :default-value="DENSE_FUSE_DEFAULTS.replaceMain"
     />
