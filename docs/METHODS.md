@@ -854,6 +854,14 @@ one photo per worker:
 The lines read (text, score, box) are kept on the image record (`textLines`), so a second
 run with other settings only redraws the masks.
 
+Effect on a block (30 TMA scans, three cameras, footprint preselection, no pose priors):
+unmasked 27 cameras, 6,343 ≥3-view points, registration check median 17.6 px, all 250
+pairs accepted (the print and frame match between frames); text masks alone 30 cameras,
+11,582 points, 2.0 px, 239 pairs; a frame mask (inside the corner fiducials, 2 % in) 30
+cameras, 12,279 points, 1.2 px, 153 pairs. On these TMA and Casa Grande scans all printed
+text lies outside that frame mask, so text masking adds to it only where print lies inside
+the photograph.
+
 ---
 
 ## 6. Ground control points & georeferencing

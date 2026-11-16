@@ -41,6 +41,11 @@ second run with other settings only redraws the masks. A line counts as text whe
 reads clearly with at least three letters or digits: buildings and field edges are found
 too, but read as nonsense, and stay unmasked.
 
+On film scans, mask the frame first ([Detect Fiducials](guide:film-fiducials) ▸
+**Generate background masks**, or **Mask border**): the fiducials and the frame edge match
+between frames as the print does, and most printed text lies on the frame anyway. Text
+then adds what is printed or written inside the photograph.
+
 ## Padding
 <!-- param: textPad  default: 20 -->
 Pixels added around each text box. Raise it when a mask leaves the edges of the

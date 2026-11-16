@@ -20,7 +20,13 @@ Notable changes to websfm. The format follows
   them reading below 0.9 or as one or two characters, while "ARIZ CSR-D", "1:25,000" and
   "9-6-78" printed on the photograph read at 0.98–1.00; on TMA scans the side data line
   ("F31 USN GS T 12A … 27 68"), the frame number and the data card read at 0.93–1.00. A
-  10k-px scan is read at 1/4 in 960-px tiles: about 8.5 s on one thread and 350 MB.
+  10k-px scan is read at 1/4 in 960-px tiles: about 8.5 s on one thread and 350 MB. On
+  30 TMA scans (three cameras, no pose priors) text masks alone registered 30 cameras
+  against 27 unmasked, 11,582 ≥3-view points against 6,343, registration check median
+  2.0 px against 17.6 px; a frame mask from the fiducials did better still (30 cameras,
+  12,279 points, 1.2 px, 153 of 250 pairs against 239), and on TMA and Casa Grande all
+  printed text lies outside it, so on film mask the frame first: Text adds what is
+  printed inside the photograph.
 - **Read the focal length and date printed on film photos.** Tools ▸ Images ▾ ▸ **Read
   text…** lists the text read on each photo and the calibrated focal length and flight
   date a camera's photos agree on (each photo votes once), and sets that focal length on

@@ -1,4 +1,4 @@
-import { readPhotoText, POOL_SIZE } from '../../workers/computeClient.js'
+import { readPhotoText, POOL_SIZE, releaseIdleWorkers } from '../../workers/computeClient.js'
 import { computeSourceOf } from '../../utils/image.js'
 import { mapConcurrent } from '../../utils/concurrency.js'
 import { compactLines, ocrConcurrency, OCR_ENGINE } from '../../core/ocr/textRun.js'
@@ -57,6 +57,10 @@ export function createPhotoText({ images, log, save, whenComputeReady }) {
       }
       onProgress?.(++done, todo.length)
     })
+    // Each worker that read holds its detector and recogniser sessions and the ONNX
+    // Runtime heap they grew (150–300 MB, never returned): drop the idle pool so the
+    // next run starts without them (a no-op while any other job is pending).
+    releaseIdleWorkers()
     const s = ((performance.now() - t0) / 1000).toFixed(1)
     log(
       `Read text: ${pluralize(done - failed, 'photo')} in ${s} s, ${pluralize(lines, 'text line')}` +
