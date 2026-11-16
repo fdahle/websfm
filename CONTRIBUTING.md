@@ -49,9 +49,8 @@ tests, the headless pipeline bench and rebuilding the WASM.
 ## Before you open a pull request
 
 ```bash
-npm run format      # Prettier; CI checks it with format:check
-npm test
-npm run typecheck
+npm run format      # Prettier: formats the files
+npm run check       # what CI checks: format:check, typecheck (with ESLint), unit tests
 ```
 
 - **Formatting is Prettier's** (`.prettierrc.json`), so a review is about the code.

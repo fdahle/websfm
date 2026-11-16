@@ -6,27 +6,20 @@
 [![Verify](https://github.com/fdahle/websfm/actions/workflows/verify.yml/badge.svg)](https://github.com/fdahle/websfm/actions/workflows/verify.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+[Why WebSfM](#why-websfm) · [First project](#your-first-project) ·
+[What works](#what-works-today) · [Browsers](#browser-requirements) ·
+[How it's tested](#how-its-tested) · [Roadmap](#roadmap) · [How it works](#how-it-works) ·
+[From source](#running-from-source) · [Reporting a problem](#reporting-a-problem) ·
+[License](#license)
+
 <!-- An animated image plays by itself and loops; a video would need a click. -->
 ![The example project's dense point cloud and cameras, turning in the 3D view](docs/images/turntable.webp)
 
-WebSfM turns overlapping photographs into 3D reconstructions — sparse and dense
-point clouds, meshes, digital elevation models and orthophotos — without
-installing anything and **without uploading your images anywhere**. All the
-computation runs locally, in background workers, and your photos never leave your
-machine. The innermost numerical kernels are written in Rust and compiled to
-WebAssembly: SIFT, descriptor matching and geometric verification, camera pose,
-bundle adjustment, PatchMatch depth maps and Poisson meshing. With WebGPU, matching
-and depth maps run on the graphics card instead, and the learned detectors run as
-ONNX models. The rest of the pipeline is JavaScript: track building, the depth-map
-filter and fusion into a point cloud, DEMs, orthophotos, georeferencing and the
-exporters.
+WebSfM turns overlapping photographs into 3D reconstructions (sparse and dense point
+clouds, meshes, digital elevation models and orthophotos) without installing anything
+and **without uploading your images anywhere**.
 
-It is built with a focus on **polar / non-WGS84 projects** (e.g. historical
-aerial imagery of Antarctica), so coordinate-reference-system handling and ground
-control are first-class throughout.
-
-**Try it at [websfm.app](https://websfm.app).** Nothing to install; the app runs on
-your machine and keeps your projects in your browser.
+**Try it at [websfm.app](https://websfm.app).**
 
 > [!NOTE]
 > **Beta.** WebSfM is at version 0.x: the pipeline is complete, but not every path has
@@ -36,7 +29,22 @@ your machine and keeps your projects in your browser.
 > [issue](https://github.com/fdahle/websfm/issues). What changed in each release is
 > under **Other ▸ What's New** in the app and in [CHANGELOG.md](CHANGELOG.md).
 
----
+## Why WebSfM
+
+- **Private.** All the computing runs on your machine, in background workers. Your
+  photos never leave it.
+- **Nothing to install.** Open the page and start; projects are kept in your browser,
+  or in a folder you choose (Chromium).
+- **Measured.** Results are scored against RTK positions, surveyed checkpoints, ETH3D
+  ground truth and airborne LiDAR, next to COLMAP, Metashape and OpenDroneMap on the
+  same images ([How it's tested](#how-its-tested)).
+- **Familiar.** The stages, settings and words of Metashape, COLMAP and ODM. Every
+  setting says on hover what it does and when to change it.
+- **Built for georeferencing.** Any coordinate reference system, polar and non-WGS84
+  ones included (historical aerial imagery of Antarctica, for one), with ground
+  control, RTK priors and reference DEMs throughout.
+- **Open.** MIT licensed, and every method is explained in the app and in
+  [docs/METHODS.md](docs/METHODS.md), with the papers it comes from.
 
 ## Your first project
 
@@ -55,24 +63,24 @@ follow **Other ▸ Guide ▸ Getting Started**. Hover a setting's label with a *
 it does, or a dotted-underlined term for what it means; the glossary explains the
 methods behind each stage.
 
-## What it does
+## What works today
 
 ![The example project's orthophoto on the 2D map, with the camera positions](docs/images/orthophoto.webp)
 <sub>Background imagery: Esri World Imagery (Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community).</sub>
 
-A full photogrammetry pipeline, stage by stage:
-
-1. **Detect** – SIFT (Rust/WASM) or a learned detector (ALIKED, DISK, SuperPoint).
-2. **Match** – brute-force descriptor matching or the learned LightGlue matcher,
-   with fundamental-matrix RANSAC verification.
-3. **Sparse SfM** – incremental reconstruction with P3P resection, LM bundle
-   adjustment, self-calibration, and track filtering.
-4. **Dense MVS** – PatchMatch depth maps fused into a dense point cloud, on the GPU
-   (WebGPU) or the CPU (WASM).
-5. **Products** – DEM and bare-earth DTM, true orthophoto, and a screened-Poisson
-   mesh, optionally textured.
-6. **Georeferencing** – ground control points, camera poses, and reference DEMs,
-   with reprojection into any project CRS (proj4).
+| Area | Highlights |
+| --- | --- |
+| **Import** | Photos, video (frames picked by camera motion and sharpness), masks, camera poses and calibration, GCP files, reference DEMs and orthophotos, point clouds and meshes; projects from COLMAP, Metashape, OpenSfM, OpenMVG, NVM and Bundler |
+| **Alignment** | SIFT or learned detectors (ALIKED, DISK, SuperPoint); brute-force or LightGlue matching with RANSAC verification; incremental reconstruction with bundle adjustment and self-calibration, fisheye lenses included; the Workflow Builder runs the stages in one go, with quality gates between them |
+| **Georeferencing** | GCPs marked in the photos or on the map, or found automatically against a reference orthophoto; RTK and EXIF camera positions; scale bars; any CRS (proj4); DEM co-registration |
+| **Dense** | PatchMatch depth maps on the graphics card (WebGPU) or the CPU, fused into a dense point cloud |
+| **Products** | DSM and bare-earth DTM, true orthophoto, screened-Poisson mesh with texture, reflectance maps from multispectral cameras, contours, slope, aspect and hillshade |
+| **Clouds and meshes** | Filter, remove outliers, subsample, crop, merge, transform, align by point pairs or ICP, classify ground, estimate normals; clean, smooth, decimate and texture meshes |
+| **Measure** | Distances, areas, profiles and volumes on the map and in 3D, DEM of difference, cloud-to-reference distances, sections |
+| **Historical imagery** | Film scans: fiducial detection and calibration, reseau grids, half-frame scans, panoramic satellite strips |
+| **Quality** | The Quality Report: matching, sparse model, calibration, checkpoint accuracy, coverage, depth coverage, DEM against a reference |
+| **Export** | Point clouds as PLY, LAS, LAZ, COPC or XYZ; meshes as PLY, glTF, OBJ or STL; Cesium 3D Tiles; DEMs and orthophotos as GeoTIFF, Cloud-Optimized GeoTIFF or PNG with a world file; camera poses and calibration; COLMAP and other SfM projects; undistorted images |
+| **Help** | A guide article for every operation, a glossary of the methods with their references, and What's New |
 
 <table>
   <tr>
@@ -84,11 +92,6 @@ A full photogrammetry pipeline, stage by stage:
     <td>Each method explained in the app, with linked terms</td>
   </tr>
 </table>
-
-There's also an in-app guide and glossary, a quality-report hub, point-cloud
-editing, 2D and 3D measurement, video import (frames picked by camera motion and
-sharpness), historical film scans (fiducials, reseau grids), COLMAP / PLY / LAS /
-LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 
 ## Browser requirements
 
@@ -102,47 +105,6 @@ LAZ / GeoTIFF import & export, COPC import and 3D Tiles export.
 - The learned backends (ALIKED, DISK, SuperPoint, LightGlue, Smart Select) download their model
   weights on first use — you'll be asked to confirm, and each file is cached
   locally afterwards (see [Model files](docs/deployment.md#model-files)).
-
----
-
-## Documentation
-
-| For | Read |
-| --- | --- |
-| Using the app | the in-app guide and glossary (source: [`src/guide/`](src/guide/), [`src/glossary/`](src/glossary/)) |
-| Running and testing from source | [docs/development.md](docs/development.md) |
-| How the code is organised | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| The algorithms and why they were chosen | [docs/METHODS.md](docs/METHODS.md) |
-| How it compares with COLMAP, Metashape and ODM | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) |
-| Hosting your own copy | [docs/deployment.md](docs/deployment.md) |
-| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| What changed | [CHANGELOG.md](CHANGELOG.md), or **Other ▸ What's New** in the app |
-
-### What's in this repository
-
-| Folder | Holds |
-| --- | --- |
-| [`src/`](src/) | the app: Vue components, Pinia stores, the web workers, and [`src/core/`](src/core/), the pure computation that also runs in the tests |
-| [`src/guide/`](src/guide/), [`src/glossary/`](src/glossary/) | the in-app help, as Markdown |
-| [`crates/`](crates/) | the Rust code (SIFT, matching, reconstruction, dense, mesh, codecs), compiled to WebAssembly in [`src/wasm/`](src/wasm/) |
-| [`tests/`](tests/) | browser tests (Playwright) and the headless pipeline bench; unit tests sit beside their code as `*.test.js` |
-| [`scripts/`](scripts/) | developer tools: the bench, model and example downloads, WASM builds, releases, deploys |
-| [`public/`](public/) | static files served as they are: icons, geoid grids, hosting headers |
-| [`deploy/`](deploy/) | hosting configs: the Cloudflare Worker of websfm.app, an nginx config for your own server |
-| [`docs/`](docs/) | the documentation above, and the README's images |
-
-At the top level, `Dockerfile` builds an image for hosting your own copy, `AGENTS.md`
-and `CLAUDE.md` are notes for AI coding tools, and the other files configure the build,
-tests and formatting.
-
-Quick start from source, with [Node.js](https://nodejs.org/) 22 (20.19 or later works;
-CI uses 22). No Rust is needed: the compiled WASM is committed.
-
-```bash
-npm install
-npm run fetch:examples   # optional: the example dataset
-npm run dev
-```
 
 ## How it's tested
 
@@ -221,6 +183,62 @@ Priorities follow real use: the [roadmap board](https://github.com/users/fdahle/
 has an issue for each item, so comment on the one that matters to you, or open an
 issue for something missing.
 
+## How it works
+
+The app is Vue 3 and Pinia; everything heavy runs in a pool of web workers, so the
+page stays responsive during a run.
+
+| Layer | Where | Job |
+| --- | --- | --- |
+| Interface | [`src/components/`](src/components/), [`src/stores/`](src/stores/) | The ribbon, dialogs and 2D/3D viewers; each project's state, saved in browser storage (OPFS) |
+| Workers | [`src/workers/`](src/workers/) | Run every processing step off the page, spread over all CPU cores; WebGPU kernels for matching and depth maps |
+| Core | [`src/core/`](src/core/) | The pipeline's computation in plain JavaScript: tracks, depth-map filtering and fusion, DEMs, orthophotos, georeferencing, readers and writers. It touches no interface or storage (a lint rule checks), so it runs in the workers and in the Node tests alike |
+| Rust | [`crates/`](crates/), compiled to [`src/wasm/`](src/wasm/) | The numerical kernels: SIFT, matching and geometric verification, camera pose, multi-threaded bundle adjustment, PatchMatch, Poisson meshing, LAZ and image codecs |
+| Models | ONNX Runtime Web | The learned detectors and matcher (ALIKED, DISK, SuperPoint, LightGlue) and Smart Select masks |
+
+[ARCHITECTURE.md](ARCHITECTURE.md) follows one operation through these layers and
+says which files a change touches.
+
+## Running from source
+
+With [Node.js](https://nodejs.org/) 22 (20.19 or later works; CI uses 22). No Rust is
+needed: the compiled WASM is committed.
+
+```bash
+npm install
+npm run fetch:examples   # optional: the example dataset
+npm run dev
+npm run check            # formatting, types, lint and unit tests, as CI runs them
+```
+
+| For | Read |
+| --- | --- |
+| Using the app | the in-app guide and glossary (source: [`src/guide/`](src/guide/), [`src/glossary/`](src/glossary/)) |
+| Running and testing from source | [docs/development.md](docs/development.md) |
+| How the code is organised | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| The algorithms and why they were chosen | [docs/METHODS.md](docs/METHODS.md) |
+| How it compares with COLMAP, Metashape and ODM | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) |
+| Hosting your own copy | [docs/deployment.md](docs/deployment.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| What changed | [CHANGELOG.md](CHANGELOG.md), or **Other ▸ What's New** in the app |
+
+### What's in this repository
+
+| Folder | Holds |
+| --- | --- |
+| [`src/`](src/) | the app: Vue components, Pinia stores, the web workers, and [`src/core/`](src/core/), the pure computation that also runs in the tests |
+| [`src/guide/`](src/guide/), [`src/glossary/`](src/glossary/) | the in-app help, as Markdown |
+| [`crates/`](crates/) | the Rust code (SIFT, matching, reconstruction, dense, mesh, codecs), compiled to WebAssembly in [`src/wasm/`](src/wasm/) |
+| [`tests/`](tests/) | browser tests (Playwright) and the headless pipeline bench; unit tests sit beside their code as `*.test.js` |
+| [`scripts/`](scripts/) | developer tools: the bench, model and example downloads, WASM builds, releases, deploys |
+| [`public/`](public/) | static files served as they are: icons, geoid grids, hosting headers |
+| [`deploy/`](deploy/) | hosting configs: the Cloudflare Worker of websfm.app, an nginx config for your own server |
+| [`docs/`](docs/) | the documentation above, and the README's images |
+
+At the top level, `Dockerfile` builds an image for hosting your own copy, `AGENTS.md`
+and `CLAUDE.md` are notes for AI coding tools, and the other files configure the build,
+tests and formatting.
+
 ## How it is developed
 
 WebSfM is developed with substantial help from AI coding tools, mainly
@@ -241,14 +259,24 @@ In practice:
 - **Testing is stated openly.** [How it's tested](#how-its-tested) lists what has
   been checked against independent reference data, and what has not yet.
 
+## Reporting a problem
+
 Bug reports are especially valuable while not every code path has met real data.
 
-## Feedback
+1. Click the **🐞 button** in the app's corner (or open
+   [an issue](https://github.com/fdahle/websfm/issues/new)) and say what you did, what
+   happened, and what kind of photos they were: how many, which camera, aerial or
+   close-range.
+2. Attach the log: open the console (**Other ▸ Console**, or Ctrl+\`, ⌘+\` on a Mac)
+   and click **Save TXT**. The file starts with your browser, GPU and memory, then lists every
+   step that ran, with its settings, timings and warnings. It is plain text you can
+   read before you share it; it holds no photos, and nothing is sent anywhere unless
+   you attach it.
 
-Found a bug or have a suggestion? Use the 🐞 button in the app, or open an issue:
-**[github.com/fdahle/websfm/issues](https://github.com/fdahle/websfm/issues)**.
-To contribute code, see [CONTRIBUTING.md](CONTRIBUTING.md). Security issues go
-through [SECURITY.md](SECURITY.md), not public issues.
+Results on your own data, good or bad, are just as welcome in
+[Discussions](https://github.com/fdahle/websfm/discussions). To contribute code, see
+[CONTRIBUTING.md](CONTRIBUTING.md). Security issues go through
+[SECURITY.md](SECURITY.md), not public issues.
 
 ## License
 

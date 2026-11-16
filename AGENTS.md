@@ -60,6 +60,7 @@ Rules that are easy to miss:
 - The name is **WebSfM** in anything people read (UI text, messages, docs, help).
   Lowercase `websfm` stays only in identifiers: URLs, the repo and npm package, the
   `.websfm` extension, storage, cache and lock keys, file names.
-- Run `npm test` and `npm run typecheck` before calling a change done.
+- Run `npm run check` (format check, typecheck with ESLint, unit tests) before calling a
+  change done.
 - In the final summary, say which help files (`src/guide/`, `src/glossary/`) were
   updated, or that none needed it.

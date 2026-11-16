@@ -39,6 +39,7 @@
     "lint": "eslint src scripts tests *.config.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check": "npm run format:check && npm run typecheck && npm test",
     "test:mutation": "stryker run"
   },
   "dependencies": {

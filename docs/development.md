@@ -31,6 +31,7 @@ fails. SIFT, matching and everything after it work without either. See
 ## Tests & type-checking
 
 ```bash
+npm run check           # all three below in one go: format:check, typecheck, test
 npm test                # unit and store regression tests (Vitest, Node)
 npm run typecheck       # TypeScript, Vue template bindings, ESLint
 npm run test:wasm       # real LAZ WASM round-trip across compressor chunks
