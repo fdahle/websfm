@@ -11,8 +11,9 @@ import { pluralize } from '../core/textFormat.js'
 
 export const OCR_MODEL_IDS = ['ppocr_det', 'ppocr_rec_en']
 
-// Auto Mask ▸ Text (AutoMaskModal.vue): read the text on the photos (once per photo,
-// images/photoText.js), then mask what core/ocr/textRun.js textMaskPlan says: sure
+// Auto Mask ▸ Text (AutoMaskModal.vue) and Read text (ReadTextModal.vue): read the text
+// on the photos (once per photo, images/photoText.js); Auto Mask then masks what
+// core/ocr/textRun.js textMaskPlan says: sure
 // text where it was found, and with `recurring` the text a camera prints at the same
 // place on its frames, on every frame of that camera. The photos of one run form the
 // frames recurrence looks at.
@@ -30,6 +31,41 @@ export function useTextMask() {
 
   const sensorOf = (img) => sensorsStore.sensors.find((s) => s.id === img.sensorId) ?? null
 
+  // Read the photos not read yet (all with `force`), with the progress shown; the
+  // models are downloaded first, with consent. → `{ failed }`, `{ declined }` or
+  // `{ cancelled }`. Called with `busy` already set by the caller.
+  async function readPhase(images, force) {
+    if (!(await modelsStore.ensureReady(OCR_MODEL_IDS))) return { declined: true }
+    progress.value = { phase: 'read', done: 0, total: images.length }
+    const { failed, read } = await imagesStore.readPhotoTexts(images, {
+      force,
+      budgetBytes: memBudgetBytes.value,
+      isCancelled: () => cancelled,
+      onProgress: (done, total) => (progress.value = { phase: 'read', done, total }),
+    })
+    if (cancelled) {
+      log('Reading text cancelled; the text read so far is kept', 'warn', 'Images')
+      return { cancelled: true }
+    }
+    return { failed, read }
+  }
+
+  /**
+   * Read the text on `images` (Tools ▸ Images ▾ ▸ Read text): those not read yet, or
+   * all with `force`. → `{ read, failed }`, `{ declined }` or `{ cancelled }`.
+   */
+  async function readText(images, { force = false } = {}) {
+    if (busy.value || !images.length) return null
+    busy.value = true
+    cancelled = false
+    try {
+      return await readPhase(images, force)
+    } finally {
+      busy.value = false
+      progress.value = null
+    }
+  }
+
   /**
    * Mask the text on `images` (image records). `existing`: 'merge' adds the text to a
    * photo's mask, 'replace' makes the text its whole mask (none where no text is).
@@ -38,20 +74,12 @@ export function useTextMask() {
    */
   async function maskText(images, { padPx, recurring, existing }) {
     if (busy.value || !images.length) return null
-    if (!(await modelsStore.ensureReady(OCR_MODEL_IDS))) return { declined: true }
     busy.value = true
     cancelled = false
     try {
-      progress.value = { phase: 'read', done: 0, total: images.length }
-      const { failed } = await imagesStore.readPhotoTexts(images, {
-        budgetBytes: memBudgetBytes.value,
-        isCancelled: () => cancelled,
-        onProgress: (done, total) => (progress.value = { phase: 'read', done, total }),
-      })
-      if (cancelled) {
-        log('Auto Mask ▸ Text cancelled; the text read so far is kept', 'warn', 'Images')
-        return { cancelled: true }
-      }
+      const phase = await readPhase(images, false)
+      if (phase.declined || phase.cancelled) return phase
+      const { failed } = phase
       const frames = images
         .filter((img) => imagesStore.hasPhotoText(img) && img.meta?.width > 0 && img.meta?.height > 0)
         .map((img) => {
@@ -121,5 +149,5 @@ export function useTextMask() {
     cancelRun('Auto Mask cancelled')
   }
 
-  return { maskText, cancel, busy, progress }
+  return { maskText, readText, cancel, busy, progress }
 }

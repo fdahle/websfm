@@ -55,6 +55,15 @@ where it was not read, such as under glare. Placed through the
 photo. It needs text found on at least three photos of a camera. Turn it off to mask only
 what was read on each photo.
 
+## Read text
+**Tools ▸ Images ▾ ▸ Read text…** lists the text read on each photo, the lines read
+clearly in bold, and what a camera's photos print: the calibrated focal length
+("CAL F.L. 153.891", "152.86 mm") and the date of the flight. Each photo votes, and the
+value most of them show wins, with how many show it. For a film camera, **Use** sets
+that focal length on the camera, as Calibrate fiducials does; compare it with the
+camera's calibration certificate when you have one. Auto mask ▸ Text reads the photos
+the same way, so one reading serves both.
+
 ## Paint a mask
 Open an image and choose **Tools ▸ Images ▾ ▸ Edit mask**. The toolbox has **Brush**
 (B), **Eraser** (E), **Rectangle** (R, Alt-drag erases), **Smart Select** (S),

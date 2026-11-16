@@ -257,7 +257,11 @@ export default {
     },
     'auto-mask': {
       label: 'Auto-Maske…',
-      blurb: 'Einen Randstreifen auf jedem Bild maskieren (Filmränder, Datenstreifen)',
+      blurb: 'Einen Randstreifen oder den Text auf jedem Bild maskieren (Filmränder, Datenstreifen)',
+    },
+    'read-text': {
+      label: 'Text lesen…',
+      blurb: 'Den Text auf den Fotos lesen: Bildnummern, Datenleisten, die aufgedruckte Brennweite',
     },
     'detect-fiducials': {
       label: 'Fiducials erkennen…',

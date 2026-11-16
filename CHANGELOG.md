@@ -21,6 +21,14 @@ Notable changes to websfm. The format follows
   "9-6-78" printed on the photograph read at 0.98–1.00; on TMA scans the side data line
   ("F31 USN GS T 12A … 27 68"), the frame number and the data card read at 0.93–1.00. A
   10k-px scan is read at 1/4 in 960-px tiles: about 8.5 s on one thread and 350 MB.
+- **Read the focal length and date printed on film photos.** Tools ▸ Images ▾ ▸ **Read
+  text…** lists the text read on each photo and the calibrated focal length and flight
+  date a camera's photos agree on (each photo votes once), and sets that focal length on
+  a film camera with one click. Readings are fixed for the usual OCR confusions (O for
+  0, l for 1) and a bare number counts only near a common lens (88, 152, 210, 305 mm),
+  after hist_sfm's rules: "152.86" and "UAGI 6056 151,78" give 152.86 and 151.78 mm,
+  "9-6-78" 6 Sep 1978, "22-8.80" 22 Aug 1980 and the end of a TMA data line "… 12 27 68"
+  27 Dec 1968, matching the flight dates of the Casa Grande, Iceland and TMA test scans.
 - **Match large sets without positions in a fraction of the time.** Match Features ▸
   Pairing ▸ **Similar images** pairs each photo with the 20 photos that look most like it,
   and up to 20 more spread over the scene, found from the features already detected,

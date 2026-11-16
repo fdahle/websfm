@@ -71,6 +71,10 @@ test('reads the text on the photos and masks it', async ({ page, browserName }) 
       g.fillText('F31 USN GS T12A 13 12 27 68', 0, 0)
       g.restore()
       g.fillText(String(142 + k), 1510, 1150)
+      g.fillStyle = '#000'
+      g.fillRect(40, 1110, 300, 60)
+      g.fillStyle = '#fff'
+      g.fillText('FL 152.86', 60, 1155)
       if (k === 0) {
         g.fillStyle = '#fff'
         g.font = 'bold 48px sans-serif'
@@ -135,5 +139,30 @@ test('reads the text on the photos and masks it', async ({ page, browserName }) 
     return { strip: at(1560, 400), date: at(420, 590), ground: at(800, 300), size: [bmp.width, bmp.height] }
   })
   expect(coverage).toEqual({ strip: true, date: true, ground: false, size: [1600, 1200] })
+
+  // Read Text: what was read, and the focal length the camera's photos agree on, which a
+  // film camera takes over.
+  await page.keyboard.press('Escape')
+  const sensorId = await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    const id = useImagesStore().images.find((i) => i.name === 'scan-0.jpg').sensorId
+    useSensorsStore().updateSensor(id, 'kind', 'film')
+    useModalsStore().readTextOpen = true
+    return id
+  })
+  const reader = page.locator('.read-text')
+  await expect(reader.locator('tr', { hasText: 'scan-0.jpg' })).toContainText('9-6-78')
+  const camera = reader.locator('.camera').filter({ hasText: '152.860 mm (3 of 3 photos)' })
+  await expect(camera).toBeVisible()
+  await camera.getByRole('button', { name: 'Use 152.860 mm' }).click()
+  const focal = await page.evaluate(async (id) => {
+    const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')
+    const s = useSensorsStore().sensors.find((x) => x.id === id)
+    return [s.focal, s.focalUnit]
+  }, sensorId)
+  expect(focal).toEqual([152.86, 'mm'])
+  await expect(camera.getByRole('button', { name: 'Use 152.860 mm' })).toBeDisabled()
   expect(errors).toEqual([])
 })

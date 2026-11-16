@@ -26,6 +26,7 @@ export const useModalsStore = defineStore('modals', () => {
   const poseTableOpen = ref(false)
   const maskManagerOpen = ref(false)
   const autoMaskOpen = ref(false)
+  const readTextOpen = ref(false)
   const sensorTableOpen = ref(false)
   // Sidebar ▸ Sensors ▸ Split camera group…: the sensor it opened on, or null.
   const splitSensorId = ref(null)
@@ -150,6 +151,7 @@ export const useModalsStore = defineStore('modals', () => {
     poseTableOpen,
     maskManagerOpen,
     autoMaskOpen,
+    readTextOpen,
     sensorTableOpen,
     splitSensorId,
     gcpTableOpen,

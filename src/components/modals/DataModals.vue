@@ -14,6 +14,7 @@ import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useModalsStore } from '../../stores/useModalsStore.js'
 import { useAppContext } from '../../appContext.js'
 import AutoMaskModal from './images/AutoMaskModal.vue'
+import ReadTextModal from './images/ReadTextModal.vue'
 import CameraImportModal from './import/CameraImportModal.vue'
 import FiducialImportModal from './import/FiducialImportModal.vue'
 import CameraPoseTableModal from './inspect/CameraPoseTableModal.vue'
@@ -94,6 +95,7 @@ const { hasReferenceDem } = storeToRefs(useExternalStore())
 const { setRasterKind, setRasterAccuracy } = useExternalStore()
 const {
   autoMaskOpen,
+  readTextOpen,
   cameraImportMode,
   cameraImportName,
   cameraImportOpen,
@@ -426,6 +428,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
 
     <MaskManagerModal v-if="maskManagerOpen" @close="maskManagerOpen = false" @edit="editMask" />
     <AutoMaskModal v-if="autoMaskOpen" @close="autoMaskOpen = false" />
+    <ReadTextModal v-if="readTextOpen" @close="readTextOpen = false" />
   </Teleport>
 
   <Teleport to="body">

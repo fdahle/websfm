@@ -152,6 +152,7 @@ export const CONSOLE_NAMES = {
   'scale-bars': ['scale bars', 'scalebars'],
   'edit-gcps': ['edit gcps', 'mark gcps'],
   'auto-mask': ['automask'],
+  'read-text': ['read text', 'ocr'],
   'img-mask-edit': ['edit mask', 'mask edit'],
   'footprints-from-poses': ['footprints'],
   'detect-fiducials': ['fiducials'],
