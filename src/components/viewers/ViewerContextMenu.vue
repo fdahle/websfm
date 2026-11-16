@@ -25,8 +25,7 @@ const { el, pos } = useMenuPlacement(() => props.menu)
           :title="it.disabled ? it.reason || null : null"
           @click="!it.disabled && emit('select', it.id)"
         >
-          <span class="vctx-check">{{ it.active ? '✓' : '' }}</span
-          >{{ it.label }}
+          <span class="vctx-check">{{ it.active ? '✓' : '' }}</span>{{ it.label }}
         </button>
       </template>
     </div>

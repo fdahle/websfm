@@ -47,8 +47,7 @@ const corrections = computed(() => CORRECTION_ORDER.filter((id) => id !== props.
     </div>
   </template>
   <p v-else class="kind-note">
-    Importing as <b>{{ labelOf(active) }}</b
-    >. Not right? Import as
+    Importing as <b>{{ labelOf(active) }}</b>. Not right? Import as
     <template v-for="(id, i) in corrections" :key="id"
       >{{ i ? ' or ' : '' }}<button class="kind-link" @click="emit('pick', id)">{{ labelOf(id) }}</button></template
     >.

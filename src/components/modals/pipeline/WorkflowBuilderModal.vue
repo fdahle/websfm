@@ -476,8 +476,9 @@ function gateSummary(run) {
                 :title="running ? 'Wait for the workflow run to finish' : null"
                 @click="addBlock(block.id)"
               >
-                <span>{{ block.label }}</span
-                ><small>{{ block.control ? 'Control' : block.automated ? 'Automatic' : 'Interactive' }}</small>
+                <span>{{ block.label }}</span><small>{{
+                  block.control ? 'Control' : block.automated ? 'Automatic' : 'Interactive'
+                }}</small>
               </button>
             </section>
           </template>

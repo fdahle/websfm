@@ -58,20 +58,16 @@ function run() {
     <template v-else>
       <div class="stats">
         <div>
-          <strong>{{ counts.keypointImages }}</strong
-          ><span>images with keypoints</span>
+          <strong>{{ counts.keypointImages }}</strong><span>images with keypoints</span>
         </div>
         <div>
-          <strong>{{ counts.keypoints.toLocaleString() }}</strong
-          ><span>keypoints</span>
+          <strong>{{ counts.keypoints.toLocaleString() }}</strong><span>keypoints</span>
         </div>
         <div>
-          <strong>{{ counts.pairs }}</strong
-          ><span>image pairs</span>
+          <strong>{{ counts.pairs }}</strong><span>image pairs</span>
         </div>
         <div>
-          <strong>{{ counts.matches.toLocaleString() }}</strong
-          ><span>matches</span>
+          <strong>{{ counts.matches.toLocaleString() }}</strong><span>matches</span>
         </div>
       </div>
       <ul v-if="s.warnings.length" class="warnings">

@@ -202,8 +202,7 @@ function doImport() {
   <ModalShell title="Import from Metashape" @close="emit('close')">
     <div class="source-head">
       <div>
-        <strong>{{ isProject ? 'Metashape project' : 'Metashape XML' }}</strong
-        ><span>{{ data.fileName }}</span>
+        <strong>{{ isProject ? 'Metashape project' : 'Metashape XML' }}</strong><span>{{ data.fileName }}</span>
       </div>
       <span>{{ crsLabel }}</span>
     </div>
@@ -222,16 +221,15 @@ function doImport() {
     <template v-else>
       <div class="stats">
         <div>
-          <strong>{{ plan.counts.aligned }}</strong
-          ><span>of {{ plan.counts.cameras }} cameras aligned</span>
+          <strong>{{ plan.counts.aligned }}</strong><span>of {{ plan.counts.cameras }} cameras aligned</span>
         </div>
         <div>
-          <strong>{{ plan.counts.sensors }}</strong
-          ><span>calibrated {{ plan.counts.sensors === 1 ? 'camera' : 'cameras' }}</span>
+          <strong>{{ plan.counts.sensors }}</strong><span
+            >calibrated {{ plan.counts.sensors === 1 ? 'camera' : 'cameras' }}</span
+          >
         </div>
         <div>
-          <strong>{{ plan.counts.markers }}</strong
-          ><span>markers, {{ plan.counts.marks }} marks</span>
+          <strong>{{ plan.counts.markers }}</strong><span>markers, {{ plan.counts.marks }} marks</span>
         </div>
       </div>
 

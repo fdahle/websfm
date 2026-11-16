@@ -49,28 +49,25 @@ const importReason = computed(() =>
     <template v-else>
       <div class="source-head">
         <div>
-          <strong>{{ session.format }}</strong
-          ><span>{{ session.sourceName }}</span>
+          <strong>{{ session.format }}</strong><span>{{ session.sourceName }}</span>
         </div>
         <span v-if="db">{{ (db.bytes / 1048576).toFixed(1) }} MB database</span>
       </div>
 
       <div class="stats">
         <div>
-          <strong>{{ session.counts.externalImages }}</strong
-          ><span>{{ db ? 'database images' : 'source cameras' }}</span>
+          <strong>{{ session.counts.externalImages }}</strong><span>{{
+            db ? 'database images' : 'source cameras'
+          }}</span>
         </div>
         <div>
-          <strong>{{ session.counts.matchedImages }}</strong
-          ><span>already matched</span>
+          <strong>{{ session.counts.matchedImages }}</strong><span>already matched</span>
         </div>
         <div>
-          <strong>{{ session.counts.bundledImages }}</strong
-          ><span>bundled images</span>
+          <strong>{{ session.counts.bundledImages }}</strong><span>bundled images</span>
         </div>
         <div>
-          <strong>{{ session.models.length }}</strong
-          ><span>sparse models</span>
+          <strong>{{ session.models.length }}</strong><span>sparse models</span>
         </div>
       </div>
 

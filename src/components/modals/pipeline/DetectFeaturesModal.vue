@@ -524,8 +524,8 @@ provideStepLayout('detect-features')
         keypoints and the matches on them are replaced.
       </p>
       <WarnBox v-if="selectionMix">
-        The other images were detected with <strong>{{ selectionMix }}</strong
-        >: with <strong>{{ detector }}</strong> these would not match them (descriptors of different kinds). Choose
+        The other images were detected with <strong>{{ selectionMix }}</strong>: with
+        <strong>{{ detector }}</strong> these would not match them (descriptors of different kinds). Choose
         {{ selectionMix }}, or detect every image again.
       </WarnBox>
       <WarnBox v-if="inModel">

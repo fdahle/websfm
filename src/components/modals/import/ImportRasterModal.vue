@@ -86,8 +86,8 @@ function confirm() {
          a guess you have to reverse-engineer later. -->
       <div class="why">
         <div class="why-hd">
-          Guessed <strong>{{ raster.kind === 'dem' ? 'DEM' : 'orthophoto' }}</strong
-          >, {{ raster.classification?.confidence ?? 'low' }} confidence:
+          Guessed <strong>{{ raster.kind === 'dem' ? 'DEM' : 'orthophoto' }}</strong>,
+          {{ raster.classification?.confidence ?? 'low' }} confidence:
         </div>
         <ul>
           <li v-for="(r, i) in reasons" :key="i">{{ r }}</li>
