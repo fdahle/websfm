@@ -6,7 +6,7 @@
 [![Verify](https://github.com/fdahle/websfm/actions/workflows/verify.yml/badge.svg)](https://github.com/fdahle/websfm/actions/workflows/verify.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Why WebSfM](#why-websfm) · [First project](#your-first-project) ·
+[Why WebSfM](#why-websfm) · [A tour](#a-tour) · [First project](#your-first-project) ·
 [What works](#what-works-today) · [Browsers](#browser-requirements) ·
 [How it's tested](#how-its-tested) · [Roadmap](#roadmap) · [How it works](#how-it-works) ·
 [From source](#running-from-source) · [Reporting a problem](#reporting-a-problem) ·
@@ -46,6 +46,36 @@ and **without uploading your images anywhere**.
 - **Open.** MIT licensed, and every method is explained in the app and in
   [docs/METHODS.md](docs/METHODS.md), with the papers it comes from.
 
+## A tour
+
+<table>
+  <tr>
+    <td colspan="2"><img src="docs/images/orthophoto.webp" alt="The example project's orthophoto on the satellite map, with the camera positions as triangles"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>The orthophoto on the map</b>, with the camera positions. Background imagery: Esri World Imagery (Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community).</td>
+  </tr>
+  <tr>
+    <td width="60%"><img src="docs/images/matches.webp" alt="The match graph laid out by camera position, with one image pair's verified matches beside it"></td>
+    <td width="40%"><img src="docs/images/glossary.webp" alt="The in-app glossary explaining focal length, with a linked term's hover box"></td>
+  </tr>
+  <tr>
+    <td><b>Matches</b>: every image pair, as a graph and side by side.</td>
+    <td><b>Glossary</b>: each method explained, with linked terms.</td>
+  </tr>
+  <tr>
+    <td width="60%"><img src="docs/images/quality-report.webp" alt="The Quality Report's overview: registered images, reprojection error, track length, depth-map coverage"></td>
+    <td width="40%"><img src="docs/images/depth-maps.webp" alt="The Build Depth Maps dialog: quality cards, then its settings as numbered steps"></td>
+  </tr>
+  <tr>
+    <td><b>Quality Report</b>: how each stage went, and what to fix first.</td>
+    <td><b>Every processing dialog</b>: a quality choice, then its settings in run order.</td>
+  </tr>
+</table>
+
+<sub>All of them, and the turning model at the top, are the example project in the app,
+taken by `npm run screenshots`.</sub>
+
 ## Your first project
 
 No photos at hand? In the first dialog (or the project picker), choose **Open the
@@ -65,9 +95,6 @@ methods behind each stage.
 
 ## What works today
 
-![The example project's orthophoto on the 2D map, with the camera positions](docs/images/orthophoto.webp)
-<sub>Background imagery: Esri World Imagery (Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community).</sub>
-
 | Area | Highlights |
 | --- | --- |
 | **Import** | Photos, video (frames picked by camera motion and sharpness), masks, camera poses and calibration, GCP files, reference DEMs and orthophotos, point clouds and meshes; projects from COLMAP, Metashape, OpenSfM, OpenMVG, NVM and Bundler |
@@ -84,27 +111,6 @@ methods behind each stage.
 
 Every command, with its place in the ribbon and the guide article that explains it, is
 listed in [docs/features.md](docs/features.md).
-
-<table>
-  <tr>
-    <td width="60%"><img src="docs/images/matches.webp" alt="The match graph, with one image pair's verified matches"></td>
-    <td width="40%"><img src="docs/images/glossary.webp" alt="The in-app glossary explaining focal length"></td>
-  </tr>
-  <tr>
-    <td>Every image pair's matches, as a graph and side by side</td>
-    <td>Each method explained in the app, with linked terms</td>
-  </tr>
-  <tr>
-    <td width="60%"><img src="docs/images/quality-report.webp" alt="The Quality Report's overview: registered images, reprojection error, track length, depth-map coverage"></td>
-    <td width="40%"><img src="docs/images/depth-maps.webp" alt="The Build Depth Maps dialog: quality cards, then its settings as numbered steps"></td>
-  </tr>
-  <tr>
-    <td>The Quality Report: how each stage went, and what to fix first</td>
-    <td>Every processing dialog: a quality choice, then its settings in run order</td>
-  </tr>
-</table>
-
-<sub>The screenshots are taken from the example project by `npm run screenshots`.</sub>
 
 ## Browser requirements
 
