@@ -79,8 +79,11 @@ methods behind each stage.
 | **Measure** | Distances, areas, profiles and volumes on the map and in 3D, DEM of difference, cloud-to-reference distances, sections |
 | **Historical imagery** | Film scans: fiducial detection and calibration, reseau grids, half-frame scans, panoramic satellite strips |
 | **Quality** | The Quality Report: matching, sparse model, calibration, checkpoint accuracy, coverage, depth coverage, DEM against a reference |
-| **Export** | Point clouds as PLY, LAS, LAZ, COPC or XYZ; meshes as PLY, glTF, OBJ or STL; Cesium 3D Tiles; DEMs and orthophotos as GeoTIFF, Cloud-Optimized GeoTIFF or PNG with a world file; camera poses and calibration; COLMAP and other SfM projects; undistorted images |
+| **Export** | Point clouds as PLY, LAS, LAZ, COPC or XYZ; meshes as PLY, glTF, OBJ or STL; Cesium 3D Tiles; DEMs as GeoTIFF, Cloud-Optimized GeoTIFF or ESRI ASCII; orthophotos as GeoTIFF, Cloud-Optimized GeoTIFF, PNG or JPEG with a world file, MBTiles or XYZ tiles; camera poses and calibration; projects for COLMAP, OpenMVG, VisualSFM, Metashape and NeRF tools (transforms.json); undistorted images |
 | **Help** | A guide article for every operation, a glossary of the methods with their references, and What's New |
+
+Every command, with its place in the ribbon and the guide article that explains it, is
+listed in [docs/features.md](docs/features.md).
 
 <table>
   <tr>

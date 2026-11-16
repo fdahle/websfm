@@ -5,7 +5,7 @@
 // `ribbonEntries`): every ribbon command is typeable by its id ("crop-mesh"), its id
 // as words ("crop mesh") and, for the common ones, a short name from CONSOLE_NAMES
 // below ("decimate"). A new ribbon button is a console command the moment it exists;
-// only its short name is hand-made. Help text is the ribbon's own location and blurb,
+// only its short name is hand-made. Help text is the ribbon's own blurb or tip, else its location,
 // so the two front ends cannot drift.
 //
 // Console-only VERBS (run, stats, set, pair, select …) take arguments; they are
@@ -320,7 +320,7 @@ function buildCommands() {
       group: tab,
       where,
       // The Export tab's ids already read as commands ("export cloud"), so they list too.
-      help: cmd.blurb ?? where,
+      help: cmd.blurb ?? cmd.tip ?? where,
       short: short.length > 0 || cmd.id.startsWith('export-'),
       ...(cmd.stepper
         ? {

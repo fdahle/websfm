@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { NEED_CHECKS, guardReason } from './commands.js'
 import { icons } from '../../utils/icons.js'
+import { getAllGuideDocs, getGuideDoc } from './guide.js'
 import {
   TABS,
   SCENE_GROUP,
@@ -275,5 +276,21 @@ describe('View tab toggles', () => {
       .filter(Boolean)
     expect(keys.filter((k) => !viewKeys.has(k))).toEqual([])
     expect(keys.filter((k) => !provided.has(k))).toEqual([])
+  })
+})
+
+describe('guide links', () => {
+  // `guide` names the article that explains a command (docs/features.md links it).
+  const linked = new Set(leaves.map((c) => c.guide).filter(Boolean))
+
+  it('every guide id is an article', () => {
+    for (const c of leaves) if (c.guide) expect(getGuideDoc(c.guide), `${c.id} → guide:${c.guide}`).not.toBeNull()
+  })
+
+  it('every article outside Start here is linked from a command', () => {
+    const orphans = getAllGuideDocs()
+      .filter((d) => d.category !== 'Start here' && !linked.has(d.id))
+      .map((d) => d.id)
+    expect(orphans).toEqual([])
   })
 })

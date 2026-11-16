@@ -40,6 +40,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run typecheck && npm test",
+    "docs:features": "node scripts/docs-features.mjs",
     "test:mutation": "stryker run"
   },
   "dependencies": {

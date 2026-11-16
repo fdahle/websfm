@@ -8,7 +8,10 @@
 // floating toolbox in the view (components/viewers/FloatingToolbox.vue).
 //
 // Command shapes:
-//   { id, label, icon, needs?: [...NEED_CHECKS keys], aerialOnly?, disabled?, activeKey? }
+//   { id, label, icon, guide?, needs?: [...NEED_CHECKS keys], aerialOnly?, disabled?, activeKey? }
+//                                        `guide` is the id of the src/guide/ article that
+//                                        explains it (docs/features.md links it; a test
+//                                        checks it resolves and links every article).
 //   { pair: [cmd, cmd] }                 two half-height commands in one footprint
 //   { id, label, icon, menu: [...] }     a dropdown; rows are commands plus
 //                                        { section: 'Name' } headings. Rows carry a
@@ -30,9 +33,19 @@
 import { BASEMAPS } from '../basemaps.js'
 
 // Shared between Reconstruct/Export and the raster tab's object actions.
-const GEN_DEM = { id: 'gen-dem', label: 'DEM', icon: 'dem', needs: ['cloud'], aerialOnly: true }
+const GEN_DEM = {
+  id: 'gen-dem',
+  guide: 'dem',
+  tip: 'Grid a point cloud into an elevation model: surface (DSM) or bare earth (DTM)',
+  label: 'DEM',
+  icon: 'dem',
+  needs: ['cloud'],
+  aerialOnly: true,
+}
 const GEN_ORTHO = {
   id: 'gen-ortho',
+  guide: 'orthophoto',
+  tip: 'Project the photos onto a DEM or mesh into one orthophoto',
   label: 'Ortho',
   icon: 'ortho',
   needs: ['imagesReady', 'depthMaps', 'surface'],
@@ -41,13 +54,31 @@ const GEN_ORTHO = {
 // A multispectral camera's bands on the DEM (stores/reconstruction/reflectanceRun.js).
 const GEN_REFLECTANCE = {
   id: 'gen-reflectance',
+  guide: 'reflectance-map',
+  tip: "Calibrated reflectance maps from a multispectral camera's bands",
   label: 'Reflect-\nance',
   icon: 'layers',
   needs: ['imagesReady', 'sparse', 'dem', 'bands'],
   aerialOnly: true,
 }
-const EXPORT_DEM = { id: 'export-dem', label: 'DEM', icon: 'dem', needs: ['dem'], aerialOnly: true }
-const EXPORT_ORTHO = { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needs: ['ortho'], aerialOnly: true }
+const EXPORT_DEM = {
+  id: 'export-dem',
+  guide: 'dem',
+  tip: 'A DEM as GeoTIFF, Cloud-Optimized GeoTIFF, ESRI ASCII grid or hillshade PNG',
+  label: 'DEM',
+  icon: 'dem',
+  needs: ['dem'],
+  aerialOnly: true,
+}
+const EXPORT_ORTHO = {
+  id: 'export-ortho',
+  guide: 'orthophoto',
+  tip: 'An orthophoto as GeoTIFF, Cloud-Optimized GeoTIFF, PNG or JPEG, MBTiles or XYZ tiles',
+  label: 'Ortho',
+  icon: 'ortho',
+  needs: ['ortho'],
+  aerialOnly: true,
+}
 
 // Tools ▸ Measure ▾. Raster tools run on the raster in front: a DEM/Orthophoto
 // tab, or one of the 2D map's rasters, which the measuring window's Layer field picks
@@ -58,6 +89,7 @@ export function measureMenu() {
     { section: 'DEM / orthophoto in front' },
     {
       id: 'measure-length',
+      guide: 'dem',
       label: 'Ruler',
       icon: 'ruler',
       measureTool: 'length',
@@ -66,6 +98,7 @@ export function measureMenu() {
     },
     {
       id: 'measure-area',
+      guide: 'dem',
       label: 'Area',
       icon: 'area',
       measureTool: 'area',
@@ -74,6 +107,7 @@ export function measureMenu() {
     },
     {
       id: 'measure-profile',
+      guide: 'dem',
       label: 'Profile',
       icon: 'profile',
       measureTool: 'profile',
@@ -83,6 +117,7 @@ export function measureMenu() {
     },
     {
       id: 'measure-volume',
+      guide: 'dem',
       label: 'Volume',
       icon: 'volume',
       measureTool: 'volume',
@@ -92,6 +127,7 @@ export function measureMenu() {
     },
     {
       id: 'measure-saved',
+      guide: 'dem',
       label: 'Saved measurements',
       icon: 'list',
       activeKey: 'measureSaved',
@@ -102,6 +138,7 @@ export function measureMenu() {
     { section: 'Clouds & meshes' },
     {
       id: 'measure-3d',
+      guide: 'point-cloud-tools',
       label: 'Measure in 3D',
       icon: 'ruler',
       needs: ['cloud'],
@@ -109,6 +146,7 @@ export function measureMenu() {
     },
     {
       id: 'cloud-distance',
+      guide: 'cloud-distance',
       label: 'Distance to reference…',
       icon: 'distance',
       needs: ['dense'],
@@ -116,6 +154,7 @@ export function measureMenu() {
     },
     {
       id: 'cloud-section',
+      guide: 'point-cloud-tools',
       label: 'Section…',
       icon: 'section',
       needs: ['dense'],
@@ -123,6 +162,7 @@ export function measureMenu() {
     },
     {
       id: 'mesh-measure',
+      guide: 'mesh',
       label: 'Mesh area & volume…',
       icon: 'volume',
       needs: ['mesh'],
@@ -131,6 +171,7 @@ export function measureMenu() {
     { section: 'Change' },
     {
       id: 'dem-difference',
+      guide: 'dem',
       label: 'DEM of difference',
       icon: 'volume',
       needs: ['dem', 'demCrs'],
@@ -147,17 +188,54 @@ export const TABS = [
       {
         label: 'Inspect',
         commands: [
-          { id: 'open-image-table', label: 'Images', icon: 'table', needs: ['images'] },
-          { id: 'open-mask-manager', label: 'Masks', icon: 'mask', needs: ['images'] },
-          { id: 'open-sensor-table', label: 'Sensors', icon: 'camera', needs: ['sensors'] },
-          { id: 'open-pose-table', label: 'Camera\nPoses', icon: 'camera-pose', needs: ['poses'] },
+          {
+            id: 'open-image-table',
+            tip: "Each photo's EXIF, camera and pose, as read and as estimated",
+            label: 'Images',
+            icon: 'table',
+            needs: ['images'],
+          },
+          {
+            id: 'open-mask-manager',
+            tip: "Each photo's mask; import masks one by one or a folder at once",
+            label: 'Masks',
+            icon: 'mask',
+            needs: ['images'],
+          },
+          {
+            id: 'open-sensor-table',
+            guide: 'camera-groups',
+            tip: 'The cameras and their calibration; split a group that holds several cameras',
+            label: 'Sensors',
+            icon: 'camera',
+            needs: ['sensors'],
+          },
+          {
+            id: 'open-pose-table',
+            tip: "Each photo's camera position and orientation, imported or estimated",
+            label: 'Camera\nPoses',
+            icon: 'camera-pose',
+            needs: ['poses'],
+          },
           // The table edits existing points; one is born elsewhere (import, or a
           // right-click on the map / an image), so an empty project has nothing to show.
           // Deliberately NOT aerialOnly: it also holds markers (scale-bar endpoints),
           // which are an object-capture feature. Importing surveyed *ground control*
           // stays aerial-only — that command is in the Import tab, not this one.
-          { id: 'open-gcp-table', label: 'Control &\nMarkers', icon: 'map-pin', needs: ['gcps'] },
-          { id: 'open-match-list', label: 'Matches', icon: 'list', needs: ['matches'] },
+          {
+            id: 'open-gcp-table',
+            tip: 'GCPs, checkpoints and markers: their coordinates, marks and residuals',
+            label: 'Control &\nMarkers',
+            icon: 'map-pin',
+            needs: ['gcps'],
+          },
+          {
+            id: 'open-match-list',
+            tip: 'Every image pair and its matches; leave a pair out of the reconstruction',
+            label: 'Matches',
+            icon: 'list',
+            needs: ['matches'],
+          },
         ],
       },
       // The remaining groups are contextual: see CAMERA_GROUP etc. below, injected by
@@ -171,25 +249,63 @@ export const TABS = [
       {
         label: 'Images',
         commands: [
-          { id: 'import-images', label: 'Images', icon: 'image' },
+          {
+            id: 'import-images',
+            guide: 'getting-started',
+            tip: 'Add photos to the project',
+            label: 'Images',
+            icon: 'image',
+          },
           // Frames of a video become images (keyframes by motion and sharpness, or a
           // fixed interval) — the dialog plans them before anything is written.
-          { id: 'import-video', label: 'Video', icon: 'video' },
+          {
+            id: 'import-video',
+            guide: 'video-import',
+            tip: 'Turn a video into sharp, overlapping frames that reconstruct like photos',
+            label: 'Video',
+            icon: 'video',
+          },
           // Scan-pixel mark positions per image (a row per mark, or a row per image
           // with x/y columns per position); rows match images by name, so
           // (unlike GCPs) the images must be there first.
-          { id: 'import-image-fiducials', label: 'Image\nFiducials', icon: 'target', needs: ['images'] },
+          {
+            id: 'import-image-fiducials',
+            guide: 'film-fiducials',
+            tip: 'Fiducial marks measured on each film scan, from a CSV or text file',
+            label: 'Image\nFiducials',
+            icon: 'target',
+            needs: ['images'],
+          },
         ],
       },
       {
         label: 'Cameras',
         commands: [
-          { id: 'import-camera-list', label: 'Camera\nPoses', icon: 'camera-pose' },
+          {
+            id: 'import-camera-list',
+            guide: 'export-camera-poses',
+            tip: 'Camera positions and orientations (GNSS, RTK or another tool) from a CSV or text file',
+            label: 'Camera\nPoses',
+            icon: 'camera-pose',
+          },
           // Intrinsics per sensor or per image; updates matching sensors (by label,
           // the images' sensor, or the only one) or adds new ones — the dialog shows which.
-          { id: 'import-calib', label: 'Calibration', icon: 'calibration' },
+          {
+            id: 'import-calib',
+            guide: 'export-calibration',
+            tip: 'Camera calibration from a CSV or text file, as Export ▸ Calibration writes it',
+            label: 'Calibration',
+            icon: 'calibration',
+          },
           // A film camera's certificate marks (mm); rows match sensors by label.
-          { id: 'import-camera-fiducials', label: 'Camera\nFiducials', icon: 'camera', needs: ['sensors'] },
+          {
+            id: 'import-camera-fiducials',
+            guide: 'film-fiducials',
+            tip: "A film camera's calibrated fiducial positions, from its calibration certificate",
+            label: 'Camera\nFiducials',
+            icon: 'camera',
+            needs: ['sensors'],
+          },
         ],
       },
       {
@@ -197,7 +313,14 @@ export const TABS = [
         commands: [
           // GCP coordinates and filename-keyed observations are project data. They
           // can be imported before images and reconcile automatically as images arrive.
-          { id: 'import-gcps', label: 'GCP\nFile', icon: 'map-pin', aerialOnly: true },
+          {
+            id: 'import-gcps',
+            guide: 'georeferencing',
+            tip: 'Ground control points and their coordinates, from a CSV or text file',
+            label: 'GCP\nFile',
+            icon: 'map-pin',
+            aerialOnly: true,
+          },
         ],
       },
       {
@@ -208,8 +331,20 @@ export const TABS = [
         commands: [
           // Explicit entry point, so the user never has to rely on the dropped-TIFF
           // geokey sniff.
-          { id: 'import-raster', label: 'Reference\nDEM / Ortho', icon: 'layers' },
-          { id: 'import-cloud', label: 'Point Cloud\n/ Mesh', icon: 'point-cloud' },
+          {
+            id: 'import-raster',
+            guide: 'coregister-dem',
+            tip: 'A DEM or orthophoto to compare with, find GCPs in, or co-register to',
+            label: 'Reference\nDEM / Ortho',
+            icon: 'layers',
+          },
+          {
+            id: 'import-cloud',
+            guide: 'cloud-distance',
+            tip: 'A point cloud or mesh from another tool, to edit, mesh, compare or align with',
+            label: 'Point Cloud\n/ Mesh',
+            icon: 'point-cloud',
+          },
         ],
       },
       {
@@ -219,6 +354,7 @@ export const TABS = [
           // (composables/useProjectMerge.js); then Add to the model joins them.
           {
             id: 'import-project',
+            guide: 'import-project',
             label: 'WebSfM\nProject',
             icon: 'folder',
             needs: ['project'],
@@ -227,6 +363,7 @@ export const TABS = [
           // Each opens a dialog that shows what the file holds and asks what of it to bring in.
           {
             id: 'import-colmap',
+            guide: 'import-sfm',
             label: 'COLMAP',
             icon: 'cube',
             tip: 'A COLMAP database, sparse model or workspace: cameras, keypoints, matches, the sparse model',
@@ -235,6 +372,7 @@ export const TABS = [
           // (core/io/metashapeXml.js, components/modals/import/MetashapeImportModal.vue).
           {
             id: 'import-metashape',
+            guide: 'import-metashape',
             label: 'Metashape',
             icon: 'camera',
             tip: 'Metashape cameras or markers XML: calibration, camera poses, markers and scale bars',
@@ -243,6 +381,7 @@ export const TABS = [
           // the same dialog as COLMAP.
           {
             id: 'import-sfm-other',
+            guide: 'import-sfm',
             label: 'Other\nSfM',
             icon: 'sparse-model',
             tip: 'Bundler, VisualSFM NVM, OpenMVG, OpenSfM or transforms.json: cameras and the sparse model',
@@ -250,6 +389,7 @@ export const TABS = [
           // Plain text or CSV from another detector or matcher (core/io/featureText.js).
           {
             id: 'import-features',
+            guide: 'import-features',
             label: 'Keypoints\n& Matches',
             icon: 'keypoints',
             needs: ['images'],
@@ -265,13 +405,36 @@ export const TABS = [
     groups: [
       {
         label: 'Workflow',
-        commands: [{ id: 'workflow-builder', label: 'Workflow\nBuilder', icon: 'list', needs: ['project'] }],
+        commands: [
+          {
+            id: 'workflow-builder',
+            guide: 'workflow-builder',
+            tip: 'Run several stages in one go, with quality checks between them',
+            label: 'Workflow\nBuilder',
+            icon: 'list',
+            needs: ['project'],
+          },
+        ],
       },
       {
         label: 'Features',
         commands: [
-          { id: 'detect-features', label: 'Detect\nFeatures', icon: 'sparkles', needs: ['images', 'imagesReady'] },
-          { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needs: ['imagesReady', 'keypoints'] },
+          {
+            id: 'detect-features',
+            guide: 'detect-features',
+            tip: 'Find keypoints in every photo, with SIFT or a learned detector',
+            label: 'Detect\nFeatures',
+            icon: 'sparkles',
+            needs: ['images', 'imagesReady'],
+          },
+          {
+            id: 'match-features',
+            guide: 'match-features',
+            tip: 'Match keypoints between photo pairs and verify each pair geometrically',
+            label: 'Match\nFeatures',
+            icon: 'link',
+            needs: ['imagesReady', 'keypoints'],
+          },
         ],
       },
       // The groups are pipeline *stages*, in order: features → sparse →
@@ -281,7 +444,14 @@ export const TABS = [
       {
         label: 'Sparse',
         commands: [
-          { id: 'reconstruct', label: 'Sparse\nModel', icon: 'sparse-model', needs: ['imagesReady', 'matches'] },
+          {
+            id: 'reconstruct',
+            guide: 'sparse-reconstruction',
+            tip: 'Solve the camera poses and calibration, and triangulate a sparse point cloud',
+            label: 'Sparse\nModel',
+            icon: 'sparse-model',
+            needs: ['imagesReady', 'matches'],
+          },
         ],
       },
       {
@@ -294,22 +464,59 @@ export const TABS = [
         // Edit GCPs is a mode, so it lives in Tools ▸ Images ▾ (ONE HOME PER TOOL).
         label: 'Georeferencing',
         commands: [
-          { id: 'find-gcps', label: 'Find\nGCPs', icon: 'map-pin', needs: ['sparse'], aerialOnly: true },
+          {
+            id: 'find-gcps',
+            guide: 'georeferencing',
+            tip: 'Find GCPs automatically by matching the photos to a reference orthophoto',
+            label: 'Find\nGCPs',
+            icon: 'map-pin',
+            needs: ['sparse'],
+            aerialOnly: true,
+          },
           // One entry point for both GCP-constrained adjustment + final similarity fit
           // and the cheap transform-only path. The modal explains/validates each mode.
-          { id: 'georeference', label: 'Geo-\nreference', icon: 'target', needs: ['sparse'], aerialOnly: true },
+          {
+            id: 'georeference',
+            guide: 'georeferencing',
+            tip: 'Place the model in a coordinate system, from GCPs or camera positions',
+            label: 'Geo-\nreference',
+            icon: 'target',
+            needs: ['sparse'],
+            aerialOnly: true,
+          },
           // Same job as Georeference — fixing the datum — for a project that has no
           // CRS at all. Deliberately NOT aerialOnly: scale bars are the object-capture
           // way to get metres, and an object project is exactly where there is no
           // georeference to supply one.
-          { id: 'scale-bars', label: 'Scale\nBars', icon: 'scale-bar', needs: ['sparse'] },
+          {
+            id: 'scale-bars',
+            guide: 'georeferencing',
+            tip: 'Scale the model from known distances between points in the photos',
+            label: 'Scale\nBars',
+            icon: 'scale-bar',
+            needs: ['sparse'],
+          },
         ],
       },
       {
         label: 'Dense',
         commands: [
-          { id: 'compute-depth', label: 'Depth\nMaps', icon: 'depth', needs: ['imagesReady', 'sparse'] },
-          { id: 'dense', label: 'Dense\nModel', icon: 'point-cloud', needs: ['depthMaps'] },
+          {
+            id: 'compute-depth',
+            guide: 'depth-maps',
+            tip: 'Estimate a depth map for each photo from its neighbours (PatchMatch)',
+            label: 'Depth\nMaps',
+            icon: 'depth',
+            needs: ['imagesReady', 'sparse'],
+          },
+          {
+            id: 'dense',
+            guide: 'dense-cloud',
+            tip: 'Fuse the depth maps into a dense, coloured point cloud',
+            label: 'Dense\nModel',
+            icon: 'point-cloud',
+            needs: ['depthMaps'],
+          },
         ],
       },
       {
@@ -318,7 +525,14 @@ export const TABS = [
           GEN_DEM,
           GEN_ORTHO,
           GEN_REFLECTANCE,
-          { id: 'gen-mesh', label: 'Mesh', icon: 'cube', needs: ['dense'] },
+          {
+            id: 'gen-mesh',
+            guide: 'mesh',
+            tip: 'Build a surface mesh from the dense cloud (screened Poisson)',
+            label: 'Mesh',
+            icon: 'cube',
+            needs: ['dense'],
+          },
         ],
       },
     ],
@@ -341,6 +555,7 @@ export const TABS = [
               { section: 'Prepare' },
               {
                 id: 'image-quality',
+                guide: 'model-tools',
                 label: 'Image quality…',
                 icon: 'quality',
                 needs: ['images', 'imagesReady'],
@@ -348,6 +563,7 @@ export const TABS = [
               },
               {
                 id: 'detect-targets',
+                guide: 'detect-targets',
                 label: 'Detect targets…',
                 icon: 'target',
                 needs: ['images', 'imagesReady'],
@@ -355,6 +571,7 @@ export const TABS = [
               },
               {
                 id: 'reduce-overlap',
+                guide: 'reduce-overlap',
                 label: 'Reduce overlap…',
                 icon: 'image',
                 needs: ['sparse'],
@@ -362,6 +579,7 @@ export const TABS = [
               },
               {
                 id: 'auto-mask',
+                guide: 'masks',
                 label: 'Auto mask…',
                 icon: 'mask',
                 needs: ['images', 'imagesReady'],
@@ -370,6 +588,7 @@ export const TABS = [
               { section: 'Film scans' },
               {
                 id: 'detect-fiducials',
+                guide: 'film-fiducials',
                 label: 'Detect fiducials…',
                 icon: 'target',
                 needs: ['filmSensor', 'imagesReady'],
@@ -377,6 +596,7 @@ export const TABS = [
               },
               {
                 id: 'calibrate-fiducials',
+                guide: 'film-fiducials',
                 label: 'Calibrate fiducials…',
                 icon: 'calibration',
                 needs: ['filmSensor'],
@@ -384,6 +604,7 @@ export const TABS = [
               },
               {
                 id: 'detect-reseau',
+                guide: 'reseau',
                 label: 'Detect reseau…',
                 icon: 'target',
                 needs: ['images', 'imagesReady'],
@@ -391,6 +612,7 @@ export const TABS = [
               },
               {
                 id: 'split-panoramic',
+                guide: 'panoramic',
                 label: 'Split panoramic strips…',
                 icon: 'image',
                 needs: ['images', 'imagesReady'],
@@ -401,6 +623,7 @@ export const TABS = [
               // floating MaskToolbar over the image view.
               {
                 id: 'img-mask-edit',
+                guide: 'masks',
                 label: 'Edit mask',
                 icon: 'pencil',
                 activeKey: 'maskEdit',
@@ -411,6 +634,7 @@ export const TABS = [
               // floating GcpToolbar), on the map it places/moves surveyed points.
               {
                 id: 'edit-gcps',
+                guide: 'georeferencing',
                 label: 'Edit GCPs',
                 icon: 'map-pin',
                 activeKey: 'gcpEdit',
@@ -432,6 +656,7 @@ export const TABS = [
               { section: 'Refine' },
               {
                 id: 'optimize-cameras',
+                guide: 'optimize-cameras',
                 label: 'Optimize cameras…',
                 icon: 'calibration',
                 needs: ['sparse'],
@@ -439,6 +664,7 @@ export const TABS = [
               },
               {
                 id: 'gradual-selection',
+                guide: 'sparse-reconstruction',
                 label: 'Gradual selection…',
                 icon: 'sparse-model',
                 needs: ['sparse'],
@@ -447,6 +673,7 @@ export const TABS = [
               { section: 'Frame' },
               {
                 id: 'set-region',
+                guide: 'model-tools',
                 label: 'Region…',
                 icon: 'region',
                 needs: ['sparse'],
@@ -454,6 +681,7 @@ export const TABS = [
               },
               {
                 id: 'orient-model',
+                guide: 'model-tools',
                 label: 'Orient model…',
                 icon: 'level',
                 needs: ['sparse'],
@@ -462,6 +690,7 @@ export const TABS = [
               { section: 'Cameras' },
               {
                 id: 'footprints-from-poses',
+                guide: 'footprints-from-poses',
                 label: 'Footprints from poses…',
                 icon: 'footprint',
                 needs: ['poses', 'sensors'],
@@ -486,6 +715,7 @@ export const TABS = [
               { section: 'Clean' },
               {
                 id: 'filter-cloud',
+                guide: 'filter-cloud',
                 label: 'Filter…',
                 icon: 'point-cloud',
                 needs: ['dense'],
@@ -493,6 +723,7 @@ export const TABS = [
               },
               {
                 id: 'cloud-outliers',
+                guide: 'filter-cloud',
                 label: 'Remove outliers…',
                 icon: 'point-cloud',
                 needs: ['dense'],
@@ -500,6 +731,7 @@ export const TABS = [
               },
               {
                 id: 'cloud-subsample',
+                guide: 'filter-cloud',
                 label: 'Subsample…',
                 icon: 'grid',
                 needs: ['dense'],
@@ -509,6 +741,7 @@ export const TABS = [
               // Modes in the 3D view; Delete / Keep only / Clear are its floating toolbox.
               {
                 id: 'view-select-rect',
+                guide: 'point-cloud-tools',
                 label: 'Select (rectangle)',
                 icon: 'rect',
                 activeKey: 'selectRect',
@@ -517,6 +750,7 @@ export const TABS = [
               },
               {
                 id: 'view-select-lasso',
+                guide: 'point-cloud-tools',
                 label: 'Select (lasso)',
                 icon: 'lasso',
                 activeKey: 'selectLasso',
@@ -525,6 +759,7 @@ export const TABS = [
               },
               {
                 id: 'crop-cloud',
+                guide: 'crop-cloud',
                 label: 'Crop…',
                 icon: 'rect',
                 needs: ['dense'],
@@ -532,6 +767,7 @@ export const TABS = [
               },
               {
                 id: 'transform-cloud',
+                guide: 'transform-cloud',
                 label: 'Transform…',
                 icon: 'transform',
                 needs: ['dense'],
@@ -540,6 +776,7 @@ export const TABS = [
               { section: 'Combine' },
               {
                 id: 'merge-clouds',
+                guide: 'merge-clouds',
                 label: 'Merge…',
                 icon: 'link',
                 needs: ['twoClouds'],
@@ -547,6 +784,7 @@ export const TABS = [
               },
               {
                 id: 'align-points',
+                guide: 'transform-cloud',
                 label: 'Align by point pairs…',
                 icon: 'align',
                 needs: ['dense'],
@@ -554,6 +792,7 @@ export const TABS = [
               },
               {
                 id: 'align-icp',
+                guide: 'align-icp',
                 label: 'Align to reference (ICP)…',
                 icon: 'align',
                 needs: ['dense'],
@@ -562,6 +801,7 @@ export const TABS = [
               { section: 'Attributes' },
               {
                 id: 'estimate-normals',
+                guide: 'estimate-normals',
                 label: 'Estimate normals…',
                 icon: 'normals',
                 needs: ['dense'],
@@ -569,6 +809,7 @@ export const TABS = [
               },
               {
                 id: 'classify-ground',
+                guide: 'classify-ground',
                 label: 'Classify points…',
                 icon: 'dem',
                 needs: ['dense'],
@@ -590,6 +831,7 @@ export const TABS = [
               { section: 'Clean' },
               {
                 id: 'clean-mesh',
+                guide: 'clean-mesh',
                 label: 'Clean mesh…',
                 icon: 'cube',
                 needs: ['mesh'],
@@ -597,6 +839,7 @@ export const TABS = [
               },
               {
                 id: 'smooth-mesh',
+                guide: 'smooth-mesh',
                 label: 'Smooth…',
                 icon: 'smooth',
                 needs: ['mesh'],
@@ -605,6 +848,7 @@ export const TABS = [
               { section: 'Simplify' },
               {
                 id: 'decimate-mesh',
+                guide: 'decimate-mesh',
                 label: 'Decimate…',
                 icon: 'decimate',
                 needs: ['mesh'],
@@ -613,6 +857,7 @@ export const TABS = [
               { section: 'Edit' },
               {
                 id: 'crop-mesh',
+                guide: 'crop-cloud',
                 label: 'Crop…',
                 icon: 'rect',
                 needs: ['mesh'],
@@ -621,6 +866,7 @@ export const TABS = [
               { section: 'Convert' },
               {
                 id: 'mesh-to-points',
+                guide: 'sample-mesh',
                 label: 'Sample to points…',
                 icon: 'point-cloud',
                 needs: ['mesh'],
@@ -629,6 +875,7 @@ export const TABS = [
               { section: 'Colour' },
               {
                 id: 'texture-mesh',
+                guide: 'texture-mesh',
                 label: 'Texture…',
                 icon: 'image',
                 needs: ['mesh', 'sparse'],
@@ -649,6 +896,7 @@ export const TABS = [
               { section: 'Terrain' },
               {
                 id: 'dem-contours',
+                guide: 'contours',
                 label: 'Contours…',
                 icon: 'contours',
                 needs: ['dem'],
@@ -657,6 +905,7 @@ export const TABS = [
               },
               {
                 id: 'dem-derivatives',
+                guide: 'terrain-derivatives',
                 label: 'Slope, aspect, hillshade…',
                 icon: 'dem',
                 needs: ['dem'],
@@ -665,6 +914,7 @@ export const TABS = [
               },
               {
                 id: 'coregister-dem',
+                guide: 'coregister-dem',
                 label: 'Co-register DEM…',
                 icon: 'dem',
                 needs: ['dem', 'referenceDem'],
@@ -674,6 +924,7 @@ export const TABS = [
               { section: 'Export' },
               {
                 id: 'clip-raster',
+                guide: 'clip-raster',
                 label: 'Clip to polygon…',
                 icon: 'clip',
                 needs: ['products'],
@@ -704,24 +955,78 @@ export const TABS = [
       // ("where in the pipeline am I?") carries across tabs.
       {
         label: 'Report',
-        commands: [{ id: 'eval-overview', label: 'Quality\nReport', icon: 'report' }],
+        commands: [
+          {
+            id: 'eval-overview',
+            guide: 'quality-report',
+            tip: 'How each stage went, and what to fix first',
+            label: 'Quality\nReport',
+            icon: 'report',
+          },
+        ],
       },
       {
         label: 'Features',
-        commands: [{ id: 'eval-match-graph', label: 'Matching', icon: 'link', needs: ['matches'] }],
+        commands: [
+          {
+            id: 'eval-match-graph',
+            guide: 'quality-report',
+            tip: 'The match graph: weak links, disconnected groups, photos with few matches',
+            label: 'Matching',
+            icon: 'link',
+            needs: ['matches'],
+          },
+        ],
       },
       {
         label: 'Sparse',
         commands: [
-          { id: 'eval-reconstruction', label: 'Sparse\nModel', icon: 'sparse-model', needs: ['sparse'] },
-          { id: 'eval-calibration', label: 'Calibration', icon: 'calibration', needs: ['sparse'] },
-          { id: 'eval-gcps', label: 'Accuracy', icon: 'map-pin', needs: ['sparse'] },
-          { id: 'eval-coverage', label: 'Coverage', icon: 'grid', needs: ['sparse'] },
+          {
+            id: 'eval-reconstruction',
+            guide: 'quality-report',
+            tip: 'Registration, track lengths and reprojection errors of the sparse model',
+            label: 'Sparse\nModel',
+            icon: 'sparse-model',
+            needs: ['sparse'],
+          },
+          {
+            id: 'eval-calibration',
+            guide: 'quality-report',
+            tip: 'The estimated lens: focal length, principal point, distortion',
+            label: 'Calibration',
+            icon: 'calibration',
+            needs: ['sparse'],
+          },
+          {
+            id: 'eval-gcps',
+            guide: 'quality-report',
+            tip: 'Residuals at checkpoints and camera positions against their reference coordinates',
+            label: 'Accuracy',
+            icon: 'map-pin',
+            needs: ['sparse'],
+          },
+          {
+            id: 'eval-coverage',
+            guide: 'quality-report',
+            tip: 'Where tie points cluster or are missing, on a coverage map',
+            label: 'Coverage',
+            icon: 'grid',
+            needs: ['sparse'],
+          },
         ],
       },
       {
         label: 'Dense',
-        commands: [{ id: 'eval-depth-coverage', label: 'Depth\nCoverage', icon: 'depth', needs: ['depthMaps'] }],
+        commands: [
+          {
+            id: 'eval-depth-coverage',
+            guide: 'quality-report',
+            tip: 'How much of each photo its depth map covers',
+            label: 'Depth\nCoverage',
+            icon: 'depth',
+            needs: ['depthMaps'],
+          },
+        ],
       },
       {
         label: 'Products',
@@ -729,6 +1034,8 @@ export const TABS = [
           // The computed DEM against an imported reference DEM (TODO.md ▸ A-6).
           {
             id: 'eval-dem-reference',
+            guide: 'quality-report',
+            tip: 'The DEM against a reference DEM: the differences and their statistics',
             label: 'DEM vs\nReference',
             icon: 'dem',
             needs: ['dem', 'referenceDem'],
@@ -750,30 +1057,99 @@ export const TABS = [
       {
         label: 'Cameras',
         commands: [
-          { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera-pose', needs: ['posesOrSparse'] },
-          { id: 'export-sensors', label: 'Calibration', icon: 'calibration', needs: ['sensors'] },
-          { id: 'export-camera-fiducials', label: 'Camera\nFiducials', icon: 'camera', needs: ['fiducialMarks'] },
+          {
+            id: 'export-cameras',
+            guide: 'export-camera-poses',
+            tip: 'Camera positions and orientations as CSV, text or GeoJSON',
+            label: 'Camera\nPoses',
+            icon: 'camera-pose',
+            needs: ['posesOrSparse'],
+          },
+          {
+            id: 'export-sensors',
+            guide: 'export-calibration',
+            tip: 'Camera calibration as CSV or text',
+            label: 'Calibration',
+            icon: 'calibration',
+            needs: ['sensors'],
+          },
+          {
+            id: 'export-camera-fiducials',
+            guide: 'film-fiducials',
+            tip: "The film cameras' fiducial positions as CSV or text",
+            label: 'Camera\nFiducials',
+            icon: 'camera',
+            needs: ['fiducialMarks'],
+          },
           // The image footprints as GeoJSON (they have no sidebar row to download from).
-          { id: 'export-footprints', label: 'Foot-\nprints', icon: 'footprint', needs: ['footprints'] },
+          {
+            id: 'export-footprints',
+            guide: 'footprints-from-poses',
+            tip: 'The ground each photo covers, as GeoJSON or KML',
+            label: 'Foot-\nprints',
+            icon: 'footprint',
+            needs: ['footprints'],
+          },
         ],
       },
       {
         label: 'Features',
         commands: [
-          { id: 'export-image-fiducials', label: 'Image\nFiducials', icon: 'target', needs: ['fiducials'] },
-          { id: 'export-keypoints', label: 'Key\npoints', icon: 'keypoints', needs: ['imagesReady', 'keypoints'] },
-          { id: 'export-matches', label: 'Matches', icon: 'link', needs: ['matches'] },
+          {
+            id: 'export-image-fiducials',
+            guide: 'film-fiducials',
+            tip: 'The fiducial marks measured on each scan, as CSV or text',
+            label: 'Image\nFiducials',
+            icon: 'target',
+            needs: ['fiducials'],
+          },
+          {
+            id: 'export-keypoints',
+            tip: "Every photo's keypoints as JSON or CSV",
+            label: 'Key\npoints',
+            icon: 'keypoints',
+            needs: ['imagesReady', 'keypoints'],
+          },
+          {
+            id: 'export-matches',
+            tip: 'The verified matches of every pair as JSON or CSV',
+            label: 'Matches',
+            icon: 'link',
+            needs: ['matches'],
+          },
         ],
       },
       {
         label: 'Reconstruction',
-        commands: [{ id: 'export-model', label: 'Model\nJSON', icon: 'cube', needs: ['sparse'] }],
+        commands: [
+          {
+            id: 'export-model',
+            tip: 'Cameras and tracks as JSON, or transforms.json for NeRF and Gaussian splatting',
+            label: 'Model\nJSON',
+            icon: 'cube',
+            needs: ['sparse'],
+          },
+        ],
       },
       {
         label: 'Geometry',
         commands: [
-          { id: 'export-cloud', label: 'Point\nCloud', icon: 'point-cloud', needs: ['cloud'] },
-          { id: 'export-mesh', label: 'Mesh', icon: 'cube', needs: ['mesh'] },
+          {
+            id: 'export-cloud',
+            guide: 'point-cloud-tools',
+            tip: 'A point cloud as PLY, LAS, LAZ, COPC or XYZ',
+            label: 'Point\nCloud',
+            icon: 'point-cloud',
+            needs: ['cloud'],
+          },
+          {
+            id: 'export-mesh',
+            guide: 'texture-mesh',
+            tip: 'A mesh as PLY, glTF, OBJ or STL',
+            label: 'Mesh',
+            icon: 'cube',
+            needs: ['mesh'],
+          },
         ],
       },
       {
@@ -782,15 +1158,42 @@ export const TABS = [
           EXPORT_DEM,
           EXPORT_ORTHO,
           // Saved ruler / area / profile / volume / 3D measurements as CSV or GeoJSON.
-          { id: 'export-measurements', label: 'Measure-\nments', icon: 'ruler', needs: ['measurements'] },
+          {
+            id: 'export-measurements',
+            guide: 'dem',
+            tip: 'Saved measurements as CSV or GeoJSON',
+            label: 'Measure-\nments',
+            icon: 'ruler',
+            needs: ['measurements'],
+          },
         ],
       },
       {
         label: 'Interoperability',
         commands: [
-          { id: 'export-colmap', label: 'SfM\nProject', icon: 'cube', needs: ['sparse'] },
-          { id: 'export-undistorted', label: 'Undistorted\nImages', icon: 'image', needs: ['sparse'] },
-          { id: 'export-tiles3d', label: '3D Tiles', icon: 'layers', needs: ['cloud'] },
+          {
+            id: 'export-colmap',
+            guide: 'import-sfm',
+            tip: 'The cameras, features and sparse model for COLMAP, OpenMVG, VisualSFM, Metashape or NeRF tools',
+            label: 'SfM\nProject',
+            icon: 'cube',
+            needs: ['sparse'],
+          },
+          {
+            id: 'export-undistorted',
+            tip: 'The photos with the lens distortion removed, as JPEG or PNG',
+            label: 'Undistorted\nImages',
+            icon: 'image',
+            needs: ['sparse'],
+          },
+          {
+            id: 'export-tiles3d',
+            guide: 'export-3d-tiles',
+            tip: 'A point cloud or mesh as Cesium 3D Tiles',
+            label: '3D Tiles',
+            icon: 'layers',
+            needs: ['cloud'],
+          },
         ],
       },
     ],
@@ -806,34 +1209,81 @@ export const TABS = [
         // portable `.websfm` file is an export — the project stays where it is.
         label: 'Project',
         commands: [
-          { id: 'open-project-settings', label: 'Project\nSettings', icon: 'settings', needs: ['project'] },
-          { id: 'save-project-file', label: 'Export\nProject', icon: 'save', needs: ['project'] },
+          {
+            id: 'open-project-settings',
+            guide: 'projects-storage',
+            tip: "This project's name, coordinate system and other settings",
+            label: 'Project\nSettings',
+            icon: 'settings',
+            needs: ['project'],
+          },
+          {
+            id: 'save-project-file',
+            guide: 'projects-storage',
+            tip: 'Save the whole project as one .websfm file, to back it up or move it',
+            label: 'Export\nProject',
+            icon: 'save',
+            needs: ['project'],
+          },
         ],
       },
       {
         label: 'Panels',
-        commands: [{ id: 'toggle-console', label: 'Console', icon: 'console', activeKey: 'consoleOpen' }],
+        commands: [
+          {
+            id: 'toggle-console',
+            guide: 'command-console',
+            tip: 'The log of every run, and a command line',
+            label: 'Console',
+            icon: 'console',
+            activeKey: 'consoleOpen',
+          },
+        ],
       },
       {
         label: 'App',
         commands: [
-          { id: 'open-glossary', label: 'Glossary', icon: 'book' },
-          { id: 'open-guide', label: 'Guide', icon: 'book' },
-          { id: 'open-shortcuts', label: 'Shortcuts', icon: 'keyboard' },
+          { id: 'open-glossary', tip: 'The methods and terms, explained', label: 'Glossary', icon: 'book' },
+          {
+            id: 'open-guide',
+            tip: 'How each operation works and how to choose its settings',
+            label: 'Guide',
+            icon: 'book',
+          },
+          { id: 'open-shortcuts', tip: 'All keyboard shortcuts', label: 'Shortcuts', icon: 'keyboard' },
           // `badge`: Ribbon shows composables/useWhatsNew's count of unseen entries.
-          { id: 'open-whats-new', label: "What's\nNew", icon: 'sparkles', badge: 'whatsNew' },
+          {
+            id: 'open-whats-new',
+            tip: 'What changed in each release',
+            label: "What's\nNew",
+            icon: 'sparkles',
+            badge: 'whatsNew',
+          },
           // Appearance lives in Settings ▸ Display (and the command palette's
           // `theme`) — deliberately not duplicated as a ribbon button.
-          { id: 'open-settings', label: 'Settings', icon: 'settings' },
-          { id: 'open-system-info', label: 'System info', icon: 'cpu' },
-          { id: 'open-about', label: 'About', icon: 'info' },
+          { id: 'open-settings', tip: 'Settings for the app, in every project', label: 'Settings', icon: 'settings' },
+          {
+            id: 'open-system-info',
+            tip: 'What this browser and machine support: GPU, memory, storage',
+            label: 'System info',
+            icon: 'cpu',
+          },
+          { id: 'open-about', tip: 'Version, license and third-party licenses', label: 'About', icon: 'info' },
         ],
       },
       {
         // A compact, classified reconstruction-health digest — copy-pasteable so a
         // run's outcome can be shared without the full (thousands-of-lines) log.
         label: 'Debug',
-        commands: [{ id: 'open-debug-summary', label: 'Project\nSummary', icon: 'summary', needs: ['project'] }],
+        commands: [
+          {
+            id: 'open-debug-summary',
+            tip: "A technical summary of the project's data, for a bug report",
+            label: 'Project\nSummary',
+            icon: 'summary',
+            needs: ['project'],
+          },
+        ],
       },
     ],
   },
@@ -847,25 +1297,25 @@ export const CAMERA_GROUP = {
   commands: [
     {
       pair: [
-        { id: 'view-preset-top', label: 'Top', icon: 'view-top' },
-        { id: 'view-preset-bottom', label: 'Bottom', icon: 'view-bottom' },
+        { id: 'view-preset-top', guide: '3d-view', label: 'Top', icon: 'view-top' },
+        { id: 'view-preset-bottom', guide: '3d-view', label: 'Bottom', icon: 'view-bottom' },
       ],
     },
     {
       pair: [
-        { id: 'view-preset-left', label: 'Left', icon: 'view-left' },
-        { id: 'view-preset-right', label: 'Right', icon: 'view-right' },
+        { id: 'view-preset-left', guide: '3d-view', label: 'Left', icon: 'view-left' },
+        { id: 'view-preset-right', guide: '3d-view', label: 'Right', icon: 'view-right' },
       ],
     },
     {
       pair: [
-        { id: 'view-preset-front', label: 'Front', icon: 'view-front' },
-        { id: 'view-preset-back', label: 'Back', icon: 'view-back' },
+        { id: 'view-preset-front', guide: '3d-view', label: 'Front', icon: 'view-front' },
+        { id: 'view-preset-back', guide: '3d-view', label: 'Back', icon: 'view-back' },
       ],
     },
-    { id: 'reset-view', label: 'Reset\nView', icon: 'view-reset' },
+    { id: 'reset-view', guide: '3d-view', label: 'Reset\nView', icon: 'view-reset' },
     // The camera circles the scene; its toolbox holds the speed and the recording.
-    { id: 'view-toggle-turntable', label: 'Turntable', icon: 'turntable', activeKey: 'turntable' },
+    { id: 'view-toggle-turntable', guide: '3d-view', label: 'Turntable', icon: 'turntable', activeKey: 'turntable' },
   ],
 }
 
@@ -875,14 +1325,15 @@ export const SCENE_GROUP = {
   label: 'Scene',
   dynamic: '3D',
   commands: [
-    { id: 'view-toggle-cameras', label: 'Cameras', icon: 'camera', activeKey: 'showCameras' },
-    { id: 'view-toggle-grid', label: 'Grid', icon: 'grid', activeKey: 'showGrid' },
-    { id: 'view-toggle-legend', label: 'Legend', icon: 'layers', activeKey: 'showLegend' },
+    { id: 'view-toggle-cameras', guide: '3d-view', label: 'Cameras', icon: 'camera', activeKey: 'showCameras' },
+    { id: 'view-toggle-grid', guide: '3d-view', label: 'Grid', icon: 'grid', activeKey: 'showGrid' },
+    { id: 'view-toggle-legend', guide: '3d-view', label: 'Legend', icon: 'layers', activeKey: 'showLegend' },
     {
       pair: [
         {
           stepper: true,
           id: 'view-point-size',
+          guide: '3d-view',
           label: 'Points',
           icon: 'point-cloud',
           valueKey: 'pointSize',
@@ -893,6 +1344,7 @@ export const SCENE_GROUP = {
         {
           stepper: true,
           id: 'view-camera-scale',
+          guide: '3d-view',
           label: 'Cameras',
           icon: 'camera',
           valueKey: 'cameraScale',
@@ -919,13 +1371,21 @@ export const MAP_GROUP = {
     { id: 'map-toggle-gcps', label: 'GCPs', icon: 'map-pin', activeKey: 'showMapGcps', needs: ['gcps'] },
     {
       id: 'map-toggle-footprints',
+      guide: 'footprints-from-poses',
       label: 'Footprints',
       icon: 'footprint',
       activeKey: 'showFootprints',
       needs: ['footprints'],
     },
     // The source images drawn into their footprints: a layer of the stack (Layers).
-    { id: 'map-toggle-photos', label: 'Photos', icon: 'image', activeKey: 'showMapPhotos', needs: ['footprints'] },
+    {
+      id: 'map-toggle-photos',
+      guide: 'footprints-from-poses',
+      label: 'Photos',
+      icon: 'image',
+      activeKey: 'showMapPhotos',
+      needs: ['footprints'],
+    },
     // `map-basemap:<value>` rows pick the base layer (core/basemaps.js); App
     // dispatches the prefix. A layer the frame cannot show is greyed with its reason.
     {

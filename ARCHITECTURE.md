@@ -115,7 +115,7 @@ to the algorithm; the other steps differ only in file names.
 | change an algorithm | `core/<stage>/` or `crates/<crate>/` | its `*.test.js`; `npm run build:wasm` for Rust; [docs/METHODS.md](docs/METHODS.md) if the method changes |
 | add or change a setting | the `*_DEFAULTS` in `core/defaults.user.js` and the dialog in `components/modals/` | the guide section in `src/guide/` (see [CONTRIBUTING](CONTRIBUTING.md#keep-the-in-app-help-in-step)) |
 | tune an internal threshold | `core/tuning.js` | the test that pins it |
-| add a ribbon command | `core/help/ribbonTabs.js` | `composables/useCommandDispatch.js`; it becomes a console command automatically (`core/help/commands.js`) |
+| add a ribbon command | `core/help/ribbonTabs.js`: its `tip` (what it does) and `guide` (its article) | `composables/useCommandDispatch.js`; it becomes a console command automatically (`core/help/commands.js`); `npm run docs:features` adds it to [docs/features.md](docs/features.md) |
 | add or change a keyboard shortcut | its entry in `core/help/shortcuts.js` | the handler asks `matches(e, id)`, a tooltip shows `keyLabel(id)` (`utils/shortcutLabels.js`); the Shortcuts dialog lists it by itself |
 | add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
 | add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |

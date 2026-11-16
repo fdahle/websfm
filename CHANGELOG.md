@@ -66,6 +66,13 @@ Notable changes to websfm. The format follows
   surveyed at 2 cm gives 2.24 cm). The figures describe the adjusted block; a DEM or
   orthophoto adds its own error.
 
+- **Every ribbon button says what it does.** Hovering a button in Import, Reconstruct,
+  Evaluate, Export and Other, or View ▸ Inspect, now shows one line on what it does (the
+  formats an export writes, the stage a Reconstruct button runs) instead of its label
+  again; the console's `help` shows the same lines. The full list, with each command's
+  place in the ribbon and its guide article, is in
+  [docs/features.md](docs/features.md), generated from the ribbon so it stays complete.
+
 ### Performance
 - **Texturing a mesh is about four times faster.** Tools ▸ Mesh ▸ Texture now spreads its
   photo work over every processor core: finding which photos see each face, and copying
