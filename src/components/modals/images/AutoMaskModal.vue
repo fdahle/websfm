@@ -312,8 +312,11 @@ const groupReason = (g) => (busy.value ? t('autoMask.disabled.busy') : g.w ? nul
 }
 .sides {
   display: flex;
+  align-items: center;
   gap: 14px;
   flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text);
 }
 .side {
   display: inline-flex;
@@ -481,6 +484,8 @@ const groupReason = (g) => (busy.value ? t('autoMask.disabled.busy') : g.w ? nul
 }
 
 .btn {
+  white-space: nowrap;
+  flex-shrink: 0;
   background: var(--accent);
   border: none;
   color: #fff;
