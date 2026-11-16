@@ -430,7 +430,7 @@ export const TABS = [
           {
             id: 'match-features',
             guide: 'match-features',
-            tip: 'Match keypoints between photo pairs and verify each pair geometrically',
+            tip: 'Match keypoints between image pairs and verify each pair geometrically',
             label: 'Match\nFeatures',
             icon: 'link',
             needs: ['imagesReady', 'keypoints'],
@@ -447,7 +447,7 @@ export const TABS = [
           {
             id: 'reconstruct',
             guide: 'sparse-reconstruction',
-            tip: 'Solve the camera poses and calibration, and triangulate a sparse point cloud',
+            tip: 'Solve the camera poses and calibration, and triangulate the tie points',
             label: 'Sparse\nModel',
             icon: 'sparse-model',
             needs: ['imagesReady', 'matches'],

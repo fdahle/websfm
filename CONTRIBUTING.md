@@ -105,7 +105,9 @@ most, because its hover box shows it whole: what it does, when to raise or lower
 what it costs. An article's introduction says what the operation makes and when to run
 it. Leave out the names of test datasets, bench numbers, dates and the history of a
 change: the evidence belongs in the CHANGELOG entry, the algorithm in
-[docs/METHODS.md](docs/METHODS.md).
+[docs/METHODS.md](docs/METHODS.md). Call things by the names in
+[docs/terms.md](docs/terms.md) (*dense cloud*, *checkpoint*, *keypoint* …), so a thing has
+one name wherever a user meets it.
 
 Whenever a change alters what a setting or operation does, changes a default, or
 adds, removes or renames a setting, operation or user-visible feature:
