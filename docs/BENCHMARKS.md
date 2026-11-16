@@ -158,6 +158,40 @@ The products are not the same size, so read the stage columns with this:
 - ODM's features, matching and texturing run on the CPU; the GPU only speeds its dense step.
 - WebSfM's total includes copying the photos into browser storage (60–210 s).
 
+### 1,940 photos: Mill19 building
+
+WebSfM alone on Mill19's *building* scene (1,940 drone photos of 4,608 × 3,456 px), from
+photos to orthophoto and mesh in one browser tab, defaults throughout, Similar images
+matching, the reference positions (Mill19's, from PixSfM) in the solve at σ 5 m.
+2026-11-15.
+
+| stage | seconds | result |
+| --- | --- | --- |
+| import | 232 | photos copied into browser storage |
+| detection | 637 | 17.5 M keypoints |
+| matching | 577 | 31,871 pairs |
+| sparse model | 822 | 1,931 of 1,940 cameras, 1.35 M points |
+| depth maps | 5,589 | 1,931 maps (41 GB) |
+| dense cloud | 710 | 173 M points |
+| reopen project | 10 | 67 GB in browser storage |
+| DSM | 39 | 8,192 × 3,993 px |
+| orthophoto | 2,525 | 11,776 × 5,741 px |
+| mesh | 146 | 608 k triangles |
+| **total** | **11,287** | 3 h 8 min; peak memory 12.6 GiB |
+
+- **Camera positions** against the reference: median 0.31 m horizontal, p95 1.42 m,
+  RMS 0.80 / 0.40 m horizontal / vertical; the largest errors (up to 5.4 m) are at one
+  strip's end.
+- **Without the positions** the block's far end lands 0.2–1.6 m from the reference,
+  varying from run to run: a weakly held block edge, not the lens (a fixed reference lens
+  gives the same spread).
+- **No limit reached:** the sparse solve held 9.7 M observations in 2.3 GB; the dense
+  cloud's fusion ran at its 16 GB budget. The next limits are the bundle adjustment's
+  32-bit WebAssembly memory (about 9,500 cameras) and that fusion budget.
+- The DSM's Auto resolution was capped at one 8,192 px tile; the orthophoto shows light
+  smeared streaks in two places, not yet investigated.
+- Depth maps are half the time, the orthophoto a quarter.
+
 ---
 
 ## Bundle adjustment against Ceres (BAL)
@@ -371,5 +405,7 @@ Metashape's 99 %, because it does not interpolate where matching finds no textur
 
 ## Not yet measured
 
-- 1,000+ image real blocks (the 1,600- and 3,000-camera runs so far are synthetic).
+- COLMAP, Metashape and ODM on a 1,000+ image block (Mill19 so far has WebSfM alone;
+  Metashape 2.2.2 at its defaults aligned 704 of its 1,940 photos).
+- Real blocks past 2,000 images (the 3,000-camera runs so far are synthetic).
 - Strecha's fountain and Herz-Jesu sets.
