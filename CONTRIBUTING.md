@@ -216,10 +216,12 @@ change to every component:
   fail on a key the code names that the English catalogue lacks, a message that does not
   parse, another language's message with different arguments, and a short fact over
   `SHORT_MAX` in any language.
-- **A converted file** joins the `vue/no-bare-strings-in-template` list in
-  `eslint.config.js`: bare English in its template fails the lint, and English in its
-  template expressions or script fails `src/components/bareText.test.js`. A new dialog
-  or component is written this way from the start.
+- **Every component is checked**, but those listed in `src/components/i18nPending.js`:
+  bare English in a template fails the lint (`vue/no-bare-strings-in-template`), and
+  English in template expressions or the script fails `src/components/bareText.test.js`.
+  A new component is written this way from the start and never goes on the list. The
+  list only shrinks: when you are changing a listed component anyway, convert it and
+  take it off.
 
 ## Menu labels
 

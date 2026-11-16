@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { parse } from '@vue/compiler-sfc'
-import eslintConfig from '../../eslint.config.js'
+import { execFileSync } from 'node:child_process'
+import { I18N_PENDING } from './i18nPending.js'
 
 // CONTRIBUTING ▸ Text in the UI: a converted file keeps its words in the catalogues.
 // ESLint's vue/no-bare-strings-in-template sees text and plain attributes only; this
@@ -9,8 +10,12 @@ import eslintConfig from '../../eslint.config.js'
 // ({{ ok ? 'Choose a projected CRS' : '' }}, :hint="`Saved as ${x}`") and in the
 // script. A literal reads as words when it has a capitalised word and a space, or three
 // words; an id ('local'), a class list ('field-input wide') or a CSS value does not.
-// The files are those eslint.config.js lists for the rule.
-const FILES = eslintConfig.find((c) => c.rules?.['vue/no-bare-strings-in-template'])?.files ?? []
+// The files: every component but those still waiting (i18nPending.js), as for the lint.
+const ALL = execFileSync('git', ['ls-files', '-co', '--exclude-standard', 'src/*.vue'], { encoding: 'utf8' })
+  .trim()
+  .split('\n')
+const PENDING = new Set(I18N_PENDING)
+const FILES = process.env.I18N_SCAN_ALL ? ALL : ALL.filter((f) => !PENDING.has(f))
 
 const INTERPOLATION = 5,
   ELEMENT = 1,
@@ -48,8 +53,11 @@ function wordyLiterals(code) {
   return out
 }
 
-describe('converted components', () => {
-  it('are listed for the bare-text lint', () => expect(FILES.length).toBeGreaterThan(0))
+describe('components', () => {
+  it('waiting for conversion are listed by a path that exists', () => {
+    const exists = new Set(ALL)
+    expect(I18N_PENDING.filter((f) => !exists.has(f))).toEqual([])
+  })
   it('keep no English in expressions or scripts', () => {
     const found = []
     for (const file of FILES) {
@@ -66,6 +74,8 @@ describe('converted components', () => {
         : [src]
       for (const c of code) for (const lit of wordyLiterals(c)) found.push(`${file}: ${lit}`)
     }
+    if (process.env.I18N_SCAN_ALL)
+      console.log('I18N_FOUND\n' + [...new Set(found.map((f) => f.split(': ')[0]))].join('\n'))
     expect(found).toEqual([])
   })
 })

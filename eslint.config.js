@@ -1,5 +1,6 @@
 import globals from 'globals'
 import pluginVue from 'eslint-plugin-vue'
+import { I18N_PENDING } from './src/components/i18nPending.js'
 export default [
   // Alone in its object, so the patterns are ignored everywhere (generated wasm glue included).
   { ignores: ['node_modules/**', 'dist/**', 'src/wasm/**', 'test-results/**', 'playwright-report/**'] },
@@ -65,39 +66,12 @@ export default [
       'vue/multi-word-component-names': 'off',
     },
   },
-  // UI text by language (CONTRIBUTING ▸ Text in the UI): a template converted to
-  // t('area.key') keeps no bare English, in its text or in the attributes a user reads.
-  // A file joins this list once it is converted; the list grows until it is every .vue.
+  // UI text by language (CONTRIBUTING ▸ Text in the UI): a component keeps no bare
+  // English in its text or in the attributes a user reads. Every component, but those
+  // still waiting for conversion (src/components/i18nPending.js, a list that only shrinks).
   {
-    files: [
-      'src/components/I18nText.vue',
-      'src/components/layout/Ribbon.vue',
-      'src/components/layout/RibbonMenu.vue',
-      'src/components/modals/cloud/FilterCloudModal.vue',
-      'src/components/modals/ui/AdvancedDisclosure.vue',
-      'src/components/modals/ui/ChoiceCards.vue',
-      'src/components/modals/ui/ColumnMappingTable.vue',
-      'src/components/modals/ui/CrsSuggestion.vue',
-      'src/components/modals/ui/DataTable.vue',
-      'src/components/modals/ui/FileNameField.vue',
-      'src/components/modals/ui/FrameCrsField.vue',
-      'src/components/modals/ui/ImportKindSwitch.vue',
-      'src/components/modals/ui/ModalShell.vue',
-      'src/components/modals/ui/NoSourceWarn.vue',
-      'src/components/modals/ui/OutputStep.vue',
-      'src/components/modals/ui/PresetCards.vue',
-      'src/components/modals/ui/RasterSizeField.vue',
-      'src/components/modals/ui/SegmentedControl.vue',
-      'src/components/modals/ui/SettingsField.vue',
-      'src/components/modals/ui/SettingsGroup.vue',
-      'src/components/modals/ui/SettingsPresetsMenu.vue',
-      'src/components/modals/ui/SettingsStep.vue',
-      'src/components/modals/ui/ShowAdvancedSettings.vue',
-      'src/components/modals/ui/SourcePicker.vue',
-      'src/components/modals/ui/StatTiles.vue',
-      'src/components/modals/ui/WarnBox.vue',
-      'src/components/modals/ui/importRoles.js',
-    ],
+    files: ['src/**/*.vue'],
+    ignores: I18N_PENDING,
     plugins: { vue: pluginVue },
     rules: {
       'vue/no-bare-strings-in-template': [

@@ -38,8 +38,9 @@ Rules that are easy to miss:
   ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Disabled controls say why*; a unit test checks).
 - UI text goes through the catalogues in `src/core/i18n/<lang>/`: `t('area.key')` in a
   template, `msg('area.key', params)` returned from core and workers, never an English
-  sentence built in code. New dialogs and components start that way; a converted `.vue`
-  is listed in `eslint.config.js` ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Text in the UI*).
+  sentence built in code. Every component is checked but those in
+  `src/components/i18nPending.js`, a list that only shrinks: never add a new one to it
+  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Text in the UI*).
 - Keyboard shortcuts live in `src/core/help/shortcuts.js`: a handler tests
   `matches(e, id)` and a tooltip shows `keyLabel(id)`; never compare `e.key` or type
   "(Ctrl+Z)" by hand ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in
