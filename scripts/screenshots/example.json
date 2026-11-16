@@ -1,0 +1,8 @@
+{
+  "name": "example-aukerman",
+  "images": "public/examples/aukerman",
+  "sceneType": "aerial",
+  "crs": "EPSG:32617",
+  "stages": "detect,match,recon,georef,depth,dense,dem,ortho,mesh,texture",
+  "dem": { "crs": "project" }
+}

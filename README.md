@@ -94,7 +94,17 @@ listed in [docs/features.md](docs/features.md).
     <td>Every image pair's matches, as a graph and side by side</td>
     <td>Each method explained in the app, with linked terms</td>
   </tr>
+  <tr>
+    <td width="60%"><img src="docs/images/quality-report.webp" alt="The Quality Report's overview: registered images, reprojection error, track length, depth-map coverage"></td>
+    <td width="40%"><img src="docs/images/depth-maps.webp" alt="The Build Depth Maps dialog: quality cards, then its settings as numbered steps"></td>
+  </tr>
+  <tr>
+    <td>The Quality Report: how each stage went, and what to fix first</td>
+    <td>Every processing dialog: a quality choice, then its settings in run order</td>
+  </tr>
 </table>
+
+<sub>The screenshots are taken from the example project by `npm run screenshots`.</sub>
 
 ## Browser requirements
 

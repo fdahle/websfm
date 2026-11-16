@@ -98,6 +98,20 @@ lists every option, including accuracy checks against reference data. Your own
 bench configs go in `scripts/bench/configs/`, which is gitignored because configs
 name datasets by local path.
 
+## The README's screenshots
+
+```bash
+npm run fetch:examples
+npm run screenshots              # all of them, into docs/images/
+npm run screenshots -- matches   # only one, by its id in scripts/screenshots/shots.mjs
+```
+
+The first run builds the example project with the bench (a few minutes, kept in
+`bench-out/screenshots/`; `-- --rebuild` builds it again), then opens it in a production
+build of the app and takes each shot through the ribbon, as a user would. Run it after
+a change to the interface that the images show. It needs a display (Chrome runs headed
+with the GPU, as the bench does on Linux) and ffmpeg for the WebP files.
+
 ## Rebuilding the WASM crates
 
 You only need this when you change Rust code under `crates/`. It requires the Rust
