@@ -104,6 +104,9 @@ Notable changes to websfm. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Changing the basemap keeps your place on the map.** Switching View ▸ Map ▸ Basemap (or
+  the satellite source) now leaves the map where you had panned and zoomed it, instead of
+  jumping back to the whole project.
 - **Bridge repair aims at the main block.** When matching leaves part of a block joined
   only by a few weak pairs, Match Features now repairs it against the main block itself.
   Before, a separate group of photos larger than any well-tied part of the main block

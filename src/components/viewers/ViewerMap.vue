@@ -437,7 +437,9 @@ function modelProjection(frame) {
 // on a detached element. destroy() invalidates any build still awaiting.
 const mapBuild = createGeneration()
 
-async function build() {
+// `keepView` (a basemap change: same projection) restores that center, zoom and
+// rotation instead of fitting the markers.
+async function build(keepView = null) {
   const token = mapBuild.next()
   const model = props.modelFrame
   if (!model) await ensureProjection(props.crs).catch(() => {})
@@ -527,7 +529,12 @@ async function build() {
   ctx.grid.update(ctx.map)
   viewRev.value++
 
-  fitToMarkers()
+  if (keepView) {
+    const view = builtMap.getView()
+    view.setCenter(keepView.center)
+    view.setResolution(keepView.resolution)
+    view.setRotation(keepView.rotation)
+  } else fitToMarkers()
 
   // Drag GCP markers to set their ground position (edit mode only). On drop, read
   // the new project-CRS coordinate straight off the geometry.
@@ -693,10 +700,15 @@ watch(
 )
 
 // A basemap preference change is immediately visible in an already-open map;
-// so is a new satellite source while Satellite is showing.
+// so is a new satellite source while Satellite is showing. The projection stays,
+// so the view stays where the user left it.
 async function rebuild() {
+  const view = ctx.map?.getView()
+  const keepView = view?.getCenter()
+    ? { center: view.getCenter(), resolution: view.getResolution(), rotation: view.getRotation() }
+    : null
   destroy()
-  await build()
+  await build(keepView)
   ctx.map?.updateSize()
 }
 watch(basemap, rebuild)
