@@ -40,6 +40,22 @@ function excludeRestrictedModels() {
   }
 }
 
+// ORT's bundle names its asyncify wasm with `new URL(…, import.meta.url)` as a fallback
+// for when `wasmPaths` is unset, so Vite emits a hashed copy into assets/. getOrt()
+// always sets `wasmPaths` to ort/<version>/ (core/features/ort.js), so that copy is
+// never fetched, and at 28 MiB (ORT 1.31) it is over Cloudflare's 25 MiB asset limit.
+function dropUnusedOrtWasm() {
+  return {
+    name: 'websfm:drop-unused-ort-wasm',
+    apply: 'build',
+    generateBundle(_, bundle) {
+      for (const name of Object.keys(bundle)) {
+        if (/^assets\/ort-wasm-[^/]*\.wasm$/.test(name)) delete bundle[name]
+      }
+    },
+  }
+}
+
 // A Workbox runtime-caching rule: `CacheFirst` keeps an entry until its cache
 // evicts it; CORS-only (status 200), because an opaque response cannot be checked
 // and Chrome counts each one as ~7 MB of quota.
@@ -70,6 +86,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       excludeRestrictedModels(),
+      dropUnusedOrtWasm(),
       notices,
       // Serve ORT's wasm runtime at /ort/ (dev middleware + build copy). ORT
       // dynamically imports its wasm-loader .mjs at runtime and feature-detects
