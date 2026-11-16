@@ -22,6 +22,10 @@ updates:
     ignore:
       - dependency-name: '*'
         update-types: ['version-update:semver-major']
+      # marked-katex-extension (5.1.13) takes katex >=0.16 <0.19 as a peer, so npm ci
+      # fails on 0.19. Drop this once a release of it accepts 0.19.
+      - dependency-name: katex
+        versions: ['>=0.19']
   - package-ecosystem: cargo
     directory: /crates
     open-pull-requests-limit: 2
