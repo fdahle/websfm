@@ -1,6 +1,7 @@
 // Central registry of the learned-model weights the app can fetch on demand.
 //
-// The ONNX weights (SuperPoint, DISK, ALIKED, LightGlue, SAM2 encoder/decoder) are NOT committed
+// The ONNX weights (SuperPoint, DISK, ALIKED, LightGlue, SAM2 encoder/decoder, the
+// PP-OCR text detector and recogniser) are NOT committed
 // to the repo — they are large (the SAM2 encoder alone is ~128 MB, over GitHub's
 // 100 MB per-file limit) and only a subset of users touch the learned backends. So
 // they live at a hostable URL and are downloaded **on first use**, with user
@@ -97,6 +98,24 @@ export const MODELS = {
     license: 'Apache-2.0',
     licenseUrl: 'https://github.com/facebookresearch/sam2/blob/main/LICENSE',
     source: 'onnx-community/sam2-hiera-tiny onnx/prompt_encoder_mask_decoder.onnx (value_info stripped)',
+  },
+  // PaddleOCR's PP-OCRv5 mobile models, converted by scripts/models/export-ppocr.py
+  // (core/ocr/: Auto Mask ▸ Text, Read text).
+  ppocr_det: {
+    file: 'ppocr_det.onnx',
+    label: 'PP-OCR text detector',
+    approxBytes: 4_800_000,
+    license: 'Apache-2.0',
+    licenseUrl: 'https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE',
+    source: 'scripts/models/export-ppocr.py: PaddleX PP-OCRv5_mobile_det_infer.tar (paddle2onnx 2.1, opset 14)',
+  },
+  ppocr_rec_en: {
+    file: 'ppocr_rec_en.onnx',
+    label: 'PP-OCR text recogniser (English)',
+    approxBytes: 7_900_000,
+    license: 'Apache-2.0',
+    licenseUrl: 'https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE',
+    source: 'scripts/models/export-ppocr.py: PaddleX en_PP-OCRv5_mobile_rec_infer.tar (paddle2onnx 2.1, opset 14)',
   },
 }
 

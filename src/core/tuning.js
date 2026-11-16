@@ -935,3 +935,27 @@ export const TAG_DETECT_TUNING = {
   gateMinPx: 40,
   gateFrac: 0.02,
 }
+
+// Text on the photographs (core/ocr/: Auto Mask ▸ Text and the text read from the
+// photos). The detector and recogniser are PaddleOCR's PP-OCRv5 mobile models; the DB
+// post-processing values are theirs (inference.yml ▸ DBPostProcess).
+export const OCR_TUNING = {
+  // A photograph is searched at most this many px on its long side: about 1/4 of a
+  // 10,000 px film scan, where the printed data line is 20-30 px high, which the
+  // detector reads best; a smaller photo is searched as it is.
+  detMaxDim: 2560,
+  // The detector reads tiles of `detTile` px overlapping by `detOverlap`, so a worker
+  // holds one tile's activations, not the whole scan's.
+  detTile: 960,
+  detOverlap: 128,
+  detThresh: 0.3, // probability above which a pixel is text
+  detBoxThresh: 0.6, // mean probability a box needs
+  unclipRatio: 1.5,
+  detMinSize: 3, // px, the shorter side of a box
+  detMaxCandidates: 1000,
+  // A box this many times taller than wide is a line running up or down the photo.
+  verticalRatio: 1.5,
+  // A line cut out wider than this many px (at 48 px high) is read only so far.
+  recMaxWidth: 1600,
+  recBatch: 16,
+}

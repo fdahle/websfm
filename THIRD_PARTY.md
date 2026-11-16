@@ -47,6 +47,7 @@ next to the app, and the app downloads each one when first used.
 | LightGlue matchers (SuperPoint, DISK) | cvg/LightGlue, ONNX export by fabio-sim/LightGlue-ONNX | Apache-2.0 | [`LightGlue.txt`](licenses/models/LightGlue.txt), [`LightGlue-ONNX.txt`](licenses/models/LightGlue-ONNX.txt) |
 | ALIKED detector and its LightGlue | Shiaoming/ALIKED weights (BSD-3-Clause) through cvg/LightGlue (Apache-2.0), exported by `scripts/models/export-aliked.py` | BSD-3-Clause, Apache-2.0 | [`ALIKED.txt`](licenses/models/ALIKED.txt), [`LightGlue.txt`](licenses/models/LightGlue.txt) |
 | SAM 2 (hiera-tiny) | facebookresearch/sam2, ONNX export by onnx-community on Hugging Face | Apache-2.0 | [`SAM2.txt`](licenses/models/SAM2.txt) |
+| PP-OCRv5 mobile text detector and English recogniser | PaddlePaddle/PaddleOCR, exported by `scripts/models/export-ppocr.py`; their character table is `src/core/ocr/dictEn.js` | Apache-2.0 | [`PaddleOCR.txt`](licenses/models/PaddleOCR.txt) |
 | SuperPoint | magicleap/SuperPointPretrainedNetwork | Non-commercial | **Not distributed**: the user supplies the file, and a build leaves it out |
 
 ## Data

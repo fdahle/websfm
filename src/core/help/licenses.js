@@ -151,6 +151,14 @@ export const INCLUDED = [
         models: ['sam2_encoder', 'sam2_decoder'],
         textFiles: ['licenses/models/SAM2.txt'],
       },
+      {
+        name: 'PaddleOCR',
+        license: 'Apache-2.0',
+        url: 'https://github.com/PaddlePaddle/PaddleOCR',
+        use: 'Finding and reading text on photos (PP-OCRv5 mobile detector and English recogniser, converted to ONNX by WebSfM), and their character table',
+        models: ['ppocr_det', 'ppocr_rec_en'],
+        textFiles: ['licenses/models/PaddleOCR.txt'],
+      },
     ],
   },
   {
