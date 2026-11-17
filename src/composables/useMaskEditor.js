@@ -43,19 +43,40 @@ import { clamp } from '../core/stats.js'
 // never is.
 const UNDO_MAX = 10
 
+// The toolbar's choices, one set for every viewer: each photo opens in its own viewer,
+// and the tool, brush size and opacity follow the user from photo to photo rather than
+// starting over on each. 'brush' | 'erase' | 'rect' | 'smart' | null (pan while
+// editing); null while mask edit is off.
+const sharedTool = ref(null)
+const sharedBrushRadius = ref(20) // screen pixels — constant on screen, ÷scale in image space
+const sharedOpacity = ref(0.45) // red-overlay alpha while editing/viewing
+// Whether the mode has armed a tool since it last started, so a photo opened later keeps
+// the tool in use, pan (null) included, instead of arming the brush again.
+let toolArmed = false
+
+/** The toolbar's shared choices back to a fresh page's (for the unit tests). */
+export function resetMaskToolbar() {
+  sharedTool.value = null
+  sharedBrushRadius.value = 20
+  sharedOpacity.value = 0.45
+  toolArmed = false
+}
+
 export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, isVisible, largeScan = () => false }) {
   const { scale, tx, ty, frame, editable } = viewport
 
   const maskFileInput = ref(null)
   const hasMask = ref(!!image().mask)
 
-  // Tool state (local: the floating toolbar and this viewer are the only consumers;
-  // per-tab persistence comes free from v-show-kept instances).
-  // 'brush' | 'erase' | 'rect' | 'smart' | null (pan while editing). A tab opened
-  // while mask edit is already on starts armed, as entering the mode does.
-  const tool = ref(maskEdit() ? 'brush' : null)
-  const brushRadius = ref(20) // screen pixels — constant on screen, ÷scale in image space
-  const maskOpacity = ref(0.45) // red-overlay alpha while editing/viewing
+  // Tool state, shared by every viewer (above). A tab opened while mask edit is on takes
+  // the tool in use; one opened before the mode ever started arms the brush.
+  const tool = sharedTool
+  if (maskEdit() && !toolArmed) {
+    tool.value = 'brush'
+    toolArmed = true
+  }
+  const brushRadius = sharedBrushRadius
+  const maskOpacity = sharedOpacity
 
   // Smart Select (SAM2 click-to-segment). The image is encoded once when the tool
   // is activated; each click decodes a *fresh* candidate segment (clicks are
@@ -503,9 +524,10 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   })
 
   // Entering edit mode arms the brush; leaving drops the tool + any in-flight rect
-  // and clears any Smart Select candidate.
+  // and clears any Smart Select candidate. (Every kept viewer runs this; they agree.)
   watch(maskEdit, (on) => {
     tool.value = on ? 'brush' : null
+    toolArmed = on
     if (!on) {
       rectDrag = null
       discardSmart()
@@ -515,7 +537,9 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   })
   watch(tool, (t, prev) => {
     rectDrag = null
-    if (t === 'smart' && editable.value)
+    // The tool is shared: only the viewer in front encodes ahead; a kept tab encodes
+    // when editing unlocks there or on its first click.
+    if (t === 'smart' && editable.value && isVisible())
       ensureEncoded() // encode this image (once) so clicks are ready
     else if (prev === 'smart') discardSmart() // dropped Smart Select — clear its preview
     drawOverlay()

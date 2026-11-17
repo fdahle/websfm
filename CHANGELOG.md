@@ -176,6 +176,9 @@ Notable changes to websfm. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Mask editing keeps your tool when you open another photo.** The Eraser, Rectangle or
+  Smart Select you picked, the brush size and the overlay opacity now carry over from
+  photo to photo instead of going back to the Brush at 20 px on each one.
 - **A film scanner's tags no longer pass for the camera.** The make and model a scanner
   writes (Better Light Model Super10K on the TMA scans) no longer name a sensor, and its
   exposure, ISO and scan date no longer show as the photo's; Show information lists them

@@ -13,7 +13,7 @@ vi.mock('../stores/useModelsStore.js', () => ({
 }))
 vi.mock('../core/segment/sam2.js', () => ({ logitsToBinaryMask: () => new Uint8Array(0) }))
 
-const { useMaskEditor } = await import('./useMaskEditor.js')
+const { useMaskEditor, resetMaskToolbar } = await import('./useMaskEditor.js')
 
 // ── A one-bit canvas model ────────────────────────────────────────────────────
 // The mask canvas is modelled as "anything excluded or not" (`filled`): enough to
@@ -68,6 +68,7 @@ const maskBlob = (filled = true) => markRaw({ filled, id: ++blobSeq })
 
 const saved = {}
 beforeEach(() => {
+  resetMaskToolbar()
   decodes = []
   exportsQ = []
   canvases = []
@@ -131,8 +132,18 @@ function stroke(m, x = 10, y = 10) {
 
 describe('useMaskEditor: canvas', () => {
   it('starts armed with the brush when mounted while mask edit is already on', () => {
-    expect(setup({ maskEdit: true }).m.tool.value).toBe('brush')
     expect(setup({ maskEdit: false }).m.tool.value).toBe(null)
+    expect(setup({ maskEdit: true }).m.tool.value).toBe('brush')
+  })
+  it('a photo opened while editing keeps the tool, brush size and opacity in use', () => {
+    const a = setup({ maskEdit: true })
+    a.m.tool.value = 'erase'
+    a.m.brushRadius.value = 44
+    a.m.maskOpacity.value = 0.7
+    const b = setup({ maskEdit: true })
+    expect([b.m.tool.value, b.m.brushRadius.value, b.m.maskOpacity.value]).toEqual(['erase', 44, 0.7])
+    a.m.tool.value = null // pan, no tool
+    expect(setup({ maskEdit: true }).m.tool.value).toBeNull()
   })
   it('builds no canvas for a preview frame, a native-sized one for full resolution', async () => {
     const pre = setup({ preview: true })
@@ -386,10 +397,14 @@ describe('useMaskEditor: keyboard', () => {
     hidden.m.onKeydown(key('r'))
     expect(hidden.m.tool.value).toBe('brush')
 
+    // The toolbar is shared and the mode is one for every viewer: start the page afresh
+    // for a viewer with editing off.
+    resetMaskToolbar()
     const off = setup({ maskEdit: false })
     off.m.onKeydown(key('r'))
     expect(off.m.tool.value).toBeNull()
 
+    resetMaskToolbar()
     const consumed = setup()
     consumed.m.onKeydown(key('r', { defaultPrevented: true }))
     expect(consumed.m.tool.value).toBe('brush')
