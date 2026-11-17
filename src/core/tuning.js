@@ -959,3 +959,14 @@ export const OCR_TUNING = {
   recMaxWidth: 1600,
   recBatch: 16,
 }
+
+// Auto Mask ▸ Frame (core/maskFrame.js): finding the film frame on a scan.
+export const FRAME_MASK_TUNING = {
+  maxDim: 1024, // px on the long side the scan is searched at
+  maxFrac: 0.25, // the frame is looked for within this share of each side
+  band: 0.6, // a side's profile is the median across this middle share of the other axis
+  minContrast: 0.15, // a frame darker than the photograph by less, over the scan's range, is none
+  photoRun: 0.03, // the photograph begins where the profile stays bright this share of the side
+  frameStart: 0.05, // the dark frame begins within this share of the edge (a scanner bed is narrower)
+  groupTolerance: 0.015, // a side this share of the scan off its group's median takes the median
+}

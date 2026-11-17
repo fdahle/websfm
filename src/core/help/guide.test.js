@@ -105,7 +105,7 @@ describe('bundled guide', () => {
     const dir = new URL('../../components/', import.meta.url)
     for (const file of readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.vue'))) {
       const src = readFileSync(new URL(file, dir), 'utf8')
-      for (const [, op, param] of src.matchAll(/<FieldHelp op="([^"]+)" param="([^"]+)"/g)) {
+      for (const [, op, param] of src.matchAll(/<FieldHelp\s+op="([^"]+)"\s+param="([^"]+)"/g)) {
         expect(getParam(op, param), `${file}: FieldHelp ${op}/${param}`).not.toBeNull()
       }
       for (const [, id] of src.matchAll(/<GlossaryTerm (?:v-else )?id="([^"]+)"/g)) {

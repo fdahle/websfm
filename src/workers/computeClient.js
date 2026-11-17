@@ -507,6 +507,12 @@ export const alignTerrain = (request, { onLog } = {}) =>
 // encoder/decoder sessions load once AND the per-uuid embedding cache (held in
 // workers/ops/segment.js module scope) is on the worker every call reaches.
 //
+// The film frame on one photo (workers/ops/mask.js): margins in the px of the reduced
+// raster it was searched at, with its size and scale (sx, sy) and the native size.
+export function detectPhotoFrame(url, options = {}) {
+  return call('detectPhotoFrame', [url, { ...options }])
+}
+
 // Text on one photo (workers/ops/ocr.js): `{ lines: [{ quad, score, text, textScore,
 // angle }], natW, natH, … }`, quads in native pixels. Spread over the pool, one photo
 // per worker; `read: false` finds the lines without reading them.

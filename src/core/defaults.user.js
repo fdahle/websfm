@@ -904,13 +904,14 @@ export const FIDUCIAL_SPOT_DEFAULTS = {
 }
 
 // Auto Mask (AutoMaskModal.vue; src/guide/masks.md border / linked / existing /
-// textPad / textRecurring): masks from a rule, the outer pixels of each side or the
+// frameInset / textPad / textRecurring): masks from a rule, the outer pixels of each side or the
 // text on the photos.
 export const AUTO_MASK_DEFAULTS = {
-  rule: 'border', // 'border' | 'text'
+  rule: 'border', // 'border' | 'frame' | 'text'
   border: 40, // px excluded on each side
   linked: true, // editing one side sets all four
   existing: 'merge', // 'merge' (union with the image's mask) | 'replace'
+  frameInset: 0.5, // % of the long side masked inside the frame found (notches, corners)
   textPad: 20, // px added around each text box
   textRecurring: true, // mask text a camera prints at the same place on every photo
 }

@@ -5,6 +5,7 @@ export default {
   rule: {
     label: 'Rule',
     border: 'Border',
+    frame: 'Frame',
     text: 'Text',
   },
   border: {
@@ -12,6 +13,23 @@ export default {
     hint: '(exclude outer pixels)',
     side: { top: 'top', right: 'right', bottom: 'bottom', left: 'left' },
     linked: 'Link all sides',
+  },
+  frame: {
+    title: 'Mask the film frame',
+    hint: '(found on each scan)',
+    inset: 'Inset',
+    insetUnit: '% of the long side',
+    about:
+      'Finds where the photograph begins on each scan, past the dark film border and any bright scanner bed, ' +
+      'and masks the frame around it. Scans of one size are checked against each other: a side far off the ' +
+      'others takes theirs.',
+    progress: 'Finding frames: {done, number} of {total, number} photos',
+    groupFound: 'frame found on {found, number} of {n, number}',
+    done:
+      '{masked, plural, one {# photo} other {# photos}} masked' +
+      '{replaced, plural, =0 {} one {, # with a side from the others} other {, # with a side from the others}}' +
+      '{none, plural, =0 {} other {, # without a frame (see the log)}}' +
+      '{failed, plural, =0 {} other {, # failed (see the log)}}',
   },
   text: {
     title: 'Mask text',

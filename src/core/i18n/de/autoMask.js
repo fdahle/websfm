@@ -4,6 +4,7 @@ export default {
   rule: {
     label: 'Regel',
     border: 'Rand',
+    frame: 'Bildrahmen',
     text: 'Text',
   },
   border: {
@@ -11,6 +12,23 @@ export default {
     hint: '(äußere Pixel ausschließen)',
     side: { top: 'oben', right: 'rechts', bottom: 'unten', left: 'links' },
     linked: 'Alle Seiten gleich',
+  },
+  frame: {
+    title: 'Filmrahmen maskieren',
+    hint: '(auf jedem Scan gesucht)',
+    inset: 'Einzug',
+    insetUnit: '% der langen Seite',
+    about:
+      'Findet, wo das Foto auf jedem Scan beginnt, hinter dem dunklen Filmrand und einem hellen Scannerbett, ' +
+      'und maskiert den Rahmen darum. Scans gleicher Größe werden miteinander verglichen: eine Seite, die weit ' +
+      'von den anderen abweicht, übernimmt deren Wert.',
+    progress: 'Rahmen suchen: {done, number} von {total, number} Fotos',
+    groupFound: 'Rahmen auf {found, number} von {n, number} gefunden',
+    done:
+      '{masked, plural, one {# Foto} other {# Fotos}} maskiert' +
+      '{replaced, plural, =0 {} one {, # mit einer Seite von den anderen} other {, # mit einer Seite von den anderen}}' +
+      '{none, plural, =0 {} other {, # ohne Rahmen (siehe Protokoll)}}' +
+      '{failed, plural, =0 {} other {, # fehlgeschlagen (siehe Protokoll)}}',
   },
   text: {
     title: 'Text maskieren',

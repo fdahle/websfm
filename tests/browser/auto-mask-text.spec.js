@@ -140,6 +140,24 @@ test('reads the text on the photos and masks it', async ({ page, browserName }) 
   })
   expect(coverage).toEqual({ strip: true, date: true, ground: false, size: [1600, 1200] })
 
+  // Frame: the black band down the right side of the scans is their only frame; it is
+  // masked where no text was, and the ground stays.
+  await dialog.getByRole('button', { name: 'Frame', exact: true }).click()
+  await scanGroup.getByRole('button', { name: 'Apply to group' }).click()
+  await expect(dialog.locator('.subbar .hint', { hasText: 'photos masked' })).toBeVisible({ timeout: 60_000 })
+  await expect(scanGroup).toContainText('frame found on 3 of 3')
+  const framed = await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const img = useImagesStore().images.find((i) => i.name === 'scan-1.jpg')
+    const bmp = await createImageBitmap(img.mask.blob)
+    const c = new OffscreenCanvas(bmp.width, bmp.height)
+    const g = c.getContext('2d')
+    g.drawImage(bmp, 0, 0)
+    const at = (x, y) => g.getImageData(x, y, 1, 1).data[3] > 127
+    return { band: at(1510, 700), ground: at(800, 300), left: at(5, 600) }
+  })
+  expect(framed).toEqual({ band: true, ground: false, left: false })
+
   // Read Text: what was read, and the focal length the camera's photos agree on, which a
   // film camera takes over.
   await page.keyboard.press('Escape')

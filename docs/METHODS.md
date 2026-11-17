@@ -821,7 +821,25 @@ marks, or estimates a robust centred layout from the batch with a declared scan 
 scale; both validate per-image fits and need a calibrated focal length. Uncalibrated
 detections do not affect reconstruction.
 
-### 5.3 Text on the photos
+### 5.3 The film frame
+
+**Auto Mask ▸ Frame** (`core/maskFrame.js`, `composables/useFrameMask.js`) masks the film
+frame per scan without fiducials. The scan is read at 1,024 px; per side, the profile
+running inward is the median of each row or column over the middle 60 % of the other axis
+(a white data card or dial on the frame stays out of a median). With the photograph's level
+the median of the profile's middle and the frame's the darkest value within the outer 25 %,
+the threshold is halfway between; walking in from the edge, the frame must begin within 5 %
+(past a bright scanner bed) and ends where the profile stays above the threshold for 3 % of
+the side, so a thin bright line inside the frame does not end it. A side darker than the
+photograph by less than 15 % of the scan's range has no frame. Scans of one size are then
+made consistent: a side more than 1.5 % of the scan from its group's median takes the median
+(dark ground or sky at the edge, a bright mark on the frame), as hist_sfm's per-view frame
+template does. The mask reaches an inset (default 0.5 % of the long side) inside the frame
+found, for the notches and rounded corners. On 30 TMA scans it gave 30 cameras, 12,466
+≥3-view points and a 1.13 px registration median against 12,279 and 1.23 px with the frame
+drawn from the fiducial corners (2 % in).
+
+### 5.4 Text on the photos
 
 **Auto Mask ▸ Text** (`core/ocr/`, `composables/useTextMask.js`) masks the text printed on
 or beside the photograph (frame numbers, the data strip, data cards, annotations), whose

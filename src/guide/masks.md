@@ -32,6 +32,21 @@ bottom band over a data strip.
 **Merge** adds the border or the text to an existing mask; **Replace** keeps only the
 new one. With all margins at 0, or on a photo without text, Replace removes the mask.
 
+## Mask the film frame
+**Auto mask ▸ Frame** finds, on each scan, where the photograph begins: past any bright
+scanner bed, through the dark film border with its fiducials, dials and data strip, to the
+first stretch of picture. Scans of one size are checked against each other, since a
+camera's frames sit in the scanner almost alike: a side that lands far from the others
+(dark ground or sky at the photograph's edge, a bright mark on the frame) takes theirs. A
+side without a dark border is left unmasked. Check the preview; for photos without a film
+frame use **Mask border** or nothing.
+
+## Inset
+<!-- param: frameInset  default: 0.5 -->
+How far inside the frame found the mask reaches, in % of the scan's long side. The
+fiducial notches and the rounded corners of the frame reach into the photograph: raise it
+when the mask leaves them, lower it to keep more of the picture.
+
 ## Mask text
 **Auto mask ▸ Text** finds and reads the text on each photo (frame numbers, the data
 strip, a data card, annotations written on the print) and masks it, so tie points are

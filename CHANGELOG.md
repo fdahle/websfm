@@ -6,6 +6,19 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Mask the film frame of each scan.** Tools ▸ Images ▾ ▸ Auto mask ▸ **Frame** finds
+  where the photograph begins on every scan, past any bright scanner bed and the dark film
+  border with its fiducials, dials and data strip, and masks the frame, with an inset for
+  the notches and rounded corners; no fiducials needed. A side that lands far from the
+  other scans of the same size (dark ground or sky at the edge) takes theirs. Each side
+  is the median brightness across the middle 60 % of the scan (a white data card does not
+  lift it), and the photograph starts where it stays bright for 3 % of the side. On 30
+  TMA scans (three cameras) it matched the frame mask drawn from the fiducials: 30
+  cameras, 12,466 ≥3-view points against 12,279, registration check median 1.13 px against
+  1.23, 162 of 250 pairs against 153 (no masks: 27 cameras, 17.6 px), while keeping 67–81 %
+  of each scan against 69–75 %. Frame and Text together gave the same pairs as Frame
+  alone there: the print sits on the frame. On 37 Casa Grande scans every side agreed with
+  its camera's other scans to 1.5 % but for three a frame, which took the median.
 - **Mask the text on film scans.** Tools ▸ Images ▾ ▸ Auto mask ▸ **Text** finds and reads
   the frame numbers, data strips, data cards and annotations on the photos and masks them,
   so the same print on every frame no longer matches between frames; text a camera prints

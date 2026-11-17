@@ -14,10 +14,12 @@ import { storedToLines } from '../../../core/ocr/textRun.js'
 import { useLog } from '../../../composables/useLog.js'
 import { useI18n } from '../../../composables/useI18n.js'
 import { useTextMask } from '../../../composables/useTextMask.js'
+import { useFrameMask } from '../../../composables/useFrameMask.js'
 import { showToast } from '../../../composables/useToasts.js'
 
 // Auto Mask: masks from a rule rather than a painted or imported file. Border excludes
-// the outer N pixels on each side (the film border on scans); Text finds and reads the
+// the outer N pixels on each side; Frame finds the film frame on each scan
+// (composables/useFrameMask.js, core/maskFrame.js); Text finds and reads the
 // text on the photos and masks it (composables/useTextMask.js, core/ocr/). Red regions
 // are EXCLUDED from feature detection and the dense cloud, applied on the next detect
 // or dense run. See core/mask.js for the mask convention.
@@ -28,10 +30,12 @@ const { updateMask } = imagesStore
 const { log } = useLog()
 const { t } = useI18n()
 const textMask = useTextMask()
+const frameMask = useFrameMask()
 
 const rule = ref(AUTO_MASK_DEFAULTS.rule)
 const rules = computed(() => [
   { id: 'border', label: t('autoMask.rule.border') },
+  { id: 'frame', label: t('autoMask.rule.frame') },
   { id: 'text', label: t('autoMask.rule.text') },
 ])
 
@@ -45,10 +49,12 @@ const linked = ref(AUTO_MASK_DEFAULTS.linked) // edit one side → fill all four
 const existing = ref(AUTO_MASK_DEFAULTS.existing) // 'merge' | 'replace' for images that already have a mask
 const textPad = ref(AUTO_MASK_DEFAULTS.textPad)
 const textRecurring = ref(AUTO_MASK_DEFAULTS.textRecurring)
+const frameInset = ref(AUTO_MASK_DEFAULTS.frameInset)
 const borderBusy = ref(false)
-const busy = computed(() => borderBusy.value || textMask.busy.value)
-// The last text run's summary line, until the next run.
+const busy = computed(() => borderBusy.value || textMask.busy.value || frameMask.busy.value)
+// The last text or frame run's summary line, until the next run.
 const textResult = ref(null)
+const frameResult = ref(null)
 
 const SIDE_KEYS = ['top', 'right', 'bottom', 'left']
 
@@ -72,6 +78,11 @@ function onPadInput(e) {
   textPad.value = Math.max(0, Math.round(Number(e.target.value) || 0))
 }
 
+function onInsetInput(e) {
+  const v = Number(e.target.value)
+  frameInset.value = Number.isFinite(v) ? Math.max(0, Math.min(10, v)) : 0
+}
+
 // Images by resolution, shared with the Mask Manager (utils/maskGroups.js) — a
 // border in px needs concrete dimensions, so the 'unknown' group can't be applied to.
 const grouping = computed(() => maskGroups(imagesStore.images))
@@ -79,11 +90,20 @@ const groupLabel = (g) => (g.w ? t('autoMask.group.size', { w: g.w, h: g.h }) : 
 
 // CSS inset (top/right/bottom/left %) for the preview overlay — the border as a
 // fraction of each dimension, so the schematic tracks the real proportions.
-function previewInset(g) {
+function previewInset(g, m = sides) {
   if (!g.w || !g.h) return '0 0 0 0'
   const pct = (px, dim) => `${Math.min(100, (px / dim) * 100)}%`
-  return `${pct(sides.top, g.h)} ${pct(sides.right, g.w)} ${pct(sides.bottom, g.h)} ${pct(sides.left, g.w)}`
+  return `${pct(m.top, g.h)} ${pct(m.right, g.w)} ${pct(m.bottom, g.h)} ${pct(m.left, g.w)}`
 }
+
+// Frame rule: the frame found on a group's first photo (after a run), for the preview,
+// and how many of its photos have one.
+const frameOf = (g) => (g.images[0] ? frameMask.found.value.get(g.images[0].id) : null)
+const framesFound = (g) =>
+  g.images.filter((img) => {
+    const m = frameMask.found.value.get(img.id)
+    return m && SIDE_KEYS.some((k) => m[k] > 0)
+  }).length
 
 // Text rule: what was read in a group, and the sure text on its first photo for the
 // preview (an SVG over the thumbnail in the photo's own pixels).
@@ -159,14 +179,29 @@ async function applyText(groups) {
   }
 }
 
+async function applyFrame(groups) {
+  frameResult.value = null
+  try {
+    const r = await frameMask.maskFrame(groups, { insetPct: frameInset.value, existing: existing.value })
+    if (r && !r.cancelled) frameResult.value = t('autoMask.frame.done', r)
+  } catch (err) {
+    const why = err?.message ?? String(err)
+    log(`Auto Mask ▸ Frame failed: ${why}`, 'error', 'Images')
+    showToast(t('autoMask.failed.title'), { detail: why, kind: 'error', ms: 6000 })
+  }
+}
+
 function applyToGroups(groups) {
   if (busy.value) return
-  return rule.value === 'text' ? applyText(groups) : applyBorder(groups)
+  if (rule.value === 'text') return applyText(groups)
+  if (rule.value === 'frame') return applyFrame(groups)
+  return applyBorder(groups)
 }
 const applyToGroup = (g) => applyToGroups([g])
 const applyToAll = () => applyToGroups(grouping.value.sizedGroups)
 
 const progressText = computed(() => {
+  if (frameMask.progress.value) return t('autoMask.frame.progress', frameMask.progress.value)
   const p = textMask.progress.value
   if (!p) return ''
   return t(p.phase === 'read' ? 'autoMask.text.reading' : 'autoMask.text.masking', p)
@@ -200,6 +235,27 @@ const groupReason = (g) => (busy.value ? t('autoMask.disabled.busy') : g.w ? nul
             <span class="unit">{{ t('autoMask.px') }}</span>
           </label>
         </div>
+      </template>
+
+      <template v-else-if="rule === 'frame'">
+        <div class="section-title">
+          {{ t('autoMask.frame.title') }}
+          {{ t('autoMask.frame.hint') }}
+        </div>
+        <div class="sides">
+          <label class="side">
+            <FieldHelp
+              op="masks"
+              param="frameInset"
+              :value="frameInset"
+              :default-value="AUTO_MASK_DEFAULTS.frameInset"
+              >{{ t('autoMask.frame.inset') }}</FieldHelp
+            >
+            <input class="num" type="number" min="0" max="10" step="0.1" :value="frameInset" @input="onInsetInput" />
+            <span class="unit">{{ t('autoMask.frame.insetUnit') }}</span>
+          </label>
+        </div>
+        <div class="about">{{ t('autoMask.frame.about') }}</div>
       </template>
 
       <template v-else>
@@ -255,11 +311,14 @@ const groupReason = (g) => (busy.value ? t('autoMask.disabled.busy') : g.w ? nul
       <button class="btn" :disabled="!!allReason" :title="allReason" @click="applyToAll">
         {{ t('autoMask.applyAll') }}
       </button>
-      <template v-if="textMask.busy.value">
+      <template v-if="textMask.busy.value || frameMask.busy.value">
         <span class="hint progress">{{ progressText }}</span>
-        <button class="btn ghost sm" @click="textMask.cancel">{{ t('autoMask.cancel') }}</button>
+        <button class="btn ghost sm" @click="() => (frameMask.busy.value ? frameMask.cancel() : textMask.cancel())">
+          {{ t('autoMask.cancel') }}
+        </button>
       </template>
       <span v-else-if="rule === 'text' && textResult" class="hint">{{ textResult }}</span>
+      <span v-else-if="rule === 'frame' && frameResult" class="hint">{{ frameResult }}</span>
       <span v-else class="hint">{{
         t('autoMask.hint', { masked: grouping.maskedCount, n: imagesStore.images.length })
       }}</span>
@@ -272,6 +331,11 @@ const groupReason = (g) => (busy.value ? t('autoMask.disabled.busy') : g.w ? nul
         <div class="preview" :title="groupLabel(g)">
           <ImageThumb v-if="g.images[0]" class="thumb" :image="g.images[0]" :alt="groupLabel(g)" />
           <div v-if="g.w && rule === 'border'" class="border-overlay" :style="{ inset: previewInset(g) }"></div>
+          <div
+            v-if="g.w && rule === 'frame' && frameOf(g)"
+            class="border-overlay"
+            :style="{ inset: previewInset(g, frameOf(g)) }"
+          ></div>
           <svg
             v-if="g.w && rule === 'text'"
             class="text-overlay"
@@ -284,6 +348,9 @@ const groupReason = (g) => (busy.value ? t('autoMask.disabled.busy') : g.w ? nul
         <div class="group-info">
           <span class="group-title">{{ groupLabel(g) }}</span>
           <span class="group-count">{{ t('autoMask.group.count', { n: g.images.length }) }}</span>
+          <span v-if="rule === 'frame' && frameMask.found.value.size" class="group-count">{{
+            t('autoMask.frame.groupFound', { found: framesFound(g), n: g.images.length })
+          }}</span>
           <span v-if="rule === 'text'" class="group-count">{{
             groupText(g).read
               ? t('autoMask.text.groupRead', { ...groupText(g), n: g.images.length })
