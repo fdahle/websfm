@@ -28,6 +28,7 @@ import {
   marginFromResiduals,
 } from './guidedTiles.js'
 import { sliceDescriptorRows } from './subsetGate.js'
+import { turnCentred } from './turn.js'
 import { modelUrl } from '../models/registry.js'
 import { modelBytes } from '../models/modelCache.js'
 
@@ -140,7 +141,10 @@ function num(data, i) {
 // LightGlue's expected keypoint normalization (see header). Centre on the image,
 // scale by half the longer side → roughly [-1,1]. `kps` is typed
 // (core/features/keypoints.js); the first `n`, or the keypoints listed in `idx`.
-function normalizeKpts(kps, w, h, { n = kps.length, idx = null } = {}) {
+// `turn`: the clockwise quarter turns the image's descriptors were detected at
+// (core/features/turn.js) — its keypoints, kept in its own pixels, are fed as the
+// detector saw them, so positions and descriptors describe the same turned image.
+function normalizeKpts(kps, w, h, { n = kps.length, idx = null, turn = 0 } = {}) {
   const m = idx ? idx.length : n
   const out = new Float32Array(m * 2)
   const cx = w / 2,
@@ -148,8 +152,9 @@ function normalizeKpts(kps, w, h, { n = kps.length, idx = null } = {}) {
     s = Math.max(w, h) / 2 || 1
   for (let i = 0; i < m; i++) {
     const k = idx ? idx[i] : i
-    out[i * 2] = (kps.x(k) - cx) / s
-    out[i * 2 + 1] = (kps.y(k) - cy) / s
+    const [u, v] = turnCentred((kps.x(k) - cx) / s, (kps.y(k) - cy) / s, turn)
+    out[i * 2] = u
+    out[i * 2 + 1] = v
   }
   return out
 }
@@ -260,15 +265,15 @@ async function openRun(modelKey, model, useGpu, minConf, onLog) {
 // Build a feedsSpec for a prefix-capped image pair (the plain, non-tiled path).
 // Prefix cap keeps the strongest (keypoints arrive score-sorted), and because
 // it's a prefix the returned indices are valid in the caller's full arrays as-is.
-function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints) {
+function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints, turnA = 0, turnB = 0) {
   const dim = kpsA.length ? descA.length / kpsA.length : 256
   const cap = maxKeypoints > 0 ? maxKeypoints : Infinity
   const nA = Math.min(kpsA.length, cap)
   const nB = Math.min(kpsB.length, cap)
   return {
     spec: {
-      kptsA: normalizeKpts(kpsA, wA, hA, { n: nA }),
-      kptsB: normalizeKpts(kpsB, wB, hB, { n: nB }),
+      kptsA: normalizeKpts(kpsA, wA, hA, { n: nA, turn: turnA }),
+      kptsB: normalizeKpts(kpsB, wB, hB, { n: nB, turn: turnB }),
       descsA: descA.subarray(0, nA * dim),
       descsB: descB.subarray(0, nB * dim),
       nA,
@@ -300,8 +305,9 @@ function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints) {
  */
 export async function matchLightGlue(args) {
   const { kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0, maxKeypoints = 2048, useGpu = false, onLog } = args
+  const { turnA = 0, turnB = 0 } = args
   const { model, modelKey } = resolveModel(args)
-  const { spec, capped } = prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints)
+  const { spec, capped } = prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints, turnA, turnB)
 
   // Serialize: ORT sessions are not reentrant (see `serialized`). Everything from
   // session resolution through run() lives inside the mutex; only the feed arrays
@@ -386,6 +392,8 @@ export async function matchLightGlueTiled(args) {
     guideRelThresh = 0.001,
     tileMinKps = 32,
     useGpu = false,
+    turnA = 0,
+    turnB = 0,
     onLog,
   } = args
   const { model, modelKey } = resolveModel(args)
@@ -408,7 +416,7 @@ export async function matchLightGlueTiled(args) {
 
     // Plain prefix run through the already-open session (fallback + coarse pass).
     const runPrefix = async (cap) => {
-      const { spec } = prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, cap)
+      const { spec } = prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, cap, turnA, turnB)
       const { matches } = await run(spec, { first: consumeFirst() })
       return matches
     }
@@ -498,8 +506,8 @@ export async function matchLightGlueTiled(args) {
       if (idxB.length > tileBudget) idxB = idxB.slice(0, tileBudget)
 
       const spec = {
-        kptsA: normalizeKpts(kpsA, wA, hA, { idx: idxA }),
-        kptsB: normalizeKpts(kpsB, wB, hB, { idx: idxB }),
+        kptsA: normalizeKpts(kpsA, wA, hA, { idx: idxA, turn: turnA }),
+        kptsB: normalizeKpts(kpsB, wB, hB, { idx: idxB, turn: turnB }),
         descsA: sliceDescriptorRows(descA, idxA, dim),
         descsB: sliceDescriptorRows(descB, idxB, dim),
         nA: idxA.length,

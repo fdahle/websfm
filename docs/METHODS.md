@@ -229,6 +229,20 @@ PnP (`register.js`) but never seeds initialisation or triangulation, so a low-ov
 survives a raised `minMatches`. Positionally degenerate pairs stay rejected. A user can
 exclude a pair (`setPairDisabled`).
 
+**Turned photos** (`core/features/turnSearch.js`, `turn.js`; learned features only).
+SuperPoint, DISK and ALIKED with LightGlue hold about ±15° of rotation, so flight lines
+flown in opposite directions match as separate pieces, or are tied to the block only by
+chance pairs (each under 30 inliers, however many: `turnSearchPieces`). For the photos of
+such pieces, each gets a 1,536-px SIFT look
+(rotation-invariant), matched against main-block photos (overlap evidence first, else an
+even spread, ≤ 40 each); a probe's homography, fitted loosely (1 % of the long side), gives
+the rotation at its inlier centre. A probe counts with ≥ 20 inliers; a photo takes the
+quarter turn holding 60 % of its probes' inliers, and photos without a convincing probe
+take their piece's. Those photos are detected again with their own settings on the turned
+raster: the keypoints are mapped back to the photo's pixels, so tracks and geometry never
+see the turn, and LightGlue is fed their positions turned about the image centre, as the
+descriptors saw them. Their pairs are then matched again; rounds repeat while photos join.
+
 **Subset gate** (`subsetGate.js`, brute force without positions): pre-match a small,
 **spatially uniform** keypoint subset (`pickSpreadIndices` grid-buckets so a repetitive
 façade does not collapse the sample onto its strong blobs) and skip the full O(Na·Nb) match

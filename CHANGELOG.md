@@ -6,6 +6,18 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Flights in opposite directions match with SuperPoint, DISK and ALIKED.** When matching
+  leaves pieces apart, or held to the block only by weak pairs, a small SIFT look at
+  their photos measures how each is turned against the main block, and photos turned a
+  quarter turn or more are detected again turned and matched again (Match Features ▸
+  Repair a split graph ▸ Find turned photos, on by default). Learned features hold only
+  about ±15° of rotation, so TMA flights at 115° and 290° stayed apart. Rachel's 58 scans
+  imported bare (SuperPoint at 5,000 px, LightGlue, all pairs): bridge repair joined the
+  block only by pairs of under 30 inliers and the best model placed 13 photos; the search
+  (58 looks, 840 probe pairs, 66 s) turned 23 photos of two pieces by 180°, detected them
+  again and matched 1,058 pairs again (9.5 min), leaving none apart, and the best model
+  placed 28. With the scans also treated as film, 49 of 58, each roll's focal solved to
+  6,069–6,217 px against the certificates' ≈ 6,140.
 - **WebSfM asks whether scans are film.** When photos carry no camera tags and look like
   scans (roll numbers in the names, large square frames, greyscale, or a scanner's tags),
   Sensors and Sparse Model ask whether to **Treat as film**; a film sensor without a focal

@@ -401,6 +401,20 @@ export const MATCH_TUNING = {
   gapMaxKeypoints: 40000,
   gapPartnerShare: 0.65,
   gapMaxShare: 0.5,
+  // Finding turned photos (MATCH_DEFAULTS.turnSearch; core/features/turnSearch.js): each
+  // photo of a piece still apart, and the main-block photos it is probed against (those
+  // with overlap evidence, else an even spread, ≤turnProbesPerImage), gets a SIFT look
+  // at turnProbeMaxDim px with ≤turnProbeKeypoints keypoints; a probe's homography (RANSAC
+  // at turnProbeThreshFrac of the photo's long side: it only has to hold the rotation)
+  // counts with ≥turnMinInliers inliers, and a photo takes the quarter turn holding
+  // turnMinShare of its probes' inliers. Rounds repeat while photos join.
+  turnRounds: 2,
+  turnProbesPerImage: 40,
+  turnProbeMaxDim: 1536,
+  turnProbeKeypoints: 2000,
+  turnProbeThreshFrac: 0.01,
+  turnMinInliers: 20,
+  turnMinShare: 0.6,
   // Share of the progress bar kept for the gate rescue and bridge repair, which follow
   // the pair pass when they can run (core/features/matchProgress.js).
   progressPostShare: 0.1,

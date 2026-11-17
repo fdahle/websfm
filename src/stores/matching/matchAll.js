@@ -12,6 +12,8 @@ import {
   matchGpuBegin,
   matchGpuEnd,
   GPU_MATCH_WORKER,
+  turnProbeFeatures,
+  turnProbeMatch,
 } from '../../workers/computeClient.js'
 import { createGpuMatchRun } from './gpuMatchRun.js'
 import { createDescriptorCache } from './descriptorCache.js'
@@ -23,13 +25,15 @@ import {
 } from '../../core/features/preselect.js'
 import { planBridgeRepair, bridgeKey, graphPieces, retryIsWorse } from '../../core/features/bridgeRepair.js'
 import { gapDetectSettings, planGapRedetect } from '../../core/features/gapRedetect.js'
+import { decideTurns, planTurnProbes, turnSearchPieces } from '../../core/features/turnSearch.js'
+import { computeSourceOf } from '../../utils/image.js'
 import { laterPassSpan, pairPassEnd, spanFraction } from '../../core/features/matchProgress.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
 import { descriptorLoader, selectRetrievalPairs } from './retrievalRun.js'
 import { spreadExtras } from '../../core/features/retrieval.js'
 import { findRigs, rigMembership, rigPairs, rigSummary } from '../../core/sensors/rig.js'
 import { isImageEnabled } from '../../core/imageEnabled.js'
-import { lightGlueModelFor } from '../../core/features/learnedDetectors.js'
+import { learnedDetector, lightGlueModelFor } from '../../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../../core/defaults.user.js'
 import { MATCH_TUNING, RETRIEVAL_TUNING } from '../../core/tuning.js'
 import { applyTuningOverrides } from '../tuningOverrides.js'
@@ -354,6 +358,201 @@ export function createMatchAll({
     }
   }
 
+  // Find the photos of the pieces still apart that are turned against the main block
+  // (core/features/turnSearch.js): a small SIFT look at each photo of the pieces and of
+  // the main block, matched piece against main, says how each pair is turned; a piece
+  // photo turned a quarter turn or more is detected again turned, with the settings it
+  // was detected with, and its pairs are matched again. Rounds repeat while photos
+  // join. → the summary kept on the run record, or null when nothing was apart.
+  async function turnPieces(images, ready, settings, requested, { onProgress, shouldCancel, span }) {
+    const byUuid = new Map(ready.map((im) => [im.uuid, im]))
+    const ids = [...byUuid.keys()]
+    const entriesOf = () =>
+      [...matchStore.value.values()]
+        .filter((e) => byUuid.has(e.idA) && byUuid.has(e.idB))
+        .map((e) => ({ ...e, disabled: e.enabled === false }))
+    // Pieces apart from the main block, and parts held to it only by weak pairs, however
+    // many (core/features/turnSearch.js turnSearchPieces): chance pairs can tie a turned
+    // flight on without placing anything.
+    const piecesNow = () =>
+      turnSearchPieces({
+        imageIds: ids,
+        entries: entriesOf(),
+        minComponent: settings.bridgeMinComponent,
+        weakInliers: settings.bridgeWeakInliers,
+      })
+    const t0 = performance.now()
+    const rounds = []
+    const looks = new Map() // uuid → its SIFT look, kept across rounds
+    const turnOf = (u) => byUuid.get(u)?.detectSettings?.turn || 0
+    for (let round = 1; round <= settings.turnRounds; round++) {
+      const pieces = piecesNow()
+      if (!pieces.length) break
+      const apart = new Set(pieces.flat())
+      const main = ids.filter((u) => !apart.has(u))
+      if (!main.length) break
+      const probes = planTurnProbes({
+        pieces,
+        main,
+        scoreUnmatched: unmatchedPairScore(ready),
+        maxPerImage: settings.turnProbesPerImage,
+      })
+      const need = [...new Set(probes.flatMap((p) => [p.idMain, p.idPiece]))].filter((u) => !looks.has(u))
+      log(
+        `Matching: ${pluralize(apart.size, 'image')} in ${pluralize(pieces.length, 'piece')} still apart or hanging by a thread` +
+          `${round > 1 ? ` (turn search round ${round})` : ''} — looking for photos turned against the main block: ` +
+          `SIFT at ${settings.turnProbeMaxDim} px on ${pluralize(need.length, 'image')}, ${pluralize(probes.length, 'probe pair')}, ` +
+          `${Math.min(POOL_SIZE, Math.max(1, need.length))} workers`,
+        'info',
+        'Matching',
+      )
+      const imagesStore = useImagesStore()
+      const total = need.length + probes.length
+      let k = 0
+      const tick = (label) =>
+        onProgress?.(++k, total, label, span[0] + 0.2 * (span[1] - span[0]) * (k / Math.max(1, total)), 'turn-probe')
+      let cursor = 0
+      await Promise.all(
+        Array.from({ length: Math.min(POOL_SIZE, need.length) }, async () => {
+          while (cursor < need.length) {
+            if (shouldCancel?.()) return
+            const im = byUuid.get(need[cursor++])
+            await imagesStore.whenComputeReady(im)
+            looks.set(
+              im.uuid,
+              await turnProbeFeatures(computeSourceOf(im), {
+                maxDim: settings.turnProbeMaxDim,
+                maxKeypoints: settings.turnProbeKeypoints,
+                mask: im.mask?.blob ?? null,
+              }),
+            )
+            tick(`Looking for turned photos: ${im.name}`)
+          }
+        }),
+      )
+      if (shouldCancel?.()) return { cancelled: true }
+      cursor = 0
+      const results = []
+      await Promise.all(
+        Array.from({ length: Math.min(POOL_SIZE, probes.length) }, async () => {
+          while (cursor < probes.length) {
+            if (shouldCancel?.()) return
+            const p = probes[cursor++]
+            const a = byUuid.get(p.idMain)
+            const native = Math.max(a.meta?.width || 0, a.meta?.height || 0, 1000)
+            const r = await turnProbeMatch(looks.get(p.idMain), looks.get(p.idPiece), {
+              threshPx: settings.turnProbeThreshFrac * native,
+            })
+            results.push({ ...p, ...r })
+            tick('Looking for turned photos: probing pairs')
+          }
+        }),
+      )
+      if (shouldCancel?.()) return { cancelled: true }
+      const decided = decideTurns({
+        probes: results,
+        pieces,
+        turnOf,
+        minInliers: settings.turnMinInliers,
+        minShare: settings.turnMinShare,
+      })
+      const convincing = results.filter((r) => r.inliers >= settings.turnMinInliers).length
+      for (const [i, p] of decided.pieces.entries()) {
+        log(
+          `Matching: piece ${i + 1} (${pluralize(p.size, 'image')}): ` +
+            (p.turn == null
+              ? `no turn found (${pluralize(p.voters, 'photo')} with a convincing probe)`
+              : `turned ${p.turn}° against the main block, by the probes of ${pluralize(p.voters, 'photo')}; ` +
+                `${pluralize(p.turned, 'photo')} to detect again turned`),
+          'info',
+          'Matching',
+        )
+      }
+      if (!decided.turns.size) {
+        log(
+          `Matching: no photo of the pieces is turned against the main block ` +
+            `(${convincing}/${pluralize(results.length, 'probe')} convincing): they stay as matched`,
+          'info',
+          'Matching',
+        )
+        rounds.push({ apart: apart.size, probes: results.length, convincing, turned: 0 })
+        break
+      }
+      // Detect again with the settings each photo was detected with, turned: one
+      // detectAll per (settings, turn) group.
+      const groups = new Map()
+      for (const [u, turn] of decided.turns) {
+        const im = byUuid.get(u)
+        const d = im.detectSettings ?? {}
+        const detect = {
+          detector: im.detector ?? 'sift',
+          ...(d.maxDim != null ? { maxDim: d.maxDim } : {}),
+          ...(d.maxDimMode != null ? { maxDimMode: d.maxDimMode } : {}),
+          ...(d.maxKeypoints != null ? { maxKeypoints: d.maxKeypoints } : {}),
+          ...(d.contrastThreshold != null ? { contrastThreshold: d.contrastThreshold } : {}),
+          ...(d.tiling != null ? { tiling: d.tiling } : {}),
+          turn,
+        }
+        const key = JSON.stringify(detect)
+        ;(groups.get(key) ?? groups.set(key, { detect, ids: [] }).get(key)).ids.push(im.id)
+      }
+      const turnedIds = [...groups.values()].flatMap((g) => g.ids)
+      const mid = span[0] + 0.7 * (span[1] - span[0])
+      let detected = 0
+      for (const g of groups.values()) {
+        await useImagesStore().detectAll(
+          {
+            ...g.detect,
+            onlyIds: g.ids,
+            _matchAgain: true,
+            ...(settings.memBudgetBytes > 0 ? { memBudgetBytes: settings.memBudgetBytes } : {}),
+          },
+          null,
+          (kk, n, name) =>
+            onProgress?.(
+              detected + kk,
+              turnedIds.length,
+              `Detecting ${name} again, turned ${g.detect.turn}°`,
+              spanFraction([span[0] + 0.2 * (span[1] - span[0]), mid], detected + kk, turnedIds.length),
+              'turn-detect',
+            ),
+          shouldCancel,
+        )
+        detected += g.ids.length
+        if (shouldCancel?.()) return { cancelled: true }
+      }
+      const record = matchRun.value
+      await matchAll(
+        images,
+        { ...requested, onlyIds: turnedIds, gapRedetect: false, turnSearch: false, onlyNewPairs: false },
+        (kk, n, label, f) => onProgress?.(kk, n, label, mid + (span[1] - mid) * (f ?? 0), 'turn-match'),
+        shouldCancel,
+      )
+      const pairsAgain = matchRun.value === record ? 0 : (matchRun.value?.nPairs ?? 0)
+      matchRun.value = record
+      if (shouldCancel?.()) return { cancelled: true }
+      const left = piecesNow().reduce((n, p) => n + p.length, 0)
+      log(
+        `Matching: after detecting ${pluralize(turnedIds.length, 'image')} again turned and matching ` +
+          `${pluralize(pairsAgain, 'pair')} again, ${pluralize(left, 'image')} ${left === 1 ? 'is' : 'are'} still apart ` +
+          `(was ${apart.size})`,
+        left < apart.size ? 'success' : 'info',
+        'Matching',
+      )
+      rounds.push({
+        apart: apart.size,
+        probes: results.length,
+        convincing,
+        turned: turnedIds.length,
+        pairs: pairsAgain,
+        left,
+      })
+      if (left >= apart.size) break
+    }
+    if (!rounds.length) return null
+    return { rounds, seconds: (performance.now() - t0) / 1000 }
+  }
+
   // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt on
   // open). The pairs it lists are kept as saved; only the rest are matched.
   async function matchAll(images, settings = {}, onProgress, shouldCancel, { resume = null } = {}) {
@@ -638,6 +837,14 @@ export function createMatchAll({
       !settings.onlyIds?.length &&
       !lightglue &&
       ready.some((im) => (im.detector ?? 'sift') === 'sift' && (im.detectScale ?? 1) < settings.gapMaxScale)
+    // Whether the photos of pieces still apart can be looked at for a turn: learned
+    // features only (SIFT turns with the photo), not on a selection (that run is how it
+    // matches turned photos again).
+    const turnPossible =
+      settings.turnSearch !== false &&
+      bridgeRounds > 0 &&
+      !settings.onlyIds?.length &&
+      ready.some((im) => learnedDetector(im.detector))
     const pairSpan = [0, pairPassEnd({ rescue: canRescue, bridgeRounds, postShare: settings.progressPostShare })]
     let barAt = 0
     const progress = (k, n, span, label, phase) => {
@@ -957,7 +1164,7 @@ export function createMatchAll({
       const tried = new Set()
       for (let round = 1; round <= bridgeRounds; round++) {
         if (cancelled || shouldCancel?.()) break
-        const span = laterPassSpan(barAt, round === bridgeRounds && !gapPossible)
+        const span = laterPassSpan(barAt, round === bridgeRounds && !gapPossible && !turnPossible)
         const label = `Bridge repair${round > 1 ? ` round ${round}` : ''}: matching the pieces of the match graph again`
         const repaired = await repairSplits(ready, pairs, settings, {
           round,
@@ -1102,6 +1309,14 @@ export function createMatchAll({
         span: [barAt, 1],
       })
       if (gap) matchRun.value = { ...matchRun.value, gapRedetect: gap }
+    }
+    if (turnPossible) {
+      const turned = await turnPieces(images, ready, settings, requested, {
+        onProgress,
+        shouldCancel,
+        span: [barAt, 1],
+      })
+      if (turned) matchRun.value = { ...matchRun.value, turnSearch: turned }
     }
   }
 

@@ -20,6 +20,10 @@ import { buildMaskLookup } from '../../utils/maskCanvas.js'
 import { analyzeImageQuality } from '../../core/features/imageQuality.js'
 import { fromScaledPx } from '../../core/sfm/geometry.js'
 import { KP_STRIDE } from '../../core/features/keypoints.js'
+import { turnRaster, unturnPoint } from '../../core/features/turn.js'
+import { matchDescriptors } from '../../core/features/bruteforce.js'
+import { estimateHomographyRansac } from '../../core/features/guidedTiles.js'
+import { homographyRotation } from '../../core/sfm/referenceLook.js'
 import { pluralize } from '../../core/textFormat.js'
 import { IMAGE_QUALITY_TUNING } from '../../core/tuning.js'
 import { DETECT_SIFT_DEFAULTS } from '../../core/defaults.user.js'
@@ -335,15 +339,23 @@ export function makeKeypointOps({ rasterize }) {
       tileSize = 0,
       overlap = 64,
       faintRetry = DETECT_SIFT_DEFAULTS.faintRetry,
+      // Clockwise quarter turns of the raster before detecting (core/features/turn.js):
+      // the keypoints come back in the photo's own pixels, the descriptors as turned.
+      turn = 0,
     } = options
-    const raster = await rasterize(url, maxDim)
-    const { data, width, height, scale, natW, natH } = raster
-    // The resize's actual per-axis factors (the raster size is rounded).
-    const sx = natW ? width / natW : scale,
-      sy = natH ? height / natH : scale
+    const read = await rasterize(url, maxDim)
+    // The resize's actual per-axis factors (the raster size is rounded), unturned.
+    const { width: uw, height: uh, scale, natW, natH } = read
+    const sx = natW ? uw / natW : scale,
+      sy = natH ? uh / natH : scale
 
     // Masked regions are excluded: keypoints landing on a masked pixel are dropped.
-    const maskLut = mask ? await buildMaskLookup(mask, width, height) : null
+    // The mask turns with the raster, so both stay in the detector's frame.
+    const maskRead = mask ? await buildMaskLookup(mask, uw, uh) : null
+    const turned = turnRaster(read.data, uw, uh, turn)
+    const raster = { ...read, data: turned.data, width: turned.width, height: turned.height }
+    const { data, width, height } = raster
+    const maskLut = maskRead ? turnRaster(maskRead, uw, uh, turn, 1).data : null
 
     // Learned detectors stream init/backend lines (first-run runtime load is slow)
     // so the UI shows progress instead of a silent stall.
@@ -392,12 +404,14 @@ export function makeKeypointOps({ rasterize }) {
       if (maskLut && maskLut[py * width + px]) continue
       const o = (py * width + px) * 4
       const k = kept * KP_STRIDE
-      // Back to native pixels, centre-aligned (core/sfm/geometry.js fromScaledPx),
-      // per axis with the factor the resize actually used (rounded raster size).
-      kpBuf[k] = fromScaledPx(dx, sx)
-      kpBuf[k + 1] = fromScaledPx(dy, sy)
-      kpBuf[k + 2] = dx / width
-      kpBuf[k + 3] = dy / height
+      // Out of the turned frame into the photo's own detect pixels, then back to native
+      // pixels, centre-aligned (core/sfm/geometry.js fromScaledPx), per axis with the
+      // factor the resize actually used (rounded raster size).
+      const [ux, uy] = unturnPoint(dx, dy, uw, uh, turn)
+      kpBuf[k] = fromScaledPx(ux, sx)
+      kpBuf[k + 1] = fromScaledPx(uy, sy)
+      kpBuf[k + 2] = ux / uw
+      kpBuf[k + 3] = uy / uh
       kpBuf[k + 4] = kscale / scale
       kpBuf[k + 5] = response
       rgbBuf[3 * kept] = data[o]
@@ -418,8 +432,9 @@ export function makeKeypointOps({ rasterize }) {
     if (descNorm === SIFT_DESC_NORM.ROOT) rootSiftInPlace(descriptors, feats.descLen)
 
     const diag = {
-      detectWidth: width,
-      detectHeight: height,
+      detectWidth: uw,
+      detectHeight: uh,
+      turn,
       natW,
       natH,
       scale,
@@ -438,8 +453,8 @@ export function makeKeypointOps({ rasterize }) {
         detector,
         width: natW,
         height: natH,
-        detectWidth: width,
-        detectHeight: height,
+        detectWidth: uw,
+        detectHeight: uh,
         ms: feats.ms,
         diag,
       },
@@ -465,8 +480,65 @@ export function makeKeypointOps({ rasterize }) {
     return { result: { ...q, natW: raster.natW, natH: raster.natH } }
   }
 
+  // Turn search (stores/matching/turnSearch.js): a small SIFT look at one photo, to
+  // measure how two photos are turned against each other — SIFT does not care, the
+  // learned detectors do. → { points (native px, x y interleaved), descriptors, count }.
+  async function turnProbeFeatures([url, { maxDim = 1536, maxKeypoints = 2000, mask = null } = {}]) {
+    const raster = await rasterize(url, maxDim)
+    const { data, width, height, scale, natW, natH } = raster
+    const sx = natW ? width / natW : scale,
+      sy = natH ? height / natH : scale
+    const maskLut = mask ? await buildMaskLookup(mask, width, height) : null
+    const { flat } = await detectSift(data, width, height, {
+      maxKeypoints,
+      contrastThreshold: 0.01,
+      maxOrientations: 1,
+    })
+    const total = Math.max(0, Math.floor((flat.length - 2) / 133))
+    const points = new Float32Array(total * 2),
+      descriptors = new Float32Array(total * 128)
+    let count = 0
+    for (let i = 0; i < total; i++) {
+      const x = flat[i * 133],
+        y = flat[i * 133 + 1]
+      const px = Math.min(width - 1, Math.max(0, Math.round(x))),
+        py = Math.min(height - 1, Math.max(0, Math.round(y)))
+      if (maskLut && maskLut[py * width + px]) continue
+      points[2 * count] = fromScaledPx(x, sx)
+      points[2 * count + 1] = fromScaledPx(y, sy)
+      descriptors.set(flat.subarray(i * 133 + 5, i * 133 + 133), count * 128)
+      count++
+    }
+    const out = { points: points.slice(0, 2 * count), descriptors: descriptors.slice(0, 128 * count), count }
+    return { result: out, transfer: [out.points.buffer, out.descriptors.buffer] }
+  }
+
+  // How photo B is turned against photo A, from two turnProbeFeatures looks: mutual
+  // ratio-test matches, one homography (RANSAC at `threshPx`, native px — loose, it
+  // only has to hold the rotation), and the rotation it applies at A's inlier centre
+  // (clockwise degrees, 0–360). → { matches, inliers, rotationDeg }.
+  async function turnProbeMatch([a, b, { ratioThreshold = 0.8, threshPx = 50 } = {}]) {
+    const { matches } = await matchDescriptors(a.descriptors, b.descriptors, { ratioThreshold, crossCheck: true })
+    if (matches.length < 8) return { result: { matches: matches.length, inliers: 0, rotationDeg: null } }
+    const ptsA = matches.map((m) => [a.points[2 * m.ia], a.points[2 * m.ia + 1]])
+    const ptsB = matches.map((m) => [b.points[2 * m.ib], b.points[2 * m.ib + 1]])
+    const fit = estimateHomographyRansac(ptsA, ptsB, { threshPx, iters: 1000 })
+    if (!fit) return { result: { matches: matches.length, inliers: 0, rotationDeg: null } }
+    let cx = 0,
+      cy = 0
+    for (let i = 0; i < ptsA.length; i++)
+      if (fit.inlierMask[i]) {
+        cx += ptsA[i][0]
+        cy += ptsA[i][1]
+      }
+    const rotationDeg = homographyRotation(fit.H, cx / fit.inlierCount, cy / fit.inlierCount)
+    return { result: { matches: matches.length, inliers: fit.inlierCount, rotationDeg } }
+  }
+
   return {
     detect,
     imageQuality,
+    turnProbeFeatures,
+    turnProbeMatch,
   }
 }

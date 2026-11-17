@@ -231,6 +231,15 @@ that a reduced detection resolution lost. Only for SIFT images detected under 0.
 their size and matched by brute force, not on a selection, and not when more than half
 the block is apart: detect everything at full size then.
 
+## Find turned photos
+<!-- param: turnSearch  default: on -->
+SuperPoint, DISK and ALIKED match only photos turned within about 15° of each other, so
+flight lines flown in opposite directions can come out as separate pieces. With this on,
+when pieces are still apart a small SIFT look at their photos, matched against the main
+block, measures how each is turned; photos turned a quarter turn or more are detected
+again turned and their pairs matched again. It adds the detection time of those photos.
+SIFT features need none of it.
+
 ## GPU acceleration
 With **Use GPU** on (Settings ▸ Compute), brute-force matching runs on the graphics
 card, typically 10–100× faster with the same matches. The first pair is checked

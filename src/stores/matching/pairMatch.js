@@ -303,6 +303,9 @@ export function createPairMatcher({
             descB,
             wB,
             hB,
+            // The quarter turns each photo was detected at (core/features/turn.js).
+            turnA: srcA.detectSettings?.turn || 0,
+            turnB: srcB.detectSettings?.turn || 0,
             // LightGlue weights are trained per detector (SuperPoint ≠ DISK ≠ ALIKED).
             modelId: learnedDetector(srcA.detector).matcherModelId,
             minConf: settings.lgMinConf,

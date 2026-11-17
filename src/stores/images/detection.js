@@ -167,6 +167,9 @@ export function createDetection({
           maxOrientations,
           // Absent before 2026-10 ⇒ unknown (they ran with 'response').
           capRule,
+          // Clockwise quarter turns the raster was detected at (core/features/turn.js):
+          // LightGlue reads this photo's keypoints turned. Absent ⇒ 0.
+          turn: settings.turn || 0,
         }
         // `_matchAgain`: the caller matches this image's pairs again (matchAll's Detect gaps again).
         if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid, { quiet: !!settings._matchAgain })

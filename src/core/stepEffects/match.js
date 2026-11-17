@@ -61,7 +61,15 @@ export function repairEffect(
       `Pieces still apart then are detected again at full size (${plural(small.images, 'image')} were detected at ` +
       `${small.scale.toFixed(2)}× of up to ${small.nativeMax.toLocaleString('en-US')} px), with about ` +
       `${Math.round(100 * tuning.gapPartnerShare)} % as many images of the main block, and their pairs matched again.`
-  return `${repair} ${gap}`
+  // Photos turned against the main block (core/features/turnSearch.js): learned
+  // features, which LightGlue matches, hold only about ±15° of rotation.
+  let turn = ''
+  if (lightglue && !selection)
+    turn =
+      s.turnSearch === false
+        ? ' Photos turned against the main block (flights in opposite directions) stay apart.'
+        : ' Pieces of photos turned against the main block (flights in opposite directions) are found with a small SIFT look, and those photos detected again turned and matched again.'
+  return `${repair} ${gap}${turn}`
 }
 
 // The images Detect gaps again at full size could act on (repairEffect's `small`).

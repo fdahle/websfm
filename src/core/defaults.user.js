@@ -205,6 +205,11 @@ export const MATCH_DEFAULTS = {
   // their partners in the main block, and match their pairs again: only for SIFT photos
   // detected well under their size (core/features/gapRedetect.js; tuning.js ▸ gap*).
   gapRedetect: true,
+  // When pieces are still apart and their features are learned (SuperPoint, DISK, ALIKED:
+  // they match only photos turned within about ±15°), look for photos turned against the
+  // main block — flights in opposite directions — and detect them again turned
+  // (core/features/turnSearch.js; tuning.js ▸ turn*).
+  turnSearch: true,
   // Keep the result of every pair already matched and match only the others: what adding
   // photos to a matched project needs. The dialog turns it on by itself when some images
   // with features are in no pair yet (stepEffects/match.js onlyNewPairsDefault).

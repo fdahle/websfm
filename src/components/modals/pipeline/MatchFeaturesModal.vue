@@ -287,9 +287,13 @@ const repairStep = computed(() => ({
   short:
     settings.value.repairSplits === false
       ? 'off'
-      : settings.value.gapRedetect === false
-        ? 'bridge pairs'
-        : 'bridge · redetect',
+      : matcher.value === 'lightglue'
+        ? settings.value.turnSearch === false
+          ? 'bridge pairs'
+          : 'bridge · turned photos'
+        : settings.value.gapRedetect === false
+          ? 'bridge pairs'
+          : 'bridge · redetect',
   long: repairLine.value,
 }))
 const acceptStep = computed(() => ({
@@ -965,7 +969,7 @@ provideStepLayout('match-features')
       title="Repair a split graph"
       :effect="repairStep"
       :inactive="!settings.repairSplits"
-      :more="1"
+      :more="2"
     >
       <SettingsField hint="Match the most promising pairs between the pieces again, with looser gates.">
         <template #label
@@ -998,6 +1002,23 @@ provideStepLayout('match-features')
           >
           <label class="checkbox-row"
             ><input v-model="settings.gapRedetect" type="checkbox" class="checkbox" /> Enabled</label
+          >
+        </SettingsField>
+        <SettingsField
+          v-if="settings.repairSplits"
+          hint="Find photos of pieces still apart that are turned against the main block, and detect them again turned (learned features only)."
+        >
+          <template #label
+            ><FieldHelp
+              op="match-features"
+              param="turnSearch"
+              :value="settings.turnSearch"
+              :default-value="MATCH_DEFAULTS.turnSearch"
+              >Find turned photos</FieldHelp
+            ></template
+          >
+          <label class="checkbox-row"
+            ><input v-model="settings.turnSearch" type="checkbox" class="checkbox" /> Enabled</label
           >
         </SettingsField>
       </template>

@@ -319,6 +319,15 @@ export function detectKeypoints(url, options = {}, { onLog } = {}) {
   })
 }
 
+// Turn search (stores/matching/turnSearch.js): a small SIFT look at a photo, and how
+// two such looks are turned against each other. Spread across the pool.
+export function turnProbeFeatures(url, options = {}) {
+  return call('turnProbeFeatures', [url, { ...options }])
+}
+export function turnProbeMatch(a, b, options = {}) {
+  return call('turnProbeMatch', [a, b, { ...options }])
+}
+
 // Image sharpness/exposure score for one image (Tools ▸ Images ▾ ▸ Image quality).
 // Spread across the pool; `mask` is the stored mask dataUrl or null.
 export function imageQuality(url, options = {}) {
