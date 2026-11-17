@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bandMetadata, droneYprToOpk, normalizeExifMetadata } from './metadata.js'
+import { bandMetadata, droneYprToOpk, formatExposure, normalizeExifMetadata, tagNumber } from './metadata.js'
 
 describe('droneYprToOpk', () => {
   it('maps DJI nadir and heading into photogrammetric OPK', () => {
@@ -163,5 +163,66 @@ describe('bandMetadata', () => {
   it('is null for an ordinary photo and marks a thermal band', () => {
     expect(bandMetadata({ Make: 'DJI', Model: 'FC6310' })).toBeNull()
     expect(bandMetadata({ BandName: 'LWIR', CaptureId: 'x' }).thermal).toBe(true)
+  })
+})
+
+describe('tagNumber', () => {
+  it('reads an XMP rational, a numeric string, a number and a one-element array', () => {
+    expect(tagNumber('1/120')).toBeCloseTo(1 / 120, 12)
+    expect(tagNumber('153/1')).toBe(153)
+    expect(tagNumber(' 2.8 ')).toBe(2.8)
+    expect(tagNumber(0.004)).toBe(0.004)
+    expect(tagNumber([100])).toBe(100)
+  })
+
+  it('is null for text that is no number, a zero denominator and nothing', () => {
+    expect(tagNumber('f11')).toBeNull()
+    expect(tagNumber('1/0')).toBeNull()
+    expect(tagNumber('')).toBeNull()
+    expect(tagNumber(undefined)).toBeNull()
+  })
+})
+
+describe('formatExposure', () => {
+  it('writes fractions of a second as 1/n and longer times in seconds', () => {
+    expect(formatExposure(1 / 500)).toBe('1/500 s')
+    expect(formatExposure(2)).toBe('2 s')
+  })
+
+  it('reads the XMP text a project saved before, and never shows NaN', () => {
+    expect(formatExposure('1/120')).toBe('1/120 s')
+    expect(formatExposure('bulb')).toBe('bulb')
+    expect(formatExposure(null)).toBeNull()
+  })
+})
+
+describe('normalizeExifMetadata on a film scan', () => {
+  // The tags exifr returns for the TMA scan CA214733R0047.tif: the XMP of the scanning
+  // back that digitised the film, not of the aerial camera.
+  const scan = {
+    Make: 'Better Light',
+    Model: 'Model Super10K',
+    ExposureTime: '1/120',
+    ISO: 1000,
+    DateTimeOriginal: '2010-06-14T15:31:48-05:00',
+  }
+
+  it('keeps a scanner out of the camera fields and records it as the scan', () => {
+    const m = normalizeExifMetadata(scan, { width: 10200, height: 10772 })
+    expect(m.make).toBeNull()
+    expect(m.model).toBeNull()
+    expect(m.exposureTime).toBeNull()
+    expect(m.iso).toBeNull()
+    expect(m.dateTime).toBeNull()
+    expect(m.scan).toEqual({ device: 'Better Light Model Super10K', date: '2010-06-14T15:31:48-05:00' })
+    expect(m.width).toBe(10200)
+  })
+
+  it("reads a camera's XMP exposure as a number and leaves `scan` empty", () => {
+    const m = normalizeExifMetadata({ Make: 'Hasselblad', Model: 'L1D-20c', ExposureTime: '1/120', FNumber: '28/10' })
+    expect(m.make).toBe('Hasselblad')
+    expect(m.exposureTime).toBeCloseTo(1 / 120, 12)
+    expect(m.fNumber).toBeCloseTo(2.8, 12)
+    expect(m.scan).toBeNull()
   })
 })

@@ -151,6 +151,11 @@ Notable changes to websfm. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **A film scanner's tags no longer pass for the camera.** The make and model a scanner
+  writes (Better Light Model Super10K on the TMA scans) no longer name a sensor, and its
+  exposure, ISO and scan date no longer show as the photo's; Show information lists them
+  as *Scanned with*. Exposure times written as a fraction in XMP now show as 1/120 s
+  instead of 1/NaN s.
 - **Film scans with placeholder GeoTIFF tags are added as photos.** A scan whose tags only
   relabel its own pixel grid (1-unit pixels, a corner at 0,0, no CRS) now goes to Images
   instead of Reference Data, whichever way the grid is flipped. In a dropped batch that

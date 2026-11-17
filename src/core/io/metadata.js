@@ -1,4 +1,5 @@
 import exifr from 'exifr'
+import { filmScannerOf } from './scanners.js'
 
 const normalizedTag = (key) =>
   String(key)
@@ -39,11 +40,21 @@ function scalarText(v) {
   return /^\d+$/.test(t) ? t : null
 }
 
+// A numeric tag as a number. EXIF gives numbers, but exifr hands an XMP rational back
+// as its text ("1/120" for exif:ExposureTime, "153/1" for a focal length), and a few
+// tags arrive as a one-element array. Null for anything that is not a finite number.
+export function tagNumber(v) {
+  if (v == null || v === '') return null
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (Array.isArray(v) || ArrayBuffer.isView(v)) return tagNumber(/** @type {ArrayLike<any>} */ (v)[0])
+  const t = String(v).trim()
+  const frac = /^([-+]?\d*\.?\d+)\s*\/\s*([-+]?\d*\.?\d+)$/.exec(t)
+  const n = frac ? Number(frac[1]) / Number(frac[2]) : t === '' ? NaN : Number(t)
+  return Number.isFinite(n) ? n : null
+}
+
 function metadataNumber(root, names) {
-  const value = metadataValue(root, names)
-  if (value == null || value === '') return null
-  const number = Number(value)
-  return Number.isFinite(number) ? number : null
+  return tagNumber(metadataValue(root, names))
 }
 
 // A list of numbers from an XMP value: exifr gives an array, a typed array, one
@@ -202,26 +213,35 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
     : null
   const opk = explicitOpk ?? droneYprToOpk(gimbalYaw, gimbalPitch, gimbalRoll)
 
+  // A film scan's tags may describe the scanner (core/io/scanners.js): its make and
+  // model, its own exposure, ISO and the date of the scan. None of that is the photo,
+  // so the camera fields stay empty and the scanner is kept apart as `scan`.
+  const scanner = filmScannerOf(e.Make, e.Model)
+  const camera = (v) => (scanner ? null : v)
+  const scanDate = e.DateTimeOriginal ?? e.CreateDate ?? null
+
   return {
     width: dims?.width ?? null,
     height: dims?.height ?? null,
-    make: e.Make ?? null,
-    model: e.Model ?? null,
-    lens: e.LensModel ?? null,
-    focalLength: e.FocalLength ?? null,
-    focalLength35: e.FocalLengthIn35mmFormat ?? null,
+    make: camera(e.Make ?? null),
+    model: camera(e.Model ?? null),
+    lens: camera(e.LensModel ?? null),
+    focalLength: camera(tagNumber(e.FocalLength)),
+    focalLength35: camera(tagNumber(e.FocalLengthIn35mmFormat)),
     // Lets us derive the physical sensor width when the 35mm-equivalent focal is
     // absent: sensorWidth_mm = imageWidth_px / FocalPlaneXResolution × unit.
-    focalPlaneXRes: e.FocalPlaneXResolution ?? null,
-    focalPlaneResUnit: e.FocalPlaneResolutionUnit ?? null,
-    fNumber: e.FNumber ?? null,
-    exposureTime: e.ExposureTime ?? null,
-    iso: e.ISO ?? null,
+    focalPlaneXRes: camera(tagNumber(e.FocalPlaneXResolution)),
+    focalPlaneResUnit: camera(e.FocalPlaneResolutionUnit ?? null),
+    fNumber: camera(tagNumber(e.FNumber)),
+    exposureTime: camera(tagNumber(e.ExposureTime)),
+    iso: camera(tagNumber(e.ISO)),
     orientation: e.Orientation ?? null,
-    dateTime: e.DateTimeOriginal ?? e.CreateDate ?? null,
+    dateTime: camera(scanDate),
     // The fraction of a second DateTimeOriginal leaves out ("45" = .45 s), where the
     // camera writes it: the rolling-shutter model takes the cameras' motion from the times.
-    subSecTime: scalarText(e.SubSecTimeOriginal ?? e.SubSecTime),
+    subSecTime: camera(scalarText(e.SubSecTimeOriginal ?? e.SubSecTime)),
+    // The film scanner whose tags these were, and when it scanned: { device, date }.
+    scan: scanner ? { device: scanner, date: scanDate } : null,
     gpsLat: e.latitude ?? metadataNumber(e, ['GPSLatitude']) ?? null,
     gpsLon: e.longitude ?? metadataNumber(e, ['GPSLongitude']) ?? null,
     gpsAlt: e.GPSAltitude ?? metadataNumber(e, ['AbsoluteAltitude']) ?? null,
@@ -299,9 +319,14 @@ export async function extractMetadata(file, url, presetDims = null) {
 
 const round = (n, d = 1) => Number(n.toFixed(d))
 
-function formatExposure(t) {
-  if (t == null) return null
-  return t >= 1 ? `${round(t)} s` : `1/${Math.round(1 / t)} s`
+// An exposure time as photographers write it ("1/120 s", "2 s"). A project saved before
+// tagNumber held the XMP text ("1/120"), so the value is read the same way here; one
+// that is still no number is shown as it was written, never as "1/NaN s".
+export function formatExposure(t) {
+  if (t == null || t === '') return null
+  const s = tagNumber(t)
+  if (s == null || s <= 0) return String(t)
+  return s >= 1 ? `${round(s)} s` : `1/${Math.round(1 / s)} s`
 }
 
 function formatDate(d) {
@@ -344,6 +369,12 @@ export const FIELD_DEFS = [
   { key: 'iso', label: 'ISO', format: (m) => m.iso },
   { key: 'orientation', label: 'Orientation', format: (m) => m.orientation },
   { key: 'dateTime', label: 'Taken', format: (m) => formatDate(m.dateTime) },
+  // A film scan's own tags: the scanner and the day of the scan, not the photo's.
+  {
+    key: 'scan',
+    label: 'Scanned with',
+    format: (m) => (m.scan ? [m.scan.device, formatDate(m.scan.date)].filter(Boolean).join(', ') : null),
+  },
   // A frame extracted by Import ▸ Video: which video, and where in it.
   {
     key: 'video',
