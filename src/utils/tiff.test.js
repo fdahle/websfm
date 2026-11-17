@@ -65,6 +65,54 @@ describe('isDegenerateGeoTransform', () => {
       }),
     ).toBe(false)
   })
+
+  // The pixel grid flipped to y-up: pixel 0,0 at world (0, height), so the image
+  // fills 0…width × 0…height. Header of the TMA CA213732V0068.tif scan
+  // (10136 × 9872), which went to Reference Data as an orthophoto.
+  const flipped = { pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 9872, 0], hasCrs: false }
+
+  it('flags the pixel grid flipped to y-up (bottom-left corner at the origin)', () => {
+    expect(isDegenerateGeoTransform({ ...flipped, width: 10136, height: 9872 })).toBe(true)
+  })
+
+  it('flags the flipped grid written as a ModelTransformation', () => {
+    const transformation = [1, 0, 0, 0, 0, -1, 0, 9872, 0, 0, 1, 0, 0, 0, 0, 1]
+    expect(isDegenerateGeoTransform({ transformation, hasCrs: false, width: 10136, height: 9872 })).toBe(true)
+  })
+
+  it('flags a grid with any corner at the origin, and a half-pixel shift', () => {
+    const size = { width: 400, height: 300, hasCrs: false }
+    // Top-right corner at 0,0: x runs negative.
+    expect(isDegenerateGeoTransform({ ...size, pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, -400, 0, 0] })).toBe(true)
+    // Pixel centres pinned: the bottom-left corner half a pixel off the origin.
+    expect(isDegenerateGeoTransform({ ...size, pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, -0.5, 300.5, 0] })).toBe(true)
+  })
+
+  it('without the image size only the top-left corner can be tested', () => {
+    expect(isDegenerateGeoTransform(flipped)).toBe(false)
+  })
+
+  it('keeps a raster whose corner is near the origin but not on it, or not at unit scale', () => {
+    const size = { width: 10136, height: 9872, hasCrs: false }
+    // 1 m pixels, a local frame starting 2 m off the origin.
+    expect(isDegenerateGeoTransform({ ...size, pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 9874, 0] })).toBe(false)
+    // The same layout at 0.5 m pixels: a real ground sample distance.
+    expect(isDegenerateGeoTransform({ ...size, pixelScale: [0.5, 0.5, 0], tiepoint: [0, 0, 0, 0, 4936, 0] })).toBe(
+      false,
+    )
+    // A CRS still makes it real.
+    expect(isDegenerateGeoTransform({ ...flipped, ...size, hasCrs: true })).toBe(false)
+  })
+
+  it('keeps a rotated or perspective ModelTransformation', () => {
+    const size = { width: 400, height: 300, hasCrs: false }
+    expect(
+      isDegenerateGeoTransform({ ...size, transformation: [1, 0.2, 0, 0, 0, -1, 0, 300, 0, 0, 1, 0, 0, 0, 0, 1] }),
+    ).toBe(false)
+    expect(
+      isDegenerateGeoTransform({ ...size, transformation: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1e-3, 0, 0, 1] }),
+    ).toBe(false)
+  })
 })
 
 describe('isAxisAlignedModelTransformation', () => {

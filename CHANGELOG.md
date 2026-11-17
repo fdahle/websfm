@@ -151,6 +151,13 @@ Notable changes to websfm. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Film scans with placeholder GeoTIFF tags are added as photos.** A scan whose tags only
+  relabel its own pixel grid (1-unit pixels, a corner at 0,0, no CRS) now goes to Images
+  instead of Reference Data, whichever way the grid is flipped. In a dropped batch that
+  holds both, the photos are added right away instead of waiting for each reference
+  raster to load. On a TMA set of 395 scans, the 172 vertical scans (pixel grid flipped
+  so it fills 0…width × 0…height) had all been imported as orthophotos, and the other
+  223 waited behind them.
 - **Changing the basemap keeps your place on the map.** Switching View ▸ Map ▸ Basemap (or
   the satellite source) now leaves the map where you had panned and zoomed it, instead of
   jumping back to the whole project.

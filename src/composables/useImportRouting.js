@@ -256,17 +256,22 @@ export function useImportRouting({
   // lands in the image path before any importer sees it. Every dropped/picked
   // image batch therefore gets forked here FIRST: a TIFF carrying GeoTIFF
   // geolocation tags is a reference raster, not a source photo. Aerial scans
-  // carry no geokeys, so the split is clean in practice — and when it isn't, the
-  // import modal offers "…or import as source image" as the escape hatch.
+  // carry none, or placeholder tags that only relabel the pixel grid
+  // (`isDegenerateGeoTransform`), so the split is clean in practice — and when it
+  // isn't, the import modal offers "…or import as source image" as the escape hatch.
   //
-  // Returns the files that really are source images, for the caller to ingest.
+  // Header-only, so the whole batch is sorted before anything is imported: a
+  // photo never waits behind a raster's full parse (about 10 s for a 100 MP scan),
+  // which in a mixed batch made the photos look as if they had gone to Reference
+  // Data too. Returns { photos, rasters }.
   async function forkGeoreferencedRasters(files) {
     const photos = []
+    const rasters = []
     for (const file of [...(files || [])]) {
       if (importRaster && isTiff(file)) {
         const probe = await probeTiffGeoTags(file)
         if (probe.georeferenced) {
-          await openRasterImport(file)
+          rasters.push(file)
           continue
         }
         // Not georeferenced ⇒ source photo. Say so, with the tags that were
@@ -277,7 +282,7 @@ export function useImportRouting({
         log(
           `${file.name}: ${
             probe.degenerate
-              ? 'placeholder GeoTIFF tags (identity transform at origin 0,0, no CRS) — not georeferencing'
+              ? 'placeholder GeoTIFF tags (unit-scale pixel grid with a corner at 0,0, no CRS) — not georeferencing'
               : 'no GeoTIFF geolocation tags'
           }` +
             `${probe.error ? ` (header unreadable: ${probe.error})` : ''}` +
@@ -292,14 +297,30 @@ export function useImportRouting({
       }
       photos.push(file)
     }
-    return photos
+    if (photos.length && rasters.length)
+      log(
+        `Sorted the batch: ${pluralize(photos.length, 'source image')}, ` +
+          `${pluralize(rasters.length, 'georeferenced raster')} to Reference Data`,
+        'info',
+        'Import',
+      )
+    return { photos, rasters }
   }
 
   // Dropped/picked image batch: fork the reference rasters out, ingest the rest.
+  // The photos and the rasters go in side by side; the rasters one at a time, as
+  // each may open the import dialog.
+  async function addImagesRouted(files) {
+    const { photos, rasters } = await forkGeoreferencedRasters(files)
+    const importRasters = async () => {
+      for (const file of rasters) await openRasterImport(file)
+    }
+    await Promise.all([addPhotosRouted(photos), importRasters()])
+  }
+
   // Files already in the project (same name and size, see imageDuplicates.js) are
   // asked about once per batch: skipped by default, or added as separate images.
-  async function addImagesRouted(files) {
-    const photos = await forkGeoreferencedRasters(files)
+  async function addPhotosRouted(photos) {
     if (!photos.length || !addImages) return
     const add = async (list, ...rest) => {
       await beforeAddImages?.(list)

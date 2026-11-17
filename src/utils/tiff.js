@@ -120,42 +120,55 @@ export async function isGeoreferencedTiff(blob) {
 // like this, and taking the tags at face value routed a whole flight strip into
 // Reference Data as "orthophotos" at origin 0/0, scale 1/-1.
 //
+// The same placeholder comes in several orientations, all of them the image's
+// own pixel grid relabelled: x = column with y = −row (top-left corner at 0,0),
+// or y flipped up so the grid fills 0…width × 0…height (bottom-left corner at
+// 0,0; rasterio's `from_origin(0, height, 1, 1)`, as on the TMA CA2137xxV
+// scans). So with the image size known, a unit-scale, axis-aligned transform
+// with ANY corner at the world origin is the pixel grid. A real raster with
+// 1 m pixels and no CRS puts a corner exactly on 0,0 only in a local frame
+// built around it, which is not a reference to import.
+//
 // A declared CRS overrides all of this: a raster that names EPSG:xxxx is
 // georeferenced even at an unlikely origin, so we only call it degenerate when
-// there is no CRS to give those numbers meaning.
-export function isDegenerateGeoTransform({ pixelScale, tiepoint, transformation, hasCrs }) {
+// there is no CRS to give those numbers meaning. "No CRS" alone is not enough:
+// a DEM or orthophoto exported in a local frame often carries none, with a real
+// pixel size and origin.
+export function isDegenerateGeoTransform({ pixelScale, tiepoint, transformation, hasCrs, width, height }) {
   if (hasCrs) return false
+  const near = (a, b = 0, eps = 1e-12) => Number.isFinite(a) && Math.abs(a - b) <= eps
 
-  // The same scanner placeholder can be written as a 4×4
-  // ModelTransformation instead of ModelTiepoint + ModelPixelScale. The TMA
-  // CA213732V00xx scans use exactly this form: x=column, y=row, origin 0/0,
-  // no CRS. It is merely the pixel coordinate system encoded as a GeoTIFF
-  // transform, not a placement on the ground.
+  // Pixel (col, row) → world: X = a*col + b*row + c, Y = d*col + e*row + f.
+  let a, b, c, d, e, f
+  // The tiepoint form's own pixel → world pair, the old test: whatever pixel it
+  // pins, pinning it to the world origin at unit scale says nothing.
+  let tiepointAtOrigin = false
   if (transformation?.length >= 16) {
+    // The placeholder written as a 4×4 ModelTransformation instead of
+    // ModelTiepoint + ModelPixelScale (the TMA CA213732V0032 header).
     const m = Array.from(transformation, Number)
-    const near = (a, b = 0) => Number.isFinite(a) && Math.abs(a - b) <= 1e-12
-    return (
-      near(Math.abs(m[0]), 1) &&
-      near(Math.abs(m[5]), 1) &&
-      near(m[1]) &&
-      near(m[4]) &&
-      near(m[3]) &&
-      near(m[7]) &&
-      near(m[12]) &&
-      near(m[13]) &&
-      near(m[14]) &&
-      near(m[15], 1)
-    )
+    if (!(near(m[12]) && near(m[13]) && near(m[14]) && near(m[15], 1))) return false
+    ;[a, b, c, d, e, f] = [m[0], m[1], m[3], m[4], m[5], m[7]]
+  } else {
+    let sx = Number(pixelScale?.[0]) || 0
+    let sy = Number(pixelScale?.[1]) || 0
+    // A zero or absent scale is no scale at all: take the pixel grid's.
+    if (!sx && !sy) sx = sy = 1
+    const [i, j, , X, Y, Z] = [0, 1, 2, 3, 4, 5].map((k) => Number(tiepoint?.[k] ?? 0))
+    // GeoTIFF: X = X0 + (col − i)·sx, Y = Y0 − (row − j)·sy.
+    ;[a, b, c, d, e, f] = [sx, 0, X - i * sx, 0, -sy, Y + j * sy]
+    tiepointAtOrigin = X === 0 && Y === 0 && Z === 0
   }
-
-  const sx = pixelScale?.[0]
-  const sy = pixelScale?.[1]
-  // Unit scale (the identity) or a zero/absent scale (no scale at all).
-  const unitScale = (Math.abs(sx) === 1 && Math.abs(sy) === 1) || (!sx && !sy)
-  if (!unitScale) return false
-  // The tiepoint's WORLD half (indices 3,4,5) — a raster placed at the origin.
-  const world = [tiepoint?.[3] ?? 0, tiepoint?.[4] ?? 0, tiepoint?.[5] ?? 0]
-  return world.every((v) => v === 0)
+  // Unit scale, no rotation or shear: the transform only relabels pixels.
+  if (!(near(Math.abs(a), 1) && near(Math.abs(e), 1) && near(b) && near(d))) return false
+  if (tiepointAtOrigin) return true
+  // Which corners can be tested: all four with the size, the top-left without.
+  const W = Number(width) > 0 ? Number(width) : null
+  const H = Number(height) > 0 ? Number(height) : null
+  const corners = [[0, 0]]
+  if (W && H) corners.push([W, 0], [0, H], [W, H])
+  // Half a pixel either way, for a writer that pinned pixel centres.
+  return corners.some(([col, row]) => near(a * col + b * row + c, 0, 0.5) && near(d * col + e * row + f, 0, 0.5))
 }
 
 // Does this file's GeoKeyDirectory name an actual CRS? 32767 is "user-defined",
@@ -188,6 +201,8 @@ export async function probeTiffGeoTags(blob) {
         tiepoint,
         transformation,
         hasCrs,
+        width: image.getWidth(),
+        height: image.getHeight(),
       })
     return {
       georeferenced: !degenerate && ((hasTiepoint && hasPixelScale) || hasTransformation),
