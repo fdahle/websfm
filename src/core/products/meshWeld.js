@@ -326,8 +326,8 @@ export function compactStep(mesh) {
 export function compactMesh(mesh, onLog) {
   const r = compactStep(mesh)
   onLog?.(
-    `Mesh compact: removed ${r.removedTriangles.toLocaleString()} degenerate triangles, ` +
-      `${r.removedVertices.toLocaleString()} unreferenced vertices`,
+    `Mesh compact: removed ${r.removedTriangles.toLocaleString('en')} degenerate triangles, ` +
+      `${r.removedVertices.toLocaleString('en')} unreferenced vertices`,
     'info',
     'Products',
   )

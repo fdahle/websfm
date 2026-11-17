@@ -7,6 +7,7 @@ import {
 import { demPreview as workerDemPreview } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
 import { productMapBlocker } from '../../core/products/productLayers.js'
+import { editCommand } from '../../core/help/consoleEdits.js'
 
 // The computed raster products (DEMs and orthophotos, several of each, one of each
 // kind the main one) as records, split out of useReconstructionStore: renaming,
@@ -50,7 +51,10 @@ export function createProducts({
     const previous = product.name || fallbackName(product.kind)
     const renamed = { ...product, name: trimmed }
     replaceRecord(renamed)
-    log(`Renamed product "${previous}" → "${trimmed}"`, 'info', 'Products', { channel: 'activity' })
+    log(`Renamed product "${previous}" → "${trimmed}"`, 'info', 'Products', {
+      channel: 'activity',
+      command: editCommand('product rename', [previous, trimmed]),
+    })
     saveProductRecord(renamed)
     return true
   }
@@ -62,6 +66,7 @@ export function createProducts({
     mainProductIds.value = { ...mainProductIds.value, [product.kind]: id }
     log(`Main ${product.kind === 'ortho' ? 'orthophoto' : 'DEM'} → "${product.name}"`, 'info', 'Products', {
       channel: 'activity',
+      command: editCommand('product main', [product.name]),
     })
     save()
     return true
@@ -74,6 +79,12 @@ export function createProducts({
   // no newer style was applied since: two quick Applies bake concurrently, and the
   // older one finishing last must not overwrite the newer (per-product sequence token).
   const productStyleSeq = new Map()
+  // A style as the console's `product style` takes it: its plain fields as key=value.
+  const styleFields = (style) =>
+    Object.entries(style)
+      .filter(([, v]) => v != null && typeof v !== 'object')
+      .map(([k, v]) => `${k}=${v}`)
+
   async function setProductStyle(id, style) {
     const product = productById(id)
     if (!product) return false
@@ -89,7 +100,7 @@ export function createProducts({
         `${label}: brightness ${next.brightness}, contrast ${next.contrast}, gamma ${next.gamma}`,
         'info',
         'Products',
-        { channel: 'activity' },
+        { channel: 'activity', command: editCommand('product style', [label, styleFields(next)]) },
       )
       saveProductRecord(styled)
       return true
@@ -113,7 +124,10 @@ export function createProducts({
       const { previewUrl: _url, ...rest } = now
       const styled = withPreviewUrl({ ...rest, style: next, previewBlob })
       replaceRecord(styled)
-      log(`${label}: ${describeDemStyle(next, product)}`, 'info', 'Products', { channel: 'activity' })
+      log(`${label}: ${describeDemStyle(next, product)}`, 'info', 'Products', {
+        channel: 'activity',
+        command: editCommand('product style', [label, styleFields(next)]),
+      })
       saveProductRecord(styled)
       return true
     } catch (err) {
@@ -164,7 +178,7 @@ export function createProducts({
       `${product.name || fallbackName(product.kind)} ${visible ? 'shown on' : 'hidden from'} the map`,
       'info',
       'Products',
-      { channel: 'activity' },
+      { channel: 'activity', command: editCommand(`product ${visible ? 'show' : 'hide'}`, [product.name]) },
     )
     save()
     return true
@@ -195,7 +209,10 @@ export function createProducts({
     }
     save()
     if (isPersisting()) await opfs.deleteProduct(projects.currentProjectId, id).catch(() => {})
-    log(`Removed product "${name}"`, 'info', 'Products', { channel: 'activity' })
+    log(`Removed product "${name}"`, 'info', 'Products', {
+      channel: 'activity',
+      command: editCommand('product remove', [name]),
+    })
     return true
   }
 

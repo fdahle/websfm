@@ -13,6 +13,7 @@ import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { pluralize } from '../core/textFormat.js'
 import { REFERENCE_ACCURACY_DEFAULTS } from '../core/defaults.user.js'
+import { editCommand } from '../core/help/consoleEdits.js'
 
 // Default accuracy of image observations (marker projections), in pixels.
 // Ground-coordinate accuracy has no implicit default: it must be declared.
@@ -89,7 +90,7 @@ export const useGcpsStore = registerProjectStore(
       isPersisting,
       build: () => ({ crs: projects.currentCrs, gcps: gcps.value, importDefaults: importDefaults.value }),
       write: opfs.saveGcps,
-      onError: (err) => log(`GCP save failed — ${err?.message ?? err}`, 'error', 'GCP'),
+      onError: (err) => log(`GCP save failed: ${err?.message ?? err}`, 'error', 'Georeferencing'),
     })
 
     // Name → image-id matching is shared with poses / footprints / COLMAP import
@@ -147,7 +148,11 @@ export const useGcpsStore = registerProjectStore(
         await ensureProjection(sourceCrs)
         await ensureProjection(projCrs)
       } catch (err) {
-        log(`GCP import failed — could not resolve CRS (${err?.message ?? err})`, 'error', 'GCP')
+        log(
+          `GCP import failed: could not resolve the coordinate system (${err?.message ?? err})`,
+          'error',
+          'Georeferencing',
+        )
         return 0
       }
       if (projects.currentProjectId !== projectId) return 0
@@ -335,13 +340,13 @@ export const useGcpsStore = registerProjectStore(
         `GCPs imported: ${pluralize(added, 'point')}${markers ? ` (${pluralize(markers, 'marker')} without coordinates)` : ''}` +
           `${obsCount ? `, ${pluralize(obsCount, 'observation')}` : ''} (from ${sourceCrs})`,
         'success',
-        'GCP',
+        'Georeferencing',
       )
       if (unconstrained)
         log(
           `${pluralize(unconstrained, 'imported GCP')} ${unconstrained === 1 ? 'has' : 'have'} unknown or invalid covariance and will not constrain the solution`,
           'warn',
-          'GCP',
+          'Georeferencing',
         )
       await save()
       return added
@@ -386,8 +391,10 @@ export const useGcpsStore = registerProjectStore(
         observations: [],
         enabled: true,
       })
-      log(`Added ${marker ? 'marker' : 'GCP'} ${gcps.value[gcps.value.length - 1].name}`, 'success', 'GCP', {
+      const added = gcps.value[gcps.value.length - 1]
+      log(`Added ${marker ? 'marker' : 'GCP'} ${added.name}`, 'info', 'Georeferencing', {
         channel: 'activity',
+        command: editCommand('gcp add', [added.name, kind]),
       })
       save()
       return id
@@ -418,7 +425,10 @@ export const useGcpsStore = registerProjectStore(
         if (g.x == null) g.x = 0
         if (g.y == null) g.y = 0
       }
-      log(`${g.name} is now a ${ROLE_NOUNS[next]}`, 'info', 'GCP', { channel: 'activity' })
+      log(`${g.name} is now a ${ROLE_NOUNS[next]}`, 'info', 'Georeferencing', {
+        channel: 'activity',
+        command: editCommand('gcp role', [g.name, next]),
+      })
       save()
     }
 
@@ -482,7 +492,10 @@ export const useGcpsStore = registerProjectStore(
       const g = gcps.value.find((x) => x.id === id)
       if (!g) return false
       g.enabled = !!enabled
-      log(`GCP ${g.name} ${g.enabled ? 'enabled' : 'disabled'}`, 'info', 'GCP', { channel: 'activity' })
+      log(`GCP ${g.name} ${g.enabled ? 'enabled' : 'disabled'}`, 'info', 'Georeferencing', {
+        channel: 'activity',
+        command: editCommand(`gcp ${g.enabled ? 'enable' : 'disable'}`, [g.name]),
+      })
       save()
       return true
     }
@@ -491,7 +504,10 @@ export const useGcpsStore = registerProjectStore(
       const idx = gcps.value.findIndex((g) => g.id === id)
       if (idx === -1) return false
       const [removed] = gcps.value.splice(idx, 1)
-      log(`Removed GCP ${removed.name}`, 'info', 'GCP', { channel: 'activity' })
+      log(`Removed GCP ${removed.name}`, 'info', 'Georeferencing', {
+        channel: 'activity',
+        command: editCommand('gcp remove', [removed.name]),
+      })
       save()
       return true
     }
@@ -529,7 +545,7 @@ export const useGcpsStore = registerProjectStore(
         // separation, core/verticalDatum.js); otherwise the GCP takes the DEM's datum.
         const hit = await sampleDem(g.x, g.y, { datum: g.verticalDatum })
         if (!hit || hit.z == null) {
-          log(`GCP ${g.name}: outside the reference DEM (or on nodata) — Z left unchanged`, 'warn', 'GCP')
+          log(`GCP ${g.name}: outside the reference DEM (or on nodata) — Z left unchanged`, 'warn', 'Georeferencing')
           skippedNoData++
           continue
         }
@@ -539,7 +555,7 @@ export const useGcpsStore = registerProjectStore(
               'accuracy, so filling Z would make this GCP claim survey-grade accuracy it ' +
               "does not have. Set the dataset's vertical accuracy first.",
             'warn',
-            'GCP',
+            'Georeferencing',
           )
           refused++
           continue
@@ -557,15 +573,15 @@ export const useGcpsStore = registerProjectStore(
         log(
           `GCP ${g.name}: Z ${before == null ? '—' : fmtNum(before)} → ${fmtNum(hit.z)} ` +
             `from "${hit.rasterName}" (σ ${hit.accuracy}, ${hit.datum}${shiftNote(hit)})`,
-          'info',
-          'GCP',
+          'debug',
+          'Georeferencing',
         )
         if (beforeDatum !== 'unknown' && beforeDatum !== g.verticalDatum) {
           log(
             `GCP ${g.name}: ⚠ its height datum was ${beforeDatum}; the DEM's ${g.verticalDatum} cannot be ` +
               "converted to it, so the GCP now carries the DEM's datum.",
             'warn',
-            'GCP',
+            'Georeferencing',
           )
         }
         if (hit.datum === 'unknown') {
@@ -573,7 +589,7 @@ export const useGcpsStore = registerProjectStore(
             `GCP ${g.name}: ⚠ that DEM's vertical datum is undeclared — an ellipsoid/geoid ` +
               'mismatch is tens of metres in polar regions.',
             'warn',
-            'GCP',
+            'Georeferencing',
           )
         }
       }
@@ -584,7 +600,7 @@ export const useGcpsStore = registerProjectStore(
           `${skippedNoData ? `, ${skippedNoData} outside/nodata` : ''}` +
           `${refused ? `, ${refused} refused (no declared vertical accuracy)` : ''}`,
         filled ? 'success' : 'warn',
-        'GCP',
+        'Georeferencing',
       )
       if (filled) save()
       return { filled, skippedHasZ, skippedNoData, refused }
@@ -618,7 +634,7 @@ export const useGcpsStore = registerProjectStore(
             ? `, Z ${fmtNum(dem.z)} σ ${dem.accuracy} (${dem.datum}${shiftNote(dem)}) from "${dem.rasterName}"`
             : ''),
         'info',
-        'GCP',
+        'Georeferencing',
       )
       if (!zUsable) {
         log(
@@ -627,14 +643,14 @@ export const useGcpsStore = registerProjectStore(
               ? `reference DEM "${dem.rasterName}" has no declared vertical accuracy`
               : 'no reference DEM covers this point'),
           'warn',
-          'GCP',
+          'Georeferencing',
         )
       } else if (dem.datum === 'unknown') {
         log(
           `GCP ${g.name}: ⚠ that DEM's vertical datum is undeclared — an ellipsoid/geoid ` +
             'mismatch is tens of metres in polar regions.',
           'warn',
-          'GCP',
+          'Georeferencing',
         )
       }
       save()
@@ -667,8 +683,8 @@ export const useGcpsStore = registerProjectStore(
           `GCP ${g.name}: reference DEM ${demZ == null ? 'no data' : fmtNum(demZ)}${hit ? shiftNote(hit) : ''}` +
             `, GCP ${gcpZ == null ? '—' : fmtNum(gcpZ)}` +
             `${rows.at(-1).dz != null ? `, Δ ${fmtNum(rows.at(-1).dz)}` : ''}`,
-          'info',
-          'GCP',
+          'debug',
+          'Georeferencing',
         )
         // Still different after sampling: the two could not be converted.
         if (
@@ -682,7 +698,7 @@ export const useGcpsStore = registerProjectStore(
             `GCP ${g.name}: height datum ${g.verticalDatum} differs from reference DEM datum ${hit.datum}, ` +
               'and the two cannot be converted',
             'warn',
-            'GCP',
+            'Georeferencing',
           )
         }
       }
@@ -706,7 +722,7 @@ export const useGcpsStore = registerProjectStore(
                 : ''
             }`,
           systematic ? 'warn' : 'info',
-          'GCP',
+          'Georeferencing',
         )
       }
       return rows
@@ -738,15 +754,15 @@ export const useGcpsStore = registerProjectStore(
         converted++
         log(
           `GCP ${g.name}: ${from} → ${toDatum}${g.z == null ? '' : `, Z ${fmtNum(g.z - shift)} → ${fmtNum(g.z)}`}`,
-          'info',
-          'GCP',
+          'debug',
+          'Georeferencing',
         )
       }
       log(
         `Convert heights to ${toDatum}: ${converted} converted` +
           `${skipped ? `, ${skipped} skipped (only ellipsoidal and EGM96/EGM2008 heights convert)` : ''}`,
         converted ? 'success' : 'warn',
-        'GCP',
+        'Georeferencing',
       )
       if (converted) save()
       return { converted, skipped }
@@ -831,7 +847,7 @@ export const useGcpsStore = registerProjectStore(
       } else {
         gcps.value = data.gcps.map(normalize)
       }
-      log(`GCPs restored: ${pluralize(gcps.value.length, 'point')}`, 'success', 'GCP')
+      log(`GCPs restored: ${pluralize(gcps.value.length, 'point')}`, 'info', 'Georeferencing')
     }
 
     // Re-project all stored GCPs when the project CRS changes.
@@ -846,7 +862,7 @@ export const useGcpsStore = registerProjectStore(
         return reprojectGcpWithAccuracy(g, fromCrs, toCrs)
       })
       await save()
-      log(`GCPs re-projected to ${toCrs}`, 'info', 'GCP')
+      log(`GCPs re-projected to ${toCrs}`, 'info', 'Georeferencing')
     }
 
     return {

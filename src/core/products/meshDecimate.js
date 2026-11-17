@@ -877,8 +877,8 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   const maxErr = Math.sqrt(worstErr2)
   const ms = Math.round(nowMs() - t0)
   onLog?.(
-    `Decimate: target ${target.toLocaleString()} triangles ` +
-      `(${hasRatio ? `ratio ${targetRatio}` : 'absolute'}), ${boundaryEdges.toLocaleString()} boundary edges ` +
+    `Decimate: target ${target.toLocaleString('en')} triangles ` +
+      `(${hasRatio ? `ratio ${targetRatio}` : 'absolute'}), ${boundaryEdges.toLocaleString('en')} boundary edges ` +
       `${preserveBoundary ? `constrained ×${boundaryWeight}` : 'unconstrained'}, origin ` +
       `(${ox.toFixed(3)}, ${oy.toFixed(3)}, ${oz.toFixed(3)})`,
     'info',
@@ -886,19 +886,19 @@ export function decimateMesh(mesh, opts = {}, onLog) {
   )
   if (outTris > target) {
     onLog?.(
-      `Decimate: stopped at ${outTris.toLocaleString()} of target ${target.toLocaleString()} — ` +
+      `Decimate: stopped at ${outTris.toLocaleString('en')} of target ${target.toLocaleString('en')} — ` +
         (stoppedByError
-          ? `next collapse exceeds maxError ${maxError}`
-          : 'no further collapse passes the topology/fold checks'),
+          ? `the next collapse exceeds the maximum error ${maxError}`
+          : 'no further collapse keeps the mesh clean (no fold or broken edge)'),
       'warn',
       'Products',
     )
   }
   onLog?.(
-    `Decimate: ${before.toLocaleString()} → ${outTris.toLocaleString()} triangles, ` +
-      `${outVerts.toLocaleString()} vertices, ${collapses.toLocaleString()} collapses in ${pluralize(passes, 'pass', 'passes')}, ` +
+    `Decimate: ${before.toLocaleString('en')} → ${outTris.toLocaleString('en')} triangles, ` +
+      `${outVerts.toLocaleString('en')} vertices, ${collapses.toLocaleString('en')} collapses in ${pluralize(passes, 'pass', 'passes')}, ` +
       `max error ${maxErr.toPrecision(3)} (RMS plane distance) in ${ms} ms`,
-    'success',
+    'info',
     'Products',
   )
 
@@ -928,7 +928,7 @@ function joinTextureCopies(mesh, onLog) {
   }
   if (m < nV) {
     onLog?.(
-      `Decimate: textured mesh, ${(nV - m).toLocaleString()} per-chart vertex copies joined first; ` +
+      `Decimate: textured mesh, ${(nV - m).toLocaleString('en')} per-chart vertex copies joined first; ` +
         'the result has no texture',
       'info',
       'Products',

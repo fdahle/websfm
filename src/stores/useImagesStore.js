@@ -23,6 +23,7 @@ import { createImageThumbnails } from './images/thumbnails.js'
 import { pluralize } from '../core/textFormat.js'
 import { PROJECT_FORMAT_VERSION } from '../core/projectFormat.js'
 import { imageIndexCsv } from '../core/io/imageIndex.js'
+import { editCommand } from '../core/help/consoleEdits.js'
 
 // Reading one byte forces the browser to validate the file behind a blob (a File
 // handle is re-checked on every read), so a moved or deleted file shows up here.
@@ -346,7 +347,10 @@ export const useImagesStore = defineStore('images', () => {
     if (!img || !trimmed || trimmed === img.name) return false
     const previous = img.name
     img.name = trimmed
-    log(`Renamed image "${previous}" → "${trimmed}"`, 'info', 'Images', { channel: 'activity' })
+    log(`Renamed image "${previous}" → "${trimmed}"`, 'info', 'Images', {
+      channel: 'activity',
+      command: editCommand('image rename', [previous, trimmed]),
+    })
     if (isPersisting()) save()
     return true
   }
@@ -367,7 +371,10 @@ export const useImagesStore = defineStore('images', () => {
       enabled ? `Enabled ${what}: later runs use it again` : `Disabled ${what}: later runs leave it out`,
       'info',
       'Images',
-      { channel: 'activity' },
+      {
+        channel: 'activity',
+        command: editCommand(`image ${enabled ? 'enable' : 'disable'}`, [changed.map((img) => img.name)]),
+      },
     )
     if (isPersisting()) save()
     return changed.length
@@ -428,7 +435,7 @@ export const useImagesStore = defineStore('images', () => {
           return healed
         })
         .catch((err) => {
-          log(`Image recovery failed: ${img.name} — ${err?.message ?? err}`, 'error', 'Images')
+          log(`Recovering ${img.name} from project storage failed: ${err?.message ?? err}`, 'error', 'Images')
           return false
         })
       urlHeal.set(img.uuid, attempt)
@@ -574,7 +581,8 @@ export const useImagesStore = defineStore('images', () => {
     const write = set ? opfs.saveMask(pid, img.uuid, img.mask.blob) : opfs.deleteMask(pid, img.uuid)
     write.then(
       () => log(set ? `Mask saved: ${img.name}` : `Mask cleared: ${img.name}`, 'info', 'Images'),
-      (err) => log(`Mask ${set ? 'not saved' : 'not cleared'}: ${img.name}: ${err?.message ?? err}`, 'error', 'Images'),
+      (err) =>
+        log(`${set ? 'Saving' : 'Clearing'} the mask of ${img.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
     )
     save()
   }
@@ -586,7 +594,7 @@ export const useImagesStore = defineStore('images', () => {
     if (!img) return
     releasePreview(img.depth)
     img.depth = previewOf(source)
-    if (!quiet) log(img.depth ? `Depth map saved: ${img.name}` : `Depth map cleared: ${img.name}`, 'info', 'Images')
+    if (!quiet) log(img.depth ? `Depth map saved: ${img.name}` : `Depth map cleared: ${img.name}`, 'debug', 'Images')
     if (isPersisting()) {
       const pid = projects.currentProjectId
       if (img.depth) opfs.saveDepth(pid, img.uuid, img.depth.blob).catch(() => {})
@@ -722,10 +730,10 @@ export const useImagesStore = defineStore('images', () => {
     }))
     images.value = restored
     for (const name of missingKp.slice(0, 20)) {
-      log(`Keypoints missing for ${name} — re-run feature detection`, 'warn', 'Project')
+      log(`Keypoints missing for ${name} — run Detect Features again`, 'warn', 'Detection')
     }
     if (missingKp.length > 20)
-      log(`Keypoints missing for ${pluralize(missingKp.length - 20, 'more image')}`, 'warn', 'Project')
+      log(`Keypoints missing for ${pluralize(missingKp.length - 20, 'more image')}`, 'warn', 'Detection')
 
     const total = records.length
     if (total === 0) {
@@ -781,12 +789,12 @@ export const useImagesStore = defineStore('images', () => {
               opfs
                 .saveImageDerived(projectId, record.uuid, 'display', display)
                 .catch((err) =>
-                  log(`OPFS derived save failed (display): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'),
+                  log(`Saving the display copy of ${record.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
                 )
               opfs
                 .saveImageDerived(projectId, record.uuid, 'pyramid', container)
                 .catch((err) =>
-                  log(`OPFS derived save failed (pyramid): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'),
+                  log(`Saving the image pyramid of ${record.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
                 )
             }
           } else {
@@ -825,20 +833,12 @@ export const useImagesStore = defineStore('images', () => {
                 opfs
                   .saveImageDerived(projectId, record.uuid, 'display', t.displayBlob)
                   .catch((err) =>
-                    log(
-                      `OPFS derived save failed (display): ${record.name} — ${err?.message ?? err}`,
-                      'error',
-                      'Images',
-                    ),
+                    log(`Saving the display copy of ${record.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
                   )
                 opfs
                   .saveImageDerived(projectId, record.uuid, 'compute', t.computeBlob)
                   .catch((err) =>
-                    log(
-                      `OPFS derived save failed (compute): ${record.name} — ${err?.message ?? err}`,
-                      'error',
-                      'Images',
-                    ),
+                    log(`Saving the working copy of ${record.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
                   )
               }
             }
@@ -865,7 +865,7 @@ export const useImagesStore = defineStore('images', () => {
         if (record.hasDepth) img.depth = previewOf(await opfs.loadDepthFile(projectId, record.uuid, dirs))
       } catch (err) {
         if (generation === restoreGeneration) {
-          log(`Restore failed: ${record.name} — ${err?.message ?? err}`, 'error', 'Project')
+          log(`Restoring ${record.name} failed: ${err?.message ?? err}`, 'error', 'Project')
           img.previewPending = false
           img.previewFailed = true
           img.previewFailReason = err?.message ?? String(err)
@@ -925,7 +925,7 @@ export const useImagesStore = defineStore('images', () => {
         }
       } catch (err) {
         failed++
-        log(`${img.name}: image quality failed — ${err?.message ?? err}`, 'error', 'Images')
+        log(`Image quality of ${img.name} failed: ${err?.message ?? err}`, 'error', 'Images')
       }
       onProgress?.(++done, targets.length)
     })

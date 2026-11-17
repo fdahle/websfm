@@ -545,7 +545,7 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     expect(fisheye.status).toBe('done')
     expect(fisheye.cameras).toHaveLength(3)
     expect(fisheye.summary.postBaMedianPx).toBeLessThan(0.5)
-    expect(logs.some((m) => /dropped \d+ of \d+ fisheye keypoint/.test(m))).toBe(true)
+    expect(logs.some((m) => /dropped \d+ of \d+ fisheye keypoint/i.test(m))).toBe(true)
     // Read as a pinhole, the same keypoints cannot fit one model.
     expect(pinhole.status !== 'done' || pinhole.summary.postBaMedianPx > 5 * fisheye.summary.postBaMedianPx).toBe(true)
   })
@@ -1754,7 +1754,7 @@ describe('reconstruct — self-calibration propagation and bookkeeping', () => {
     expect(out.status).toBe('done')
     // The camera-prior pass did move the focal after the last fold.
     expect(
-      logs.some((m) => /camera-prior bundle adjustment \(round 1, intrinsics 'f'\) self-calibration/.test(m)),
+      logs.some((m) => /camera-prior bundle adjustment \(round 1, calibration 'f'\) self-calibration/i.test(m)),
     ).toBe(true)
     expect(out.summary.selfCalDistortion).toHaveLength(1)
     const err = recordMismatch(out, pristineOf(sc.images))
@@ -1850,7 +1850,7 @@ describe('reconstruct — alternate-seed retries', () => {
       },
       {
         onLog: (m) => {
-          const hit = /^Seed retry (\d+): initial pair (\S+) ↔ (\S+)/.exec(m)
+          const hit = /^Seed retry (\d+): initial pair (\S+) ↔ (\S+)/i.exec(m)
           if (!hit) return
           seeds.push([hit[2], hit[3]].sort().join('--'))
           throw new Error('injected failure after seed selection')

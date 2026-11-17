@@ -94,7 +94,7 @@ export async function finishDepthMap(
       `depth ${dm.depthMin.toFixed(2)}–${dm.depthMax.toFixed(2)} (${dm.seeded} seeds, ${seedPct}%), ` +
       `${((100 * valid) / dm.depth.length).toFixed(0)}% with depth, ` +
       `cost median ${cs.median.toFixed(2)} / p95 ${cs.p95.toFixed(2)}, ${(imgMs / 1000).toFixed(1)}s`,
-    'info',
+    'debug',
     'Dense',
   ])
 

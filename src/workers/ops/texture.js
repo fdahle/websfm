@@ -200,10 +200,10 @@ export function makeTextureOps({ rasterize } = {}) {
       off += blobs[i].size
     }
     emit('log', [
-      `Texture: ${out.count.toLocaleString()} triangles, ${out.nVerts.toLocaleString()} vertices, ` +
+      `Texture: ${out.count.toLocaleString('en')} triangles, ${out.nVerts.toLocaleString('en')} vertices, ` +
         `${pages.length} page${pages.length === 1 ? '' : 's'} (${(total / 1e6).toFixed(1)} MB JPEG) ` +
         `in ${((performance.now() - run.t0) / 1000).toFixed(1)} s`,
-      'success',
+      'info',
       'Products',
     ])
     const result = {
@@ -417,7 +417,7 @@ function viewHooks(views, settings, rasterize, log, { quietGpu = false } = {}) {
         if (coverage < GPU_CHECK_COVERAGE) return cpu // too little of the mesh in view to judge
         if (agree < GPU_AGREE_MIN) {
           log(
-            `Texture: GPU validate failed — ${(100 * agree).toFixed(2)} % of covered pixels agree with the CPU pass; using the CPU`,
+            `Texture: the GPU pass agrees with the CPU on only ${(100 * agree).toFixed(2)} % of covered pixels; using the CPU`,
             'warn',
           )
           gpu.destroy()

@@ -286,6 +286,7 @@ const {
   logApplied,
 } = useRecommendedPreset({
   stage: 'detection',
+  source: 'Detection',
   recommendations: detectRecommendations,
   defaults: presetBase,
   labels: DETECT_RECOMMENDATION_LABELS,

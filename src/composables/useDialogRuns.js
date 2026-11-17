@@ -310,7 +310,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     try {
       await fn(settings)
     } catch (err) {
-      log(`${err?.message ?? err}`, 'error', 'Export')
+      log(`Export failed: ${err?.message ?? err}`, 'error', 'Export')
       showToast('Export failed', { detail: String(err?.message ?? err), kind: 'error', ms: 6000 })
     }
   }
@@ -350,7 +350,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
         ms: 8000,
       })
     } catch (err) {
-      log(`${err?.message ?? err}`, 'error', 'Products')
+      log(`Co-registration failed: ${err?.message ?? err}`, 'error', 'Products')
       showToast('Co-registration failed', { detail: String(err?.message ?? err), kind: 'error', ms: 6000 })
     }
   }
@@ -395,7 +395,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     } catch (err) {
       if (!isAbort(err)) {
         const detail = String(err?.message ?? err)
-        log(`Detect targets failed: ${detail}`, 'error', 'GCP')
+        log(`Detect targets failed: ${detail}`, 'error', 'Georeferencing')
         showToast('Detect targets failed', { detail, kind: 'error', ms: 6000 })
       }
     } finally {

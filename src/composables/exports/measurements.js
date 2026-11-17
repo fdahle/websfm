@@ -95,7 +95,7 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
   async function doExportMeasurements({ format = 'csv', measurementCoords = 'project', ids = null, fileName } = {}) {
     const records = recordsFor(ids)
     if (!records.length) {
-      log('Export: no saved measurements', 'warn', 'Export')
+      log('No saved measurements', 'warn', 'Export')
       return
     }
     const resolved = await effectiveFrameSpec?.()

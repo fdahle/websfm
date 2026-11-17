@@ -397,7 +397,7 @@ export function clipOrtho(ortho, polygons, { crop = true, allTouched = false, on
   const inside = polygonMask(ortho, polygons, { allTouched })
   const { bounds, win } = windowOf(ortho, inside, crop)
   if (!win) {
-    onLog?.('Clip ortho: no pixel centre lies inside a clip polygon', 'warn', 'Products')
+    onLog?.('Clip orthophoto: no pixel centre lies inside a clip polygon', 'warn', 'Products')
     return null
   }
   const { width: w, data, mask } = ortho

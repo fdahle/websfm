@@ -339,7 +339,7 @@ describe('quality presets & derived params (Step 3)', () => {
     }
     const logs = []
     const out = fuseDepthMaps([map], {}, (m, level) => logs.push({ m, level }))
-    expect(logs.some((l) => l.level === 'warn' && /weak cost distribution/.test(l.m))).toBe(true)
+    expect(logs.some((l) => l.level === 'warn' && /depth maps match weakly/.test(l.m))).toBe(true)
     // Summary is attached to the returned flat typed array for cross-run comparison (Q3).
     expect(out).toBeInstanceOf(Float32Array)
     expect(out.summary).toBeTruthy()

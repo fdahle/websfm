@@ -106,7 +106,7 @@ export async function openLasStream(source, { createLazDecoder = null, batchPoin
     }
     if (left > 0) {
       onLog?.(
-        `LAZ: the chunk table covers ${(count - left).toLocaleString()} of ${count.toLocaleString()} points — reading those`,
+        `LAZ: the chunk table covers ${(count - left).toLocaleString('en')} of ${count.toLocaleString('en')} points — reading those`,
         'warn',
         'Import',
       )

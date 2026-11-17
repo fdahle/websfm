@@ -103,7 +103,7 @@ export function createRasterImport({
       ;({ meta, plane } = await parseRasterFile(file, file.name, {
         forceKind,
         previewOnly: true,
-        onLog: (m, l, c) => log(m, l, c),
+        onLog: (m, l, c) => log(m, l, c ?? 'Import'),
       }))
       // Too large for one plane: read the window over the project's images instead.
       if (meta?.tooLarge) {
@@ -119,9 +119,9 @@ export function createRasterImport({
         const { window, factor } = fit
         const cell = Math.abs(meta.geoTransform.scaleX)
         log(
-          `Reference raster ${file.name}: ${meta.width.toLocaleString()} × ${meta.height.toLocaleString()} cells ` +
-            `is too large for one plane — reading the ${(window[2] - window[0]).toLocaleString()} × ` +
-            `${(window[3] - window[1]).toLocaleString()} window over the project's images and GCPs (half ` +
+          `Reference raster ${file.name}: ${meta.width.toLocaleString('en')} × ${meta.height.toLocaleString('en')} cells ` +
+            `is too large for one plane — reading the ${(window[2] - window[0]).toLocaleString('en')} × ` +
+            `${(window[3] - window[1]).toLocaleString('en')} window over the project's images and GCPs (half ` +
             'their extent around them, at least 1 km)' +
             (factor > 1
               ? `, at ${factor}× its cell size (${(cell * factor).toPrecision(3)} instead of ${cell.toPrecision(3)}) ` +
@@ -135,7 +135,7 @@ export function createRasterImport({
           previewOnly: true,
           window,
           factor,
-          onLog: (m, l, c) => log(m, l, c),
+          onLog: (m, l, c) => log(m, l, c ?? 'Import'),
         }))
       }
     } catch (err) {
@@ -212,12 +212,12 @@ export function createRasterImport({
       if (plane)
         await opfs
           .saveExternalPlane(projectId, record.id, plane.buffer)
-          .catch((err) => log(`Reference raster save failed — ${err?.message ?? err}`, 'error', 'Import'))
+          .catch((err) => log(`Reference raster save failed: ${err?.message ?? err}`, 'error', 'Import'))
       // Keep the original file: it's the source of truth a kind flip re-decodes
       // from, and (A-7) what "cache locally" would materialise.
       await opfs
         .saveExternalSource(projectId, record.id, file)
-        .catch((err) => log(`Reference raster source save failed — ${err?.message ?? err}`, 'warn', 'Import'))
+        .catch((err) => log(`Reference raster source save failed: ${err?.message ?? err}`, 'warn', 'Import'))
       await save()
     }
 
@@ -369,7 +369,7 @@ export function createRasterImport({
         factor: meta.window?.factor ?? 1,
         // A plain copy: the record is reactive, and a proxy cannot be posted to the worker.
         style: JSON.parse(JSON.stringify(meta.style ?? null)),
-        onLog: (m, l, c) => log(m, l, c),
+        onLog: (m, l, c) => log(m, l, c ?? 'Import'),
       })
       const source = buildSource(meta, plane)
       setSource(meta.id, source)
@@ -381,7 +381,7 @@ export function createRasterImport({
       return source
     } catch (err) {
       log(
-        `Reference raster "${meta.name}": rebuilding full-resolution pixels failed — ` + `${err?.message ?? err}`,
+        `Reference raster "${meta.name}": rebuilding full-resolution pixels failed: ` + `${err?.message ?? err}`,
         'error',
         'Import',
       )

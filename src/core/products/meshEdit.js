@@ -99,8 +99,8 @@ export function cleanMesh(mesh, opts = {}, onLog) {
       threshold: r.threshold,
     }
     onLog?.(
-      `Mesh clean (components): removed ${r.removedComponents.toLocaleString()} of ${r.components.toLocaleString()} components ` +
-        `(${r.removedTriangles.toLocaleString()} triangles, threshold ${Math.ceil(r.threshold).toLocaleString()})`,
+      `Mesh clean (components): removed ${r.removedComponents.toLocaleString('en')} of ${r.components.toLocaleString('en')} components ` +
+        `(${r.removedTriangles.toLocaleString('en')} triangles, threshold ${Math.ceil(r.threshold).toLocaleString('en')})`,
       'info',
       'Products',
     )
@@ -111,7 +111,7 @@ export function cleanMesh(mesh, opts = {}, onLog) {
     stats.longEdges = { removedTriangles: r.removedTriangles, median: r.median, limit: r.limit }
     onLog?.(
       `Mesh clean (long edges): median ${r.median.toPrecision(4)}, limit ${r.limit.toPrecision(4)} → ` +
-        `removed ${r.removedTriangles.toLocaleString()} triangles`,
+        `removed ${r.removedTriangles.toLocaleString('en')} triangles`,
       'info',
       'Products',
     )
@@ -127,8 +127,8 @@ export function cleanMesh(mesh, opts = {}, onLog) {
       addedVertices: r.addedVertices,
     }
     onLog?.(
-      `Mesh clean (holes): filled ${r.filled.toLocaleString()}, left ${r.tooLarge.toLocaleString()} too large, ` +
-        `skipped ${r.skipped.toLocaleString()} non-manifold chains`,
+      `Mesh clean (holes): filled ${r.filled.toLocaleString('en')}, left ${r.tooLarge.toLocaleString('en')} too large, ` +
+        `skipped ${r.skipped.toLocaleString('en')} non-manifold chains`,
       r.skipped ? 'warn' : 'info',
       'Products',
     )
@@ -138,8 +138,8 @@ export function cleanMesh(mesh, opts = {}, onLog) {
     out = r.mesh
     stats.compact = { removedTriangles: r.removedTriangles, removedVertices: r.removedVertices }
     onLog?.(
-      `Mesh clean (compact): removed ${r.removedTriangles.toLocaleString()} degenerate triangles, ` +
-        `${r.removedVertices.toLocaleString()} unreferenced vertices`,
+      `Mesh clean (compact): removed ${r.removedTriangles.toLocaleString('en')} degenerate triangles, ` +
+        `${r.removedVertices.toLocaleString('en')} unreferenced vertices`,
       'info',
       'Products',
     )
@@ -150,8 +150,8 @@ export function cleanMesh(mesh, opts = {}, onLog) {
   stats.outputTriangles = out.count
   stats.outputVertices = out.nVerts
   onLog?.(
-    `Mesh clean: ${stats.inputTriangles.toLocaleString()} → ${out.count.toLocaleString()} triangles`,
-    'success',
+    `Mesh clean: ${stats.inputTriangles.toLocaleString('en')} → ${out.count.toLocaleString('en')} triangles`,
+    'info',
     'Products',
   )
   return { mesh: out, stats }
@@ -194,7 +194,7 @@ export function cropMesh(mesh, { min = [], max = [], invert = false } = {}, onLo
   }
   const out = compactStep(selectTriangles(mesh, keep, kept)).mesh
   onLog?.(
-    `Mesh crop: kept ${out.count.toLocaleString()} of ${nT.toLocaleString()} triangles` +
+    `Mesh crop: kept ${out.count.toLocaleString('en')} of ${nT.toLocaleString('en')} triangles` +
       `${invert ? ' (outside box)' : ''}`,
     'info',
     'Products',

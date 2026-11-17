@@ -189,7 +189,7 @@ export function makeMeshOps() {
     emit('log', [
       `Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles ` +
         `in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
-      'success',
+      'info',
       'Products',
     ])
     emit('progress', [1, 1, 'Done'])
@@ -230,7 +230,7 @@ export function makeMeshOps() {
       const mesh = completeMesh(dense, ctx, poissonOnce(emit, wasm64, ctx), performance.now() - t, log)
       log(
         `Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
-        'success',
+        'info',
         'Products',
       )
       return meshResult(mesh)
@@ -259,7 +259,7 @@ export function makeMeshOps() {
     log(
       `Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles in ${((performance.now() - run.t0) / 1000).toFixed(1)}s ` +
         `(joining ${((performance.now() - t) / 1000).toFixed(1)}s)`,
-      'success',
+      'info',
       'Products',
     )
     return meshResult(mesh)

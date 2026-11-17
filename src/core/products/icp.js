@@ -401,8 +401,8 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
   let t = [0, 1, 2].map((i) => s * Rc[i] + init.t[i] - c[i])
 
   log(
-    `ICP: ${nSrc.toLocaleString()} source pts → sample ${m.toLocaleString()} (seed ${seed}) · ` +
-      `reference ${ref.isMesh ? `${ref.surface.nValid.toLocaleString()} mesh triangles (closest surface point)` : `${ref.count.toLocaleString()} pts`} · ${method} · ` +
+    `ICP: ${nSrc.toLocaleString('en')} source pts → sample ${m.toLocaleString('en')} (seed ${seed}) · ` +
+      `reference ${ref.isMesh ? `${ref.surface.nValid.toLocaleString('en')} mesh triangles (closest surface point)` : `${ref.count.toLocaleString('en')} pts`} · ${method} · ` +
       `maxDistance ${maxDistance} · trim ${Math.round(trimFrac * 100)}% · scale ${estimateScale ? 'estimated' : 'fixed'} · ` +
       `≤ ${maxIterations} iterations, tolerance ${tolerance}`,
   )
@@ -523,7 +523,7 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
     )
   }
   log(
-    `ICP iter 0: rms ${ev.rms.toPrecision(4)}, ${ev.inliers.toLocaleString()} in range (${((100 * ev.inliers) / m).toFixed(1)}%)`,
+    `ICP iter 0: rms ${ev.rms.toPrecision(4)}, ${ev.inliers.toLocaleString('en')} in range (${((100 * ev.inliers) / m).toFixed(1)}%)`,
     'debug',
   )
 
@@ -629,13 +629,13 @@ export function icpAlign(source, reference, opts = {}, onLog, onProgress) {
     }
     disp = Math.sqrt(disp / m)
     log(
-      `ICP iter ${iterations}: rms ${ev.rms.toPrecision(4)}, ${ev.inliers.toLocaleString()} in range, ` +
+      `ICP iter ${iterations}: rms ${ev.rms.toPrecision(4)}, ${ev.inliers.toLocaleString('en')} in range, ` +
         `moved ${disp.toPrecision(3)}`,
       'debug',
     )
     onProgress?.(iterations / (maxIterations + 1))
     if (ev.kept < minPairs) {
-      log(`ICP: only ${ev.kept} correspondences left within maxDistance; stopping`, 'warn')
+      log(`ICP: only ${ev.kept} correspondences left within the search radius; stopping`, 'warn')
       break
     }
     if (disp < tol && Math.abs(ev.rms - prevRms) < tol) {

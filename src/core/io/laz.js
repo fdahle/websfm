@@ -143,7 +143,7 @@ export function cloudToLaz(
   const size = header.length + packed.data.length
   const ratio = n ? (n * recordLength) / packed.data.length : 1
   onLog?.(
-    `LAZ export: ${n.toLocaleString()} points, ${(size / 1024 ** 2).toFixed(1)} MB ` +
+    `LAZ export: ${n.toLocaleString('en')} points, ${(size / 1024 ** 2).toFixed(1)} MB ` +
       `(${ratio.toFixed(1)}× smaller than LAS)` +
       (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'),
     'info',
@@ -177,7 +177,7 @@ export function parseLaz(buffer, { decompress, onLog } = {}) {
   })
   const cloud = decodeLasPoints(records, h.count, h.recordLength, h.format, h.scale, h.offset, h.extraBytes)
   onLog?.(
-    `LAZ: read ${h.count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, ` +
+    `LAZ: read ${h.count.toLocaleString('en')} points (v${h.versionMajor}.${h.versionMinor}, ` +
       `format ${h.format}${cloud.col ? ', RGB' : ''})`,
     'info',
     'Import',

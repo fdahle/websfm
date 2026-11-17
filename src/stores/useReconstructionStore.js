@@ -32,6 +32,7 @@ import { makeFrameModelResolver } from '../core/sfm/displayFrame.js'
 import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { pluralize } from '../core/textFormat.js'
 import { mainOf, nextProductName, outdatedReasons, stampOf } from '../core/products/productSet.js'
+import { productLogSource } from '../core/logRules.js'
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -357,9 +358,15 @@ export const useReconstructionStore = registerProjectStore(
       if (cloud.kind === 'sparse') return setMainSparse(id)
       if (mainOf(clouds.value, cloud.kind, mainProductIds.value[cloud.kind])?.id === id) return false
       mainProductIds.value = { ...mainProductIds.value, [cloud.kind]: id }
-      log(`Main ${cloud.kind === 'mesh' ? 'mesh' : 'dense cloud'} → "${cloud.name}"`, 'info', 'Reconstruction', {
-        channel: 'activity',
-      })
+      log(
+        `Main ${cloud.kind === 'mesh' ? 'mesh' : 'dense cloud'} → "${cloud.name}"`,
+        'info',
+        productLogSource(cloud.kind),
+        {
+          channel: 'activity',
+          command: `product main "${cloud.name}"`,
+        },
+      )
       save()
       return true
     }
@@ -484,7 +491,7 @@ export const useReconstructionStore = registerProjectStore(
               ? `. ${pluralize(products, 'product')} built on the earlier model ${products === 1 ? 'is' : 'are'} kept, marked outdated.`
               : '.'),
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       }
     }

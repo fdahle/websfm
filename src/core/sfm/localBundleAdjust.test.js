@@ -24,8 +24,8 @@ describe('local bundle adjustment (localBaWindow)', () => {
   it("refines each new camera's window with its neighbours fixed and keeps the model", async () => {
     const base = await run({})
     const local = await run({ localBaWindow: 8, interimBaGrowth: 2 })
-    expect(local.logs.some((m) => /^local BA \(.*free \+ \d+ fixed cameras/.test(m))).toBe(true)
-    expect(base.logs.some((m) => m.startsWith('local BA ('))).toBe(false)
+    expect(local.logs.some((m) => /^Local BA \(.*free \+ \d+ fixed cameras/.test(m))).toBe(true)
+    expect(base.logs.some((m) => m.startsWith('Local BA ('))).toBe(false)
     expect(local.out.summary.nCameras).toBe(base.out.summary.nCameras)
     // Same final quality within a small margin: the global solves still run at the end.
     expect(local.out.summary.postBaMedianPx).toBeGreaterThan(0)

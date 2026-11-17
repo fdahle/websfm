@@ -68,7 +68,7 @@ export function createKeypointCache({ hasKeypoints, imageById, isPersisting, log
     if (!data) {
       img.kpStatus = 'error'
       img.kpCount = 0
-      log(`Keypoints missing for ${img.name} — re-run feature detection`, 'warn', 'Project')
+      log(`Keypoints missing for ${img.name} — run Detect Features again`, 'warn', 'Detection')
       return { kps: null }
     }
     const kps = new Keypoints(data)

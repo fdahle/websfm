@@ -109,7 +109,7 @@ export function makeDemOps() {
         `${grid.holesFilled ? ` (${grid.holesFilled} in enclosed gaps)` : ''} (${frame.crs}` +
         // A local frame's vertical is an estimate; say which camera signal set it.
         `${frame.crs === 'local' && frame.source ? `, up from ${frame.source}` : ''})`,
-      'success',
+      'info',
       'Products',
     ])
     emit('progress', [1, 1, 'Done'])
@@ -152,9 +152,9 @@ export function makeDemOps() {
       emit('log', [
         chosen
           ? `${label}: ${full.requestedGsd.toPrecision(3)} ${unit}/px would need more than ` +
-            `${cap.toLocaleString()} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px`
+            `${cap.toLocaleString('en')} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px`
           : `${label}: Auto — one point per cell (${full.requestedGsd.toPrecision(3)} ${unit}/px) would need more ` +
-            `than ${cap.toLocaleString()} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px ` +
+            `than ${cap.toLocaleString('en')} cells a side; built at ${geom.gsd.toPrecision(3)} ${unit}/px ` +
             `(set a GSD for a finer one)`,
         chosen ? 'warn' : 'info',
         'Products',
@@ -251,7 +251,7 @@ export function makeDemOps() {
         `${res.count} measured + ${res.filled} filled cells (${frame.crs}); GeoTIFF ${formatBytes(cog.size)} ` +
         `in ${((performance.now() - t0) / 1000).toFixed(1)} s, overview ${ov.width}×${ov.height} @ ` +
         `${ov.gsd.toPrecision(3)} ${unit}/px`,
-      'success',
+      'info',
       'Products',
     ])
     emit('progress', [1, 1, 'Done'])

@@ -91,7 +91,7 @@ function onReduceOverlapRun({ disableIds, kept, enabled, coverage }) {
   toolModal.value = null
   imagesStore.setImagesEnabled(disableIds, false)
   log(
-    `Reduce overlap: kept ${kept} of ${pluralize(enabled, 'enabled photo')}, every sparse point in at least ` +
+    `Reduce overlap: kept ${kept} of ${pluralize(enabled, 'enabled photo')}, every tie point in at least ` +
       `${pluralize(coverage, 'photo')} (or all that see it); ${pluralize(disableIds.length, 'photo')} disabled`,
     'success',
     'Images',

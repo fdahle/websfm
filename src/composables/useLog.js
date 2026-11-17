@@ -1,4 +1,5 @@
 import { shallowRef, triggerRef } from 'vue'
+import { LOG_SOURCE_IDS, LOG_LEVEL_IDS } from '../core/logRules.js'
 // Re-export the pure formatter so existing consumers keep importing it from here;
 // its implementation lives in utils/ (Vue-free) so it can be unit-tested.
 export { stripSourcePrefix } from '../utils/logFormat.js'
@@ -46,18 +47,37 @@ const TRIM_CHUNK = 500
 const pending = shared.pending
 const listeners = shared.listeners
 
+// Development only: a line whose source or level is not in core/logRules.js is named
+// once in the browser console, so a typo or a new area is caught where it is written.
+const warned = new Set()
+function checkLine(level, source) {
+  if (!import.meta.env?.DEV) return
+  const bad = !LOG_LEVEL_IDS.includes(level)
+    ? `level "${level}"`
+    : !LOG_SOURCE_IDS.includes(source)
+      ? `source "${source}"`
+      : ''
+  if (bad && !warned.has(bad)) {
+    warned.add(bad)
+    console.warn(`log line with ${bad}, not in core/logRules.js (CONTRIBUTING.md ▸ The console)`)
+  }
+}
+
 export function useLog() {
-  // `opts.channel` separates the two kinds of line that share this stream:
-  //   'pipeline' (default) — the scientific/process record: what a detector,
-  //     matcher, SfM/dense run, or import actually did. This is the audit trail
-  //     the user exports and reads back.
-  //   'activity' — a one-line confirmation that the *user* just did something
-  //     reversible (toggled a match, enabled a GCP, set a cloud as main…). Shown
-  //     live so the action is acknowledged, kept for scroll-back, but off the
-  //     default export so it never clogs the record.
+  // The rules are in CONTRIBUTING.md ▸ The console; the sources, levels and channels
+  // in core/logRules.js. `opts.channel` separates the two kinds of line that share
+  // this stream:
+  //   'pipeline' (default) — the record: what a detector, matcher, SfM/dense run, or
+  //     import actually did. The audit trail the user exports and reads back.
+  //   'activity' — a one-line confirmation that the *user* just made an edit by hand
+  //     (toggled a match, enabled a GCP, set a cloud as main…). Shown live so the
+  //     action is acknowledged, kept for scroll-back, but off the default export.
+  //     `opts.command` is the console command that makes the same edit; the console
+  //     shows it on the line's hover.
   // The console renders them in separate tabs; entries persist either way.
   function log(message, level = 'info', source = null, opts = {}) {
     const channel = opts.channel === 'activity' ? 'activity' : 'pipeline'
+    checkLine(level, source)
     const now = new Date()
     const hms = now.toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const ms = now.getMilliseconds().toString().padStart(3, '0')
@@ -73,6 +93,7 @@ export function useLog() {
       message,
       source,
       channel,
+      ...(opts.command ? { command: opts.command } : {}),
     }
     const buf = entries.value
     buf.push(entry)

@@ -102,7 +102,7 @@ export function makeExportOps({ lazCodec = null } = {}) {
       } finally {
         encoder?.free?.()
       }
-      onLog(`COPC: ${reader.nodes.size.toLocaleString()} octree nodes, point format ${out.plan.format}`, 'info')
+      onLog(`COPC: ${reader.nodes.size.toLocaleString('en')} octree nodes, point format ${out.plan.format}`, 'info')
     } else if (format === 'las') {
       blob = partsToBlob(cloudToLasParts(src, { crsCode, geographic, onLog }), 'application/octet-stream')
     } else if (format === 'xyz') {
@@ -116,7 +116,7 @@ export function makeExportOps({ lazCodec = null } = {}) {
     }
     const count = src.count ?? src.length
     onLog(
-      `${format.toUpperCase()} written: ${count.toLocaleString()} points, ` +
+      `${format.toUpperCase()} written: ${count.toLocaleString('en')} points, ` +
         `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
       'info',
     )
@@ -187,7 +187,7 @@ export function makeExportOps({ lazCodec = null } = {}) {
     }
     const count = src.count ?? src.idx.length / 3
     onLog(
-      `Mesh ${format.toUpperCase()} written: ${count.toLocaleString()} triangles` +
+      `Mesh ${format.toUpperCase()} written: ${count.toLocaleString('en')} triangles` +
         `${textured && (format === 'glb' || format === 'obj') ? `, ${pages.length} texture page${pages.length === 1 ? '' : 's'}` : ''}, ` +
         `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
       'info',
@@ -407,7 +407,7 @@ export function makeExportOps({ lazCodec = null } = {}) {
     const { parts } = await builder.finish()
     const blob = new Blob(parts, { type: 'image/tiff' })
     emit('log', [
-      `${ortho ? 'Ortho' : 'DEM'} export: reprojected to ${to.code}, ${out.width.toLocaleString()} × ${out.height.toLocaleString()} px ` +
+      `${ortho ? 'Ortho' : 'DEM'} export: reprojected to ${to.code}, ${out.width.toLocaleString('en')} × ${out.height.toLocaleString('en')} px ` +
         `at ${out.gsd.toPrecision(4)} per px (${resampling}${finest > 1 ? `, positions interpolated every ${finest} px` : ''}), ` +
         `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)} s; heights keep their vertical datum`,
       'info',

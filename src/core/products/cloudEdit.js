@@ -237,7 +237,7 @@ export function cropCloud(cloud, { min = [], max = [], invert = false } = {}, on
     }
   }
   onLog?.(
-    `Crop: kept ${kept.toLocaleString()} of ${n.toLocaleString()} points` + `${invert ? ' (outside box)' : ''}`,
+    `Crop: kept ${kept.toLocaleString('en')} of ${n.toLocaleString('en')} points` + `${invert ? ' (outside box)' : ''}`,
     'info',
     'Products',
   )
@@ -269,8 +269,8 @@ export function maskCloud(cloud, { mask, keepSelected = false } = {}, onLog) {
     }
   }
   onLog?.(
-    `Selection: ${keepSelected ? 'kept' : 'deleted'} ${(keepSelected ? kept : n - kept).toLocaleString()}` +
-      ` selected of ${n.toLocaleString()} points`,
+    `Selection: ${keepSelected ? 'kept' : 'deleted'} ${(keepSelected ? kept : n - kept).toLocaleString('en')}` +
+      ` selected of ${n.toLocaleString('en')} points`,
     'info',
     'Products',
   )
@@ -302,7 +302,7 @@ export function classifySelection(cloud, { mask, classValue } = {}, onLog) {
     }
   }
   onLog?.(
-    `Classify: ${selected.toLocaleString()} selected points set to class ${c} (${changed.toLocaleString()} changed)`,
+    `Classify: ${selected.toLocaleString('en')} selected points set to class ${c} (${changed.toLocaleString('en')} changed)`,
     'info',
     'Products',
   )
@@ -366,7 +366,7 @@ export function statisticalOutlierFilter(
   }
   onLog?.(
     `Filter (outlier): mean neighbour distance ${mu.toFixed(4)} ±${sigma.toFixed(4)}, ` +
-      `limit ${limit.toFixed(4)} → kept ${kept.toLocaleString()} of ${n.toLocaleString()}`,
+      `limit ${limit.toFixed(4)} → kept ${kept.toLocaleString('en')} of ${n.toLocaleString('en')}`,
     'info',
     'Products',
   )
@@ -488,8 +488,8 @@ export function removeIsolated(cloud, { cell = 0, minNeighbors = 2, maxSupport =
       kept++
     }
   onLog?.(
-    `Filter (isolated): cell ${grid.cell.toFixed(4)} → kept ${kept.toLocaleString()} ` +
-      `of ${n.toLocaleString()} points`,
+    `Filter (isolated): cell ${grid.cell.toFixed(4)} → kept ${kept.toLocaleString('en')} ` +
+      `of ${n.toLocaleString('en')} points`,
     'info',
     'Products',
   )
@@ -531,7 +531,7 @@ export function filterRange(cloud, { zMin = null, zMax = null, lumaMin = null, l
     keep[i] = 1
     kept++
   }
-  onLog?.(`Filter (range): kept ${kept.toLocaleString()} of ${n.toLocaleString()} points`, 'info', 'Products')
+  onLog?.(`Filter (range): kept ${kept.toLocaleString('en')} of ${n.toLocaleString('en')} points`, 'info', 'Products')
   return selectPoints(cloud, keep, kept)
 }
 
@@ -574,7 +574,7 @@ export function voxelDownsample(cloud, { cell = 0 } = {}, onLog) {
       }
     }
     onLog?.(
-      `Subsample: retained ${seen.size.toLocaleString()} representative points with their attributes`,
+      `Subsample: retained ${seen.size.toLocaleString('en')} representative points with their attributes`,
       'info',
       'Products',
     )
@@ -623,7 +623,7 @@ export function voxelDownsample(cloud, { cell = 0 } = {}, onLog) {
     }
   }
   const outNrm = sn ? acc.finalizeNormals().nrm : null
-  onLog?.(`Filter (voxel ${c}): ${m.toLocaleString()} of ${n.toLocaleString()} points kept`, 'info', 'Products')
+  onLog?.(`Filter (voxel ${c}): ${m.toLocaleString('en')} of ${n.toLocaleString('en')} points kept`, 'info', 'Products')
   return { count: m, pos: outPos, ...(outCol ? { col: outCol } : {}), ...(outNrm ? { nrm: outNrm } : {}) }
 }
 
@@ -704,7 +704,7 @@ export function mergeClouds(clouds, { cell = 0 } = {}, onLog) {
     for (const name of shared) attributes[name].set(c.attributes[name].subarray(0, n), o)
     o += n
   }
-  onLog?.(`Merge: ${list.length} clouds → ${total.toLocaleString()} points`, 'info', 'Products')
+  onLog?.(`Merge: ${list.length} clouds → ${total.toLocaleString('en')} points`, 'info', 'Products')
   const merged = {
     count: total,
     pos,
@@ -740,7 +740,7 @@ export function mergeClouds(clouds, { cell = 0 } = {}, onLog) {
       kept++
     }
   onLog?.(
-    `Merge: ${(total - kept).toLocaleString()} points dropped where the clouds overlap (cells of ${c}), ${kept.toLocaleString()} kept`,
+    `Merge: ${(total - kept).toLocaleString('en')} points dropped where the clouds overlap (cells of ${c}), ${kept.toLocaleString('en')} kept`,
     'info',
     'Products',
   )

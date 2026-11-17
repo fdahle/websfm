@@ -68,7 +68,7 @@ export function useDemCoregistration() {
     const u = dem.unit && dem.unit !== 'model' ? ` ${dem.unit}` : ''
     const f = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`
     log(
-      `${label}: on ${result.before.n.toLocaleString()} cells${stable ? ` of "${stable.name}"` : ''}, ` +
+      `${label}: on ${result.before.n.toLocaleString('en')} cells${stable ? ` of "${stable.name}"` : ''}, ` +
         (settings.horizontal ? `shift E ${f(result.shift[0])}, N ${f(result.shift[1])}${u}` : 'no horizontal shift') +
         (result.horizontal
           ? ` (${result.horizontal.iterations} iteration${result.horizontal.iterations === 1 ? '' : 's'})`

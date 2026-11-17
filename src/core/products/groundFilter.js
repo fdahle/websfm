@@ -394,7 +394,7 @@ export function classifyGround(pos, count, opts = {}) {
     }
     onLog?.(
       `Ground filter: cloth resolution ${asked.toPrecision(3)} ${unitLabel} would need more than ` +
-        `${maxParticles.toLocaleString()} particles; using ${res.toPrecision(3)} ${unitLabel}`,
+        `${maxParticles.toLocaleString('en')} particles; using ${res.toPrecision(3)} ${unitLabel}`,
     )
   }
   // Particle (c, r) sits at (x0 + c·res, y0 − r·res), the top-left one on the
@@ -403,7 +403,7 @@ export function classifyGround(pos, count, opts = {}) {
   // small ones.
   const grid = { width, height, res, x0: minX, y0: maxY }
   onLog?.(
-    `Ground filter: ${n.toLocaleString()} points, cloth ${width}×${height} at ` +
+    `Ground filter: ${n.toLocaleString('en')} points, cloth ${width}×${height} at ` +
       `${res.toPrecision(3)} ${unitLabel}, rigidness ${rigidness}, ` +
       `class threshold ${+classThreshold.toPrecision(3)} ${unitLabel}`,
   )
@@ -459,13 +459,13 @@ export function classifyGround(pos, count, opts = {}) {
   onProgress?.(1)
   onLog?.(
     `Ground filter: ${sim.converged ? 'converged' : 'stopped'} after ${sim.iterations} iterations; ` +
-      `${pinned.toLocaleString()} of ${(width * height).toLocaleString()} particles on the cloud` +
-      `${snapped ? ` (${snapped.toLocaleString()} snapped on slopes)` : ''}` +
-      `${despiked ? `, ${despiked.toLocaleString()} isolated low cells raised` : ''}`,
+      `${pinned.toLocaleString('en')} of ${(width * height).toLocaleString('en')} particles on the cloud` +
+      `${snapped ? ` (${snapped.toLocaleString('en')} snapped on slopes)` : ''}` +
+      `${despiked ? `, ${despiked.toLocaleString('en')} isolated low cells raised` : ''}`,
   )
   onLog?.(
-    `Ground filter: ${ground.toLocaleString()} ground, ${unclassified.toLocaleString()} above ground, ` +
-      `${low.toLocaleString()} low points${count - n ? `, ${(count - n).toLocaleString()} outside the extent` : ''}`,
+    `Ground filter: ${ground.toLocaleString('en')} ground, ${unclassified.toLocaleString('en')} above ground, ` +
+      `${low.toLocaleString('en')} low points${count - n ? `, ${(count - n).toLocaleString('en')} outside the extent` : ''}`,
   )
 
   return {
@@ -526,7 +526,7 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
     bounds = coreExtent(framed, count)
     if (bounds && bounds.inside < count) {
       onLog?.(
-        `Ground filter: classifying the cloud's dense core; ${(count - bounds.inside).toLocaleString()} ` +
+        `Ground filter: classifying the cloud's dense core; ${(count - bounds.inside).toLocaleString('en')} ` +
           'points outside it stay never classified (class 0)',
       )
     }
@@ -574,12 +574,12 @@ export function classifyCloudGround(cloud, frame, opts = {}) {
   })
   const c = above.counts
   onLog?.(
-    `Classify points: ${above.voxels.toLocaleString()} voxels above ground` +
+    `Classify points: ${above.voxels.toLocaleString('en')} voxels above ground` +
       (aboveGround.buildings
-        ? `; ${above.buildingSegments.toLocaleString()} of ${above.segments.toLocaleString()} planar segments are buildings (${c.building.toLocaleString()} points)`
+        ? `; ${above.buildingSegments.toLocaleString('en')} of ${above.segments.toLocaleString('en')} planar segments are buildings (${c.building.toLocaleString('en')} points)`
         : '') +
       (aboveGround.vegetation
-        ? `; vegetation ${c.low.toLocaleString()} low, ${c.medium.toLocaleString()} medium, ${c.high.toLocaleString()} high` +
+        ? `; vegetation ${c.low.toLocaleString('en')} low, ${c.medium.toLocaleString('en')} medium, ${c.high.toLocaleString('en')} high` +
           (above.colour ? '' : ' (no colour: geometry only)')
         : ''),
   )

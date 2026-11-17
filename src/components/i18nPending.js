@@ -16,7 +16,6 @@ export const I18N_PENDING = [
   'src/components/guide/GuideModal.vue',
   'src/components/layout/BetaBadge.vue',
   'src/components/layout/BrowserWarning.vue',
-  'src/components/layout/DevConsole.vue',
   'src/components/layout/ExperimentalBadge.vue',
   'src/components/layout/MobileWarning.vue',
   'src/components/layout/ProjectPicker.vue',

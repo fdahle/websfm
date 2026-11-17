@@ -56,7 +56,7 @@ export function productBounds(pos, count, mode, label, unit, emit) {
   emit('log', [
     `${label}: extent is the cloud's dense core, ${f(core.maxX - core.minX)} × ${f(core.maxY - core.minY)} ${unit}` +
       (out
-        ? ` — ${out.toLocaleString()} of ${count.toLocaleString()} points (${((100 * out) / count).toFixed(1)}%) lie outside and are left out; choose Extent ▸ All points to keep them`
+        ? ` — ${out.toLocaleString('en')} of ${count.toLocaleString('en')} points (${((100 * out) / count).toFixed(1)}%) lie outside and are left out; choose Extent ▸ All points to keep them`
         : ''),
     out / count > 0.05 ? 'warn' : 'info',
     'Products',

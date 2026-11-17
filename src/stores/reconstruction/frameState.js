@@ -10,6 +10,7 @@ import { ref, computed } from 'vue'
 import { normalizeRegion, regionStatus, regionMask } from '../../core/products/region.js'
 import { selectPoints } from '../../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../../core/products/orientation.js'
+import { editCommand } from '../../core/help/consoleEdits.js'
 
 export function createFrameState({ log, mainSparseCloud, save, validGeoref }) {
   // The reconstruction REGION (Tools ▸ Model ▾ ▸ Region, core/products/region.js):
@@ -29,7 +30,13 @@ export function createFrameState({ log, mainSparseCloud, save, validGeoref }) {
     if (!next || !c) return false
     region.value = next
     const f = (v) => v.map((x) => x.toPrecision(5)).join(', ')
-    log(`Region set: [${f(next.min)}] – [${f(next.max)}]`, 'info', 'Reconstruction', { channel: 'activity' })
+    log(`Region set: [${f(next.min)}] – [${f(next.max)}]`, 'info', 'Sparse', {
+      channel: 'activity',
+      command: editCommand(
+        'region set',
+        [...next.min, ...next.max].map((v) => +Number(v).toPrecision(6)),
+      ),
+    })
     save()
     return true
   }
@@ -40,15 +47,19 @@ export function createFrameState({ log, mainSparseCloud, save, validGeoref }) {
     const r = activeRegion()
     if (!r || cloud.imported) return null
     const { keep, kept } = regionMask(cloud.pos, cloud.count, r)
-    log(`${label}: region keeps ${kept.toLocaleString()} of ${cloud.count.toLocaleString()} points`, 'info', 'Products')
+    log(
+      `${label}: region keeps ${kept.toLocaleString('en')} of ${cloud.count.toLocaleString('en')} points`,
+      'info',
+      'Products',
+    )
     return selectPoints(cloud, keep, kept)
   }
   // Settings for a dense run with the active region attached (null ⇒ unbounded).
   function withRegion(settings) {
     const r = activeRegion()
-    if (r) log('Dense: limited to the region', 'info', 'Dense')
+    if (r) log('Limited to the region', 'info', 'Dense')
     else if (regionState.value.reason === 'stale')
-      log('Dense: the region was drawn on an older model and is ignored — refit it to use it', 'warn', 'Dense')
+      log('The region was drawn on an older model and is ignored — set it again to use it', 'warn', 'Sparse')
     return { ...settings, region: r ? { min: r.min, max: r.max } : null }
   }
   // The user ORIENTATION of the local frame (Tools ▸ Model ▾ ▸ Orient model,
@@ -75,8 +86,9 @@ export function createFrameState({ log, mainSparseCloud, save, validGeoref }) {
       `Orientation set: up [${f(next.up)}], origin [${f(next.origin)}], heading ${next.headingDeg}°` +
         (validGeoref.value ? ' — the georeference outranks it for georeferenced products' : ''),
       'info',
-      'Reconstruction',
-      { channel: 'activity' },
+      'Sparse',
+      // Orient… sets it: the console opens that tool too.
+      { channel: 'activity', command: 'orient' },
     )
     save()
     return true
@@ -101,15 +113,16 @@ export function createFrameState({ log, mainSparseCloud, save, validGeoref }) {
   function clearOrientation() {
     if (!orientation.value) return
     orientation.value = null
-    log('Orientation removed — the local frame is levelled from the cameras again', 'info', 'Reconstruction', {
+    log('Orientation removed — the local frame is levelled from the cameras again', 'info', 'Sparse', {
       channel: 'activity',
+      command: 'orientation clear',
     })
     save()
   }
   function clearRegion() {
     if (!region.value) return
     region.value = null
-    log('Region cleared', 'info', 'Reconstruction', { channel: 'activity' })
+    log('Region cleared', 'info', 'Sparse', { channel: 'activity', command: 'region clear' })
     save()
   }
 

@@ -195,7 +195,7 @@ export function useWorkflowRunner({
           }
           if (s.onFail === 'stop') {
             outcome = 'failed'
-            error = `Quality gate failed — ${message}`
+            error = `Quality gate failed: ${message}`
             onLog(`Workflow stopped — ${error}`, 'error', 'Workflow')
             break
           }
@@ -250,7 +250,7 @@ export function useWorkflowRunner({
         }
 
         setStatus(block.id, 'running')
-        onLog(`Workflow: ${spec.label} started`, 'info', 'Workflow')
+        onLog(`${spec.label} started`, 'info', 'Workflow')
         const result = await runAutomated(block.type, { ...block.settings }, context)
         if (stopRequested || result?.cancelled) {
           setStatus(block.id, 'stopped')
@@ -270,7 +270,7 @@ export function useWorkflowRunner({
       outcome = 'failed'
       error = err?.message ?? String(err)
       if (currentBlockId.value) setStatus(currentBlockId.value, 'failed', error)
-      onLog(`Workflow failed — ${error}`, 'error', 'Workflow')
+      onLog(`Workflow failed: ${error}`, 'error', 'Workflow')
     } finally {
       const finishedAt = new Date().toISOString()
       recordRun({

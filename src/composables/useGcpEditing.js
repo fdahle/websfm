@@ -123,14 +123,14 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     // which, rather than implying a prediction existed and was missed.
     if (!guide) {
       const why = otherMarks === 0 ? ' — first mark for this GCP, nothing to predict from yet' : ''
-      log(`GCP "${name}" marked at ${at}${why}`, 'info', 'GCP')
+      log(`GCP "${name}" marked at ${at}${why}`, 'info', 'Georeferencing')
     } else if (guide.kind === 'line') {
       // `line` is normalised (a²+b²=1), so |a·u+b·v+c| is a true pixel distance.
       const d = Math.abs(guide.line[0] * px + guide.line[1] * py + guide.line[2])
       log(
         `GCP "${name}" marked at ${at} — ${d.toFixed(1)}px off the epipolar line predicted ` + `from its 1 other mark`,
         'info',
-        'GCP',
+        'Georeferencing',
       )
     } else {
       const d = Math.hypot(guide.u - px, guide.v - py)
@@ -142,7 +142,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
       log(
         `GCP "${name}" marked at ${at} — ${d.toFixed(1)}px from the position predicted by ` + `${from}`,
         'info',
-        'GCP',
+        'Georeferencing',
       )
     }
     await logGcpEstimateShift(gcpId, imageId, px, py, name, guide)
@@ -174,7 +174,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
         : `moved the estimate ${moved.toFixed(1)}px ${towards ? 'toward' : 'away from'} your click ` +
           `(Δx ${dx >= 0 ? '+' : ''}${dx.toFixed(1)}, Δy ${dy >= 0 ? '+' : ''}${dy.toFixed(1)}), ` +
           `now (${after.u.toFixed(1)}, ${after.v.toFixed(1)}) from ${after.viewCount} marks`
-    log(`GCP "${name}": this mark ${dir}`, 'debug', 'GCP')
+    log(`GCP "${name}": this mark ${dir}`, 'debug', 'Georeferencing')
   }
 
   // Right-click marking in the image view. Assign attaches the clicked pixel to an
@@ -217,7 +217,11 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     setGcpPosition(id, 'y', y)
     selectedGcpId.value = id
     const g = gcps.value.find((gg) => gg.id === id)
-    log(`GCP "${g?.name ?? id}" position set to (${x.toFixed(3)}, ${y.toFixed(3)}) ${currentCrs.value}`, 'info', 'GCP')
+    log(
+      `GCP "${g?.name ?? id}" position set to (${x.toFixed(3)}, ${y.toFixed(3)}) ${currentCrs.value}`,
+      'info',
+      'Georeferencing',
+    )
     refreshGcpReport()
   }
   function addGcpAtCoord({ x, y }) {
@@ -236,7 +240,7 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     try {
       pick = await externalStore.pickGroundControl(rasterId, col, row, { displayFactor, datum })
     } catch (err) {
-      log(`GCP from reference: ${err.message}`, 'warn', 'GCP')
+      log(`GCP from reference: ${err.message}`, 'warn', 'Georeferencing')
       return
     }
     const id = gcpId ?? addGcp()

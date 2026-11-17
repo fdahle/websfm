@@ -121,7 +121,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
           }
         : {}),
     })
-    if (autoPairing) log(`Workflow: Match Features pairing is automatic → ${settings.strategy}`, 'info', 'Workflow')
+    if (autoPairing) log(`Match Features pairing is automatic → ${settings.strategy}`, 'info', 'Workflow')
     if (WORKFLOW_BLOCK_BY_ID.get(type)?.tool) return runToolBlock(type, settings, context)
     const targets =
       type === 'detect-features'

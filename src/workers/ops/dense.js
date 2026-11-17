@@ -174,7 +174,7 @@ export function makeDenseOps({ rasterize }) {
       geomCacheMaps: DENSE_TUNING.geomDepthCache,
     })
     emit('log', [
-      `Dense: projected peak memory ≈ ${formatBytes(proj.total)} ` +
+      `Projected peak memory ≈ ${formatBytes(proj.total)} ` +
         `(store ${formatBytes(proj.store)} + raster ${formatBytes(proj.raster)}` +
         `${proj.gpu ? ` + GPU ${formatBytes(proj.gpu)}` : ''}${proj.filter ? ` + filter masks ${formatBytes(proj.filter)}` : ''}` +
         `${proj.method ? ` + Full method ${formatBytes(proj.method)}` : ''}) vs budget ${formatBytes(budget)}`,
@@ -183,8 +183,8 @@ export function makeDenseOps({ rasterize }) {
     ])
     if (proj.total > budget) {
       emit('log', [
-        'Dense: aborting before start — projected memory exceeds the budget. ' +
-          'Lower Quality (e.g. Medium) or raise the memory budget, then retry.',
+        'Aborting before start — projected memory exceeds the budget. ' +
+          'Choose a lower Quality (e.g. Medium) or raise the memory budget (Settings ▸ Compute), then run again.',
         'error',
         'Dense',
       ])
@@ -419,7 +419,7 @@ export function makeDenseOps({ rasterize }) {
     emit('log', [
       `Depth maps: ${streamMaps ? streamed : maps.length}/${total} computed in ${((performance.now() - t0) / 1000).toFixed(1)}s; ` +
         `raster cache peak ${formatBytes(ledger.peak())}`,
-      'success',
+      'info',
       'Dense',
     ])
     if (input.settings?.ackToken) acks.delete(input.settings.ackToken)
@@ -465,7 +465,7 @@ export function makeDenseOps({ rasterize }) {
         emit('log', [
           `Depth filter: ${pluralize(marginal.length, 'marginal map')} kept <1% after cross-view filtering — ` +
             `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. ` +
-            'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.',
+            'They stay saved (the orthophoto can use them) but add little to the dense cloud.',
           'warn',
           'Dense',
         ])
@@ -475,7 +475,7 @@ export function makeDenseOps({ rasterize }) {
       const usPerPx = pxDone > 0 ? (geomFilterMs * 1000) / pxDone : 0
       emit('log', [
         `Depth filter: cross-view consistency in ${(geomFilterMs / 1000).toFixed(1)}s ` +
-          `(${usPerPx.toFixed(2)} µs/px; ${((100 * geomFilterMs) / (geomFilterMs + loopMs)).toFixed(0)}% of Stage A, ` +
+          `(${usPerPx.toFixed(2)} µs/px; ${((100 * geomFilterMs) / (geomFilterMs + loopMs)).toFixed(0)}% of the depth-map run, ` +
           `progress bar gave it ${(100 * (1 - LOOP_SHARE)).toFixed(0)}%)`,
         'info',
         'Dense',
@@ -635,7 +635,7 @@ export function makeDenseOps({ rasterize }) {
       emit('log', [
         `Depth filter: ${pluralize(marginal.length, 'marginal map')} kept <1% after cross-view filtering — ` +
           `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. ` +
-          'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.',
+          'They stay saved (the orthophoto can use them) but add little to the dense cloud.',
         'warn',
         'Dense',
       ])
@@ -754,9 +754,9 @@ export function makeDenseOps({ rasterize }) {
         `Dense cloud: fused ${maps.length} depth maps → ${nPoints} points ` +
           `in ${((performance.now() - tFuse) / 1000).toFixed(1)}s` +
           (nPoints === 0
-            ? ' — no pixels survived cross-view consistency; check intrinsics/distortion, Quality, or fusion gates (maxCost / minViews / parallax)'
+            ? ' — no pixel passed the cross-view check; check the camera calibration and the depth-map Quality, or loosen Max matching cost, Min consistent views or Min triangulation angle'
             : ''),
-        nPoints === 0 ? 'error' : 'success',
+        nPoints === 0 ? 'error' : 'info',
         'Dense',
       ])
     emit('progress', [total, total, 'Done'])

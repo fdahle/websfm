@@ -13,11 +13,15 @@
 //   matchPairs() → [{ nameA, nameB, idA, idB, inliers, enabled, weak, used }]
 //   pairState(uuidA, uuidB) → { pid, enabled, inliers } | null, setPairEnabled(pid, on)
 //   selectImage(id)
+//   items(list) → [{ id, name }] for a list of core/help/consoleEdits.js (images, gcps …)
+//   edit(noun, action, args) → a reply line, or nothing (the store logs the Activity line)
 //   language() → id, languages() → [{ id, label, preview? }], setLanguage(id)
 //   tuning: { get(group) → overrides, set(group, path, value | undefined) }
 // }
 
-import { resolveCommand, consoleReason, helpLines, helpFor, getCommand, RUN_STAGES } from './commands.js'
+import { resolveCommand, consoleReason, helpLines, helpFor, getCommand } from './commands.js'
+import { RUN_STAGE_NAMES, parseRunArgs, runStageHelp } from './consoleRun.js'
+import { EDITS, parseEditArgs, findNamed, quoteArg } from './consoleEdits.js'
 import { createWorkflow } from '../workflow.js'
 import { stepValue } from './ribbonTabs.js'
 import { TUNING_GROUPS, parseTuningKey, parseTuningValue, getPath, tuningKeys } from './consoleSettings.js'
@@ -34,30 +38,10 @@ function restAfter(line, n) {
   return line.trim().replace(new RegExp(`^(?:\\S+\\s*){${n}}`), '')
 }
 
-/**
- * An image by name: exact (any case), else the one name starting with it, else the
- * one containing it. → { image } | { error }.
- */
+/** An image by name (consoleEdits.js findNamed). → { image } | { error }. */
 export function findImage(images, query) {
-  const q = String(query ?? '')
-    .trim()
-    .toLowerCase()
-  if (!q) return { error: 'Give an image name' }
-  const exact = images.filter((i) => i.name.toLowerCase() === q)
-  if (exact.length === 1) return { image: exact[0] }
-  for (const match of [(i) => i.name.toLowerCase().startsWith(q), (i) => i.name.toLowerCase().includes(q)]) {
-    const hits = images.filter(match)
-    if (hits.length === 1) return { image: hits[0] }
-    if (hits.length > 1) {
-      return {
-        error: `"${query}" matches ${hits.length} images: ${hits
-          .slice(0, 5)
-          .map((i) => i.name)
-          .join(', ')}${hits.length > 5 ? ', …' : ''}`,
-      }
-    }
-  }
-  return { error: `No image named "${query}"` }
+  const r = findNamed(images, query, 'image')
+  return r.error ? r : { image: r.item }
 }
 
 const fmtN = (n) => (Number.isFinite(n) ? n.toLocaleString('en') : '—')
@@ -141,14 +125,27 @@ export function argCompletionsFor(env) {
   const groups = Object.keys(TUNING_GROUPS)
   return {
     set: () => [...groups, ...groups.flatMap((g) => tuningKeys(g))],
-    run: () => [
-      'workflow',
-      ...new Set(Object.keys(RUN_STAGES)),
-      ...(env?.workflows?.() ?? []).map((w) => `workflow ${w.name}`),
-    ],
+    run: () => ['workflow', ...RUN_STAGE_NAMES, ...(env?.workflows?.() ?? []).map((w) => `workflow ${w.name}`)],
     select: () => (env?.images?.() ?? []).map((i) => i.name),
     pair: () => ['disable', 'enable'],
-    help: () => ['all'],
+    help: () => ['all', 'edit', ...EDITS.map((e) => e.noun), ...RUN_STAGE_NAMES.map((n) => `run ${n}`)],
+    // An edit command completes the names of its list (quoted when they have spaces).
+    // An edit command completes the name being typed: the arguments before it stay.
+    edit: (rest, cmd) => {
+      const e = EDITS.find((x) => x.noun === cmd?.edit?.noun)
+      if (!e) return []
+      const done = splitArgs(rest).length - (/\s$/.test(rest) || !rest ? 0 : 1)
+      const kind = e.actions[cmd.edit.action].args[Math.min(done, e.actions[cmd.edit.action].args.length - 1)] ?? ''
+      const list = /^images/.test(kind) ? 'images' : /^gcp/.test(kind) ? 'gcps' : /^item/.test(kind) ? e.list : null
+      // The token being typed: the last one, unless a space closed it.
+      const last = [...rest.matchAll(/"[^"]*"?|'[^']*'?|\S+/g)].at(-1)
+      const part = last && last.index + last[0].length === rest.length ? last[0] : ''
+      const head = rest.slice(0, rest.length - part.length)
+      const q = part.replace(/^["']/, '').toLowerCase()
+      return (env?.items?.(list) ?? [])
+        .filter((i) => String(i.name).toLowerCase().startsWith(q))
+        .map((i) => `${head}${quoteArg(i.name)}`)
+    },
   }
 }
 
@@ -205,7 +202,8 @@ const VERB_HANDLERS = {
       for (const l of helpLines()) log(l)
       return
     }
-    const lines = getCommand(topic) ? helpFor(topic) : helpLines(topic)
+    const stage = topic.match(/^run\s+(\S+)$/i)
+    const lines = stage ? runStageHelp(stage[1]) : getCommand(topic) ? helpFor(topic) : helpLines(topic)
     if (!lines) {
       log(`No such command or tab: ${topic}`, 'error')
       return
@@ -265,19 +263,17 @@ const VERB_HANDLERS = {
       }
       workflow = hits[0]
     } else {
-      const unknown = args.filter((a) => !RUN_STAGES[a.toLowerCase()])
-      if (unknown.length) {
-        log(
-          `Unknown stage${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')} — stages: ${[...new Set(Object.keys(RUN_STAGES))].join(' ')}`,
-          'error',
-        )
+      const parsed = parseRunArgs(args)
+      if (parsed.error) {
+        log(parsed.error, 'error')
         return
       }
       // An explicit `run` always runs: the stages re-run even where output exists.
       workflow = createWorkflow(
         `Console: ${args.join(' ')}`,
-        args.map((a) => RUN_STAGES[a.toLowerCase()]),
+        parsed.stages.map((st) => st.id),
       )
+      workflow.blocks.forEach((b, i) => Object.assign(b.settings, parsed.stages[i].settings))
       workflow.defaults.reusePolicy = 'rerun'
     }
     const status = env.workflowStatus?.() ?? {}
@@ -286,7 +282,8 @@ const VERB_HANDLERS = {
       return
     }
     log(
-      `Running ${workflow.name.startsWith('Console: ') ? workflow.blocks.map((b) => b.type).join(' → ') : `workflow "${workflow.name}"`}`,
+      `Running ${workflow.name.startsWith('Console: ') ? workflow.blocks.map((b) => b.type).join(' → ') : `workflow "${workflow.name}"`}` +
+        (workflow.name.startsWith('Console: ') && /=/.test(rest) ? ` (${restAfter(rest, 0)})` : ''),
     )
     Promise.resolve(env.startWorkflow(workflow)).then((ok) => {
       const pause = env.workflowStatus?.().pause
@@ -368,7 +365,7 @@ const VERB_HANDLERS = {
     const old = current(key.path)
     if (/^(default|reset|unset)$/i.test(raw.trim())) {
       env.tuning.set(key.group, key.path, undefined)
-      log(`${name}: ${JSON.stringify(old)} → ${JSON.stringify(current(key.path))} (default)`, 'success')
+      log(`${name}: ${JSON.stringify(old)} → ${JSON.stringify(current(key.path))} (default)`, 'info')
       return
     }
     const value = parseTuningValue(raw, key.def)
@@ -380,7 +377,7 @@ const VERB_HANDLERS = {
     log(
       `${name}: ${JSON.stringify(old)} → ${JSON.stringify(value.value)} (default ${JSON.stringify(key.def)}) — ` +
         `applies to ${TUNING_GROUPS[key.group].appliesTo}, this session only`,
-      'success',
+      'info',
     )
   },
 
@@ -417,8 +414,22 @@ const VERB_HANDLERS = {
     env.setPairEnabled(pair.pid, on)
     log(
       `${label} (${fmtN(pair.inliers)} inliers) ${on ? 'restored to' : 'excluded from'} reconstruction — takes effect on the next Sparse Model run`,
-      'success',
+      'info',
     )
+  },
+
+  // An edit made by hand (consoleEdits.js): read the arguments, then let the store make
+  // it, which logs the Activity line.
+  edit(rest, env, log, cmd) {
+    const e = EDITS.find((x) => x.noun === cmd.edit.noun)
+    const parsed = parseEditArgs(e, cmd.edit.action, splitArgs(rest), (list) => env.items(list))
+    if (parsed.error) {
+      if (parsed.error === 'usage') usage(cmd, log)
+      else log(parsed.error, 'error')
+      return
+    }
+    const reply = env.edit(e.noun, cmd.edit.action, parsed.args)
+    if (reply) log(reply.text ?? reply, reply.level ?? 'info')
   },
 
   select(rest, env, log) {

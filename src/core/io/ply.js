@@ -306,7 +306,7 @@ function plyResult(st, { onLog }) {
   const { format, faceEl, n, pos, col, nrm, attributes, tris } = st
   if (faceEl && tris.length) {
     onLog?.(
-      `PLY: read mesh — ${n.toLocaleString()} vertices, ${(tris.length / 3).toLocaleString()} triangles` +
+      `PLY: read mesh — ${n.toLocaleString('en')} vertices, ${(tris.length / 3).toLocaleString('en')} triangles` +
         `${col ? ', color' : ''}`,
       'info',
       'Import',
@@ -314,7 +314,7 @@ function plyResult(st, { onLog }) {
     return { attributes, nVerts: n, count: tris.length / 3, pos, idx: tris.take(), ...(col ? { col } : {}) }
   }
   onLog?.(
-    `PLY: read ${n.toLocaleString()} points (${format}${col ? ', color' : ''}${nrm ? ', normals' : ''})`,
+    `PLY: read ${n.toLocaleString('en')} points (${format}${col ? ', color' : ''}${nrm ? ', normals' : ''})`,
     'info',
     'Import',
   )

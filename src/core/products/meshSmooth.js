@@ -115,8 +115,8 @@ export function taubinSmooth(mesh, opts = {}, onLog) {
     nFixed += fixed[v]
   }
   onLog?.(
-    `Mesh smooth (Taubin λ=${lambda}, μ=${mu}, ${iters} iterations): ${nV.toLocaleString()} vertices, ` +
-      `${nFixed.toLocaleString()} fixed on the boundary, max displacement ${Math.sqrt(maxMove2).toPrecision(4)}`,
+    `Mesh smooth (Taubin λ=${lambda}, μ=${mu}, ${iters} iterations): ${nV.toLocaleString('en')} vertices, ` +
+      `${nFixed.toLocaleString('en')} fixed on the boundary, max displacement ${Math.sqrt(maxMove2).toPrecision(4)}`,
     'info',
     'Products',
   )

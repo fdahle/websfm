@@ -71,7 +71,7 @@ export function createIngest({
     for (const x of siblings) {
       if (x.enabled === false) continue
       x.enabled = false
-      log(`${x.name}: calibration panel photo — disabled, so alignment leaves it out`, 'info', 'Metadata')
+      log(`${x.name}: calibration panel photo — disabled, so alignment leaves it out`, 'info', 'Images')
     }
   }
 
@@ -91,7 +91,7 @@ export function createIngest({
               ? `frame of ${extraMeta.videoSource} at ${Number(extraMeta.videoTime ?? 0).toFixed(3)} s`
               : 'unknown camera')
           const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
-          log(`Metadata: ${file.name} — ${meta.band ? `${cam} ${meta.band.name}` : cam}${dim}`, 'success', 'Metadata')
+          log(`Metadata: ${file.name} — ${meta.band ? `${cam} ${meta.band.name}` : cam}${dim}`, 'debug', 'Images')
           if (meta.band) leavePanelCaptureOut(found)
           if (isPersisting()) save(projectId)
         }
@@ -100,7 +100,7 @@ export function createIngest({
         const found =
           projects.currentProjectId === projectId ? images.value.find((img) => img.uuid === item.uuid) : null
         if (found) found.loading = false
-        log(`Metadata failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Metadata')
+        log(`Reading the metadata of ${file.name} failed: ${err?.message ?? err}`, 'error', 'Images')
         if (isPersisting()) save(projectId)
       })
   }
@@ -162,13 +162,13 @@ export function createIngest({
         if (given?.sensorId) item.sensorId = given.sensorId
       } else if (knownIds.has(item.id)) {
         URL.revokeObjectURL(item.url)
-        log(`Skip duplicate: ${file.name}`, 'warn', 'Images')
+        log(`${file.name} skipped: already in the project`, 'warn', 'Images')
         continue
       }
       knownIds.add(item.id)
       images.value.push(item)
       added++
-      log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info', 'Images')
+      log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'debug', 'Images')
 
       if (persistImport) {
         originalUrls.set(item.uuid, item.url)
@@ -177,7 +177,9 @@ export function createIngest({
             opfs
               .saveImage(projectId, item.uuid, file)
               .then(() => stored.push(item.uuid))
-              .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')),
+              .catch((err) =>
+                log(`Saving ${file.name} to project storage failed: ${err?.message ?? err}`, 'error', 'Images'),
+              ),
           ),
         )
       }
@@ -294,7 +296,7 @@ export function createIngest({
             resolveComputeReady(item.uuid)
             // No preview event (an older worker): fall back to the display JPEG.
             if (!found.thumb) thumbnails.requestThumbnail(found)
-            log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
+            log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'debug', 'Images')
             if (timings) {
               // Per-stage baseline for the TIFF-codec plan (TODO.md): which stage
               // dominates decides whether/what to move to a Rust/WASM codec.
@@ -345,11 +347,7 @@ export function createIngest({
                   opfs
                     .saveImageDerived(projectId, item.uuid, 'display', displayBlob)
                     .catch((err) =>
-                      log(
-                        `OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`,
-                        'error',
-                        'Images',
-                      ),
+                      log(`Saving the display copy of ${file.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
                     ),
                 ),
               )
@@ -358,11 +356,7 @@ export function createIngest({
                   opfs
                     .saveImageDerived(projectId, item.uuid, 'compute', computeBlob)
                     .catch((err) =>
-                      log(
-                        `OPFS derived save failed (compute): ${file.name} — ${err?.message ?? err}`,
-                        'error',
-                        'Images',
-                      ),
+                      log(`Saving the working copy of ${file.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
                     ),
                 ),
               )
@@ -379,7 +373,7 @@ export function createIngest({
             // silently fall back to the lossy display JPEG for a TIFF (that would
             // leak JPEG artifacts into keypoints/depth — the computeUrl invariant).
             rejectComputeReady(item.uuid, err instanceof Error ? err : new Error(String(err)))
-            log(`TIFF decode failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')
+            log(`Decoding the TIFF ${file.name} failed: ${err?.message ?? err}`, 'error', 'Images')
           } finally {
             done++
             onProgress?.(done, total, file.name)
@@ -441,7 +435,7 @@ export function createIngest({
           opfs
             .saveImageDerived(projectId, item.uuid, 'display', pyr.displayBlob)
             .catch((err) =>
-              log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'),
+              log(`Saving the display copy of ${file.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
             ),
         ),
       )
@@ -450,7 +444,7 @@ export function createIngest({
           opfs
             .saveImageDerived(projectId, item.uuid, 'pyramid', pyr.blob)
             .catch((err) =>
-              log(`OPFS derived save failed (pyramid): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'),
+              log(`Saving the image pyramid of ${file.name} failed: ${err?.message ?? err}`, 'error', 'Images'),
             ),
         ),
       )

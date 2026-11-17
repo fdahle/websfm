@@ -105,7 +105,7 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
     const [a, b, c] = orientPlanePicks.value
     const plane = planeFromThreePoints(a, b, c)
     if (!plane) {
-      log('Orient model: the three points are (nearly) on one line — pick a wider triangle', 'warn', 'Reconstruction')
+      log('Orient model: the three points are (nearly) on one line — pick a wider triangle', 'warn', 'Sparse')
     } else {
       const up = upFromPlane(plane.normal, plane.point, cameraCentres())
       orientDraft.value = { ...orientDraft.value, up }

@@ -232,7 +232,7 @@ export function createGeoreferencing({
         `Georeference: the camera positions lie along one line (roll about it ±${fit.roll.sigmaDeg.toFixed(1)}° ` +
           `from them alone), so the photos' ${axes.source} directions fix it`,
         'info',
-        'Products',
+        'Georeferencing',
       )
       fit = fixed
     }
@@ -367,7 +367,7 @@ export function createGeoreferencing({
               'in Project Settings'
             : ''),
         'warn',
-        'Products',
+        'Georeferencing',
       )
       return null
     }
@@ -398,7 +398,7 @@ export function createGeoreferencing({
           `scale ${held.sim.scale.toPrecision(4)}); the camera positions sit ` +
           `${rms == null ? '–' : rms.toPrecision(3)} from it (RMS of ${posePairs.length})`,
         'success',
-        'Products',
+        'Georeferencing',
       )
       healthDirty.value++
       save()
@@ -422,13 +422,13 @@ export function createGeoreferencing({
             ? 'mixed heights bias the fit; GCP table ▸ Convert heights to… puts them in one datum'
             : 'declare it in the GCP table, or products cannot be compared with a reference DEM in another datum'),
         'warn',
-        'Products',
+        'Georeferencing',
       )
     }
     const pairs = usingGcps ? gcpPairs : georefPairs()
     if (pairs.length < 3) {
       clearFit()
-      log('Georeference: need ≥3 GCPs or camera poses matching registered images', 'warn', 'Products')
+      log('Georeference: needs 3 or more GCPs, or camera positions of registered photos', 'warn', 'Georeferencing')
       return null
     }
     if (usingGcps) {
@@ -442,7 +442,7 @@ export function createGeoreferencing({
         log(
           `Georeference: GCP vertical range (${verticalSpan.toPrecision(3)}) is small relative to vertical uncertainty; scale/tilt may be weakly constrained`,
           'warn',
-          'Products',
+          'Georeferencing',
         )
       }
     }
@@ -457,13 +457,17 @@ export function createGeoreferencing({
           `open (±${poseFit.rollSigmaDeg.toFixed(1)}°). Add GCPs, a second strip, or the photos' ` +
           `orientation (omega, phi, kappa) to the camera positions`,
         'warn',
-        'Products',
+        'Georeferencing',
       )
       return null
     }
     if (!fit) {
       clearFit()
-      log('Georeference: fit failed (degenerate configuration)', 'warn', 'Products')
+      log(
+        'Georeference: the fit failed: the GCPs or camera positions lie on a line or a point; add some off it',
+        'warn',
+        'Georeferencing',
+      )
       return null
     }
     georef.value = withCoregistration({
@@ -483,13 +487,13 @@ export function createGeoreferencing({
             `curvature restored; ground units)`
           : ''),
       'success',
-      'Products',
+      'Georeferencing',
     )
     if (georef.value.coregistered)
       log(
         `Georeference: co-registered to ${describeCoregistration(coregistration.value)}, kept from Co-register DEM`,
         'info',
-        'Products',
+        'Georeferencing',
       )
     healthDirty.value++ // GCP prune / refit → the hub overview must recompute
     save()

@@ -82,7 +82,7 @@ export function createImageFiducials({
     log(
       `Fiducial observations imported: ${applied}${unmatched ? `, ${pluralize(unmatched, 'unmatched image')}` : ''}`,
       applied ? 'success' : 'warn',
-      'Sensor',
+      'Fiducials',
     )
     if (applied && isPersisting()) save()
     return applied
@@ -132,7 +132,7 @@ export function createImageFiducials({
     if (!sensor?.id) throw new Error('Choose a film sensor')
     const cancelled = () => !!shouldCancel?.()
     const abandon = () => {
-      log('Fiducial detection cancelled — no detections or masks were stored', 'warn', 'Fiducial')
+      log('Fiducial detection cancelled — no detections or masks were stored', 'info', 'Fiducials')
       return { perImage: [], drafts: [], applied: 0, masksGenerated: 0, cancelled: true }
     }
     // Pinia/Vue callers may supply a reactive Proxy. Keep worker input plain even
@@ -153,11 +153,11 @@ export function createImageFiducials({
         try {
           await whenComputeReady(img)
           const out = await detectFiducialSpotsWorker(computeSourceOf(img), settings, {
-            onLog: (m) => log(`${img.name}: ${m}`, 'info', 'Fiducial'),
+            onLog: (m, l = 'info') => log(`${img.name}: ${m}`, l, 'Fiducials'),
           })
           buffered.push({ id: img.id, name: img.name, out })
         } catch (err) {
-          log(`${img.name}: fiducial spot detection failed — ${err.message}`, 'error', 'Fiducial')
+          log(`${img.name}: fiducial spot detection failed: ${err.message}`, 'error', 'Fiducials')
           buffered.push({
             id: img.id,
             name: img.name,
@@ -173,7 +173,7 @@ export function createImageFiducials({
     log(
       `Fiducial detection: ${pluralize(targets.length, 'image')}, ${concurrency} at a time (full-resolution decode budget)`,
       'info',
-      'Fiducial',
+      'Fiducials',
     )
     await Promise.all(Array.from({ length: concurrency }, drain))
     if (cancelled()) return abandon()
@@ -225,7 +225,7 @@ export function createImageFiducials({
         })
         templates.push(...p.templates)
       } catch (err) {
-        log(`${img.name}: donor crop failed — ${err.message}`, 'warn', 'Fiducial')
+        log(`${img.name}: donor crop failed: ${err.message}`, 'warn', 'Fiducials')
       }
     }
     if (templates.length)
@@ -269,7 +269,7 @@ export function createImageFiducials({
             row.out.drafts = (row.out.drafts || []).filter((x) => x.slot !== d.fidId)
           }
         } catch (err) {
-          log(`${img.name}: anonymous template retry failed — ${err.message}`, 'warn', 'Fiducial')
+          log(`${img.name}: anonymous template retry failed: ${err.message}`, 'warn', 'Fiducials')
         }
       }
     // Cross-image agreement, once the whole batch (including the template retry)
@@ -279,14 +279,14 @@ export function createImageFiducials({
     const { consensus, shape } = suspectsOf()
     for (const s of consensus.perSlot) {
       if (!s.checked) {
-        log(`Batch consensus: ${s.slot} skipped — only ${pluralize(s.n, 'image')}`, 'debug', 'Fiducial')
+        log(`Batch consensus: ${s.slot} skipped — only ${pluralize(s.n, 'image')}`, 'debug', 'Fiducials')
         continue
       }
       log(
         `Batch consensus (${consensus.basis}-relative): ${s.slot} over ${pluralize(s.n, 'image')}, ` +
           `spread ${(s.spreadFrac * 100).toFixed(2)}% of frame width, tolerance ${(s.tolFrac * 100).toFixed(2)}%`,
         'debug',
-        'Fiducial',
+        'Fiducials',
       )
     }
     // slot → reason, per image. Batch disagreement wins the label when both fire.
@@ -301,7 +301,7 @@ export function createImageFiducials({
         `${o.imageName ?? o.imageId}: ${o.slot} disagrees with the batch — ` +
           `${o.distPx.toFixed(1)} px from the batch position (tolerance ${o.tolPx.toFixed(1)} px); sent to review`,
         'warn',
-        'Fiducial',
+        'Fiducials',
       )
     }
     for (const { row, check } of shape) {
@@ -310,7 +310,7 @@ export function createImageFiducials({
         `${row.name}: opposite-mark centres agree within ${check.centreSpreadPx.toFixed(1)} px ` +
           `(tolerance ${check.tolPx.toFixed(1)} px)`,
         'debug',
-        'Fiducial',
+        'Fiducials',
       )
       if (!check.outliers.length) continue
       for (const o of check.outliers) drop(row.id, o.slot, 'shape-inconsistent')
@@ -318,7 +318,7 @@ export function createImageFiducials({
         `${row.name}: ${[...new Set(check.outliers.map((o) => o.slot))].join(', ')} break the layout's symmetry — ` +
           `opposite-mark centres ${check.outliers[0].distPx.toFixed(1)} px apart (tolerance ${check.tolPx.toFixed(1)} px); sent to review`,
         'warn',
-        'Fiducial',
+        'Fiducials',
       )
     }
     for (const row of buffered) {
@@ -359,7 +359,7 @@ export function createImageFiducials({
             ),
           )
         } catch (err) {
-          log(`${img.name}: frame mask failed — ${err.message}`, 'warn', 'Fiducial')
+          log(`${img.name}: frame mask failed: ${err.message}`, 'warn', 'Fiducials')
         }
       }
     if (cancelled()) return abandon()
@@ -440,13 +440,13 @@ export function createImageFiducials({
     const perImage = []
     for (const [k, img] of targets.entries()) {
       if (shouldCancel?.()) {
-        log('Reseau detection cancelled', 'warn', 'Fiducial')
+        log('Reseau detection cancelled', 'info', 'Fiducials')
         return { calibration: null, perImage, cancelled: true }
       }
       onProgress?.(k, targets.length, img.name)
       try {
         await whenComputeReady(img)
-        const out = await detectReseau(computeSourceOf(img), opts, { onLog: (m, l, c) => log(m, l, c) })
+        const out = await detectReseau(computeSourceOf(img), opts, { onLog: (m, l, c) => log(m, l, c ?? 'Fiducials') })
         img.fiducialDetections = [
           ...(img.fiducialDetections || []).filter((d) => d.source !== 'reseau'),
           ...out.detections.map((d) => ({
@@ -485,11 +485,11 @@ export function createImageFiducials({
               : '; too few to fit') +
             ` (${(out.ms / 1000).toFixed(1)} s)`,
           fit ? 'info' : 'warn',
-          'Fiducial',
+          'Fiducials',
         )
       } catch (err) {
         perImage.push({ id: img.id, name: img.name, error: err?.message ?? String(err) })
-        log(`${img.name}: reseau detection failed — ${err?.message ?? err}`, 'error', 'Fiducial')
+        log(`${img.name}: reseau detection failed: ${err?.message ?? err}`, 'error', 'Fiducials')
       }
     }
     onProgress?.(targets.length, targets.length, '')
@@ -625,7 +625,10 @@ export function createImageFiducials({
           computeSourceOf(a),
           computeSourceOf(b),
           { fitA: best.fitA, fitB: best.fitB, geometry, seamXMm: Number.isFinite(seamXMm) ? seamXMm : 0 },
-          { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t) => onProgress?.(k + d / t, pairs.length, stem) },
+          {
+            onLog: (m, l, c) => log(m, l, c ?? 'Fiducials'),
+            onProgress: (d, t) => onProgress?.(k + d / t, pairs.length, stem),
+          },
         )
         const name = `${stem}.tif`
         const before = new Set(images.value.map((img) => img.id))
@@ -678,8 +681,8 @@ export function createImageFiducials({
             `${ga.found.length} + ${gb.found.length} reseau crosses, ${row.columns} × ${row.rows} lattice, ` +
             `${pluralize(best.shared, 'shared column')} (scene correlation ${best.ncc.toFixed(2)}), film deformation ` +
             `${best.fitA.affineRmsUm.toFixed(1)} / ${best.fitB.affineRmsUm.toFixed(1)} µm corrected`,
-          'success',
-          'Fiducial',
+          'info',
+          'Fiducials',
         )
         if (removeHalves && frame) {
           // The marks now live on the frame: drop the halves' own, not leave them orphaned.
@@ -690,7 +693,7 @@ export function createImageFiducials({
         }
       } catch (err) {
         out.push({ stem, error: err?.message ?? String(err) })
-        log(`${stem}: half-frame stitch failed — ${err?.message ?? err}`, 'error', 'Fiducial')
+        log(`${stem}: half-frame stitch failed: ${err?.message ?? err}`, 'error', 'Fiducials')
       }
     }
     onProgress?.(pairs.length, pairs.length, '')
@@ -764,7 +767,10 @@ export function createImageFiducials({
         const blobs = await splitPanoramicStrip(
           computeSourceOf(img),
           { strip, layout },
-          { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t) => onProgress?.(k + d / t, plans.length, img.name) },
+          {
+            onLog: (m, l, c) => log(m, l, c ?? 'Fiducials'),
+            onProgress: (d, t) => onProgress?.(k + d / t, plans.length, img.name),
+          },
         )
         const names = layout.segments.map((seg) => segmentName(img.name, seg.index))
         const before = new Set(images.value.map((x) => x.id))
@@ -795,8 +801,8 @@ export function createImageFiducials({
           `${img.name}: ${layout.axis === 'x' ? strip.width : strip.height} px of scan (${((layout.scanRad * 180) / Math.PI).toFixed(1)}°) → ` +
             `${pluralize(layout.segments.length, 'segment')} of ${W}×${H} (${((2 * layout.segments[0].halfRad * 180) / Math.PI).toFixed(1)}° each)` +
             `${marks ? `, ${pluralize(marks, 'GCP mark')} carried over` : ''}`,
-          'success',
-          'Fiducial',
+          'info',
+          'Fiducials',
         )
         if (removeStrips && segImages.every(Boolean)) {
           for (const g of gcpsStore.gcps) gcpsStore.removeObservation(g.id, img.id)
@@ -804,7 +810,7 @@ export function createImageFiducials({
         }
       } catch (err) {
         out.push({ name: img.name, error: err?.message ?? String(err) })
-        log(`${img.name}: panoramic split failed — ${err?.message ?? err}`, 'error', 'Fiducial')
+        log(`${img.name}: panoramic split failed: ${err?.message ?? err}`, 'error', 'Fiducials')
       }
     }
     onProgress?.(plans.length, plans.length, '')

@@ -143,7 +143,7 @@ export function cloudToCloudDistance(source, reference, opts = {}, onLog, onProg
     return { distance, stats: distanceStats(distance), signed: useSign }
   }
   log(
-    `C2C: ${n.toLocaleString()} source pts vs ${m.toLocaleString()} reference pts · ` +
+    `C2C: ${n.toLocaleString('en')} source pts vs ${m.toLocaleString('en')} reference pts · ` +
       `${usePlane ? `local plane (k=${k})` : 'nearest point'} · ${useSign ? 'signed (reference normals)' : 'unsigned'}` +
       (Number.isFinite(maxDistance) ? ` · maxDistance ${maxDistance}` : ''),
   )
@@ -259,9 +259,9 @@ export function cloudToCloudDistance(source, reference, opts = {}, onLog, onProg
   const stats = distanceStats(distance)
   onProgress?.(1)
   log(
-    `C2C: ${stats.validCount.toLocaleString()} of ${n.toLocaleString()} within range · ${fmtStats(stats)}` +
+    `C2C: ${stats.validCount.toLocaleString('en')} of ${n.toLocaleString('en')} within range · ${fmtStats(stats)}` +
       (planeFallback
-        ? ` · ${planeFallback.toLocaleString()} fell back to the nearest point (too few / collinear neighbours)`
+        ? ` · ${planeFallback.toLocaleString('en')} fell back to the nearest point (too few / collinear neighbours)`
         : '') +
       ` in ${((Date.now() - t0) / 1000).toFixed(1)} s`,
   )
@@ -582,8 +582,8 @@ export function cloudToMeshDistance(source, mesh, opts = {}, onLog, onProgress) 
   }
 
   log(
-    `C2M: ${n.toLocaleString()} source pts vs ${nValid.toLocaleString()} triangles` +
-      (nValid < nT ? ` (${(nT - nValid).toLocaleString()} invalid skipped)` : '') +
+    `C2M: ${n.toLocaleString('en')} source pts vs ${nValid.toLocaleString('en')} triangles` +
+      (nValid < nT ? ` (${(nT - nValid).toLocaleString('en')} invalid skipped)` : '') +
       ` · ${search.tiers.length} radius tier${search.tiers.length === 1 ? '' : 's'} (max radius ${search.maxRadius.toPrecision(3)}, ` +
       `median ${search.medianRadius.toPrecision(3)}) · ${signed ? 'signed by face normal' : 'unsigned'}` +
       (Number.isFinite(maxDistance) ? ` · maxDistance ${maxDistance}` : ''),
@@ -616,7 +616,7 @@ export function cloudToMeshDistance(source, mesh, opts = {}, onLog, onProgress) 
   const stats = distanceStats(distance)
   onProgress?.(1)
   log(
-    `C2M: ${stats.validCount.toLocaleString()} of ${n.toLocaleString()} within range · ${fmtStats(stats)} · ` +
+    `C2M: ${stats.validCount.toLocaleString('en')} of ${n.toLocaleString('en')} within range · ${fmtStats(stats)} · ` +
       `${(search.stats.candidates / n).toFixed(1)} candidates / ${(search.stats.exact / n).toFixed(1)} exact tests per point ` +
       `in ${((Date.now() - t0) / 1000).toFixed(1)} s`,
   )

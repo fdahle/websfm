@@ -98,7 +98,7 @@ export function makeCloudOps() {
       const result = classifyCloudGround(c, frame, {
         ...s,
         budgetBytes: s.memBudgetBytes > 0 ? s.memBudgetBytes : Infinity,
-        onLog: (m) => log(m, 'info', 'Products'),
+        onLog: (m, l = 'info') => log(m, l, 'Products'),
         onProgress: (f) => progress(f, 'Simulating the cloth…'),
       })
       if (!result) throw new Error('no point lies inside the classified extent')
@@ -163,7 +163,7 @@ export function makeCloudOps() {
       const fmt = (v) => (Number.isFinite(v) ? v.toPrecision(4) : '—')
       log(
         `Distance: mean ${fmt(stats.mean)}, median ${fmt(stats.median)}, RMS ${fmt(stats.rms)}, ` +
-          `95% |d| ≤ ${fmt(stats.p95Abs)} (${stats.validCount.toLocaleString()} of ${src.count.toLocaleString()} points)`,
+          `95% |d| ≤ ${fmt(stats.p95Abs)} (${stats.validCount.toLocaleString('en')} of ${src.count.toLocaleString('en')} points)`,
         'info',
         'Products',
       )
@@ -245,9 +245,9 @@ export function makeCloudOps() {
       // A slab of a split run reports through the store, once for the whole run.
       if (!mode.startsWith('part-'))
         log(
-          `${mode[0].toUpperCase()}${mode.slice(1)}: ${size.toLocaleString()} ${unit} ` +
-            `from ${before.toLocaleString()} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
-          size ? 'success' : 'warn',
+          `${mode[0].toUpperCase()}${mode.slice(1)}: ${size.toLocaleString('en')} ${unit} ` +
+            `from ${before.toLocaleString('en')} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+          size ? 'info' : 'warn',
           'Products',
         )
       emit('progress', [1, 1, 'Done'])

@@ -53,14 +53,14 @@ export function useFrameMask() {
           } catch (err) {
             if (cancelled) return
             failed++
-            log(`${img.name}: frame detection failed — ${err?.message ?? err}`, 'error', 'Images')
+            log(`${img.name}: frame detection failed: ${err?.message ?? err}`, 'error', 'Images')
           }
           progress.value = { done: ++done, total }
           onProgress?.(done, total)
         },
       )
       if (cancelled) {
-        log('Auto Mask ▸ Frame cancelled; no mask was written', 'warn', 'Images')
+        log('Auto Mask ▸ Frame cancelled; no mask was written', 'info', 'Images')
         return { cancelled: true }
       }
       for (const g of sized) {
@@ -86,7 +86,7 @@ export function useFrameMask() {
           log(
             `${img.name}: frame ${sides.map((s) => m[s]).join('/')} px` +
               (c.replaced.length ? ` (${c.replaced.join(', ')} from the group's median)` : ''),
-            'info',
+            'debug',
             'Images',
           )
           const base = merge && img.mask ? img.mask.blob : null

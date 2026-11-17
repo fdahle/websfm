@@ -118,6 +118,8 @@ to the algorithm; the other steps differ only in file names.
 | tune an internal threshold | `core/tuning.js` | the test that pins it |
 | add a ribbon command | `core/help/ribbonTabs.js`: its `tip` (what it does) and `guide` (its article); its German in `core/i18n/de/ribbon.js` | `composables/useCommandDispatch.js`; it becomes a console command automatically (`core/help/commands.js`); `npm run docs:features` adds it to [docs/features.md](docs/features.md) |
 | add or change text a user reads | its message in `core/i18n/en/<area>.js` | `t('area.key')` in the template, `msg('area.key', …)` from core ([CONTRIBUTING](CONTRIBUTING.md#text-in-the-ui)) |
+| add a processing step, tool or import | its run in a store or composable | its log lines and closing line ([CONTRIBUTING](CONTRIBUTING.md#what-an-operation-logs)); an automated block in `core/workflow.js` makes it a console `run` stage |
+| add an edit made by hand (sidebar, table, right-click) | the store call | its Activity line names a console command: an entry in `core/help/consoleEdits.js`, carried out in `composables/useConsoleEnv.js` |
 | add or change a keyboard shortcut | its entry in `core/help/shortcuts.js` | the handler asks `matches(e, id)`, a tooltip shows `keyLabel(id)` (`utils/shortcutLabels.js`); the Shortcuts dialog lists it by itself |
 | add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
 | add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |
@@ -159,7 +161,11 @@ to the algorithm; the other steps differ only in file names.
   stays on one worker (a GPU path, or fusion, which is bound by reads), a comment says
   why.
 - **Log derived values with their inputs.** Every automatically chosen value gets a
-  log line, so a run can be reproduced from its log.
+  log line, so a run can be reproduced from its log. Sources, levels and channels are
+  in `core/logRules.js`, the rules in [CONTRIBUTING](CONTRIBUTING.md#the-console).
+- **Everything can be typed.** The console reaches every ribbon command
+  (`core/help/commands.js`), every automated workflow block with its settings
+  (`core/help/consoleRun.js`) and every hand edit (`core/help/consoleEdits.js`).
 - **User-visible changes update the user guide** in `src/guide/` and get a CHANGELOG
   entry, in the same change.
 

@@ -168,8 +168,8 @@ export function useProjectLifecycle({
       mc = matchesStore.matchCacheStats()
     const mem = globalThis.performance?.memory
     log(
-      `Heap inventory: ${keypoints.toLocaleString()} keypoints (${pluralize(kc.entries, 'image')} resident, ` +
-        `${formatBytes(kc.bytes)} typed), ${matches.toLocaleString()} matches (${pluralize(mc.entries, 'pair')} resident, ` +
+      `Heap inventory: ${keypoints.toLocaleString('en')} keypoints (${pluralize(kc.entries, 'image')} resident, ` +
+        `${formatBytes(kc.bytes)} typed), ${matches.toLocaleString('en')} matches (${pluralize(mc.entries, 'pair')} resident, ` +
         `${formatBytes(mc.bytes)} typed)` +
         (mem?.usedJSHeapSize
           ? ` · JS memory (heap + ArrayBuffers) ${formatBytes(mem.usedJSHeapSize)}, heap limit ${formatBytes(mem.jsHeapSizeLimit)}`
@@ -460,7 +460,7 @@ export function useProjectLifecycle({
       return await window.showDirectoryPicker({ mode: 'readwrite' })
     } catch (err) {
       if (err?.name !== 'AbortError') {
-        log(`Folder picker: ${err?.message ?? err}`, 'error', 'Project')
+        log(`Choosing a folder failed: ${err?.message ?? err}`, 'error', 'Project')
       }
       return null
     }
@@ -514,7 +514,7 @@ export function useProjectLifecycle({
     if (!dirHandle) return
     const res = await adoptFolderProject(dirHandle)
     if (!res.ok) {
-      log(`Open project folder: ${res.error}`, 'error', 'Project')
+      log(`Opening the project folder failed: ${res.error}`, 'error', 'Project')
       showToast('Not a project folder', { detail: res.error, kind: 'error', ms: 6000 })
       return
     }
@@ -535,10 +535,12 @@ export function useProjectLifecycle({
   // now land in the new root, and an open refuses to leave unsaved changes behind.
   async function reopenMoved(id) {
     if (id !== currentProjectId.value) return
-    await retryPersistence().catch((err) => log(err?.message ?? String(err), 'warn', 'Project'))
+    await retryPersistence().catch((err) =>
+      log(`Saving the unsaved changes again failed: ${err?.message ?? err}`, 'warn', 'Project'),
+    )
     log('Reopening the project from its new location', 'info', 'Project')
     await openProject(id).catch((err) =>
-      log(`Could not reopen the project: ${err?.message ?? err}`, 'error', 'Project'),
+      log(`Reopening the project failed: ${err?.message ?? err}`, 'error', 'Project'),
     )
   }
 
@@ -773,7 +775,7 @@ export function useProjectLifecycle({
     if (!id) return
     try {
       await flushProjectWork()
-      const res = await exportProject(id, { includeDerived, onLog: (m, l, c) => log(m, l, c) })
+      const res = await exportProject(id, { includeDerived, onLog: (m, l, c) => log(m, l, c ?? 'Export') })
       if (res?.cancelled) return
       showToast('Project file written', { detail: `${res.fileName} · ${formatBytes(res.archiveBytes)}` })
     } catch (err) {
@@ -829,7 +831,7 @@ export function useProjectLifecycle({
     const id = await withLoadingOverlay('Opening project file…', async () => {
       try {
         return await importProject(file, {
-          onLog: (m, l, c) => log(m, l, c),
+          onLog: (m, l, c) => log(m, l, c ?? 'Project'),
           onProgress: fileProgress,
           dirHandle: dirHandle || null,
         })

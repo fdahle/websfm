@@ -292,6 +292,112 @@ volume) is a workbench: it uses the same fields but no numbered steps.
 
 Adding or moving a setting means updating its step's effect and its test too.
 
+## The console
+
+The console is two things: the **log**, the record a user reads back, exports and
+attaches to a bug report, and the **command line**, which reaches everything the
+mouse does. A new step, tool or edit is not done until both are right. The table of
+sources, levels and channels is `src/core/logRules.js`; `src/core/logRules.test.js`
+checks every log line in `src/` against the rules below.
+
+### What a line is
+
+A line is `log(message, level, source, opts)` (`composables/useLog.js`), or
+`onLog(message, level, source)` from `src/core/` and a worker's
+`emit('log', [message, level, source])`.
+
+- **Source**: the area a user would look under for the line, one of `LOG_SOURCES` in
+  `core/logRules.js`, named as the ribbon names that area: Project, Import, Images,
+  Sensors, Fiducials, Poses, Detection, Matching, Sparse, Georeferencing, Dense,
+  Products, Evaluate, Export, Workflow, Models, System, Viewer, Console. Each entry says
+  what it covers. A line about one product takes its kind's source
+  (`productLogSource(kind)`). A new area is a new entry there, not a new word at the
+  call. Code outside `src/core/` and the workers always names the source; core code
+  may leave it out when one function serves several areas, and the code that runs it
+  relays with a default: `onLog: (m, l, c) => log(m, l, c ?? 'Dense')`. A relay keeps
+  the level it is given (never `(m) => log(m, 'info', …)`).
+- **Level**: what the user should do with the line.
+  - `debug` (shown with **Detail**, left out of the export unless asked): what a bug
+    report needs and a user does not: a line per image, pair, tile, slab or iteration,
+    timings inside a stage, memory marks, a cancelled item.
+  - `info`: the record: what ran on what, the settings, each value chosen automatically
+    with its inputs, a stage's result, a step the user cancelled ("Building DEM
+    cancelled").
+  - `success`: the **one** closing line of an operation the user started that finished,
+    with its result, counts and time ("Dense cloud "Dense cloud 2": 41,233,118 points
+    from 212 depth maps in 312.4 s"). It is written by the store or composable that
+    started the operation and kept its result, never by `src/core/` or a worker (they
+    report at `info`); nor by a hand edit or a project's restore.
+  - `warn`: the operation went on, but the user should know: a fallback (GPU → CPU), an
+    input left out and why, a value clamped, a result that looks weak, a step declined
+    (a model not downloaded).
+  - `error`: the operation, or a part the user asked for, failed: what failed, why, and
+    what to do about it, in the user's terms.
+- **Channel**: `pipeline` (the default) is the record. `activity` confirms an edit the
+  user made by hand (rename, enable, set as main, remove, restyle), at `info`, and names
+  the console command that makes the same edit: `{ channel: 'activity', command:
+  editCommand('gcp disable', [g.name]) }` (`core/help/consoleEdits.js`). The console
+  shows it on hover; the test fails on an Activity line without a command that
+  resolves.
+
+### What an operation logs
+
+A processing step, an import or an export writes, in this order:
+
+1. what it runs on and with which settings (`info`): the input counts and the settings
+   that decide the result;
+2. every value it chose by itself, with what it chose it from, so a run can be
+   reproduced from its log ("GSD 0.042 m: median ground sample of 212 photos");
+3. how it spread the work: the number of workers or threads, the GPU or CPU path
+   (`info`, a fallback at `warn`);
+4. each stage's result in a multi-stage run (`info`); the per-item detail at `debug`;
+5. what it left out or clamped (`warn`), with a count and the reason;
+6. one closing line: `success` with the result, its counts and the wall time; or
+   `info` "… cancelled" and what was kept; or `error` with what to do.
+
+A run that logs one line per item at `info` floods the record of a 1,000-photo
+project: count them and log the count, put the items at `debug`. Progress belongs in
+the progress bar, not the log; a long stage may log a paced heartbeat
+(`createLogPacer`, `utils/blockProgress.js`).
+
+### How a line reads
+
+- English, as the logs stay ([Text in the UI](#text-in-the-ui)), in the words of
+  [docs/terms.md](docs/terms.md). Numbers in English too: `n.toLocaleString('en')`,
+  never a bare `toLocaleString()`, which writes "1.234" in a German browser.
+- It starts with a capital letter, or with a name ("${img.name}: …", "transforms.json …").
+- It does not repeat its source ("Dense: …" under Dense): the badge shows it. A sub-step
+  may lead ("Fusion: …" under Dense, "Mesh: …" under Products), and what follows the
+  colon is lower case.
+- A failure reads "<what> failed: <why>" ("Saving the matches failed: …"), never a bare
+  `err.message`, "X error:" or "Error:"; add what to do when you know it.
+- A line a user sees by default (not `debug`) has no shorthand: bundle adjustment, not
+  BA; calibration, not intrinsics; observations, not obs; project storage, not OPFS;
+  no "Stage A", "init", "kp", "NCC", and no capitals for emphasis ("REJECTED"). Name a
+  setting by its label in the dialog ("Max matching cost", not `maxCost`) and a step by
+  its command ("run Sparse Model again", not "re-run reconstruction").
+- Units on every number (px, m, s, MB), a name in quotes when it is a user's name.
+
+### Everything can be typed
+
+Whatever the mouse can do, the command line can, so a user can script it, and a bug
+report can say exactly what was done:
+
+1. **A ribbon command** is a console command by itself (`core/help/commands.js`
+   reads the ribbon tables). Give a common one a short name in `CONSOLE_NAMES`.
+2. **A processing step** that a workflow can run unattended is a `run` stage with its
+   settings as `key=value` (`core/help/consoleRun.js` reads `WORKFLOW_BLOCKS`). A new
+   step gets an automated workflow block; give it a short word in `STAGE_WORDS`.
+3. **An edit made by hand** (sidebar, table, right-click) is an Edit command,
+   `<noun> <action> <arguments>`, in `EDITS` (`core/help/consoleEdits.js`), carried out
+   in `composables/useConsoleEnv.js` by the same store call the click makes. Its
+   Activity line names it (above).
+4. A console-only command with arguments is a verb in `VERBS` (`commands.js`) with its
+   handler in `core/help/console.js`.
+
+The command line stays in English and is checked by `console.test.js` against a fake
+environment; the help article is `src/guide/command-console.md`.
+
 ## License
 
 By contributing, you agree that your contribution is released under the project's

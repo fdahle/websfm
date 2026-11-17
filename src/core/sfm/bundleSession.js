@@ -89,7 +89,7 @@ export function createBundleSession(ctx) {
       `Bundle adjustment: a tie point counts as ${Math.sqrt(1 / tieWeight).toFixed(2)} px (one detection pixel) ` +
         'against the GCPs and camera positions',
       'info',
-      'Reconstruction',
+      'Sparse',
     )
 
   // Rolling shutter (cfg.rollingShutter 'on', rollingShutter.js): before each solve every
@@ -154,7 +154,7 @@ export function createBundleSession(ctx) {
           : `${s.cholesky} Cholesky`) +
         `; ${((result.ms ?? 0) / 1000).toFixed(1)}s`,
       'debug',
-      'Reconstruction',
+      'Sparse',
     )
   }
 
@@ -248,10 +248,10 @@ export function createBundleSession(ctx) {
     })
     setTrackPositions(ptIds, result.pos)
     log(
-      `local BA (${imageByUuid(uuid)?.name ?? uuid}) — ${free.length} free + ${fixed.length} fixed cameras, ` +
+      `Local BA (${imageByUuid(uuid)?.name ?? uuid}) — ${free.length} free + ${fixed.length} fixed cameras, ` +
         `${ptIds.length} points: RMS ${result.costBefore.toFixed(2)} → ${result.costAfter.toFixed(2)}px`,
       'debug',
-      'Reconstruction',
+      'Sparse',
     )
   }
 
@@ -324,7 +324,7 @@ export function createBundleSession(ctx) {
       log(
         `${label} skipped (cameras=${cameras.size}, ` + `points=${tracks.liveCount()}, iters=${iters})`,
         'debug',
-        'Reconstruction',
+        'Sparse',
       )
       return
     }
@@ -346,7 +346,7 @@ export function createBundleSession(ctx) {
       })
       uuidList = [...uuidList.filter((u) => !isFixed(u)), ...uuidList.filter((u) => isFixed(u) && seen.has(u))]
       if (!freeImg.size || ptIds.length < 10) {
-        log(`${label} skipped (no free camera with points)`, 'debug', 'Reconstruction')
+        log(`${label} skipped (no free camera with points)`, 'debug', 'Sparse')
         return
       }
     }
@@ -380,7 +380,7 @@ export function createBundleSession(ctx) {
       `${label} — ${camList.length} cameras, ${ptIds.length} points, ` +
         `${observations.n} observations, ${iters} iters`,
       'info',
-      'Reconstruction',
+      'Sparse',
     )
     // Diagnostic: where do the gross pre-solve residuals sit? Grouped by camera, split
     // by the observed point's track length (2 = freshly triangulated, ≥3 = extended).
@@ -424,10 +424,10 @@ export function createBundleSession(ctx) {
           )
         const total = [...byCam.values()].reduce((s, r) => s + r.n, 0)
         log(
-          `${label} pre-solve gross residuals (>${gross.toFixed(0)}px): ${total} obs on ${pluralize(byCam.size, 'camera')}; ` +
+          `${label} pre-solve gross residuals (>${gross.toFixed(0)}px): ${pluralize(total, 'observation')} on ${pluralize(byCam.size, 'camera')}; ` +
             `top: ${top.join('; ')}`,
           'debug',
-          'Reconstruction',
+          'Sparse',
         )
       }
     }
@@ -464,7 +464,7 @@ export function createBundleSession(ctx) {
         `${label} decentring p1, p2 kept without a trial: ${held.surveyGrade} of ${held.total} camera ` +
           `positions within ${cfg.selfCalDecentringHeldSigma} m hold the block`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     } else if (trialP && result) {
       const without = await solve(withoutDecentring(refineMode))
@@ -477,7 +477,7 @@ export function createBundleSession(ctx) {
             `${without.costAfter.toFixed(3)}px without (${(100 * gain).toFixed(1)}% better; kept from ` +
             `${(100 * cfg.selfCalDecentringMinGain).toFixed(0)}%)`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
         if (decentring === 'dropped') {
           result = without
@@ -486,15 +486,15 @@ export function createBundleSession(ctx) {
       }
     }
     if (!result) {
-      log(`${label} returned no result (skipped)`, 'warn', 'Reconstruction')
+      log(`${label} returned no result (skipped)`, 'warn', 'Sparse')
       return
     }
     if (constrained && result.costAfter > result.costBefore + 0.01 && !cameraPriorReprojectionAccepts(result)) {
       log(
-        `${label} REJECTED — reprojection RMS ${result.costBefore.toFixed(2)}px → ` +
+        `${label} not kept: reprojection RMS ${result.costBefore.toFixed(2)}px → ` +
           `${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`,
         'warn',
-        'Reconstruction',
+        'Sparse',
       )
       return
     }
@@ -521,21 +521,21 @@ export function createBundleSession(ctx) {
       if (delta < 0.01) {
         log(
           `${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); ` +
-            `keeping the pre-BA estimate`,
+            'the earlier estimate stays',
           'debug',
-          'Reconstruction',
+          'Sparse',
         )
         lastSolve = { mode: refineMode, converged: true }
         return
       }
       if (!robust.improved) {
         log(
-          `${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → ` +
+          `${label} not kept: RMS ${result.costBefore.toFixed(2)}px → ` +
             `${result.costAfter.toFixed(2)}px and robust cost ${robust.before.toFixed(2)} → ` +
             `${robust.after.toFixed(2)}px (Huber δ ${robust.delta.toFixed(1)}px) would worsen the model; ` +
-            'keeping the pre-BA estimate',
+            'the earlier estimate stays',
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         return
       }
@@ -544,7 +544,7 @@ export function createBundleSession(ctx) {
           `but the robust cost it minimises fell ${robust.before.toFixed(2)} → ${robust.after.toFixed(2)}px ` +
           `(Huber δ ${robust.delta.toFixed(1)}px): outliers were down-weighted, not the fit worsened`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
 
@@ -612,10 +612,10 @@ export function createBundleSession(ctx) {
       selfCalRecord.adjustments.push({ label, mode: refineMode, accepted: !rejected, sensors: proposals })
       if (rejected) {
         log(
-          `${label} self-calibration REJECTED before commit — ${rejected.reason}; ` +
-            'keeping cameras, points, intrinsics, and keypoints unchanged',
+          `${label}: the lens fit is not kept (${rejected.reason}); ` +
+            'cameras, points, calibration and keypoints are unchanged',
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         return
       }
@@ -677,14 +677,14 @@ export function createBundleSession(ctx) {
           `${label} self-calibration — ${who}: ` +
             `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)}${pm} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
           g >= 0 ? 'info' : 'debug',
-          'Reconstruction',
+          'Sparse',
         )
         if (g >= 0) {
           // The last solve of the focal is the run's σ (finaliseIntrinsics keeps the row);
           // one that moved it without a σ leaves none rather than an earlier solve's.
           const rec = intrinsicsRecord.get(imageByUuid(uuidList[ci])?.sensorId ?? `image:${uuidList[ci]}`)
           if (rec) rec.fxSigma = sigma > 0 ? sigma : null
-          if (sigma > 0) log(`${label}: ${focalSigmaNote(fx1, sigma)}`, 'info', 'Reconstruction')
+          if (sigma > 0) log(`${label}: ${focalSigmaNote(fx1, sigma)}`, 'info', 'Sparse')
         }
       }
     }
@@ -697,8 +697,8 @@ export function createBundleSession(ctx) {
       log(
         `${label} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px ` +
           `(${result.costAfter <= result.costBefore ? '−' : '+'}${Math.abs(result.costBefore - result.costAfter).toFixed(2)}px)`,
-        'success',
-        'Reconstruction',
+        'info',
+        'Sparse',
       )
     }
     const trace = result.costTrace ?? []
@@ -718,9 +718,9 @@ export function createBundleSession(ctx) {
             trace.length >= iters
             ? `plateaued, but ran all ${trace.length} iterations (no stopping rule fired)`
             : `converged in ${trace.length} iter`
-      log(`${label} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`, 'debug', 'Reconstruction')
+      log(`${label} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`, 'debug', 'Sparse')
     }
-    log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
+    log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Sparse')
     // Converged: LM stopped on its own rule before the iteration cap.
     lastSolve = { mode: refineMode, converged: trace.length > 0 && trace.length < iters }
     return result
@@ -739,10 +739,10 @@ export function createBundleSession(ctx) {
       const constrained = buildCameraPriorConstraints(uuidList)
       if (!constrained) {
         log(
-          `camera-prior bundle adjustment skipped — fewer than ${cfg.cameraPriorBaMinCameras} ` +
+          `Camera-prior bundle adjustment skipped — fewer than ${cfg.cameraPriorBaMinCameras} ` +
             'registered, non-collinear 3D camera positions',
           'debug',
-          'Reconstruction',
+          'Sparse',
         )
         return
       }
@@ -750,10 +750,10 @@ export function createBundleSession(ctx) {
       const camList = uuidList.map((u) => cameras.get(u))
       const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
       log(
-        `camera-prior bundle adjustment (round ${round + 1}/${cfg.cameraPriorBaRounds}) — ` +
+        `Camera-prior bundle adjustment (round ${round + 1}/${cfg.cameraPriorBaRounds}) — ` +
           `${pluralize(constrained.priors.length, 'camera')}, seed RMS ${constrained.fit.rms.toPrecision(3)} project units`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
       // Experiment (cameraPriorRefineIntrinsics): let the GNSS-constrained solve re-estimate
       // focal / principal point / distortion. With fixed K a self-calibration that is
@@ -768,17 +768,17 @@ export function createBundleSession(ctx) {
             ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics)
             : cfg.cameraPriorRefineIntrinsics
         const r = await runBundleAdjust(
-          `camera-prior bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
+          `camera-prior bundle adjustment (round ${round + 1}, calibration '${mode}')`,
           baIterations,
           mode,
           { cameraPriors: constrained.priors, warm: true, lensSigma: true },
         )
         if (!r) return
         log(
-          `camera-prior bundle adjustment centre residual → ` +
+          `Camera-prior bundle adjustment centre residual → ` +
             `${(r.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`,
-          'success',
-          'Reconstruction',
+          'info',
+          'Sparse',
         )
         continue
       }
@@ -802,21 +802,21 @@ export function createBundleSession(ctx) {
       if (!result) return
       if (!cameraPriorReprojectionAccepts(result)) {
         log(
-          `camera-prior bundle adjustment REJECTED — reprojection RMS ` +
+          `Camera-prior bundle adjustment not kept: reprojection RMS ` +
             `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px exceeds the safety bound`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         return
       }
       uuidList.forEach((uuid, ci) => cameras.set(uuid, { ...cameras.get(uuid), ...result.cameras[ci] }))
       setTrackPositions(ptIds, result.pos)
       log(
-        `camera-prior bundle adjustment RMS ${result.costBefore.toFixed(2)}px → ` +
+        `Camera-prior bundle adjustment RMS ${result.costBefore.toFixed(2)}px → ` +
           `${result.costAfter.toFixed(2)}px; centre residual → ` +
           `${(result.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`,
-        'success',
-        'Reconstruction',
+        'info',
+        'Sparse',
       )
     }
   }
@@ -838,11 +838,7 @@ export function createBundleSession(ctx) {
     const qualifying = qualifyingGcps(gcps, cameras)
     if (qualifying.length < 3) {
       if (gcps.length) {
-        log(
-          `GCP anchoring skipped (${qualifying.length}/3 GCPs ` + `with ≥2 registered views)`,
-          'debug',
-          'Reconstruction',
-        )
+        log(`GCP anchoring skipped (${qualifying.length}/3 GCPs ` + `with ≥2 registered views)`, 'debug', 'Sparse')
       }
       return
     }
@@ -857,7 +853,7 @@ export function createBundleSession(ctx) {
       const ptIds = tracks.liveIds()
       const setup = await buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPointIndex: ptIds.length })
       if (setup.error) {
-        log(`GCP anchoring stopped (${setup.error})`, 'warn', 'Reconstruction')
+        log(`GCP anchoring stopped (${setup.error})`, 'warn', 'Sparse')
         return
       }
       const { fit, frame, anchorPts, anchors } = setup
@@ -870,7 +866,7 @@ export function createBundleSession(ctx) {
           `${pluralize(anchors.length, 'GCP')}, seed scale ${fit.scale.toPrecision(4)}, ` +
           `seed RMS ${fit.rms.toPrecision(3)}`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
 
       // With enough control, let the anchored solve re-estimate the intrinsics, as
@@ -887,7 +883,7 @@ export function createBundleSession(ctx) {
           : (cfg.gcpRefineIntrinsics ?? 'none')
       if (gcpMode && gcpMode !== 'none' && anchors.length >= (cfg.gcpRefineIntrinsicsMinGcps ?? 5)) {
         const r = await runBundleAdjust(
-          `GCP-anchored bundle adjustment (round ${round + 1}, intrinsics '${gcpMode}')`,
+          `GCP-anchored bundle adjustment (round ${round + 1}, calibration '${gcpMode}')`,
           baIterations,
           gcpMode,
           { cameraPriors: constrainedCameras?.priors ?? null, gcp: setup, lensSigma: true },
@@ -895,8 +891,8 @@ export function createBundleSession(ctx) {
         if (!r) return
         log(
           `GCP-anchored bundle adjustment anchor residual → ${(r.anchorRmsAfter * fit.scale).toPrecision(3)} project units`,
-          'success',
-          'Reconstruction',
+          'info',
+          'Sparse',
         )
         continue
       }
@@ -923,7 +919,7 @@ export function createBundleSession(ctx) {
       })
       noteBaSolver(`GCP-anchored bundle adjustment (round ${round + 1})`, result)
       if (!result) {
-        log('GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Reconstruction')
+        log('GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Sparse')
         return
       }
       // Like a camera-prior solve, an anchored solve is SUPPOSED to trade some image
@@ -933,10 +929,10 @@ export function createBundleSession(ctx) {
       // block at 1.69 → 1.71 px and left its checkpoints at 10.6 m vertical RMS.
       if (result.costAfter > result.costBefore + 0.01 && !cameraPriorReprojectionAccepts(result)) {
         log(
-          `GCP-anchored bundle adjustment REJECTED — reprojection RMS ` +
+          `GCP-anchored bundle adjustment not kept: reprojection RMS ` +
             `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         return
       }
@@ -952,8 +948,8 @@ export function createBundleSession(ctx) {
           (constrainedCameras
             ? `, camera-centre residual → ` + `${(result.cameraPriorRmsAfter * fit.scale).toPrecision(3)} project units`
             : ''),
-        'success',
-        'Reconstruction',
+        'info',
+        'Sparse',
       )
     }
   }
@@ -1038,7 +1034,7 @@ export function createBundleSession(ctx) {
         log(
           'Hold to a reference DEM skipped — the model needs three or more GCPs or camera positions to place it on the DEM',
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         return null
       }
@@ -1049,7 +1045,7 @@ export function createBundleSession(ctx) {
           `Hold to a reference DEM skipped — ${pluralize(stats.candidates, 'tie point')} over stable ground on the ` +
             `reference, ${stats.used} usable; it needs at least ${cfg.demHoldMinAnchors ?? 20}`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         return round ? record : null
       }
@@ -1066,7 +1062,7 @@ export function createBundleSession(ctx) {
           `${stats.rejected} left out as too far from the DEM; height against the ` +
           `DEM ${fmt(stats.median)} median, NMAD ${stats.nmad.toFixed(2)}, in the ${held.source === 'gcps' ? 'GCPs' : 'camera positions'}' frame`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
       const gcpSetup = held.gcpSetup
       const gcp = {
@@ -1079,7 +1075,7 @@ export function createBundleSession(ctx) {
           ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics)
           : (cfg.gcpRefineIntrinsics ?? 'none')
       const r = await runBundleAdjust(
-        `DEM-held bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
+        `DEM-held bundle adjustment (round ${round + 1}, calibration '${mode}')`,
         baIterations,
         mode,
         { cameraPriors: held.priorSet?.priors ?? null, gcp, lensSigma: true },
@@ -1122,7 +1118,7 @@ export function createBundleSession(ctx) {
             `(${pluralize(held.priorSet?.priors?.length ?? 0, 'camera')}, now ${fmt(wCams ? wc / wCams - d : 0)} ` +
             `from them) and the DEM by their weights`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       }
       if (!absolute)
@@ -1131,15 +1127,15 @@ export function createBundleSession(ctx) {
             `${held.source === 'gcps' ? 'GCPs' : 'camera positions'} and of the DEM are not in one known datum, so ` +
             'the offset between them was left out. Declare both datums to let the DEM set the height too.',
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       const before = record.rounds[0]
       log(
         `Hold to a reference DEM: height against the DEM NMAD ${before.nmad.toFixed(2)} → ` +
           `${record.after.nmad.toFixed(2)}, median ${fmt(before.median)} → ${fmt(record.after.median)} ` +
           `(${pluralize(record.after.used, 'tie point')})`,
-        'success',
-        'Reconstruction',
+        'info',
+        'Sparse',
       )
     }
     return record

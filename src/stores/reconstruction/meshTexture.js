@@ -132,7 +132,7 @@ export function createMeshTexture({
       await save()
       return cloud
     } catch (err) {
-      log(`Texture error: ${err?.message ?? err}`, 'error', 'Products')
+      log(`Texture failed: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
       return null
     }
@@ -146,7 +146,7 @@ export function createMeshTexture({
   // there are three or more, so worker 0 pastes their blocks as they arrive.
   // settings.textureWorkers: the most workers to use (default: the pool).
   async function runTexture(input, transfer, onProgress) {
-    const onLog = (m, l, c) => log(m, l, c)
+    const onLog = (m, l, c) => log(m, l, c ?? 'Products')
     const runId = `texture-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const { views, settings } = input
     const want = Math.max(1, Math.min(POOL_SIZE, settings.textureWorkers ?? POOL_SIZE))

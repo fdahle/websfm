@@ -724,8 +724,8 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
     if (tiled) {
       onLog(
         `Fusion: slab ${ti + 1}/${nT} (${axKey} cells ${Number.isFinite(lo) ? lo : '−∞'}…${Number.isFinite(hi) ? hi : '∞'}) → ` +
-          `${slabCells.toLocaleString()} points in ${((now() - tT) / 1000).toFixed(1)}s`,
-        'info',
+          `${slabCells.toLocaleString('en')} points in ${((now() - tT) / 1000).toFixed(1)}s`,
+        'debug',
         'Dense',
       )
     }
@@ -798,8 +798,8 @@ export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks
   // Audit the pre-flight: how tight was the measured bound, and what did the
   // accumulator actually hold.
   onLog(
-    `Fusion: ${mergedCells.toLocaleString()} merged cells vs the measured bound ` +
-      `${estCells.toLocaleString()} (${((100 * mergedCells) / Math.max(1, estCells)).toFixed(0)}%); ` +
+    `Fusion: ${mergedCells.toLocaleString('en')} merged cells vs the measured bound ` +
+      `${estCells.toLocaleString('en')} (${((100 * mergedCells) / Math.max(1, estCells)).toFixed(0)}%); ` +
       `accumulator held ${formatBytes(accBytes)}${tiled ? ' (largest slab)' : ''}`,
     'info',
     'Dense',

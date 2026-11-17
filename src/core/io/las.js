@@ -90,7 +90,7 @@ export function* cloudToLasParts(
   const scale = [scaleFor(maxX - minX), scaleFor(maxY - minY), scaleFor(maxZ - minZ)]
   const offset = [minX, minY, minZ]
   onLog?.(
-    `LAS export: ${n.toLocaleString()} points, scale [${scale.map((s) => s.toPrecision(3)).join(', ')}], ` +
+    `LAS export: ${n.toLocaleString('en')} points, scale [${scale.map((s) => s.toPrecision(3)).join(', ')}], ` +
       `offset [${offset.map((o) => o.toPrecision(6)).join(', ')}]` +
       (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'),
     'info',
@@ -701,7 +701,7 @@ export function parseLas(buffer, { onLog } = {}) {
     h.extraBytes,
   )
   onLog?.(
-    `LAS: read ${count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, ` +
+    `LAS: read ${count.toLocaleString('en')} points (v${h.versionMajor}.${h.versionMinor}, ` +
       `format ${h.format}${cloud.col ? ', RGB' : ''}` +
       `${h.extraBytes.length ? `, extra bytes: ${h.extraBytes.map((e) => e.name).join(', ')}` : ''})`,
     'info',
@@ -991,7 +991,7 @@ export async function parseLasSource(source, { onLog, chunkBytes = 8 * 1024 * 10
   }
   const cloud = decoder.finish()
   onLog?.(
-    `LAS: read ${count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, ` +
+    `LAS: read ${count.toLocaleString('en')} points (v${h.versionMajor}.${h.versionMinor}, ` +
       `format ${h.format}${cloud.col ? ', RGB' : ''}` +
       `${h.extraBytes.length ? `, extra bytes: ${h.extraBytes.map((e) => e.name).join(', ')}` : ''})`,
     'info',

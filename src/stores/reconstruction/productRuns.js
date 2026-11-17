@@ -95,7 +95,19 @@ export function createProductRuns({
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
   // settings.points 'ground' builds a DTM from the ground class (LAS 2) of a
   // classified cloud instead, and 'classes' a DEM of the chosen classes (a canopy DSM).
+  // A raster run's closing line (CONTRIBUTING.md ▸ The console): its size, cell and time.
+  function rasterClosing(what, record, t0) {
+    const unit = record.unit === 'model' ? 'model units' : (record.unit ?? '')
+    log(
+      `${what} "${record.name}": ${record.width.toLocaleString('en')} × ${record.height.toLocaleString('en')} cells` +
+        `${record.gsd ? ` at ${record.gsd.toPrecision(3)} ${unit}` : ''} in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+      'success',
+      'Products',
+    )
+  }
+
   async function generateDem(settings = {}, onProgress) {
+    const tRun = performance.now()
     const sparse = mainSparseCloud.value
     const groundOnly = settings.points === 'ground'
     const classes = demPointClasses(settings)
@@ -122,7 +134,7 @@ export function createProductRuns({
     const src = source.cloud
     log(
       `DEM: source is the ${source.kind} cloud` +
-        `${source.name ? ` "${source.name}"` : ''} (${source.count.toLocaleString()} points)` +
+        `${source.name ? ` "${source.name}"` : ''} (${source.count.toLocaleString('en')} points)` +
         (source.kind === 'sparse'
           ? ' — cells are interpolated from tie points; build a dense cloud for a true surface'
           : ''),
@@ -174,8 +186,8 @@ export function createProductRuns({
         )
         staged = { pos: flat.pos, count: flat.count, total: src.count }
         log(
-          `${label}: read ${flat.count.toLocaleString()} ${what ? `${what} ` : ''}points ` +
-            `of ${streamed ? 'the streamed cloud' : `the cloud's octree (${src.count.toLocaleString()} points)`} ` +
+          `${label}: read ${flat.count.toLocaleString('en')} ${what ? `${what} ` : ''}points ` +
+            `of ${streamed ? 'the streamed cloud' : `the cloud's octree (${src.count.toLocaleString('en')} points)`} ` +
             (plan.complete ? '(every level of its octree)' : `down to ${plan.spacing.toPrecision(3)}-unit spacing`),
           'info',
           'Products',
@@ -195,13 +207,13 @@ export function createProductRuns({
         })
       if (cls)
         log(
-          `${label}: ${staged.count.toLocaleString()} ${what} points of ${staged.total.toLocaleString()}`,
+          `${label}: ${staged.count.toLocaleString('en')} ${what} points of ${staged.total.toLocaleString('en')}`,
           'info',
           'Products',
         )
       else if (r && !fromOctree)
         log(
-          `DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`,
+          `DEM: region keeps ${staged.count.toLocaleString('en')} of ${staged.total.toLocaleString('en')} points`,
           'info',
           'Products',
         )
@@ -227,7 +239,7 @@ export function createProductRuns({
         },
         {
           transfer: [points.pos.buffer],
-          onLog: (m, l, c) => log(m, l, c),
+          onLog: (m, l, c) => log(m, l, c ?? 'Products'),
           onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
         },
       )
@@ -253,10 +265,11 @@ export function createProductRuns({
       )
       saveProductRecord(record)
       reconStatus.value = 'done'
+      rasterClosing(label, record, tRun)
     } catch (err) {
       if (cancelled(err, 'DEM')) return
       log(
-        `DEM error: ${bufferFailureText(err?.message ?? err, 'Lower the memory budget (Settings ▸ Compute) or build at a coarser GSD')}`,
+        `DEM failed: ${bufferFailureText(err?.message ?? err, 'Lower the memory budget (Settings ▸ Compute) or build at a coarser GSD')}`,
         'error',
         'Products',
       )
@@ -277,17 +290,17 @@ export function createProductRuns({
     const id = settings.surface ?? 'dem'
     const opt = orthoSurfaces.value.find((s) => s.id === id)
     if (!opt) {
-      log(`Ortho: unknown surface "${id}"`, 'warn', 'Products')
+      log(`Orthophoto: unknown surface "${id}"`, 'warn', 'Products')
       return null
     }
     if (!opt.available) {
-      log(`Ortho: ${opt.hint}`, 'warn', 'Products')
+      log(`Orthophoto: ${opt.hint}`, 'warn', 'Products')
       return null
     }
 
     if (id === 'dem') {
       const d = dem.value
-      log('Ortho: surface is the DEM — cells the DEM has no height for stay transparent', 'info', 'Products')
+      log('Orthophoto: surface is the DEM — cells the DEM has no height for stay transparent', 'info', 'Products')
       return {
         kind: 'dem',
         grid: {
@@ -313,7 +326,7 @@ export function createProductRuns({
 
     let frameSpec = resolved.source === 'georef' ? resolved.frameSpec : null
     if (settings.crs && settings.crs !== 'local' && !frameSpec) {
-      log('Ortho: no georeference available — using the local frame', 'warn', 'Products')
+      log('Orthophoto: no georeference available — using the local frame', 'warn', 'Products')
     }
     // Local frame: reuse the DEM's when it was built locally, so a mesh ortho lands
     // on the same grid origin as the DEM instead of a near-identical one of its own.
@@ -355,14 +368,14 @@ export function createProductRuns({
       n = 0
     if (cloud && isStreamed(cloud)) {
       if (!extractCloudPoints) {
-        log('Ortho: the point cloud is streamed from its octree and cannot be sampled here', 'warn', 'Products')
+        log('Orthophoto: the point cloud is streamed from its octree and cannot be sampled here', 'warn', 'Products')
         return null
       }
       try {
         const { cloud: flat } = await extractCloudPoints(cloud, { fields: 'xyz', maxPoints: MAX_FIT })
         ;({ pos, n } = strided(flat.pos, flat.count))
       } catch (err) {
-        log(`Ortho: reading a sample of the streamed cloud failed — ${err?.message ?? err}`, 'error', 'Products')
+        log(`Orthophoto: reading a sample of the streamed cloud failed: ${err?.message ?? err}`, 'error', 'Products')
         return null
       }
     } else if (cloud) {
@@ -375,7 +388,7 @@ export function createProductRuns({
       ;({ pos, n } = strided(m.pos, m.nVerts ?? Math.floor(m.pos.length / 3)))
     }
     if (id !== 'mesh' && n < 3) {
-      log('Ortho: a plane surface needs a point cloud to fit — build or import one first', 'warn', 'Products')
+      log('Orthophoto: a plane surface needs a point cloud to fit — build or import one first', 'warn', 'Products')
       return null
     }
     const cameras = [...sparseCameras.value.entries()].map(([uuid, cam]) => ({
@@ -388,7 +401,7 @@ export function createProductRuns({
     if (id === 'mesh') {
       const m = meshCloud.value
       log(
-        `Ortho: surface is the mesh "${m.name ?? 'mesh'}" ` + `(${m.count.toLocaleString()} triangles)`,
+        `Orthophoto: surface is the mesh "${m.name ?? 'mesh'}" ` + `(${m.count.toLocaleString('en')} triangles)`,
         'info',
         'Products',
       )
@@ -405,8 +418,8 @@ export function createProductRuns({
     }
 
     log(
-      `Ortho: surface is a plane fitted to the ${src.kind} cloud ` +
-        `(${n.toLocaleString()} of ${total.toLocaleString()} points${isStreamed(cloud) ? ', from its octree' : ''})`,
+      `Orthophoto: surface is a plane fitted to the ${src.kind} cloud ` +
+        `(${n.toLocaleString('en')} of ${total.toLocaleString('en')} points${isStreamed(cloud) ? ', from its octree' : ''})`,
       'info',
       'Products',
     )
@@ -456,6 +469,7 @@ export function createProductRuns({
   // planes, colour from their RGB planes). Needs depth maps and a surface — which
   // is a DEM only when the user picks one (see orthoSurfaces).
   async function generateOrtho(settings = {}, onProgress) {
+    const tRun = performance.now()
     const projectId = projects.currentProjectId,
       sparse = mainSparseCloud.value
     const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
@@ -463,7 +477,7 @@ export function createProductRuns({
     try {
       input = await depthMapInput()
     } catch (err) {
-      log(`Ortho: ${err.message}`, 'error', 'Products')
+      log(`Orthophoto failed: ${err.message}`, 'error', 'Products')
       return
     }
     const { streamed } = input
@@ -472,12 +486,12 @@ export function createProductRuns({
     const maps = off.size ? input.maps.filter((m) => !off.has(m.uuid)) : input.maps
     if (maps.length < input.maps.length)
       log(
-        `Ortho: ${pluralize(input.maps.length - maps.length, 'depth map')} of disabled images left out`,
+        `Orthophoto: ${pluralize(input.maps.length - maps.length, 'depth map')} of disabled images left out`,
         'info',
         'Products',
       )
     if (!maps.length) {
-      log('Ortho: compute depth maps first', 'warn', 'Products')
+      log('Orthophoto: compute depth maps first', 'warn', 'Products')
       return
     }
     const resolved = await effectiveFrameSpec({ crs: settings.crs })
@@ -533,7 +547,7 @@ export function createProductRuns({
       // also leaves the tab room for it (a 98 M-point dense cloud is ~3 GB of it).
       const memBudgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
       const pageBytes = pageBufferBytes() + (streamed ? 0 : mapsPayload.reduce((n, m) => n + bytesOf(m), 0))
-      log(`Ortho: the open project holds ${formatBytes(pageBytes)} of buffers in this tab`, 'debug', 'Products')
+      log(`Orthophoto: the open project holds ${formatBytes(pageBytes)} of buffers in this tab`, 'debug', 'Products')
       releaseIdleWorkers() // as for the DEM
       const res = await runOrtho(
         {
@@ -582,11 +596,12 @@ export function createProductRuns({
       )
       saveProductRecord(record)
       reconStatus.value = 'done'
+      rasterClosing('Orthophoto', record, tRun)
     } catch (err) {
       if (!stillCurrent()) return
       if (cancelled(err, 'Orthophoto')) return
       log(
-        `Ortho error: ${bufferFailureText(
+        `Orthophoto failed: ${bufferFailureText(
           err?.message ?? err,
           'Build at a coarser GSD, or lower the memory budget (Settings ▸ Compute) so the photo cache leaves room for the rest of the tab',
         )}`,
@@ -605,7 +620,7 @@ export function createProductRuns({
   // would be copied into every worker: those run whole on one, as does a pool of two.
   // settings.orthoWorkers: the most workers that take groups (default: the pool less one).
   async function runOrtho(input, onProgress) {
-    const onLog = (m, l, c) => log(m, l, c)
+    const onLog = (m, l, c) => log(m, l, c ?? 'Products')
     const want = input.streamed ? Math.min(POOL_SIZE - 1, input.settings.orthoWorkers ?? Infinity) : 1
     if (want < 2) return workerGenerateOrtho(input, { onLog, onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
     const PLAN = 0.1 // the bar's share of the survey and plan
@@ -617,8 +632,8 @@ export function createProductRuns({
     const nBlocks = Math.ceil(width / block) * Math.ceil(height / block)
     // The log's progress lines, as one worker's run gives them (utils/blockProgress.js).
     const pacer = createLogPacer()
-    const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })
-    const blockLines = createBlockProgress(nBlocks, { prefix: 'Ortho: ', pacer })
+    const heartbeat = createStepProgress({ prefix: 'Orthophoto: ', unit: 'map visit', pacer })
+    const blockLines = createBlockProgress(nBlocks, { prefix: 'Orthophoto: ', pacer })
     // Visits done per call, for the heartbeat (less, per call, the visits of the groups
     // taken off its list); the bar follows the blocks received.
     const done = [],
@@ -698,7 +713,8 @@ export function createProductRuns({
         }
       }),
     )
-    if (stolen) log(`Ortho: ${pluralize(stolen, 'group')} offered to workers that finished early`, 'debug', 'Products')
+    if (stolen)
+      log(`Orthophoto: ${pluralize(stolen, 'group')} offered to workers that finished early`, 'debug', 'Products')
     await Promise.all(adds)
     return workerOrthoFinish(parts, {
       onLog,

@@ -16,9 +16,9 @@ import { useLog } from './useLog.js'
 // would change meaning under them. Selecting it is the only thing that writes
 // settings; nothing here mutates on open.
 //
-// `stage`/`labels` exist for the audit line: applying a derived value logs the
+// `stage`/`labels`/`source` (the stage's console source) exist for the audit line: applying a derived value logs the
 // value AND the reason, so a run stays reproducible from the log alone.
-export function useRecommendedPreset({ stage, recommendations, defaults, labels = {} }) {
+export function useRecommendedPreset({ stage, source, recommendations, defaults, labels = {} }) {
   const { log } = useLog()
 
   const items = computed(() => diffRecommendations(unref(recommendations), unref(defaults)))
@@ -31,7 +31,7 @@ export function useRecommendedPreset({ stage, recommendations, defaults, labels 
 
   function logApplied() {
     for (const line of recommendationLines(items.value, unref(labels))) {
-      log(`Recommended ${stage}: ${line}`, 'info', 'Recommend')
+      log(`Recommended ${stage}: ${line}`, 'info', source)
     }
   }
 

@@ -159,7 +159,7 @@ describe('useWorkflowRunner quality gates', () => {
     expect(calls).toEqual(['reconstruct'])
     expect(recordRun.mock.calls[0][0]).toMatchObject({
       outcome: 'failed',
-      error: expect.stringMatching(/Quality gate failed — Reprojection median 1.70 px/),
+      error: expect.stringMatching(/Quality gate failed: Reprojection median 1.70 px/),
     })
   })
 

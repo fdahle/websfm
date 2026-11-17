@@ -68,10 +68,10 @@ export async function createGpuMatchRun({
   }
   const g = init.geometry
   log(
-    `Matching: backend = WebGPU (${init.adapter}) — brute-force NN on ${g.tileA}×${g.tileB} tiles ` +
+    `Matching: backend = WebGPU (${init.adapter}) — brute-force nearest neighbours on ${g.tileA}×${g.tileB} tiles ` +
       `(${g.workgroup} threads, ${g.microTile} per thread, k-chunk ${g.kChunk}), ` +
       `≤${(init.macPerDispatch / 1e9).toFixed(1)} GMAC per dispatch; descriptor cache ${Math.round(init.budgetBytes / MiB)} MB ` +
-      `(requested ${Math.round(cacheBudgetBytes / MiB)} MB); ratio test + mutual NN in JS (nnSelect.js). ` +
+      `(requested ${Math.round(cacheBudgetBytes / MiB)} MB); ratio test and mutual nearest neighbours in JS. ` +
       'Verification stays on WASM.',
     'info',
   )

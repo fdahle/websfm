@@ -349,7 +349,7 @@ describe('decimateMesh — planar grid', () => {
     expect(out.count).toBeGreaterThanOrEqual(318)
     checkShape(out)
     for (const n of edgeUse(out).values()) expect(n).toBeLessThanOrEqual(2)
-    expect(logs.some((l) => l.level === 'success' && l.source === 'Products')).toBe(true)
+    expect(logs.some((l) => l.level === 'info' && l.source === 'Products')).toBe(true)
   })
 
   it('stays exactly planar', () => {

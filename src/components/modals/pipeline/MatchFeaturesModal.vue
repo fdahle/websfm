@@ -169,11 +169,11 @@ function applyStrategyRecommendation() {
   const rec = strategyRec.value
   if (!rec) return
   strategy.value = rec.value
-  log(`Recommended matching: Pairing strategy = ${rec.value} — ${rec.reason}`, 'info', 'Recommend')
+  log(`Recommended matching: Pairing strategy = ${rec.value} — ${rec.reason}`, 'info', 'Matching')
   const method = matchRecommendations.value.preselectMethod
   if (method) {
     settings.value = { ...settings.value, preselectMethod: method.value }
-    log(`Recommended matching: Preselect by = ${method.value} — ${method.reason}`, 'info', 'Recommend')
+    log(`Recommended matching: Preselect by = ${method.value} — ${method.reason}`, 'info', 'Matching')
   }
 }
 

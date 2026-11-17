@@ -447,7 +447,7 @@ export function useImportRouting({
     log(
       `Video import: ${result.added} of ${pluralize(times.length, 'frame')} from ${file.name} added` +
         `${result.cancelled ? ' (cancelled)' : ''}`,
-      result.cancelled ? 'warn' : 'success',
+      result.cancelled ? 'info' : 'success',
       'Import',
     )
     if (result.added) {
@@ -478,12 +478,12 @@ export function useImportRouting({
     }
     try {
       const { parsed, stats } = await parseCloudFileWorker(file, {
-        onLog: (m, l, c) => log(m, l, c),
+        onLog: (m, l, c) => log(m, l, c ?? 'Import'),
       })
       importCloudData.value = { parsed, stats, fileName: file.name }
       importCloudOpen.value = true
     } catch (err) {
-      log(`Cloud import: ${err?.message ?? err}`, 'error', 'Import')
+      log(`Cloud import failed: ${err?.message ?? err}`, 'error', 'Import')
     }
   }
 
@@ -507,7 +507,7 @@ export function useImportRouting({
     importCloudOpen.value = false
     importCloudData.value = null
     if (!data) return
-    const transformed = applyImportTransform(data.parsed, { ...settings, onLog: (m, l, c) => log(m, l, c) })
+    const transformed = applyImportTransform(data.parsed, { ...settings, onLog: (m, l, c) => log(m, l, c ?? 'Import') })
     if (importCloud(transformed, data.fileName)) activateTab('viewer')
   }
 
@@ -574,7 +574,7 @@ export function useImportRouting({
     }
     const { rows, layout } = parseFiducialObs(text)
     if (!rows.length) {
-      log(`Image fiducials: no marks with finite pixel positions in ${file.name}`, 'warn', 'Sensor')
+      log(`Image fiducials: no mark in ${file.name} has a pixel position`, 'warn', 'Fiducials')
       return
     }
     fiducialImportData.value = { kind: 'image', fileName: file.name, rows, layout }
@@ -593,7 +593,7 @@ export function useImportRouting({
     }
     const { groups } = parseFiducialMarks(text)
     if (!groups.length) {
-      log('Camera fiducials: no marks with finite x_mm / y_mm found', 'warn', 'Sensor')
+      log('Camera fiducials: no mark has an x_mm and y_mm position', 'warn', 'Sensors')
       return
     }
     fiducialImportData.value = { kind: 'camera', fileName: file.name, groups }
@@ -787,7 +787,7 @@ export function useImportRouting({
       log(
         `Metashape import: scale bars ${missed.join(', ')} left out (an endpoint is not in the project)`,
         'warn',
-        'Scale',
+        'Georeferencing',
       )
   }
 

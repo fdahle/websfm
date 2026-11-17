@@ -249,7 +249,7 @@ export function createCloudEdits({
       // Same frame: the region and orientation drawn on the model stay with it.
       const carried = edited && carryFrameStamps ? carryFrameStamps(original, edited) : []
       if (carried.length)
-        log(`${label}: the ${carried.join(' and ')} carried over to the edited model`, 'info', 'Reconstruction')
+        log(`${label}: the ${carried.join(' and ')} carried over to the edited model`, 'info', 'Sparse')
       await invalidateSparseDependents()
       // Calibration defines the canonical observation frame and must survive
       // a re-solve (neither tool frees a radial term). Old run statistics must not
@@ -261,7 +261,7 @@ export function createCloudEdits({
       healthDirty.value++
       reconStatus.value = 'done'
       if (!(await save())) {
-        log(`${label}: the edited model could not be saved — it will be lost on reload`, 'warn', 'Reconstruction')
+        log(`${label}: the edited model could not be saved — it will be lost on reload`, 'warn', 'Sparse')
       }
       const held = result.constraints ?? {}
       log(
@@ -270,12 +270,12 @@ export function createCloudEdits({
             ? ` (held to ${pluralize(held.gcpAnchors || 0, 'GCP anchor')}, ${pluralize(held.cameraPriors || 0, 'camera prior')})`
             : ' (no survey constraints)'),
         'success',
-        'Reconstruction',
+        'Sparse',
       )
-      if (held.gcpError) log(`${label}: GCP anchoring skipped — ${held.gcpError}`, 'warn', 'Reconstruction')
+      if (held.gcpError) log(`${label}: GCP anchoring skipped — ${held.gcpError}`, 'warn', 'Sparse')
       return mainSparseCloud.value
     } catch (err) {
-      log(`${label} stopped: ${err?.message ?? err}`, 'error', 'Reconstruction')
+      log(`${label} stopped: ${err?.message ?? err}`, 'error', 'Sparse')
       reconStatus.value = 'error'
       return null
     }
@@ -347,7 +347,7 @@ export function createCloudEdits({
       })
       if (source.style) cloud.style = JSON.parse(JSON.stringify(source.style))
       log(
-        `Crop: copied ${flat.count.toLocaleString()} points of the streamed cloud into "${cloud.name}"` +
+        `Crop: copied ${flat.count.toLocaleString('en')} points of the streamed cloud into "${cloud.name}"` +
           (plan.complete
             ? ''
             : ` — thinned to ${plan.spacing.toPrecision(3)}-unit spacing to stay within ` +
@@ -359,7 +359,7 @@ export function createCloudEdits({
       await save()
       return cloud
     } catch (err) {
-      log(`Crop error: ${err?.message ?? err}`, 'error', 'Products')
+      log(`Crop failed: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
       return null
     }
@@ -390,14 +390,14 @@ export function createCloudEdits({
         return null
       }
       log(
-        `Cloud edit: read ${flat.count.toLocaleString()} points of the streamed reference "${reference.name}" around the source` +
+        `Cloud edit: read ${flat.count.toLocaleString('en')} points of the streamed reference "${reference.name}" around the source` +
           (plan.complete ? '' : ` (thinned to ${plan.spacing.toPrecision(3)}-unit spacing)`),
         plan.complete ? 'info' : 'warn',
         'Products',
       )
       return { ...flat, id: reference.id, name: reference.name, kind: 'dense' }
     } catch (err) {
-      log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+      log(`Cloud edit failed: ${err?.message ?? err}`, 'error', 'Products')
       return null
     }
   }
@@ -418,7 +418,7 @@ export function createCloudEdits({
           {
             worker: w,
             transfer,
-            onLog: (m, l, c) => log(m, l, c),
+            onLog: (m, l, c) => log(m, l, c ?? 'Products'),
             onProgress: (d, t, lbl, f) => {
               fractions[w] = f ?? d / Math.max(1, t)
               onProgress?.(
@@ -486,8 +486,8 @@ export function createCloudEdits({
       const copy = editPayload(source, t)
       result = { count: source.count, pos: copy.pos, col: copy.col, nrm, attributes: copy.attributes }
       log(
-        `Normals: ${source.count.toLocaleString()} points on ${pluralize(used, 'worker')} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
-        'success',
+        `Normals: ${source.count.toLocaleString('en')} points on ${pluralize(used, 'worker')} in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+        'info',
         'Products',
       )
     } else {
@@ -499,7 +499,7 @@ export function createCloudEdits({
         const transfer = []
         const { cloud: pre, error } = await workerEditCloud(
           { mode: 'filter', clouds: [editPayload(source, transfer)], settings: { ...settings, methods: before } },
-          { transfer, onLog: (m, l, c) => log(m, l, c) },
+          { transfer, onLog: (m, l, c) => log(m, l, c ?? 'Products') },
         )
         if (error) throw new Error(error)
         cloud = pre
@@ -541,7 +541,7 @@ export function createCloudEdits({
         }
       log(
         `Filter (outlier): mean neighbour distance ${mu.toFixed(4)} ±${sigma.toFixed(4)}, limit ${limit.toFixed(4)} → ` +
-          `kept ${kept.toLocaleString()} of ${cloud.count.toLocaleString()}, on ${pluralize(used, 'worker')} ` +
+          `kept ${kept.toLocaleString('en')} of ${cloud.count.toLocaleString('en')}, on ${pluralize(used, 'worker')} ` +
           `in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
         'info',
         'Products',
@@ -561,7 +561,7 @@ export function createCloudEdits({
       from: [source],
     })
     if (REPLACES_SOURCE_VIEW.has(mode)) source.visible = false
-    log(`Cloud edit: added "${cloud.name}" — ${cloud.count.toLocaleString()} points`, 'success', 'Products')
+    log(`Cloud edit: added "${cloud.name}" — ${cloud.count.toLocaleString('en')} points`, 'success', 'Products')
     return cloud
   }
 
@@ -605,7 +605,7 @@ export function createCloudEdits({
           {
             worker: w,
             transfer,
-            onLog: (m, l, c) => log(m, l, c),
+            onLog: (m, l, c) => log(m, l, c ?? 'Products'),
             onProgress: (d, t, lbl, f) => {
               fractions[w] = f ?? d / Math.max(1, t)
               const sum = fractions.reduce((a, c) => a + c, 0)
@@ -631,7 +631,7 @@ export function createCloudEdits({
       },
       {
         transfer,
-        onLog: (m, l, c) => log(m, l, c),
+        onLog: (m, l, c) => log(m, l, c ?? 'Products'),
         onProgress: (d, t, lbl, f) =>
           onProgress?.(
             parts.length + (f ?? 0),
@@ -644,11 +644,11 @@ export function createCloudEdits({
     if (error) throw new Error(error)
     if (!out?.count) return null
     log(
-      `Decimate: ${out.count.toLocaleString()} triangles from ${source.count.toLocaleString()}, ` +
+      `Decimate: ${out.count.toLocaleString('en')} triangles from ${source.count.toLocaleString('en')}, ` +
         `${pluralize(parts.length, 'block')} on ${pluralize(parts.length, 'worker')} ` +
-        `(${joined.count.toLocaleString()} joined, then across the seams), largest error ` +
+        `(${joined.count.toLocaleString('en')} joined, then across the seams), largest error ` +
         `${(stats?.maxError ?? 0).toPrecision(3)}, in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
-      'success',
+      'info',
       'Products',
     )
     const mesh = addDerivedMesh(out, {
@@ -711,9 +711,9 @@ export function createCloudEdits({
         )
         if (!flat.count) return null
         log(
-          `ICP: aligning on ${flat.count.toLocaleString()} points of the streamed source "${streamedSource.name}"` +
+          `ICP: aligning on ${flat.count.toLocaleString('en')} points of the streamed source "${streamedSource.name}"` +
             (plan.complete ? '' : ` (${plan.spacing.toPrecision(3)}-unit spacing)`) +
-            `, then moving all ${streamedSource.count.toLocaleString()}`,
+            `, then moving all ${streamedSource.count.toLocaleString('en')}`,
           'info',
           'Products',
         )
@@ -729,7 +729,7 @@ export function createCloudEdits({
             maxDistance: 10 * (estimateSpacing(anyCloudBounds(streamedSource), streamedSource.count) || 1),
           }
       } catch (err) {
-        log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+        log(`Cloud edit failed: ${err?.message ?? err}`, 'error', 'Products')
         return null
       }
     }
@@ -794,13 +794,13 @@ export function createCloudEdits({
         reconStatus.value = cloud ? 'done' : 'error'
         if (cloud)
           log(
-            `Cloud edit: added "${cloud.name}" (${cloud.count.toLocaleString()} points, streamed)`,
+            `Cloud edit: added "${cloud.name}" (${cloud.count.toLocaleString('en')} points, streamed)`,
             'success',
             'Products',
           )
         return cloud
       } catch (err) {
-        log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+        log(`Cloud edit failed: ${err?.message ?? err}`, 'error', 'Products')
         reconStatus.value = 'error'
         return null
       }
@@ -827,7 +827,7 @@ export function createCloudEdits({
           return cloud
         }
       } catch (err) {
-        log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+        log(`Cloud edit failed: ${err?.message ?? err}`, 'error', 'Products')
         reconStatus.value = 'error'
         return null
       }
@@ -892,7 +892,11 @@ export function createCloudEdits({
         extra,
       } = await workerEditCloud(
         { mode, clouds: payload, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
+        {
+          onLog: (m, l, c) => log(m, l, c ?? 'Products'),
+          onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+          transfer,
+        },
       )
       if (error) throw new Error(error)
       if (!edited?.count) {
@@ -910,7 +914,7 @@ export function createCloudEdits({
         reconStatus.value = cloud ? 'done' : 'error'
         if (cloud)
           log(
-            `Cloud edit: added "${cloud.name}" (${cloud.count.toLocaleString()} points, streamed)`,
+            `Cloud edit: added "${cloud.name}" (${cloud.count.toLocaleString('en')} points, streamed)`,
             'success',
             'Products',
           )
@@ -931,7 +935,7 @@ export function createCloudEdits({
         log(
           mode === 'classify'
             ? `Classify: "${cloud.name}" updated`
-            : `Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString()} points`,
+            : `Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString('en')} points`,
           'success',
           'Products',
         )
@@ -965,8 +969,8 @@ export function createCloudEdits({
         log(
           `Cloud edit: added "${cloud.name}" — ${
             cloud.kind === 'mesh'
-              ? `${cloud.count.toLocaleString()} triangles`
-              : `${cloud.count.toLocaleString()} points`
+              ? `${cloud.count.toLocaleString('en')} triangles`
+              : `${cloud.count.toLocaleString('en')} points`
           }`,
           'success',
           'Products',
@@ -976,7 +980,7 @@ export function createCloudEdits({
       await save()
       return cloud
     } catch (err) {
-      log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+      log(`Cloud edit failed: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
       return null
     }

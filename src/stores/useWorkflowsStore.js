@@ -6,6 +6,7 @@ import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useLog } from '../composables/useLog.js'
+import { editCommand } from '../core/help/consoleEdits.js'
 
 const TEMPLATE_KEY = 'websfm-workflow-templates-v1'
 const MAX_RUNS = 30
@@ -40,7 +41,7 @@ export const useWorkflowsStore = registerProjectStore(
       isPersisting,
       build: () => ({ workflows: workflows.value, activeId: activeId.value, runs: runs.value }),
       write: opfs.saveWorkflows,
-      onError: (err) => log(`Workflow save failed — ${err?.message ?? err}`, 'error', 'Workflow'),
+      onError: (err) => log(`Workflow save failed: ${err?.message ?? err}`, 'error', 'Workflow'),
     })
 
     function addWorkflow(workflow = createWorkflow()) {
@@ -102,7 +103,10 @@ export const useWorkflowsStore = registerProjectStore(
       const copy = normalizeWorkflow({ ...JSON.parse(JSON.stringify(source)), id: null, name: source.name })
       templates.value.push(copy)
       localStorage.setItem(TEMPLATE_KEY, JSON.stringify(templates.value))
-      log(`Workflow template saved: ${copy.name}`, 'success', 'Workflow', { channel: 'activity' })
+      log(`Workflow template saved: ${copy.name}`, 'info', 'Workflow', {
+        channel: 'activity',
+        command: editCommand('template save', [source.name]),
+      })
     }
 
     function applyTemplate(templateId) {

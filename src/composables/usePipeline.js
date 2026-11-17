@@ -234,15 +234,16 @@ export function usePipeline({
   // model read): a rejection there would skip finishRun, leave the modal open and
   // isBusy() true, and refuse open, switch and delete until a reload. `body` returns
   // the run's result (usually finishRun's); a throw becomes { ok: false } with the
-  // message, logged (as a cancel when the user pressed Cancel).
+  // message, logged (as a cancel when the user pressed Cancel) under the run's
+  // console source (`opts.source`).
   async function withProgress(title, total, onCancel, opts, body) {
     openProgress(title, total, onCancel, opts)
     try {
       return await body()
     } catch (err) {
       const message = String(err?.message ?? err)
-      if (aborted.value) useLog().log(`${title}: cancelled`, 'info', 'Pipeline')
-      else useLog().log(`${title} failed: ${message}`, 'error', 'Pipeline')
+      if (aborted.value) useLog().log(`${title} cancelled`, 'info', opts.source)
+      else useLog().log(`${title} failed: ${message}`, 'error', opts.source)
       return finishRun(false, message)
     }
   }
@@ -256,11 +257,7 @@ export function usePipeline({
         ? images.value
         : images.value.filter((img) => img.kpStatus !== 'done')
     if (pending.length === 0) {
-      useLog().log(
-        'Detection: every image already has keypoints — nothing to detect in Append mode',
-        'info',
-        'Detection',
-      )
+      useLog().log('Every image already has keypoints — nothing to detect in Append mode', 'info', 'Detection')
       return { ok: true, unchanged: true }
     }
     // Model consent BEFORE openProgress — see ensureModels.
@@ -276,7 +273,7 @@ export function usePipeline({
       'Detecting Features',
       pending.length,
       () => cancelWorkers('detection cancelled'),
-      { unit: 'images' },
+      { unit: 'images', source: 'Detection' },
       async () => {
         // No per-image overlay callback: the keypoint overlay is a global toggle gated on
         // the image's own kpStatus, so it lights up reactively as each detection lands.
@@ -308,7 +305,7 @@ export function usePipeline({
       'Matching Features',
       0,
       () => cancelWorkers('matching cancelled'),
-      { unit: 'pairs' },
+      { unit: 'pairs', source: 'Matching' },
       async () => {
         await matchAll(images.value, settings, report, shouldCancel, opts)
         return finishRun()
@@ -325,7 +322,7 @@ export function usePipeline({
       'Sparse Reconstruction',
       ready.length,
       () => cancelWorkers('reconstruction cancelled'),
-      { steps: SPARSE_STEPS },
+      { steps: SPARSE_STEPS, source: 'Sparse' },
       async () => {
         await reconstruct(settings, report)
         return finishRun()
@@ -341,7 +338,7 @@ export function usePipeline({
       'Building Depth Maps',
       images.value.length,
       () => cancelWorkers('depth maps cancelled'),
-      { unit: 'images' },
+      { unit: 'images', source: 'Dense' },
       async () => {
         await computeDepthMaps(settings, report, opts)
         return finishRun()
@@ -355,7 +352,7 @@ export function usePipeline({
       'Building Dense Cloud',
       1,
       () => cancelWorkers('densify cancelled'),
-      { indeterminate: true, unit: 'maps', steps: FUSION_STEPS },
+      { indeterminate: true, unit: 'maps', steps: FUSION_STEPS, source: 'Dense' },
       async () => {
         await densify(settings, report)
         return finishRun()
@@ -370,7 +367,7 @@ export function usePipeline({
       'Building DEM',
       1,
       () => cancelWorkers('DEM cancelled'),
-      { indeterminate: true },
+      { indeterminate: true, source: 'Products' },
       async () => {
         await generateDem(settings, report)
         return finishRun()
@@ -384,7 +381,7 @@ export function usePipeline({
       'Building Orthophoto',
       1,
       () => cancelWorkers('orthophoto cancelled'),
-      { indeterminate: true },
+      { indeterminate: true, source: 'Products' },
       async () => {
         await generateOrtho(settings, report)
         return finishRun()
@@ -399,7 +396,7 @@ export function usePipeline({
       'Building Mesh',
       1,
       () => cancelWorkers('mesh cancelled'),
-      { indeterminate: true },
+      { indeterminate: true, source: 'Products' },
       async () => {
         await generateMesh(settings, report)
         return finishRun()
@@ -434,7 +431,7 @@ export function usePipeline({
       titles[request.mode] ?? 'Editing Cloud',
       1,
       () => cancelWorkers('cloud edit cancelled'),
-      { indeterminate: true },
+      { indeterminate: true, source: 'Products' },
       async () => {
         // ok ⇔ the store committed a result (it returns null for a refusal, an empty
         // result, a superseded run or an error) — callers act on the outcome, not on
@@ -452,7 +449,7 @@ export function usePipeline({
       'Texturing Mesh',
       100,
       () => cancelWorkers('texture cancelled'),
-      {},
+      { source: 'Products' },
       async () => {
         const cloud = await textureMesh(request, report)
         return finishRun(!!cloud)

@@ -177,8 +177,8 @@ export function makeIoOps({ lazCodec = null } = {}) {
     }
     const stats = cloudStats(parsed)
     emit('log', [
-      `Parsed ${name}: ${stats.points.toLocaleString()} points` +
-        `${stats.faces ? `, ${stats.faces.toLocaleString()} faces` : ''}` +
+      `Parsed ${name}: ${stats.points.toLocaleString('en')} points` +
+        `${stats.faces ? `, ${stats.faces.toLocaleString('en')} faces` : ''}` +
         ` in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
       'info',
       'Import',

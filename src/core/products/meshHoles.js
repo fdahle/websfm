@@ -330,9 +330,9 @@ function holesOnSurface(mesh, { maxHoleEdges = 64 } = {}) {
 export function fillHoles(mesh, opts = {}, onLog) {
   const r = holesStep(mesh, opts)
   onLog?.(
-    `Mesh holes: filled ${r.filled.toLocaleString()} (+${r.addedTriangles.toLocaleString()} triangles), ` +
-      `left ${r.tooLarge.toLocaleString()} above ${opts.maxHoleEdges ?? 64} edges, ` +
-      `skipped ${r.skipped.toLocaleString()} non-manifold chains`,
+    `Mesh holes: filled ${r.filled.toLocaleString('en')} (+${r.addedTriangles.toLocaleString('en')} triangles), ` +
+      `left ${r.tooLarge.toLocaleString('en')} above ${opts.maxHoleEdges ?? 64} edges, ` +
+      `skipped ${r.skipped.toLocaleString('en')} non-manifold chains`,
     r.skipped ? 'warn' : 'info',
     'Products',
   )

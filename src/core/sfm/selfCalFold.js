@@ -263,7 +263,7 @@ export function createSelfCalFold({
         `${label} re-derived ${pluralize(rebuiltImgs, 'image')}' keypoints from the recorded pixels ` +
           `with the refined lens and K (mean change ${(rebuiltShift / Math.max(1, rebuiltN)).toFixed(2)}px)`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
   }

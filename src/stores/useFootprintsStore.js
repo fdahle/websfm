@@ -26,6 +26,7 @@ import { useProjectsStore } from './useProjectsStore.js'
 import { useExternalStore } from './useExternalStore.js'
 import { pluralize } from '../core/textFormat.js'
 import { isFootprintSet } from '../core/products/vectorLayers.js'
+import { editCommand } from '../core/help/consoleEdits.js'
 
 // Project-scoped store: the project's vector sets, stored in the project working
 // CRS and re-projected when it changes.
@@ -71,7 +72,7 @@ export const useFootprintsStore = registerProjectStore(
       isPersisting,
       build: () => ({ crs: currentCrs.value, sets: sets.value }),
       write: opfs.saveFootprints,
-      onError: (err) => log(`Vector layer save failed — ${err?.message ?? err}`, 'error', 'Footprint'),
+      onError: (err) => log(`Vector layer save failed: ${err?.message ?? err}`, 'error', 'Poses'),
     })
 
     // Name → image-id matching is shared with GCP observations / poses / COLMAP
@@ -128,7 +129,7 @@ export const useFootprintsStore = registerProjectStore(
         await ensureProjection(sourceCrs)
         await ensureProjection(projCrs)
       } catch (err) {
-        log(`Polygon import failed — could not resolve CRS (${err?.message ?? err})`, 'error', 'Footprint')
+        log(`Polygon import failed: could not resolve the coordinate system (${err?.message ?? err})`, 'error', 'Poses')
         return 0
       }
 
@@ -140,7 +141,7 @@ export const useFootprintsStore = registerProjectStore(
         return { id: crypto.randomUUID(), imageId, imageName: raw.imageName ?? raw.name ?? null, rings }
       })
       if (!footprints.length) {
-        log('Polygon import: no polygons found', 'warn', 'Footprint')
+        log('Polygon import: no polygons found', 'warn', 'Poses')
         return 0
       }
 
@@ -157,7 +158,7 @@ export const useFootprintsStore = registerProjectStore(
       log(
         `Polygons imported: ${pluralize(footprints.length, 'polygon')}${matched ? `, ${matched} matched to images` : ''} (from ${sourceCrs})`,
         'success',
-        'Footprint',
+        'Poses',
       )
       await save()
       return footprints.length
@@ -171,7 +172,7 @@ export const useFootprintsStore = registerProjectStore(
         await ensureProjection(sourceCrs)
         await ensureProjection(projCrs)
       } catch (err) {
-        log(`Line layer not added — could not resolve CRS (${err?.message ?? err})`, 'error', 'Footprint')
+        log(`Line layer not added — could not resolve CRS (${err?.message ?? err})`, 'error', 'Poses')
         return null
       }
       const footprints = lines.map((l) => ({
@@ -275,7 +276,7 @@ export const useFootprintsStore = registerProjectStore(
         local = null
       if (geographic) {
         if (!valid.length) {
-          log('Footprints computed from poses: 0 (no poses with a position)', 'warn', 'Footprint')
+          log('Footprints computed from poses: 0 (no poses with a position)', 'warn', 'Poses')
           return none()
         }
         try {
@@ -289,7 +290,7 @@ export const useFootprintsStore = registerProjectStore(
           log(
             `Cannot compute footprints — failed to build a local metric frame for ${crs} (${err?.message ?? err})`,
             'error',
-            'Footprint',
+            'Poses',
           )
           return none()
         }
@@ -301,7 +302,7 @@ export const useFootprintsStore = registerProjectStore(
         try {
           surface = await groundSurface({ demSource, poseDatum, crs, local, valid })
         } catch (err) {
-          log(`Cannot compute footprints on the terrain — ${err?.message ?? err}`, 'error', 'Footprint')
+          log(`Cannot compute footprints on the terrain — ${err?.message ?? err}`, 'error', 'Poses')
           return none()
         }
       }
@@ -388,15 +389,15 @@ export const useFootprintsStore = registerProjectStore(
         `Footprints computed from poses: ${footprints.length}${skipped ? ` (${skipped} skipped — ${detail})` : ''}` +
           (surface ? ` — ground from ${surface.describe()}` : ''),
         footprints.length ? 'success' : 'warn',
-        'Footprint',
+        'Poses',
       )
-      if (surface?.error) log(`Terrain: ${surface.error}`, 'warn', 'Footprint')
+      if (surface?.error) log(`Terrain: ${surface.error}`, 'warn', 'Poses')
       if (reasons.belowPlane && surface) {
         log(
           'Cameras below the terrain usually mean their heights are in another vertical datum than ' +
             'chosen, or are heights above take-off rather than absolute',
           'warn',
-          'Footprint',
+          'Poses',
         )
       }
       save()
@@ -451,7 +452,7 @@ export const useFootprintsStore = registerProjectStore(
           `Terrain heights are ${datumLabel(TERRAIN_DATUM)}; camera heights in ${datumLabel(target)} cannot ` +
             'be converted to it, so the terrain is used as it is',
           'warn',
-          'Footprint',
+          'Poses',
         )
       }
       const range = { min: Infinity, max: -Infinity }
@@ -481,7 +482,10 @@ export const useFootprintsStore = registerProjectStore(
       const idx = sets.value.findIndex((s) => s.id === id)
       if (idx === -1) return false
       const [removed] = sets.value.splice(idx, 1)
-      log(`Layer removed: ${removed.name}`, 'info', 'Footprint', { channel: 'activity' })
+      log(`Layer removed: ${removed.name}`, 'info', 'Poses', {
+        channel: 'activity',
+        command: editCommand('layer remove', [removed.name]),
+      })
       save()
       return true
     }
@@ -491,8 +495,12 @@ export const useFootprintsStore = registerProjectStore(
       if (!set) return false
       const clean = String(name ?? '').trim()
       if (!clean || clean === set.name) return false
+      const previous = set.name
       set.name = clean
-      log(`Layer renamed to ${clean}`, 'info', 'Footprint', { channel: 'activity' })
+      log(`Layer renamed to ${clean}`, 'info', 'Poses', {
+        channel: 'activity',
+        command: editCommand('layer rename', [previous, clean]),
+      })
       save()
       return true
     }
@@ -501,8 +509,9 @@ export const useFootprintsStore = registerProjectStore(
       const set = sets.value.find((s) => s.id === id)
       if (!set) return
       set.visible = !!visible
-      log(`Layer ${set.name} ${set.visible ? 'shown on' : 'hidden from'} map`, 'info', 'Footprint', {
+      log(`Layer ${set.name} ${set.visible ? 'shown on' : 'hidden from'} map`, 'info', 'Poses', {
         channel: 'activity',
+        command: editCommand(`layer ${set.visible ? 'show' : 'hide'}`, [set.name]),
       })
       save()
     }
@@ -549,8 +558,8 @@ export const useFootprintsStore = registerProjectStore(
       const polys = sets.value.reduce((n, s) => n + s.footprints.length, 0)
       log(
         `Vector layers restored: ${pluralize(sets.value.length, 'layer')}, ${pluralize(polys, 'polygon')}`,
-        'success',
-        'Footprint',
+        'info',
+        'Poses',
       )
     }
 
@@ -567,7 +576,7 @@ export const useFootprintsStore = registerProjectStore(
         footprints: s.footprints.map((fp) => transformFeature(fp, fromCrs, toCrs)),
       }))
       await save()
-      log(`Vector layers re-projected to ${toCrs}`, 'info', 'Footprint')
+      log(`Vector layers re-projected to ${toCrs}`, 'info', 'Poses')
     }
 
     return {

@@ -20,6 +20,10 @@
 // the needs here once did. Only console-only verbs carry their own `needs`.
 
 import { allGroups, leafCommands, ribbonEntries, labelText } from './ribbonTabs.js'
+import { RUN_STAGES, RUN_STAGE_NAMES } from './consoleRun.js'
+import { EDITS, editUsage } from './consoleEdits.js'
+
+export { RUN_STAGES }
 
 // Prerequisite checks: the ONE table behind both gates, the ribbon's greyed
 // buttons/menu rows (Ribbon.vue `needs: [...]`) and this command line, so the two
@@ -228,20 +232,6 @@ const CONSOLE_ONLY_DISPATCH = [
   },
 ]
 
-// The stages `run` chains, by the word typed → workflow block id (core/workflow.js).
-export const RUN_STAGES = {
-  detect: 'detect-features',
-  match: 'match-features',
-  sparse: 'reconstruct',
-  reconstruct: 'reconstruct',
-  depth: 'compute-depth',
-  dense: 'dense',
-  dem: 'gen-dem',
-  ortho: 'gen-ortho',
-  mesh: 'gen-mesh',
-  texture: 'texture-mesh',
-}
-
 // Console-only verbs: they take arguments and act through the console environment
 // (core/help/console.js), not a ribbon command. `usage` lines are what `help <verb>`
 // and a malformed call print.
@@ -264,10 +254,11 @@ export const VERBS = [
     names: ['run'],
     needs: ['project'],
     usage: [
-      `run <stage> [<stage> …]   stages: ${[...new Set(Object.keys(RUN_STAGES))].join(' ')}`,
+      `run <stage> [<key>=<value> …] [<stage> …]   stages: ${RUN_STAGE_NAMES.join(' ')}`,
       'run workflow <name>',
+      'help run <stage>   (its settings and their defaults)',
     ],
-    help: 'Run pipeline stages (default settings) or a saved workflow through the workflow runner',
+    help: 'Run processing steps, each with its settings, or a saved workflow, through the workflow runner',
   },
   { verb: 'continue', names: ['continue'], usage: ['continue'], help: 'Continue a paused workflow' },
   { verb: 'reuse', names: ['reuse'], usage: ['reuse'], help: 'Keep the existing output a paused workflow asks about' },
@@ -348,6 +339,21 @@ function buildCommands() {
           }
         : {}),
     })
+  }
+  // The edits made by hand (consoleEdits.js), one command each: "gcp disable".
+  for (const e of EDITS) {
+    for (const [action, a] of Object.entries(e.actions)) {
+      out.push({
+        name: `${e.noun} ${action}`,
+        aliases: [],
+        verb: 'edit',
+        edit: { noun: e.noun, action },
+        group: 'Edit',
+        help: a.help,
+        usage: [editUsage(e, action)],
+        needs: e.needs,
+      })
+    }
   }
   for (const c of CONSOLE_ONLY_DISPATCH) {
     out.push({
@@ -452,7 +458,13 @@ export function completions(prefix, argCompletions = null) {
   const complete = res?.cmd?.verb && argCompletions[res.cmd.verb]
   if (complete) {
     const rest = p.slice(res.name.length).trimStart()
-    for (const arg of complete(rest)) if (arg.toLowerCase().startsWith(rest)) out.push(`${res.name} ${arg}`)
+    // An edit command picks its own candidates (it matches a name inside quotes) and
+    // keeps the arguments as typed.
+    if (res.cmd.verb === 'edit') {
+      const typed = String(prefix).trimStart().slice(res.name.length).trimStart()
+      for (const arg of complete(typed, res.cmd)) out.push(`${res.name} ${arg}`)
+    } else
+      for (const arg of complete(rest, res.cmd)) if (arg.toLowerCase().startsWith(rest)) out.push(`${res.name} ${arg}`)
   }
   return [...new Set(out)].sort()
 }
@@ -511,6 +523,9 @@ export function helpLines(topic = '') {
   const t = String(topic ?? '')
     .trim()
     .toLowerCase()
+  // A noun of the Edit group ("help gcp"): its commands.
+  const noun = EDITS.find((e) => e.noun === t)
+  if (noun) return COMMANDS.filter((c) => c.edit?.noun === noun.noun).map(overviewLine)
   const groups = [...new Set(COMMANDS.map((c) => c.group))]
   const pick = !t || t === 'all' ? groups : groups.filter((g) => g.toLowerCase() === t || g.toLowerCase().startsWith(t))
   if (!pick.length) return null
@@ -518,13 +533,14 @@ export function helpLines(topic = '') {
   let hidden = 0
   for (const g of pick) {
     const rows = COMMANDS.filter((c) => c.group === g)
-    const shown = t ? rows : rows.filter((c) => c.short || c.verb)
+    const shown = t ? rows : rows.filter((c) => c.short || (c.verb && c.verb !== 'edit'))
     hidden += rows.length - shown.length
     if (!shown.length) continue
     lines.push(`— ${g} —`)
     for (const c of shown) lines.push(overviewLine(c))
   }
-  if (hidden) lines.push(`${hidden} more ribbon commands: "help <tab>" (e.g. help tools) or "help all".`)
+  if (!t) lines.push(`— Edit —`, `  ${EDITS.map((e) => e.noun).join(', ')} — edits by hand: "help edit", or "help gcp"`)
+  if (hidden) lines.push(`${hidden} more commands: "help <tab>" (e.g. help tools, help edit) or "help all".`)
   return lines
 }
 

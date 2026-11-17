@@ -70,7 +70,7 @@ export function makeTiles3dOps({ lazCodec = null } = {}) {
     let levels = 0
     for (const n of reader.nodes.values()) levels = Math.max(levels, n.key[0] + 1)
     emit('log', [
-      `3D Tiles: ${res.points.toLocaleString()} points in ${res.contentTiles.toLocaleString()} tiles over ${levels} levels` +
+      `3D Tiles: ${res.points.toLocaleString('en')} points in ${res.contentTiles.toLocaleString('en')} tiles over ${levels} levels` +
         `${res.external.length ? ` (${res.external.length} external tilesets)` : ''}, ${(blob.size / 1024 ** 2).toFixed(1)} MB in ` +
         `${((performance.now() - t0) / 1000).toFixed(1)} s`,
       'info',
@@ -108,7 +108,7 @@ export function makeTiles3dOps({ lazCodec = null } = {}) {
     })
     const blob = out.finish(res.tileset, res.external)
     emit('log', [
-      `3D Tiles: ${(mesh.count ?? mesh.idx.length / 3).toLocaleString()} triangles in ${res.tiles.toLocaleString()} tiles ` +
+      `3D Tiles: ${(mesh.count ?? mesh.idx.length / 3).toLocaleString('en')} triangles in ${res.tiles.toLocaleString('en')} tiles ` +
         `over ${res.levels} levels${res.textured ? ' (textured leaves)' : ''}, ${(blob.size / 1024 ** 2).toFixed(1)} MB in ` +
         `${((performance.now() - t0) / 1000).toFixed(1)} s`,
       'info',

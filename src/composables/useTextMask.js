@@ -53,7 +53,7 @@ export function useTextMask() {
       onProgress: (done, total) => setProgress({ phase: 'read', done, total }),
     })
     if (cancelled) {
-      log('Reading text cancelled; the text read so far is kept', 'warn', 'Images')
+      log('Reading text cancelled; the text read so far is kept', 'info', 'Images')
       return { cancelled: true }
     }
     return { failed, read }

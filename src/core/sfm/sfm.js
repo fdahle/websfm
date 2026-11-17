@@ -103,7 +103,7 @@ export async function reconstruct(input, hooks = {}) {
     ;(hooks.onLog ?? (() => {}))(
       describeScaleContext(runScale, 'Reprojection gates'),
       runScale.clamped ? 'warn' : 'info',
-      'SfM',
+      'Sparse',
     )
   }
 
@@ -181,10 +181,10 @@ export async function reconstruct(input, hooks = {}) {
     attempt++
   ) {
     log(
-      `primary registered only ${primary.cameras.length}/${nInputImages}; ` +
-        `retrying with alternate seed (${attempt + 1}/${maxRetries}, ${pluralize(excluded.size, 'prior seed')} excluded)`,
+      `The main model holds only ${primary.cameras.length} of ${nInputImages} photos; ` +
+        `trying another seed pair (${attempt + 1}/${maxRetries}, ${pluralize(excluded.size, 'earlier seed')} left out)`,
       'warn',
-      'Reconstruction',
+      'Sparse',
     )
     const candidate = await reconstructSingleModel(
       {
@@ -215,7 +215,7 @@ export async function reconstruct(input, hooks = {}) {
     )
     attempts.retriesRun = attempt + 1
     if (twinRetry) {
-      log(`seed retry ${attempt + 1} tried the other planar twin of the first seed`, 'info', 'Reconstruction')
+      log(`Seed retry ${attempt + 1} tried the other planar twin of the first seed`, 'info', 'Sparse')
       twinRetry = null
     }
     if (candidate.status !== 'done') {
@@ -234,9 +234,9 @@ export async function reconstruct(input, hooks = {}) {
       if (!failedKey) {
         // Failed before choosing a seed: the same exclusions would fail the same way.
         log(
-          `seed retry ${attempt + 1} found no usable seed (${candidate.status}); stopping the retries`,
+          `Seed retry ${attempt + 1} found no usable seed (${candidate.status}); stopping the retries`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         break
       }
@@ -264,16 +264,16 @@ export async function reconstruct(input, hooks = {}) {
       (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)
     ) {
       log(
-        `alternate seed improved primary ${primary.cameras.length} → ${candidate.cameras.length} cameras; keeping it`,
-        'success',
-        'Reconstruction',
+        `Alternate seed improved primary ${primary.cameras.length} → ${candidate.cameras.length} cameras; keeping it`,
+        'info',
+        'Sparse',
       )
       primary = candidate
     } else {
       log(
-        `alternate seed reached ${candidate.cameras.length} cameras; keeping ${primary.cameras.length}-camera primary`,
+        `Alternate seed reached ${candidate.cameras.length} cameras; keeping ${primary.cameras.length}-camera primary`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
     const candidateKey = pairKey(candidate.summary?.initPair)
@@ -282,11 +282,11 @@ export async function reconstruct(input, hooks = {}) {
   }
   if (primary.cameras.length < 0.25 * nInputImages) {
     log(
-      `primary remains too small after alternate-seed retries ` +
-        `(${primary.cameras.length}/${nInputImages}); secondary recovery suppressed because it cannot ` +
-        `reliably align against a tiny primary`,
+      `The main model is still too small after trying other seed pairs ` +
+        `(${primary.cameras.length} of ${nInputImages} photos); the separate pieces are not built, as they cannot ` +
+        `be placed reliably against so small a model`,
       'error',
-      'Reconstruction',
+      'Sparse',
     )
     primary.secondaryModels = []
     primary.summary = { ...(primary.summary || {}), secondaryMerges: [] }
@@ -310,14 +310,14 @@ export async function reconstruct(input, hooks = {}) {
 
   const secondaryModels = []
   const mergeReports = []
-  log(`secondary-model recovery — ${pluralize(jobs.length, 'viable stranded component')}`, 'info', 'Reconstruction')
+  log(`Secondary-model recovery — ${pluralize(jobs.length, 'viable stranded component')}`, 'info', 'Sparse')
   for (let ji = 0; ji < jobs.length; ji++) {
     const job = jobs[ji]
     log(
-      `secondary ${ji + 1}/${jobs.length} — ${job.componentIds.length} stranded + ` +
+      `Secondary ${ji + 1}/${jobs.length} — ${job.componentIds.length} stranded + ` +
         `${pluralize(job.boundaryIds.length, 'primary boundary image')}, ${pluralize(job.pairs.length, 'pair')}`,
       'info',
-      'Reconstruction',
+      'Sparse',
     )
     // Clone only this job's subset: cloning the whole input and then overriding its
     // images and pairs briefly held a second copy of every keypoint and match.
@@ -341,12 +341,12 @@ export async function reconstruct(input, hooks = {}) {
       },
     )
     if (secondary.status !== 'done' || secondary.cameras.length < 2 || !secondary.points.length) {
-      log(`secondary ${ji + 1} failed to form a usable model`, 'warn', 'Reconstruction')
+      log(`Piece ${ji + 1} did not form a usable model`, 'warn', 'Sparse')
       continue
     }
     const aligned = alignSecondary(primary, secondary, job.componentIds)
     if (!aligned.accepted) {
-      log(`secondary ${ji + 1} kept separate — ${aligned.reason}`, 'warn', 'Reconstruction')
+      log(`Piece ${ji + 1} kept separate: ${aligned.reason}`, 'warn', 'Sparse')
       secondaryModels.push({
         ...secondary,
         name: `Secondary sparse ${ji + 1}`,
@@ -370,13 +370,13 @@ export async function reconstruct(input, hooks = {}) {
     }
     mergeReports.push(report)
     log(
-      `secondary ${ji + 1} merged — +${report.addedCameras} cameras, ` +
+      `Secondary ${ji + 1} merged — +${report.addedCameras} cameras, ` +
         `+${report.addedPoints} points; ${report.sharedCameras} shared cameras, ` +
         `position RMS ${(100 * report.alignmentRmsFrac).toFixed(2)}% of span, ` +
         `rotation median ${report.medianRotationDeg.toFixed(2)}°, scale spread ` +
         `${(100 * report.scaleSpread).toFixed(2)}%`,
-      'success',
-      'Reconstruction',
+      'info',
+      'Sparse',
     )
   }
   primary.secondaryModels = secondaryModels

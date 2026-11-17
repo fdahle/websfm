@@ -112,7 +112,7 @@ export function createSparseRun({
         `Survey constraints: fitted in a local metric frame (grid scale factor k=${surveyFrame.k.toFixed(6)}, ` +
           'curvature restored) — the project CRS is unchanged for display and export',
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
     const imgById = imagesById()
@@ -163,7 +163,7 @@ export function createSparseRun({
         `Camera priors: ${pluralize(cameraPriors.length, 'geographic position')} converted to a ` +
           'survey-centred metric frame for bundle adjustment',
         'info',
-        'Pose',
+        'Poses',
       )
     }
     const withArm = cameraPriors.filter((p) => p.leverArm)
@@ -174,7 +174,7 @@ export function createSparseRun({
           `offset from the camera centre by (${arms.slice(0, 3).join('), (')}) m in camera axes` +
           `${arms.length > 3 ? ', …' : ''}`,
         'info',
-        'Pose',
+        'Poses',
       )
     }
     return { gcps, cameraPriors, surveyFrame }
@@ -211,7 +211,7 @@ export function createSparseRun({
   async function demHoldInput(request, survey) {
     if (!request?.referenceId) return null
     const fail = (why) => {
-      log(`Hold to a reference DEM: ${why}; the model is solved without it`, 'warn', 'Reconstruction')
+      log(`Hold to a reference DEM: ${why}; the model is solved without it`, 'warn', 'Sparse')
       return null
     }
     const crs = projects.currentCrs
@@ -259,7 +259,7 @@ export function createSparseRun({
             ? `; heights compared as they are (control ${datumLabel(datum)}, reference ${datumLabel(refDatum)})`
             : ''),
       'info',
-      'Reconstruction',
+      'Sparse',
     )
     delete grid.valid
     // The DEM sets the model's height only when both heights are in one known datum
@@ -284,7 +284,7 @@ export function createSparseRun({
   async function reconstruct(settings = {}, onProgress) {
     const { addToModel = false, existingCameras = 'auto', demHold: demHoldRequest = null, ...solverSettings } = settings
     // The console's session overrides of SFM_TUNING knobs (stores/tuningOverrides.js).
-    settings = applyTuningOverrides('sfm', solverSettings, (msg) => log(msg, 'warn', 'Reconstruction'))
+    settings = applyTuningOverrides('sfm', solverSettings, (msg) => log(msg, 'warn', 'Sparse'))
     const base = addToModel ? mainSparseCloud.value : null
     if (addToModel) {
       const fresh = images.value.filter(
@@ -293,7 +293,7 @@ export function createSparseRun({
       ).length
       const why = extensionBlocker(base, fresh)
       if (why) {
-        log(`Add to the model: ${why}`, 'error', 'Reconstruction')
+        log(`Add to the model: ${why}`, 'error', 'Sparse')
         return
       }
     }
@@ -326,7 +326,7 @@ export function createSparseRun({
           `Released ${formatBytes(descriptorBytesReleased)} of persisted descriptors from ` +
             `${pluralize(descriptorImagesReleased, 'image')} before reconstruction`,
           'info',
-          'Compute',
+          'Sparse',
         )
         // Yield once so the engine can reclaim detached descriptor backing stores
         // before the live-heap reading below. Never assume it did: the decision
@@ -339,8 +339,7 @@ export function createSparseRun({
       // the same photos and matches always reach the solver in the same order.
       // A disabled image (core/imageEnabled.js) stays out, and so do its pairs.
       const off = images.value.filter((img) => !isImageEnabled(img))
-      if (off.length)
-        log(`${pluralize(off.length, 'disabled image')} left out of the reconstruction`, 'info', 'Reconstruction')
+      if (off.length) log(`${pluralize(off.length, 'disabled image')} left out of the reconstruction`, 'info', 'Sparse')
       let imgs = images.value
         .filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0 && isImageEnabled(img))
         .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
@@ -412,7 +411,7 @@ export function createSparseRun({
               : '') +
             '.',
           'error',
-          'Reconstruction',
+          'Sparse',
         )
       }
 
@@ -433,10 +432,10 @@ export function createSparseRun({
           releaseIdleWorkers()
           log(
             `Released the loaded reconstruction before rerun (${released.cameraCount} cameras, ` +
-              `${released.pointCount.toLocaleString()} points). ` +
+              `${released.pointCount.toLocaleString('en')} points). ` +
               'Nothing is saved until the new model lands; if the run ends without one, the saved model is read back.',
             'info',
-            'Compute',
+            'Sparse',
           )
           await new Promise((resolve) => setTimeout(resolve, 50))
           pre = decideMemory(project(false))
@@ -444,13 +443,13 @@ export function createSparseRun({
       }
       if (!pre.renderer.safe) {
         log(
-          `Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, ` +
-            `${matchCount.toLocaleString()} matches; renderer heap ` +
+          `Sparse memory preflight — ${keypointCount.toLocaleString('en')} keypoints, ` +
+            `${matchCount.toLocaleString('en')} matches; renderer heap ` +
             `${pre.renderer.usedBytes != null ? `${formatBytes(pre.renderer.usedBytes)} current + ` : ''}` +
             `${formatBytes(pre.renderer.estimateBytes)}${ceiling(pre.renderer)}, ` +
             `input buffers ${formatBytes(pre.renderer.bufferBytes)}`,
           'error',
-          'Compute',
+          'Sparse',
         )
         refuse({}, { renderer: pre.renderer, worker: { heapSafe: true, buffersSafe: true } })
         return
@@ -480,7 +479,7 @@ export function createSparseRun({
           `Reconstruction: ${pluralize(missingKeypoints.length, 'image')} left out — their keypoints could not be read ` +
             `(${missingKeypoints.slice(0, 5).join(', ')}${missingKeypoints.length > 5 ? ', …' : ''})`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         imgs = imgs.filter((img) => keypointSets.has(img.uuid))
       }
@@ -517,13 +516,13 @@ export function createSparseRun({
           `Sparse memory preflight: guided track extension turned off for this run so it fits — ${reason}. ` +
             'The model is complete without it; lower the keypoint cap or the preselection neighbours to keep it.',
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
       }
       log(
-        `Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, ` +
-          `${matchCount.toLocaleString()} matches → ${tracks.observations.toLocaleString()} keypoints in ` +
-          `${tracks.tracks.toLocaleString()} tracks${guided ? ', guided extension on' : ''}; renderer heap ` +
+        `Sparse memory preflight — ${keypointCount.toLocaleString('en')} keypoints, ` +
+          `${matchCount.toLocaleString('en')} matches → ${tracks.observations.toLocaleString('en')} keypoints in ` +
+          `${tracks.tracks.toLocaleString('en')} tracks${guided ? ', guided extension on' : ''}; renderer heap ` +
           `${decisions.renderer.usedBytes != null ? `${formatBytes(decisions.renderer.usedBytes)} current + ` : ''}` +
           `${formatBytes(peak.rendererHeapBytes)}${ceiling(decisions.renderer)}, ` +
           `input buffers ${formatBytes(peak.rendererBufferBytes)}; ` +
@@ -531,10 +530,10 @@ export function createSparseRun({
           `buffers ${formatBytes(peak.workerBufferBytes)}` +
           `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}` +
           ` (of which bundle adjustment ${formatBytes(peak.solverWasmBytes)} for ` +
-          `${peak.observations.toLocaleString()} observations, ${peak.points.toLocaleString()} points ` +
+          `${peak.observations.toLocaleString('en')} observations, ${peak.points.toLocaleString('en')} points ` +
           `≤ ${formatBytes(WASM_SOLVER_LIMIT_BYTES)} wasm memory)`,
         plan.safe ? 'info' : 'error',
-        'Compute',
+        'Sparse',
       )
       if (!plan.safe) {
         refuse(peak, decisions)
@@ -712,10 +711,10 @@ export function createSparseRun({
         }
         if (shipped) {
           log(
-            `guided track extension: sending ${shipped}/${pluralize(imgs.length, 'image')}' descriptors ` +
+            `Guided track extension: sending ${shipped}/${pluralize(imgs.length, 'image')}' descriptors ` +
               `to the worker (${formatBytes(bytes)}, uint8 RootSIFT)`,
             'info',
-            'Reconstruction',
+            'Sparse',
           )
         }
       }
@@ -734,7 +733,7 @@ export function createSparseRun({
             `Sparse reconstruction stopped at ${formatBytes(used)} heap usage ` +
               `(safety ceiling ${formatBytes(stopAt)})`,
             'error',
-            'Compute',
+            'Sparse',
           )
           cancelRun('reconstruction stopped before browser memory exhaustion')
         }, 500)
@@ -746,7 +745,7 @@ export function createSparseRun({
 
       input.liveSnapshots = true
       let packedResult = await workerReconstruct(input, {
-        onLog: (message, level, category) => log(message, level, category),
+        onLog: (message, level, category) => log(message, level, category ?? 'Sparse'),
         onProgress: (done, total, label, fraction, phase) => onProgress?.(done, total, label, fraction, phase),
         onEvent: (ev, [snap]) => {
           if (ev === 'snapshot' && projects.currentProjectId === runProjectId) showLive(snap)
@@ -761,7 +760,7 @@ export function createSparseRun({
       // The expanded Maps are now authoritative. Drop the transferred CSR buffers
       // before orientation + persistence allocate their own compact arrays.
       packedResult = null
-      log(`Compact result received: ${result.points.length.toLocaleString()} points`, 'info', 'Reconstruction')
+      log(`Compact result received: ${result.points.length.toLocaleString('en')} points`, 'info', 'Sparse')
 
       // Apply the compact worker result. The transport codec has already expanded
       // its CSR buffers directly into the Map-based point shape used by the app.
@@ -821,7 +820,7 @@ export function createSparseRun({
                     ? `Oriented model Z-up from the ground plane (aerial; every camera looks obliquely, the main look ${how.viewTiltDeg.toFixed(1)}° off it)`
                     : 'Oriented model Z-up from the mean viewing direction (aerial: cameras above ground)',
               'info',
-              'Reconstruction',
+              'Sparse',
             )
             // Photos taken from the ground look up, so "cameras look down" turned
             // the model over: say so, the scene type (fixed at creation) is likely wrong.
@@ -829,7 +828,7 @@ export function createSparseRun({
               log(
                 'The photos look up at their subject, as from the ground, so the aerial orientation has probably put the model upside down. If these are not aerial photos, make a new project with the scene type Object capture.',
                 'warn',
-                'Reconstruction',
+                'Sparse',
               )
           }
         }
@@ -903,10 +902,10 @@ export function createSparseRun({
         const saved = await save()
         log(
           saved
-            ? 'Reconstruction saved to project storage'
-            : 'Reconstruction is available in memory but could not be saved to project storage',
+            ? `Sparse model: ${pluralize(result.summary?.nCameras ?? 0, 'camera')}, ${(result.summary?.nPoints ?? 0).toLocaleString('en')} tie points, saved`
+            : 'The sparse model is in memory but could not be saved to project storage',
           saved ? 'success' : 'warn',
-          'Project',
+          'Sparse',
         )
         if (base) {
           const ext = result.summary?.extension ?? {}
@@ -916,14 +915,14 @@ export function createSparseRun({
                 ? '. Depth maps, clouds and rasters built from them stay current; build depth maps again to cover the new images.'
                 : '.'),
             'success',
-            'Reconstruction',
+            'Sparse',
           )
           if (ext.notAdded?.length)
             log(
               `${pluralize(ext.notAdded.length, 'image')} could not be added: ${ext.notAdded.slice(0, 8).join(', ')}` +
                 `${ext.notAdded.length > 8 ? ', …' : ''} (too few matches to the model, or a pose that did not fit)`,
               'warn',
-              'Reconstruction',
+              'Sparse',
             )
           // Refined: every camera may move now that the new ones are in (Optimize cameras).
           if (extendMode === 'refined' && mainSparseCloud.value) {
@@ -941,10 +940,10 @@ export function createSparseRun({
       }
     } catch (err) {
       if (isAbort(err)) {
-        log(`Reconstruction cancelled (${err.message})`, 'info', 'Reconstruction')
+        log(`Reconstruction cancelled (${err.message})`, 'info', 'Sparse')
         reconStatus.value = 'idle'
       } else {
-        log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
+        log(`Sparse Model failed: ${err?.message ?? err}`, 'error', 'Sparse')
         reconStatus.value = 'error'
       }
     } finally {

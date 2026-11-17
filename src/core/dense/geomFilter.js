@@ -615,7 +615,7 @@ function judgeReference(
 function logReference(onLog, s, label, mi, nMaps, nCand, cfg, tMap) {
   onLog(
     `Depth filter: ${label || '?'} (${mi + 1}/${nMaps}) — kept ${s.keptPct.toFixed(1)}%; ` +
-      `dropped ${s.lowNcc} low-NCC, ${s.inconsistent} inconsistent` +
+      `dropped ${s.lowNcc} of low correlation, ${s.inconsistent} inconsistent` +
       `${cfg.angleOn ? `, ${s.lowParallax} low-parallax` : ''} px; ${nCand} candidate views, ` +
       `${((Date.now() - tMap) / 1000).toFixed(1)}s`,
     'info',
@@ -626,7 +626,11 @@ function logReference(onLog, s, label, mi, nMaps, nCand, cfg, tMap) {
 export function logFilterTotals(onLog, t, nMaps, cfg) {
   const pct = (n) => ((100 * n) / Math.max(1, t.considered)).toFixed(1)
   if (nMaps < 2) {
-    onLog(`Depth filter: only ${nMaps} map — cross-view check skipped, NCC floor only`, 'warn', 'Dense')
+    onLog(
+      `Depth filter: only ${nMaps} map — cross-view check skipped, only the correlation floor applies`,
+      'warn',
+      'Dense',
+    )
   }
   if (t.clampedMaps > 0) {
     onLog(
@@ -638,7 +642,7 @@ export function logFilterTotals(onLog, t, nMaps, cfg) {
   }
   onLog(
     `Depth filter: ${t.considered} px with depth → ${t.kept} kept (${pct(t.kept)}%); dropped ` +
-      `${t.lowNcc} NCC<${cfg.minNcc} (${pct(t.lowNcc)}%), ` +
+      `${t.lowNcc} with correlation < ${cfg.minNcc} (${pct(t.lowNcc)}%), ` +
       `${t.inconsistent} <${cfg.minConsistent} consistent views @${cfg.maxGeomCost}px (${pct(t.inconsistent)}%)` +
       `${cfg.angleOn ? `, ${t.lowParallax} consistent only at <${cfg.minGeomAngleDeg}° parallax (${pct(t.lowParallax)}%)` : ''}`,
     'info',

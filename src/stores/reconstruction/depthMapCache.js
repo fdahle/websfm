@@ -39,14 +39,14 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
         depthMaps.value = new Map()
       }
       log(
-        `Dense: ${pluralize(maps.length, 'depth map')} saved (${formatBytes(depthMapBytes(index.maps))}) ` +
-          `— reopening this project will not need a Stage A re-run`,
+        `${pluralize(maps.length, 'depth map')} saved (${formatBytes(depthMapBytes(index.maps))}) ` +
+          `— reopening this project will not compute them again`,
         'info',
         'Dense',
       )
     } catch (err) {
       // Non-fatal: the maps are live in memory, this run still works.
-      log(`Dense: could not save depth maps — ${err?.message ?? err}. They will be lost on reload.`, 'warn', 'Dense')
+      log(`Could not save depth maps — ${err?.message ?? err}. They will be lost on reload.`, 'warn', 'Dense')
     }
   }
 
@@ -127,8 +127,8 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
           depthMapsKey.value = mapsKey ? { mapsKey, cameraKeys } : null
         }
         log(
-          `Dense: ${pluralize(metas.length, 'depth map')} saved (${formatBytes(depthMapBytes(metas))}) as they finished ` +
-            `— reopening this project will not need a Stage A re-run`,
+          `${pluralize(metas.length, 'depth map')} saved (${formatBytes(depthMapBytes(metas))}) as they finished ` +
+            `— reopening this project will not compute them again`,
           'info',
           'Dense',
         )
@@ -166,7 +166,7 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     }
     if (isDepthIndexStale(index, mainSparseCloud())) {
       log(
-        `Dense: discarding ${pluralize(index.maps.length, 'saved depth map')} — they belong to an older ` +
+        `Discarding ${pluralize(index.maps.length, 'saved depth map')} — they belong to an older ` +
           `sparse reconstruction and no longer match the current model; recompute them`,
         'warn',
         'Dense',

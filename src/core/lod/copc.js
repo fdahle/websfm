@@ -462,7 +462,7 @@ export async function readCopcMeta(source, { createChunkDecoder, statsPoints = C
     }
     if (total !== h.count)
       onLog?.(
-        `COPC: the hierarchy holds ${total.toLocaleString()} points, the header says ${h.count.toLocaleString()} — using the hierarchy`,
+        `COPC: the hierarchy holds ${total.toLocaleString('en')} points, the header says ${h.count.toLocaleString('en')} — using the hierarchy`,
         'warn',
         'Import',
       )

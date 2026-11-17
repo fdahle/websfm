@@ -192,7 +192,7 @@ export function createCloudExports({
     if (isStreamed(cloud)) {
       if (applyGeoref || downsampleCell > 0) {
         log(
-          `Export: "${cloud.name}" is streamed, so it is written in its own coordinates` +
+          `"${cloud.name}" is streamed, so it is written in its own coordinates` +
             `${downsampleCell > 0 ? ', without a downsample' : ''}`,
           'info',
           'Export',
@@ -444,7 +444,7 @@ export function createCloudExports({
     ]
     downloadBlob(`${name}.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
     log(
-      `3D Tiles export: ${src.count.toLocaleString()} points, ` +
+      `3D Tiles export: ${src.count.toLocaleString('en')} points, ` +
         `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`,
       'success',
       'Export',
@@ -511,7 +511,7 @@ export function createCloudExports({
       : await store.exportCloudTiles(cloud, opts)
     downloadBlob(`${name}.zip`, res.blob)
     log(
-      `3D Tiles export: "${cloud.name}", ${res.points.toLocaleString()} points in ${res.contentTiles.toLocaleString()} tiles ` +
+      `3D Tiles export: "${cloud.name}", ${res.points.toLocaleString('en')} points in ${res.contentTiles.toLocaleString('en')} tiles ` +
         `(${res.levels} levels), ${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`,
       'success',
       'Export',
@@ -564,7 +564,7 @@ export function createCloudExports({
     )
     downloadBlob(`${name}.zip`, res.blob)
     log(
-      `3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString()} triangles in ${res.tiles.toLocaleString()} tiles ` +
+      `3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString('en')} triangles in ${res.tiles.toLocaleString('en')} tiles ` +
         `(${res.levels} levels${res.textured ? ', textured leaves' : ''}), ${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`,
       'success',
       'Export',
@@ -625,7 +625,7 @@ export function createCloudExports({
     ]
     downloadBlob(`${name}.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
     log(
-      `3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString()} triangles` +
+      `3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString('en')} triangles` +
         `${textured ? `, ${texture.pages.length} texture page${texture.pages.length === 1 ? '' : 's'}` : ''}, ` +
         `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`,
       'success',

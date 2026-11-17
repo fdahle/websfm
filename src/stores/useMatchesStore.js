@@ -21,7 +21,9 @@ import { RESIDENT_TUNING } from '../core/tuning.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
+import { useImagesStore } from './useImagesStore.js'
 import { pluralize } from '../core/textFormat.js'
+import { editCommand } from '../core/help/consoleEdits.js'
 
 const EMPTY_MATCHES = new Uint32Array(0)
 
@@ -333,7 +335,7 @@ export const useMatchesStore = registerProjectStore(
         } while (saveAgain)
       })()
         .catch((err) => {
-          log(`Matches: could not save — ${err?.message ?? err}`, 'warn', 'Matching')
+          log(`Saving the matches failed: ${err?.message ?? err}`, 'warn', 'Matching')
         })
         .finally(() => {
           saving = null
@@ -579,8 +581,10 @@ export const useMatchesStore = registerProjectStore(
       entry.enabled = !!enabled
       touch()
       save() // flags only: the matches buffers are reused
+      const nameOf = (uuid) => useImagesStore().images.find((img) => img.uuid === uuid)?.name ?? uuid
       log(`Pair ${enabled ? 'restored to' : 'excluded from'} reconstruction`, 'info', 'Matching', {
         channel: 'activity',
+        command: editCommand(`pair ${enabled ? 'enable' : 'disable'}`, [nameOf(entry.idA), nameOf(entry.idB)]),
       })
       return true
     }
@@ -619,11 +623,11 @@ export const useMatchesStore = registerProjectStore(
           matchesFile = doc.matchesFile
         } catch (err) {
           restored = []
-          log(`Matches: the saved match document is unreadable (${err.message}) — re-run matching`, 'error', 'Matching')
+          log(`The saved matches cannot be read (${err.message}) — run Match Features again`, 'error', 'Matching')
         }
       }
       matchStore.value = new Map(restored)
-      if (restored.length > 0) log(`Matches restored: ${pluralize(restored.length, 'pair')}`, 'success', 'Matching')
+      if (restored.length > 0) log(`Matches restored: ${pluralize(restored.length, 'pair')}`, 'info', 'Matching')
     }
 
     // Reset in-memory matches. Only purge deletes the persisted match files — a plain
@@ -647,7 +651,10 @@ export const useMatchesStore = registerProjectStore(
         opfs.clearAllMatches(projects.currentProjectId).catch(() => {})
       }
       if (purge && removed) {
-        log(`Removed ${removed} match pair${removed === 1 ? '' : 's'}`, 'info', 'Matching', { channel: 'activity' })
+        log(`Removed ${removed} match pair${removed === 1 ? '' : 's'}`, 'info', 'Matching', {
+          channel: 'activity',
+          command: 'matches remove',
+        })
       }
     }
 

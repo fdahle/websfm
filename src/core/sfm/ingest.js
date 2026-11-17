@@ -44,10 +44,10 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       const fit = fitFiducialTransform(obs, cal.transform || 'affine', { spacingMm: cal.reseau?.spacingMm })
       if (!fit) {
         log(
-          `${img.name} — fiducial fit failed (${pluralize(obs.length, 'usable mark')}, ` +
-            `need ≥3); falling back to standard intrinsics`,
+          `${img.name}: fiducial fit failed (${pluralize(obs.length, 'usable mark')}, ` +
+            `needs 3 or more); using the sensor's calibration without fiducials`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         continue
       }
@@ -59,15 +59,15 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
             ? ` over ${pluralize(fit.crosses, 'reseau cross', 'reseau crosses')}, film deformation ` +
               `${fit.affineRmsUm.toFixed(1)}µm RMS corrected`
             : ''),
-        'info',
-        'Reconstruction',
+        'debug',
+        'Sparse',
       )
       if (fit.rmsUm > 0.5 * pitchUm) {
         log(
           `${img.name} — fiducial residual ${fit.rmsUm.toFixed(1)}µm exceeds ` +
             `½ pixel (${(0.5 * pitchUm).toFixed(1)}µm) — check the clicked marks`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
       }
       const sid = img.sensorId ?? '__nosensor__'
@@ -90,29 +90,29 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       const yUp = reflected * 2 > entries.length
       if (yUp) {
         log(
-          `sensor ${sid} — fiducial coordinates are y-up against y-down scan rows; ` +
+          `Sensor ${sid} — fiducial coordinates are y-up against y-down scan rows; ` +
             'the canonical frame flips y so the camera stays proper (not mirrored)',
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       }
       const frame = canonicalFrame(fiducials, pitchMm, { yUp })
       if (!frame) {
         log(
-          `sensor ${sid} — could not build canonical frame (need ≥3 marks); ` +
-            `film images fall back to standard intrinsics`,
+          `Sensor ${sid} — could not build canonical frame (need ≥3 marks); ` +
+            `its film scans use the sensor's calibration without fiducials`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
         continue
       }
       const source = `fiducial interior orientation (${fiducials.focalMm}mm ÷ ${(pitchMm * 1000).toFixed(2)}µm/px)`
       log(
-        `sensor ${sid} — canonical frame ${frame.width}×${frame.height}px, ` +
+        `Sensor ${sid} — canonical frame ${frame.width}×${frame.height}px, ` +
           `K fx=${frame.K.fx.toFixed(1)} cx=${frame.K.cx.toFixed(1)} cy=${frame.K.cy.toFixed(1)} ` +
           `(median pitch ${(pitchMm * 1000).toFixed(2)}µm/px over ${pluralize(entries.length, 'image')})`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
       for (const { img, fit } of entries) {
         const scanTransform = fit.forward ? fit : fit.A
@@ -138,9 +138,9 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       }
       if (remapped) {
         log(
-          `remapped ${pluralize(remapped, 'GCP observation')} on film images ` + `into the canonical frame`,
+          `Remapped ${pluralize(remapped, 'GCP observation')} on film images ` + `into the canonical frame`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       }
     }
@@ -178,7 +178,7 @@ export function resolveIntrinsics({ imgs, intrinsicsRecord, log }) {
       `K[${img.name}] fx=${K.fx.toFixed(1)} fy=${K.fy.toFixed(1)} ` +
         `cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} — ${K.source}${implied}`,
       'debug',
-      'Reconstruction',
+      'Sparse',
     )
     // A real principal point sits within a few % of the image centre. A cx/cy
     // far outside that is virtually always a convention mix-up — Metashape and
@@ -192,12 +192,12 @@ export function resolveIntrinsics({ imgs, intrinsicsRecord, log }) {
       if (!ppWarned.has(key)) {
         ppWarned.add(key)
         log(
-          `principal point cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} is far from ` +
+          `Principal point cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} is far from ` +
             `the image centre (${(iw / 2).toFixed(0)}, ${(ih / 2).toFixed(0)}) — the sensor table takes ` +
-            `ABSOLUTE pixels. If this calibration came from Metashape (which reports centre offsets), ` +
+            `absolute pixels (from the image corner). If this calibration came from Metashape (which reports centre offsets), ` +
             `enter ${(iw / 2).toFixed(1)} + cx and ${(ih / 2).toFixed(1)} + cy instead.`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
       }
     }
@@ -205,11 +205,11 @@ export function resolveIntrinsics({ imgs, intrinsicsRecord, log }) {
     // ~9% focal error on the CA…V set). Flag it so the user checks pitch/format.
     if (K.impliedFilmWidthMm != null && K.filmWidthOk === false) {
       log(
-        `K[${img.name}] implied film width ${K.impliedFilmWidthMm.toFixed(0)}mm ` +
-          `is not a standard aerial format (~230/240mm) — check the scan pixel pitch, or use the ` +
-          `film/sensor-format (mm) field instead of pixel size.`,
+        `${img.name}: the calibration implies a film width of ${K.impliedFilmWidthMm.toFixed(0)} mm, which ` +
+          `is not a standard aerial format (about 230 or 240 mm) — check the scan's pixel size, or enter the ` +
+          `film format (mm) in the sensor table instead of the pixel size.`,
         'warn',
-        'Reconstruction',
+        'Sparse',
       )
     }
   }
@@ -292,19 +292,19 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
   }
   if (undistortedImgs > 0) {
     log(
-      `undistorted keypoints on ${undistortedImgs}/${pluralize(imgs.length, 'image')} ` +
+      `Undistorted keypoints on ${undistortedImgs}/${pluralize(imgs.length, 'image')} ` +
         `(lens distortion removed at ingest — pipeline stays pinhole; ` +
         `mean shift ${(shiftSum / Math.max(1, shiftN)).toFixed(2)}px, max ${shiftMax.toFixed(2)}px)`,
       'info',
-      'Reconstruction',
+      'Sparse',
     )
   }
   if (dropped > 0) {
     log(
-      `dropped ${dropped} of ${pluralize(fisheyeKps, 'fisheye keypoint')} more than ${FISHEYE_MAX_RAY_DEG}° off-axis ` +
+      `Dropped ${dropped} of ${pluralize(fisheyeKps, 'fisheye keypoint')} more than ${FISHEYE_MAX_RAY_DEG}° off-axis ` +
         '(too stretched in the pinhole frame to measure reliably)',
       'info',
-      'Reconstruction',
+      'Sparse',
     )
   }
   return { anyCalibratedDistortion, undistortedUuids, recordedByUuid }
@@ -368,9 +368,9 @@ export function refitMovedPairs({ donePairs, bridgePairs = [], movedUuids, image
     }
     if (droppedMatches > 0) {
       log(
-        `dropped ${pluralize(droppedMatches, 'match', 'matches')} on fisheye keypoints too far off-axis`,
+        `Dropped ${pluralize(droppedMatches, 'match', 'matches')} on fisheye keypoints too far off-axis`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
     if (pending > 0) {
@@ -378,7 +378,7 @@ export function refitMovedPairs({ donePairs, bridgePairs = [], movedUuids, image
         `F of ${pluralize(pending, 'pair')} re-fitted on the moved keypoints when first read` +
           `${skipped ? ` (${skipped} skipped)` : ''} (the distorted-space fit is stale)`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
   }

@@ -78,10 +78,10 @@ export async function refineModel(ctx) {
     const resid = modelResiduals()
     const nr = resid.length || 1
     log(
-      `${label} — ${((100 * resid.filter((r) => r > 5).length) / nr).toFixed(1)}% obs over 5px, ` +
+      `${label} — ${((100 * resid.filter((r) => r > 5).length) / nr).toFixed(1)}% of observations over 5 px, ` +
         `${((100 * resid.filter((r) => r > 20).length) / nr).toFixed(1)}% over 20px`,
       'info',
-      'Reconstruction',
+      'Sparse',
     )
   }
 
@@ -121,10 +121,10 @@ export async function refineModel(ctx) {
           `${pluralize(res.rounds, 'round')}, ≤${filterMaxReprojPx.toFixed(1)}px) — ${pluralize(res.lifted, 'point')} lifted to ≥3 views; ` +
           `track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ${after.t2}/${after.t3}/${after.t4}`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     } else {
-      log(`${label} track completion found nothing to add`, 'debug', 'Reconstruction')
+      log(`${label} track completion found nothing to add`, 'debug', 'Sparse')
     }
     return total
   }
@@ -152,13 +152,13 @@ export async function refineModel(ctx) {
     if (defaultKCount > 0 && selfCalRecord.requested !== 'none' && regUuids.some(focalIsGuess)) {
       const mixed = !regUuids.every(focalIsGuess)
       const pre = await runBundleAdjust(
-        'focal pre-solve (default-FOV intrinsics)',
+        'focal pre-solve (default field of view)',
         baIterations,
         'f',
         mixed ? { refineOnly: focalIsGuess } : {},
       )
       if (pre && mixed) {
-        await runBundleAdjust('focal pre-solve re-settle (calibrated intrinsics kept)', baIterations, 'none')
+        await runBundleAdjust('focal pre-solve re-settle (entered calibration kept)', baIterations, 'none')
       }
     }
 
@@ -178,13 +178,13 @@ export async function refineModel(ctx) {
     })
     if (preThr.adaptive) {
       log(
-        `pre-BA gross cleanup relaxed ${preThr.absolutePx.toFixed(1)}px → ` +
+        `Cleanup before bundle adjustment relaxed ${preThr.absolutePx.toFixed(1)}px → ` +
           `${preThr.px.toFixed(1)}px — the absolute gate would have removed over ` +
           `${(100 * CLEANUP_THRESHOLD_DEFAULTS.preBaMaxRemovedFrac).toFixed(0)}% of observations. ` +
-          `The residual distribution is shifted as a whole, which points at the intrinsics ` +
+          `The residual distribution is shifted as a whole, which points at the calibration ` +
           `(focal length / principal point), not at bad tracks.`,
         'warn',
-        'Reconstruction',
+        'Sparse',
       )
     }
     const preClean = filterModelTracks({
@@ -192,11 +192,11 @@ export async function refineModel(ctx) {
       minTriAngleDeg: filterMinTriAngleDeg,
     })
     log(
-      `pre-BA gross cleanup (≤${preThr.px.toFixed(1)}px, ` +
-        `≥${filterMinTriAngleDeg}° parallax) — removed ${preClean.obsRemoved} obs + ` +
+      `Cleanup before bundle adjustment (≤${preThr.px.toFixed(1)}px, ` +
+        `≥${filterMinTriAngleDeg}° parallax) — removed ${preClean.obsRemoved} observations and ` +
         `${preClean.ptsRemoved} points; ${tracks.liveCount()} points remain`,
       preClean.obsRemoved || preClean.ptsRemoved ? 'info' : 'debug',
-      'Reconstruction',
+      'Sparse',
     )
     refreshTracks()
 
@@ -232,28 +232,28 @@ export async function refineModel(ctx) {
       if (added || merged || completed) {
         const after = trackHist(tracks)
         log(
-          `retriangulation +${pluralize(added, 'point')}, merged ${pluralize(merged, 'split track')}` +
+          `Retriangulation +${pluralize(added, 'point')}, merged ${pluralize(merged, 'split track')}` +
             `${lowParallax ? `, rejected ${pluralize(lowParallax, 'low-parallax candidate')}` : ''}; ` +
             `${tracks.liveCount()} points`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
         log(
-          `track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ` +
+          `Track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ` +
             `${after.t2}/${after.t3}/${after.t4}`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
         await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none', { warm: true })
       } else if (lowParallax) {
         log(
-          `retriangulation found no stable missed structure — rejected ` +
+          `Retriangulation found no stable missed structure — rejected ` +
             `${pluralize(lowParallax, 'candidate point')} below ${filterMinTriAngleDeg}° parallax`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       } else {
-        log('retriangulation found no missed structure', 'debug', 'Reconstruction')
+        log('Retriangulation found no missed structure', 'debug', 'Sparse')
       }
       memoryMark('first BA + retriangulation')
     }
@@ -312,13 +312,13 @@ export async function refineModel(ctx) {
         guidedRecord = [...(guidedRecord ?? []), { pass: round, ...g, gatePx, before, after }]
         guidedObs = g.added
         log(
-          `guided track extension (pass ${round}) +${pluralize(g.added, 'observation')} on ${pluralize(g.pointsExtended, 'point')} — ` +
+          `Guided track extension (pass ${round}) +${pluralize(g.added, 'observation')} on ${pluralize(g.pointsExtended, 'point')} — ` +
             `${g.lifted} lifted from 2 to ≥3 views (≤${gatePx.toFixed(1)}px, descriptor ≤ ` +
             `${g.tau?.toFixed(3) ?? '–'} measured from ≥3-view tracks, ratio ${cfg.guidedRatio ?? 0.8}; ${pluralize(g.windows, 'search window')}, ` +
             `${pluralize(g.proposals, 'proposal')}, searched on ${pluralize(g.threads, 'thread')}); track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ` +
             `${after.t2}/${after.t3}/${after.t4}`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
         memoryMark('guided extension')
       } else if (round === 2 && cfg.guidedSkippedForMemory) {
@@ -327,11 +327,11 @@ export async function refineModel(ctx) {
         const m = cfg.guidedSkippedForMemory
         guidedRecord = [{ pass: round, skipped: 'memory', ...m }]
         log(
-          `guided track extension skipped — the memory preflight projected the worker past its ` +
+          `Guided track extension skipped — the memory preflight projected the worker past its ` +
             `ceiling with it on${m.reason ? ` (${m.reason})` : ''}; the model is complete without it, ` +
             'with fewer ≥3-view tracks',
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
       }
       // Same quantile floor as the pre-BA pass, but a deliberately loose bound: these
@@ -342,10 +342,10 @@ export async function refineModel(ctx) {
       })
       if (thr.adaptive) {
         log(
-          `track filter pass ${round} relaxed ${maxPx.toFixed(1)}px → ${thr.px.toFixed(1)}px — ` +
-            `the absolute gate would have removed over half the observations; check the intrinsics`,
+          `Track filter pass ${round} relaxed ${maxPx.toFixed(1)}px → ${thr.px.toFixed(1)}px — ` +
+            `the absolute gate would have removed over half the observations; check the calibration`,
           'warn',
-          'Reconstruction',
+          'Sparse',
         )
       }
       const { obsRemoved, ptsRemoved } = filterModelTracks({
@@ -353,10 +353,10 @@ export async function refineModel(ctx) {
         minTriAngleDeg: filterMinTriAngleDeg,
       })
       log(
-        `track filter pass ${round} (≤${thr.px.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — ` +
-          `removed ${obsRemoved} obs + ${ptsRemoved} points; ${tracks.liveCount()} points remain`,
+        `Track filter pass ${round} (≤${thr.px.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — ` +
+          `removed ${obsRemoved} observations and ${ptsRemoved} points; ${tracks.liveCount()} points remain`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
       // Staged self-cal (WS2): under 'auto' the post-filter passes escalate the refined
       // terms (k2 / cx,cy / k3, then k4 on a four-term fisheye) as the camera + observation counts clear each gate; an
@@ -379,10 +379,10 @@ export async function refineModel(ctx) {
         refineMode = stagedSelfCalTerms(counts)
         const deferred = stagedSelfCalDeferred(counts)
         log(
-          `post-filter pass ${round} self-cal terms '${refineMode}'` +
+          `Post-filter pass ${round} self-cal terms '${refineMode}'` +
             `${deferred.length ? ` — deferred ${deferred.join('; ')}` : ' — all terms unlocked'}`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       }
       // WS-C1: radial distortion is identifiable only from multi-view track redundancy,
@@ -400,10 +400,10 @@ export async function refineModel(ctx) {
           const next = ident.scope === 'all' ? 'none' : withoutDistortionTerms(refineMode)
           if (next !== refineMode) {
             log(
-              `post-filter pass ${round} self-cal ${next === 'none' ? 'skipped' : `reduced to '${next}'`} — ` +
+              `Post-filter pass ${round} self-cal ${next === 'none' ? 'skipped' : `reduced to '${next}'`} — ` +
                 `${ident.reason}`,
               'info',
-              'Reconstruction',
+              'Sparse',
             )
           }
           refineMode = next
@@ -420,10 +420,10 @@ export async function refineModel(ctx) {
       if (unchanged && prev?.converged && prev.mode === refineMode) {
         selfCalRecord.passes.push({ pass: round, mode: refineMode, reducedReason, skipped: 'unchanged' })
         log(
-          `post-filter bundle adjustment ${round} skipped — nothing changed since the last solve, ` +
+          `Post-filter bundle adjustment ${round} skipped — nothing changed since the last solve, ` +
             `which converged with the same terms ('${refineMode}')`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       } else {
         selfCalRecord.passes.push({ pass: round, mode: refineMode, reducedReason })
@@ -442,7 +442,7 @@ export async function refineModel(ctx) {
           log(
             `${label} again without k4 — the self-cal guard refused the k4 fit; k4 keeps its value for this run`,
             'info',
-            'Reconstruction',
+            'Sparse',
           )
           selfCalRecord.passes.push({ pass: round, mode: withoutK4, reducedReason: 'k4 refused by the self-cal guard' })
           await runBundleAdjust(`${label} (without k4)`, baIterations, withoutK4, { warm: true, lensSigma: true })
@@ -469,20 +469,20 @@ export async function refineModel(ctx) {
       guidedRecord.at(-1).audit = audit
       const f = (v) => (v == null ? '–' : v.toFixed(2))
       log(
-        `guided track extension audit — ${audit.survived}/${pluralize(audit.proposed, 'added observation')} survived the ` +
-          `filter and BA; their residuals median ${f(audit.medianPx)}px, p90 ${f(audit.p90Px)}px vs every other ` +
+        `Guided track extension audit — ${audit.survived}/${pluralize(audit.proposed, 'added observation')} survived the ` +
+          `filter and bundle adjustment; their residuals median ${f(audit.medianPx)}px, p90 ${f(audit.p90Px)}px vs every other ` +
           `observation's ${f(audit.restMedianPx)}px / ${f(audit.restP90Px)}px`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
 
-    log('bundle adjustment + filtering complete', 'success', 'Reconstruction')
+    log('Bundle adjustment + filtering complete', 'info', 'Sparse')
   } else {
     log(
-      `bundle adjustment skipped (cameras=${cameras.size}, ` + `points=${tracks.liveCount()}, iters=${baIterations})`,
+      `Bundle adjustment skipped (cameras=${cameras.size}, ` + `points=${tracks.liveCount()}, iters=${baIterations})`,
       'debug',
-      'Reconstruction',
+      'Sparse',
     )
   }
   return { guidedRecord, trackCompletionRecord }
@@ -507,22 +507,22 @@ export function pruneFinalTracks({ cfg, tracks, refreshTracks, keypointsAt = nul
   if (finalTrackPrune.applied) {
     refreshTracks()
     log(
-      `final track-quality cleanup — removed ` +
+      `Final track-quality cleanup — removed ` +
         `${pluralize(finalTrackPrune.removed, 'uncorroborated 2-view point')}; ${pluralize(finalTrackPrune.supported, 'point')} with ≥${finalMinTrackViews} views remain` +
         (finalTrackPrune.keptForCoverage
           ? `, plus ${pluralize(finalTrackPrune.keptForCoverage, '2-view point')} kept as the only ` +
             'coverage of their image area'
           : ''),
       finalTrackPrune.removed ? 'info' : 'debug',
-      'Reconstruction',
+      'Sparse',
     )
   } else if (finalTrackPrune.total > 0 && finalMinTrackViews > 2) {
     log(
-      `final track-quality cleanup kept 2-view points — only ${finalTrackPrune.supported}/` +
+      `Final track-quality cleanup kept 2-view points — only ${finalTrackPrune.supported}/` +
         `${finalTrackPrune.total} (${(100 * finalTrackPrune.supportedShare).toFixed(1)}%) have ` +
         `≥${finalMinTrackViews} views, below the safe automatic-pruning floor`,
       'warn',
-      'Reconstruction',
+      'Sparse',
     )
   }
   return finalTrackPrune

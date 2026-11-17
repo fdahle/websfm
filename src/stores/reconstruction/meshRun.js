@@ -76,6 +76,7 @@ export function createMeshRun({
   // genuinely non-destructive: terminating a worker cannot strand detached
   // source buffers. Upserts a single kind:'mesh' cloud.
   async function generateMesh(settings = {}, onProgress) {
+    const tRun = performance.now()
     // replaceMain: Mesh ▸ Replace the main mesh (where the mesh goes, not how it is built).
     const { sourceId, replaceMain, ...meshSettings } = settings
     const pick = sourceId != null ? meshSources.value.find((s) => s.id === sourceId) : meshSource.value
@@ -84,7 +85,7 @@ export function createMeshRun({
       log(
         sourceId != null
           ? 'Mesh: the chosen dense cloud is gone or has no normals'
-          : 'Mesh: build a dense point cloud (with normals) first',
+          : 'Mesh: build a dense cloud (with normals) first',
         'warn',
         'Products',
       )
@@ -103,7 +104,7 @@ export function createMeshRun({
     // has its own spacing, which the worker estimates.
     const mergeCell = dense.imported ? 0 : (denseSummary.value?.mergeCell ?? 0)
     log(
-      `Mesh: source "${dense.name ?? 'Dense'}" (${dense.count.toLocaleString()} points` +
+      `Mesh: source "${dense.name ?? 'Dense'}" (${dense.count.toLocaleString('en')} points` +
         `${dense.derived ? ', edited' : ''}${dense.imported ? ', imported' : ''})`,
       'info',
       'Products',
@@ -139,26 +140,36 @@ export function createMeshRun({
                 [posCopy, colCopy, nrmCopy].reduce((n, a) => n + (a && !isSharedArray(a) ? a.byteLength : 0), 0),
             })
           : await workerMeshify(input, {
-              onLog: (m, l, c) => log(m, l, c),
+              onLog: (m, l, c) => log(m, l, c ?? 'Products'),
               onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
               transfer,
             })
       if (!mesh || !mesh.nVerts) {
-        log('Mesh: Poisson produced no surface — try a lower depth or check the cloud/normals', 'warn', 'Products')
+        log(
+          'Mesh: Poisson made no surface — try a lower Octree depth, or check the cloud and its normals',
+          'warn',
+          'Products',
+        )
         reconStatus.value = 'done'
         return
       }
-      upsertMeshCloud(mesh, {
+      const built = upsertMeshCloud(mesh, {
         sourceId: dense.id,
         sourceName: dense.name ?? null,
         settings: meshSettings,
         replace: !!replaceMain,
       })
       reconStatus.value = 'done'
+      log(
+        `Mesh "${built.name}": ${mesh.count.toLocaleString('en')} triangles from "${dense.name}" in ` +
+          `${((performance.now() - tRun) / 1000).toFixed(1)} s`,
+        'success',
+        'Products',
+      )
       await save()
     } catch (err) {
       if (cancelled(err, 'Mesh')) return
-      log(`Mesh error: ${err?.message ?? err}`, 'error', 'Products')
+      log(`Mesh failed: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
     }
   }
@@ -184,7 +195,7 @@ export function createMeshRun({
   // the largest tile (each a wasm heap that keeps its high-water mark), and worker 0 joins
   // them. Resolves to { mesh }.
   async function meshOnPool(input, transfer, settings, onProgress, { heldBytes = 0 } = {}) {
-    const onLog = (m, l, c) => log(m, l, c)
+    const onLog = (m, l, c) => log(m, l, c ?? 'Products')
     const runId = `mesh-${Date.now().toString(36)}`
     const prep = await workerMeshPrepare(
       { ...input, runId },

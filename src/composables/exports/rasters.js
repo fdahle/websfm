@@ -100,7 +100,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
         from: { code: info.crs, def: fromDef },
         to: { code: outputCrs, def: toDef, epsg, geographic: isGeographic(outputCrs) },
       },
-      { transfer, onLog: (m, l, c) => log(m, l, c) },
+      { transfer, onLog: (m, l, c) => log(m, l, c ?? 'Export') },
     )
     const name = exportFileName(fileName, defaultExportName(kind, { base: projectBase(), crs: outputCrs }))
     downloadBlob(`${name}.tif`, blob, 'image/tiff')
@@ -153,7 +153,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     }
     if (full && format !== 'png') {
       // The ASCII grid of the full grid, written from the COG in row bands.
-      const blob = await workerDemAscii({ dem: demRef(d), nodata }, { onLog: (m, l, c) => log(m, l, c) })
+      const blob = await workerDemAscii({ dem: demRef(d), nodata }, { onLog: (m, l, c) => log(m, l, c ?? 'Export') })
       downloadBlob(`${name}.asc`, blob, 'text/plain;charset=utf-8')
       if (info.crs) downloadBlob(`${name}.prj`, prjText(info), 'text/plain;charset=utf-8')
       log(`DEM export: ASCII grid of the full ${d.fullWidth}×${d.fullHeight} grid`, 'success', 'Export')
@@ -211,7 +211,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
   async function exportTiles(o, { format, tileFormat, jpegQuality, fileName }) {
     const info = crsInfo(o)
     if (!info.crs) {
-      log('Ortho export: an orthophoto in the local frame has no place on a web map', 'warn', 'Export')
+      log('Orthophoto export: an orthophoto in the local frame has no place on a web map', 'warn', 'Export')
       return
     }
     await ensureProjection(info.crs)
@@ -250,7 +250,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
         container: format,
         name: projectBase(),
       },
-      { onLog: (m, l, c) => log(m, l, c) },
+      { onLog: (m, l, c) => log(m, l, c ?? 'Export') },
     )
     downloadBlob(`${name}.${format === 'mbtiles' ? 'mbtiles' : 'zip'}`, blob)
     log(
@@ -285,10 +285,10 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     const name = exportFileName(fileName, defaultExportName('ortho', { format, base: projectBase() }))
     if (format === 'cog') {
       downloadBlob(`${name}.tif`, o.cog, 'image/tiff')
-      log('Ortho export: Cloud-Optimized GeoTIFF (the stored file, DEFLATE)', 'success', 'Export')
+      log('Orthophoto export: Cloud-Optimized GeoTIFF (the stored file, DEFLATE)', 'success', 'Export')
       return
     }
-    const onLog = (m, l, c) => log(m, l, c)
+    const onLog = (m, l, c) => log(m, l, c ?? 'Export')
     if (format === 'geotiff') {
       const deflate = compression === 'deflate'
       const { blob } = await exportOrthoFile(
@@ -379,7 +379,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
         format: download,
         crs: info.crs,
       },
-      { transfer, onLog: (m, l, c) => log(m, l, c) },
+      { transfer, onLog: (m, l, c) => log(m, l, c ?? 'Export') },
     )
     const unit = unitLabelOf(grid)
     let layer = null
@@ -394,7 +394,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       .filter(Boolean)
       .join(' and ')
     log(
-      `Contours: ${lines.toLocaleString()} lines over ${levels} levels every ${interval} ${unit} → ${where}`,
+      `Contours: ${lines.toLocaleString('en')} lines over ${levels} levels every ${interval} ${unit} → ${where}`,
       'success',
       'Export',
     )
@@ -420,7 +420,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
     const { input, transfer } = demToolInput(grid)
     const { rasters } = await workerDemTool(
       { tool: 'terrain', ...input, settings: { products, units: slopeUnits, azimuth, altitude, multidirectional, k } },
-      { transfer, onLog: (m, l, c) => log(m, l, c) },
+      { transfer, onLog: (m, l, c) => log(m, l, c ?? 'Export') },
     )
     const info = crsInfo(grid)
     const deflate = compression === 'none' ? null : deflateBytes
@@ -481,7 +481,7 @@ export function createRasterExports({ addLineSet, crsInfo, dem, log, ortho, proj
       kind === 'ortho' || !input.grid
         ? []
         : [input.grid.data.buffer, ...(input.grid.mask ? [input.grid.mask.buffer] : [])]
-    const { raster } = await workerDemTool(input, { transfer: buffers, onLog: (m, l, c) => log(m, l, c) })
+    const { raster } = await workerDemTool(input, { transfer: buffers, onLog: (m, l, c) => log(m, l, c ?? 'Export') })
     if (!raster) {
       log('Clip: the polygon does not overlap the raster', 'warn', 'Export')
       return

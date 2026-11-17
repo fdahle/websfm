@@ -284,21 +284,21 @@ export async function selectInitPair(
       `${pluralize(eligible.length - fresh.length, 'seed candidate')} skipped — both images already registered by an ` +
         `earlier attempt${fresh.length ? '' : ' (none left, so they stay in)'}`,
       'info',
-      'Reconstruction',
+      'Sparse',
     )
   }
   const ranked = fresh.length ? fresh : eligible
   const candidates = ranked.slice(0, initCandidates)
 
   log(
-    `${pluralize(candidates.length, 'init candidate')} of ${donePairs.length} done pairs ` +
+    `${pluralize(candidates.length, 'candidate seed pair')} of ${donePairs.length} matched pairs ` +
       `(≥${minInitInliers} inliers, need ≥${minInitAngleDeg}° parallax)`,
     'info',
-    'Reconstruction',
+    'Sparse',
   )
 
   if (candidates.length === 0) {
-    log('no valid matched pair found — check inlier counts and metadata', 'warn', 'Reconstruction')
+    log('No matched pair can start the model — check the matches and the focal lengths of the photos', 'warn', 'Sparse')
     return { status: 'idle' }
   }
 
@@ -462,7 +462,7 @@ export async function selectInitPair(
       const nameA = imageByUuid(entry.idA)?.name ?? entry.idA
       const nameB = imageByUuid(entry.idB)?.name ?? entry.idB
       if (!init.ok) {
-        log(`candidate ${nameA} ↔ ${nameB} rejected — ${init.reason}`, 'debug', 'Reconstruction')
+        log(`Candidate ${nameA} ↔ ${nameB} rejected — ${init.reason}`, 'debug', 'Sparse')
         continue
       }
       // Cheirality survival = how many triangulated points are in front of both
@@ -472,10 +472,10 @@ export async function selectInitPair(
       const pct = tri ? ((100 * kept) / tri).toFixed(0) : '0'
       if (kept < 10) {
         log(
-          `candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts ` +
+          `Candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts ` +
             `survived cheirality (${pct}%), need ≥10`,
           'debug',
-          'Reconstruction',
+          'Sparse',
         )
         continue
       }
@@ -490,9 +490,9 @@ export async function selectInitPair(
       // Log the score AND its factors: a seed decision that can only be re-derived by
       // hand from raw candidate numbers is what made the B4 post-mortem manual.
       log(
-        `candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, ` +
+        `Candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, ` +
           `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, ` +
-          `init reproj median ${init.reproj.median.toFixed(2)}px (E from ${init.eSource}` +
+          `initial reprojection median ${init.reproj.median.toFixed(2)}px (E from ${init.eSource}` +
           `${init.twinChoice ? `, planar twin settled by ${TWIN_BY[init.twinChoice]}` : ''}` +
           `${init.twinOf ? ` over ${init.twinOf.eSource}: depth spread ${init.depthCv.toFixed(3)} vs ${init.twinOf.depthCv.toFixed(3)}` : ''}), ` +
           `KᵀFK σ2/σ1 ${candRatio.toFixed(2)}, ` +
@@ -501,7 +501,7 @@ export async function selectInitPair(
           `connectivity ×${connectivityHealth(init).toFixed(2)}, ` +
           `growth ×${growthHealth(init).toFixed(2)} from ${pluralize(init.growth.views, 'PnP-ready view')})`,
         'debug',
-        'Reconstruction',
+        'Sparse',
       )
       viable.push(init)
     }
@@ -556,11 +556,11 @@ export async function selectInitPair(
     }
     const widest = viable.reduce((m, v) => Math.max(m, v.angle), 0)
     log(
-      `no candidate among ${probed} probed clears ${minInitAngleDeg}° parallax (widest ${widest.toFixed(2)}°) — ` +
+      `No candidate among ${probed} probed clears ${minInitAngleDeg}° parallax (widest ${widest.toFixed(2)}°) — ` +
         `widening the search: next ${pluralize(batch.length, 'pair')} by inlier count` +
         (skipped ? `, ${skipped} skipped as near-coincident with already-probed views` : ''),
       'info',
-      'Reconstruction',
+      'Sparse',
     )
     if (!batch.length) break
     probed += batch.length
@@ -578,15 +578,15 @@ export async function selectInitPair(
     const rest = adequate.filter((v) => v !== best)
     const second = rest.length ? rest.reduce((a, b) => (b.score > a.score ? b : a)) : null
     log(
-      `selected seed ${best.nameA} ↔ ${best.nameB} of ` +
+      `Selected seed ${best.nameA} ↔ ${best.nameB} of ` +
         `${pluralize(adequate.length, 'pair')} over ${minInitAngleDeg}° parallax (score ${best.score.toFixed(1)}: ` +
         `${best.cheiralKept} pts, ${best.angle.toFixed(2)}° parallax, ` +
-        `init reproj median ${best.reproj.median.toFixed(2)}px, ` +
+        `initial reprojection median ${best.reproj.median.toFixed(2)}px, ` +
         `connectivity ${connectivityHealth(best).toFixed(2)} at graph degree ${pairDegree(best.entry)} ` +
         `vs median ${medianDegree}, ${pluralize(best.growth.views, 'PnP-ready view')})` +
         (second ? ` — ahead of ${second.nameA} ↔ ${second.nameB} at ${second.score.toFixed(1)}` : ''),
       'info',
-      'Reconstruction',
+      'Sparse',
     )
   } else if (viable.length) {
     best = viable.reduce((a, b) => (b.angle > a.angle ? b : a))
@@ -609,9 +609,9 @@ export async function selectInitPair(
 
   if (!best) {
     log(
-      'pose recovery failed for all candidate pairs ' + '(toggle "Detail" in the console to see per-candidate reasons)',
+      'No candidate pair gave a relative pose to start the model from (turn on Detail in the console for the reason per pair)',
       'error',
-      'Reconstruction',
+      'Sparse',
     )
     return { status: 'error' }
   }
@@ -622,7 +622,7 @@ export async function selectInitPair(
     const trackFloor = settings.filterMinTriAngleDeg
     const doomed = Number.isFinite(trackFloor) && best.angle < trackFloor
     log(
-      `best initial parallax is only ${best.angle.toFixed(2)}° ` +
+      `Best initial parallax is only ${best.angle.toFixed(2)}° ` +
         `(< ${minInitAngleDeg}°) — ` +
         (doomed
           ? `below the ${trackFloor}° the track filter requires, so this seed's points will be filtered out and ` +
@@ -630,7 +630,7 @@ export async function selectInitPair(
             `a turn on the spot, or a very distant scene.`
           : 'the sparse cloud may look flat/linear'),
       'warn',
-      'Reconstruction',
+      'Sparse',
     )
   }
 

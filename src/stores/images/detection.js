@@ -57,7 +57,7 @@ export function createDetection({
     // the console *source* is the pipeline stage 'Detection', not the detector.
     const tag = detectorLabel(settings.detector)
     img.kpStatus = 'running'
-    log(`${tag} start: ${img.name}`, 'info', 'Detection')
+    log(`${tag} start: ${img.name}`, 'debug', 'Detection')
     try {
       // A TIFF's lossless compute PNG may still be encoding (ingest sets the
       // display JPEG first) — wait for it, or reject if its transcode failed,
@@ -97,7 +97,7 @@ export function createDetection({
           ...(maxOrientations != null ? { maxOrientations } : {}),
           ...(capRule != null ? { capRule } : {}),
         },
-        { onLog: (msg) => log(msg, 'info', 'Detection') },
+        { onLog: (msg, l = 'info') => log(msg, l, 'Detection') },
       )
       // The worker can't be interrupted mid-image, so a cancel pressed while this
       // one was in flight lands here with a finished result — drop it rather than
@@ -105,7 +105,7 @@ export function createDetection({
       if (shouldCancel?.()) {
         const found = images.value.find((i) => i.id === id)
         if (found) found.kpStatus = hadKeypoints ? 'done' : null
-        log(`${tag} discarded (cancelled): ${img.name}`, 'warn', 'Detection')
+        log(`${tag} discarded (cancelled): ${img.name}`, 'debug', 'Detection')
         return
       }
       const found = images.value.find((i) => i.id === id)
@@ -173,7 +173,7 @@ export function createDetection({
         }
         // `_matchAgain`: the caller matches this image's pairs again (matchAll's Detect gaps again).
         if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid, { quiet: !!settings._matchAgain })
-        log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'Detection')
+        log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'debug', 'Detection')
         // Detailed diagnostics (debug level): the working resolution actually
         // used, how many features the cap discarded, mask drops, and the response
         // spread (the signal for tuning maxKeypoints / contrastThreshold).
@@ -241,10 +241,10 @@ export function createDetection({
       // revert the image to its prior state instead of flagging an error.
       if (shouldCancel?.()) {
         if (found) found.kpStatus = hadKeypoints ? 'done' : null
-        log(`${tag} aborted (cancelled): ${img.name}`, 'warn', 'Detection')
+        log(`${tag} aborted (cancelled): ${img.name}`, 'debug', 'Detection')
         return
       }
-      log(`${tag} error: ${img.name} — ${err?.message ?? err}`, 'error', 'Detection')
+      log(`${tag} failed: ${img.name} — ${err?.message ?? err}`, 'error', 'Detection')
       if (found) found.kpStatus = 'error'
     }
   }
@@ -259,7 +259,7 @@ export function createDetection({
     if (resume && isPersisting()) {
       const verdict = canContinue(resume, key)
       if (verdict.ok) journal = structuredClone(resume)
-      else log(`Detection: the stopped run cannot continue (${verdict.why}); starting again`, 'warn', 'Detection')
+      else log(`The stopped run cannot continue (${verdict.why}); starting again`, 'warn', 'Detection')
     }
     // An image the journal lists keeps its features, unless they did not survive (its
     // status is no longer 'done', e.g. a keypoint file that was never written).
@@ -290,7 +290,7 @@ export function createDetection({
       await writer.flush(journal)
       if (kept.size) {
         log(
-          `Detection: continuing the stopped run — ${pluralize(kept.size, 'image')} of ${total + kept.size} already detected`,
+          `Continuing the stopped run — ${pluralize(kept.size, 'image')} of ${total + kept.size} already detected`,
           'info',
           'Detection',
         )
@@ -326,7 +326,7 @@ export function createDetection({
       settings.memBudgetBytes > 0 ? ` (memory budget ${(settings.memBudgetBytes / 1024 ** 3).toFixed(1)} GB)` : ''
     log(
       `${batchTag} batch: ${pluralize(total, 'image')} queued — ${resLabel}, ${concurrency} concurrent${budgetNote}` +
-        `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp` +
+        `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} keypoints` +
         `${band && !learnedSpec && band.scaleKeypoints !== false ? ' (auto: scaled with the detected area, up to 4×)' : ''}` +
         `${
           learnedSpec
@@ -366,7 +366,7 @@ export function createDetection({
     log(
       `${batchTag} ${stop() ? 'cancelled' : 'batch complete'} — ${done}/${total} processed in ${seconds.toFixed(2)} s` +
         ` (${concurrency} concurrent)`,
-      stop() ? 'warn' : 'success',
+      stop() ? 'info' : 'success',
       'Detection',
     )
   }

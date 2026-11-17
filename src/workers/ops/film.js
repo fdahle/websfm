@@ -81,7 +81,7 @@ export function makeFilmOps() {
         // Synchronous by design: OffscreenCanvas drawImage/getImageData are sync,
         // which is what lets the pure orchestrator call back into the worker.
         cropWindow: (cx, cy, half) => cropGray(bmp, cx - half, cy - half, 2 * half + 1, 2 * half + 1),
-        onLog: emit ? (msg) => emit('log', [`Fiducial: ${msg}`]) : undefined,
+        onLog: emit ? (msg, l = 'info') => emit('log', [msg, l, 'Fiducials']) : undefined,
       })
       return { result: { results, ms: performance.now() - t0 } }
     } finally {
@@ -203,7 +203,7 @@ export function makeFilmOps() {
         emit?.('log', [
           `Reseau: could not place the lattice (${pluralize(placed.length, 'central cross', 'central crosses')} found)`,
           'warn',
-          'Images',
+          'Fiducials',
         ])
         return {
           result: { detections: [], placed: placed.length, found: 0, of: nodes.length, ms: performance.now() - t0 },
@@ -343,7 +343,7 @@ export function makeFilmOps() {
       emit?.('log', [
         `Reseau: grew ${pluralize(list.length, 'cross', 'crosses')} from (${seed.px.toFixed(0)}, ${seed.py.toFixed(0)}) on ${bmp.width}×${bmp.height}`,
         'debug',
-        'Fiducial',
+        'Fiducials',
       ])
       return { result: { found: list, seed, ms: performance.now() - t0 } }
     } finally {
@@ -525,7 +525,7 @@ export function makeFilmOps() {
       emit?.('log', [
         `Reseau: stitched ${W}×${H} from ${A.width}×${A.height} + ${B.width}×${B.height} in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
         'info',
-        'Fiducial',
+        'Fiducials',
       ])
       return { result: new Blob(parts, { type: 'image/tiff' }) }
     } finally {
@@ -584,7 +584,7 @@ export function makeFilmOps() {
         `Panoramic: ${bmp.width}×${bmp.height} → ${pluralize(layout.segments.length, 'segment')} of ` +
           `${layout.segments[0].width}×${layout.segments[0].height} in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
         'info',
-        'Fiducial',
+        'Fiducials',
       ])
       return { result: blobs }
     } finally {

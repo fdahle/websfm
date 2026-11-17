@@ -128,12 +128,12 @@ export function createDepthRun({
   async function computeDepthMaps(settings = {}, onProgress, { resume = null } = {}) {
     const cloud = mainSparseCloud.value
     if (!cloud || cloud.cameras.size < 2) {
-      log('Dense: need a sparse cloud with ≥2 cameras first', 'warn', 'Dense')
+      log('Build a sparse model with 2 or more cameras first', 'warn', 'Dense')
       return
     }
     const hasTracks = cloud.points.viewTotal > 0
     if (!hasTracks) {
-      log('Dense: sparse cloud has no view-tracks (rebuild the sparse model first)', 'warn', 'Dense')
+      log('The sparse model has no tracks — build it again first', 'warn', 'Dense')
       return
     }
     reconStatus.value = 'running'
@@ -191,7 +191,7 @@ export function createDepthRun({
               `the last sparse run produced no interior-orientation transform for it — ` +
               `re-run the sparse reconstruction before building the dense cloud`
           }
-          log(`Dense: ${im.name} skipped — ${why}.`, 'error', 'Dense')
+          log(`${im.name} skipped — ${why}.`, 'error', 'Dense')
           continue
         }
         // A TIFF's lossless compute PNG may still be encoding right after ingest;
@@ -214,7 +214,7 @@ export function createDepthRun({
           height: fid?.frame?.height ?? im.meta?.height ?? 0,
         })
       }
-      if (disabled) log(`Dense: ${pluralize(disabled, 'disabled image')} left out of the depth maps`, 'info', 'Dense')
+      if (disabled) log(`${pluralize(disabled, 'disabled image')} left out of the depth maps`, 'info', 'Dense')
       if (ownLens.length) {
         const terms = (d) =>
           ['k1', 'k2', 'k3', 'k4', 'p1', 'p2']
@@ -230,7 +230,7 @@ export function createDepthRun({
             }${g.dist?.fisheye ? ' fisheye' : ''} ${terms(g.dist) || 'pinhole'}` +
             (g.selfCal ? ` (+ correction ${terms(g.selfCal)})` : ''),
         )
-        log(`Dense: undistorting with the sparse model's own lens — ${parts.join('; ')}`, 'info', 'Dense')
+        log(`Undistorting with the sparse model's own lens — ${parts.join('; ')}`, 'info', 'Dense')
       }
       if (selfCalRows.length) {
         const parts = selfCalRows.map(
@@ -243,7 +243,7 @@ export function createDepthRun({
             `${d.k2 ? `, k2 ${d.k2.toFixed(5)}` : ''}${d.k3 ? `, k3 ${d.k3.toFixed(5)}` : ''}` +
             `${d.k4 ? `, k4 ${d.k4.toFixed(5)}` : ''}`,
         )
-        log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join('; ')}`, 'info', 'Dense')
+        log(`Applying self-calibrated distortion from the sparse run — ${parts.join('; ')}`, 'info', 'Dense')
       }
       // Packed typed arrays, transferred (core/dense/sparseInput.js) — not an object
       // plus a views array per point, structured-cloned.
@@ -277,7 +277,7 @@ export function createDepthRun({
       if (resume && isPersisting()) {
         const verdict = canContinue(resume, key)
         if (verdict.ok) journal = structuredClone(resume)
-        else log(`Dense: the stopped depth-map run cannot continue (${verdict.why}); starting again`, 'warn', 'Dense')
+        else log(`The stopped depth-map run cannot continue (${verdict.why}); starting again`, 'warn', 'Dense')
       }
       // Resolve a quality preset → working maxDim from the largest native image
       // dimension (Step 3), unless the user set an explicit maxDim in Advanced. A
@@ -289,7 +289,7 @@ export function createDepthRun({
       resolved.sceneType = projects.currentSceneType ?? null
       if (resolved.geomConsistency !== false && (settings.minConsistent == null || settings.minConsistent === '')) {
         log(
-          `Dense: consistent views auto → ${autoMinConsistent(resolved.sceneType)} ` +
+          `Consistent views auto → ${autoMinConsistent(resolved.sceneType)} ` +
             `(${resolved.sceneType === 'object' ? 'object capture' : 'aerial / mapping'} project)`,
           'info',
           'Dense',
@@ -303,7 +303,7 @@ export function createDepthRun({
       resolved.planarPrior = settings.planarPrior ?? method === 'full'
       resolved.geomPass = settings.geomPass ?? method === 'full'
       log(
-        `Dense: method ${method === 'full' ? 'Full (ACMH, planar prior, geometric pass)' : 'Fast (best-K, one pass)'}` +
+        `Method ${method === 'full' ? 'Full (ACMH, planar prior, geometric pass)' : 'Fast (best-K, one pass)'}` +
           `${(settings.method ?? 'auto') === 'auto' ? ` — auto, ${onGpu ? 'on the GPU' : 'without a GPU'}` : ''}`,
         'info',
         'Dense',
@@ -326,7 +326,7 @@ export function createDepthRun({
         const fit = plan(resolved.quality, budget)
         if (fit?.steps > 0) {
           log(
-            `Dense: quality '${resolved.quality}' would need ≈ ${formatBytes(plan(resolved.quality, Infinity).proj.total)} ` +
+            `Quality '${resolved.quality}' would need ≈ ${formatBytes(plan(resolved.quality, Infinity).proj.total)} ` +
               `against the ${formatBytes(budget)} budget — using '${fit.quality}' (≤${fit.maxDim}px, ≈ ${formatBytes(fit.proj.total)}). ` +
               'Raise the memory budget (Settings ▸ Compute) to keep the higher quality.',
             'warn',
@@ -336,7 +336,7 @@ export function createDepthRun({
           resolved.maxDim = fit.maxDim
         }
         log(
-          `Dense: quality '${resolved.quality}' → working ≤${resolved.maxDim}px ` +
+          `Quality '${resolved.quality}' → working ≤${resolved.maxDim}px ` +
             `(¼-scale presets of ${nativeLong}px native)`,
           'info',
           'Dense',
@@ -364,7 +364,7 @@ export function createDepthRun({
         kept = reusableDepthMaps({ index: savedIndex, cloud, key: mapsKey, cameraKeys })
         if (kept.length === inputImages.length) {
           log(
-            `Dense: all ${pluralize(kept.length, 'depth map')} kept — their cameras and settings are unchanged, so there is nothing to compute`,
+            `All ${pluralize(kept.length, 'depth map')} kept — their cameras and settings are unchanged, so there is nothing to compute`,
             'success',
             'Dense',
           )
@@ -373,7 +373,7 @@ export function createDepthRun({
         }
         if (kept.length)
           log(
-            `Dense: ${pluralize(kept.length, 'depth map')} of ${inputImages.length} kept (cameras and settings unchanged); ` +
+            `${pluralize(kept.length, 'depth map')} of ${inputImages.length} kept (cameras and settings unchanged); ` +
               `computing ${pluralize(inputImages.length - kept.length, 'map')}`,
             'info',
             'Dense',
@@ -452,7 +452,7 @@ export function createDepthRun({
       if (resume && journal) {
         const n = journal.phase === 'pass1' ? journal.done.length : inputImages.length
         log(
-          `Dense: continuing the stopped run — ${pluralize(n, 'depth map')} of ${inputImages.length} already saved` +
+          `Continuing the stopped run — ${pluralize(n, 'depth map')} of ${inputImages.length} already saved` +
             `${journal.phase === 'pass1' ? '' : ` (from step ${journal.phase})`}`,
           'info',
           'Dense',
@@ -589,14 +589,14 @@ export function createDepthRun({
       }
       depthSummary.value = stageSummary
       if (previews && isPersisting()) imagesStore.save()
-      log(`Dense: ${pluralize(run ? run.metas.length : maps.length, 'depth map')} computed`, 'success', 'Dense')
+      log(`${pluralize(run ? run.metas.length : maps.length, 'depth map')} computed`, 'success', 'Dense')
       reconStatus.value = 'done'
       // In memory only: save before densify can transfer the buffers away (a no-op
       // when the project cannot save, which is why this path exists).
       if (!run) await persistDepthMaps(maps, settings)
     } catch (err) {
       if (!writeFailure && cancelled(err, 'Depth maps', 'Dense')) return
-      log(`Depth-map error: ${(writeFailure ?? err)?.message ?? err}`, 'error', 'Dense')
+      log(`Depth maps failed: ${(writeFailure ?? err)?.message ?? err}`, 'error', 'Dense')
       reconStatus.value = 'error'
     }
   }
@@ -615,7 +615,7 @@ export function createDepthRun({
   async function runDepthMaps(images, sparse, settings, onProgress, onMap, extraIn = {}) {
     const { refs: only = null, ...extra } = extraIn
     const n = only ? only.length : images.length
-    const onLog = (m, l, c) => log(m, l, c)
+    const onLog = (m, l, c) => log(m, l, c ?? 'Dense')
     const runToken = crypto.randomUUID()
     const onEventFor =
       (w) =>
@@ -668,7 +668,7 @@ export function createDepthRun({
     )
     const chunks = contiguousChunks(n, workers).map((c) => (only ? c.map((k) => only[k]) : c))
     // Every worker picks its backend the same way: the first says which, not every one.
-    const onLogOf = (w) => (w === 0 ? onLog : (m, l, c) => SAME_ON_EVERY_WORKER.test(m) || onLog(m, l, c))
+    const onLogOf = (w) => (w === 0 ? onLog : (m, l, c) => SAME_ON_EVERY_WORKER.test(m) || onLog(m, l, c ?? 'Dense'))
     const counts = new Array(workers).fill(0),
       fractions = new Array(workers).fill(0)
     const t0 = performance.now()
@@ -774,7 +774,11 @@ export function createDepthRun({
     if (workers === 1 && !own) {
       ;({ stats, ms } = await workerFilterDepthMaps(
         { maps: entries, settings, from },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), onEvent },
+        {
+          onLog: (m, l, c) => log(m, l, c ?? 'Dense'),
+          onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+          onEvent,
+        },
       ))
     } else {
       const t0 = performance.now()
@@ -789,7 +793,7 @@ export function createDepthRun({
             { maps: entries, settings, from, refs, workers },
             {
               worker: w,
-              onLog: (m, l, c) => log(m, l, c),
+              onLog: (m, l, c) => log(m, l, c ?? 'Dense'),
               onEvent,
               onProgress: (d, t, lbl, f) => {
                 fractions[w] = f
@@ -842,7 +846,7 @@ export function createDepthRun({
         log(
           `Depth filter: ${pluralize(marginal.length, 'marginal map')} kept <1% after cross-view filtering — ` +
             `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. ` +
-            'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.',
+            'They stay saved (the orthophoto can use them) but add little to the dense cloud.',
           'warn',
           'Dense',
         )

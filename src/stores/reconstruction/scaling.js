@@ -169,14 +169,14 @@ export function createScaling({
       }
     }
     if (!sparseCameras.value.size) {
-      log('Scale: build the sparse model first', 'warn', 'Scale')
+      log('Scale: build the sparse model first', 'warn', 'Georeferencing')
       return null
     }
     const measured = await measureBars()
     const usable = measured.filter((m) => m.bar.enabled !== false && m.modelDistance != null)
     for (const m of measured) {
       if (m.bar.enabled !== false && m.reason) {
-        log(`Scale: bar "${m.bar.name}" cannot be measured — ${m.reason}`, 'warn', 'Scale')
+        log(`Scale: bar "${m.bar.name}" cannot be measured — ${m.reason}`, 'warn', 'Georeferencing')
       }
     }
     if (!usable.length) {
@@ -184,7 +184,7 @@ export function createScaling({
       log(
         'Scale: no usable scale bar (need one with two resolvable endpoints and a positive distance)',
         'warn',
-        'Scale',
+        'Georeferencing',
       )
       return null
     }
@@ -199,7 +199,11 @@ export function createScaling({
     )
     if (!fit) {
       clearFit()
-      log('Scale: fit failed (degenerate input)', 'warn', 'Scale')
+      log(
+        'Scale: the fit failed: the scale bars give no usable length (check their ends and distances)',
+        'warn',
+        'Georeferencing',
+      )
       return null
     }
     const byId = new Map(usable.map((m) => [m.bar.id, m.bar]))
@@ -233,7 +237,7 @@ export function createScaling({
           )
           .join(', '),
       'success',
-      'Scale',
+      'Georeferencing',
     )
     healthDirty.value++
     save()

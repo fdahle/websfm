@@ -6,6 +6,15 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Everything you click can be typed in the console.** `run` takes every step a workflow
+  can run unattended, with its settings (`run dense minViews=3 mesh preset=high`), and
+  the edits you make by hand are commands too (`gcp disable "GCP 12"`, `product main
+  "DEM 2"`, `image rename`, `sensor set`, `region clear` …); hovering an Activity line
+  shows its command. Before, `run` knew nine stages at their defaults and only pairs could
+  be edited by name; it now knows fifteen (the Tools edits Filter, Normals, ICP, Clean,
+  Smooth and Decimate besides), each setting checked against what the Workflow Builder
+  allows, and 37 edits of images, groups, sensors, products, layers, GCPs, scale bars,
+  the region and the orientation. **help edit** and **help run dense** list them.
 - **Matching shows its steps.** The progress dialog of Match Features lists the passes the
   run can take (finding similar images, matching the pairs, re-testing gated pairs,
   repairing a split graph, detecting the gaps again, finding turned photos) with a bar and
@@ -156,6 +165,18 @@ Notable changes to websfm. The format follows
   [docs/features.md](docs/features.md), generated from the ribbon so it stays complete.
 
 ### Changed
+- **The console log reads the same everywhere.** Each line's source names the part of
+  WebSfM it comes from, as the ribbon does (Sparse, Georeferencing, Fiducials, System …),
+  each step ends in one green line with its result and time, and the per-photo and
+  per-pair lines moved to Detail. Before, one step was logged under up to three sources
+  (Reconstruction, SfM, Compute), 31 success lines came from the middle of a run (one per
+  registered photo), the dense cloud, DEM, orthophoto, mesh and reflectance map had no
+  closing line, a worker's warnings arrived as plain lines, and numbers took the
+  browser's language ("1.234" in German). Logs saved before show under the new names.
+  The wording too: a failure reads "what failed: why" (it came in four forms, and some
+  errors named no step at all), and the lines shown by default say bundle adjustment,
+  calibration and tie point instead of BA, intrinsics and sparse point; solver internals
+  moved to Detail. 529 warning, error and flagged lines were read by hand.
 - **Edit Mask is on the Picture tab, Edit GCPs in Reconstruct ▸ Georeferencing.** Open a
   photo and Edit Mask sits beside its Mask toggle; Edit GCPs and Find GCPs share one
   button's space before Georeference. Tools ▸ Images ▾ now holds only the tools that work

@@ -122,7 +122,7 @@ export function useProjectMerge() {
     for (let i = 0; i < total; i += batchSize) {
       if (shouldCancel()) {
         cancelled = true
-        log(`Import project: cancelled after ${pluralize(done, 'photo')} of ${total}`, 'warn', 'Import')
+        log(`Import project: cancelled after ${pluralize(done, 'photo')} of ${total}`, 'info', 'Import')
         break
       }
       const batch = plan.added.slice(i, i + batchSize)

@@ -259,7 +259,7 @@ export async function depthMapForImage(
   // levels get more iterations (cheap, and they carry the global propagation).
   if (levels.length > 1) {
     const plan = levels.map((L, li) => `${L.w}×${L.h}×${iterations + (levels.length - 1 - li)}it`).join(' → ')
-    hooks.onLog?.(`coarse-to-fine ${levels.length} levels (${sources.length} src) — ${plan}`, 'debug', 'Dense')
+    hooks.onLog?.(`Coarse-to-fine ${levels.length} levels (${sources.length} src) — ${plan}`, 'debug', 'Dense')
   }
   const baseSeed = (ref.width * 73856093) ^ (ref.height * 19349663)
   // Per-level progress weights (this image is 0..1): a level's cost ≈ its pixels ×
@@ -318,7 +318,7 @@ export async function depthMapForImage(
       maxCost: numOpt(settings.priorMaxCost, DENSE_TUNING.priorMaxCost, { positive: true }),
     })
     hooks.onLog?.(
-      `planar prior: ${pp.support} support points, ${pp.triangles} triangles, ` +
+      `Planar prior: ${pp.support} support points, ${pp.triangles} triangles, ` +
         `${((100 * pp.covered) / (L.w * L.h)).toFixed(0)} % of pixels covered`,
       'debug',
       'Dense',
@@ -400,7 +400,7 @@ export async function depthMapForImage(
       `GPU validate: cost consistency RMS ${gpuCheck.rms.toExponential(2)} (median ${gpuCheck.median.toExponential(2)}, ` +
         `90 % ${gpuCheck.p90.toExponential(2)}, max ${gpuCheck.max.toExponential(2)}) ` +
         `over ${n} px; median final cost ${medCost.toFixed(3)} (${src.length} src, best-${k})`,
-      gpuCheck.median > DENSE_TUNING.gpuCheckWarn ? 'warn' : 'success',
+      gpuCheck.median > DENSE_TUNING.gpuCheckWarn ? 'warn' : 'info',
       'Dense',
     )
   }

@@ -1,7 +1,8 @@
 import { test, expect } from './fixtures.js'
 
 // The console's command line: Ctrl-K opens and focuses it, ribbon commands and the
-// verbs (help, set, stats, run, pair, select) act through the app's real wiring.
+// verbs (help, set, stats, run, pair, select) and the edits (image, gcp …) act through
+// the app's real wiring.
 test('Ctrl-K focuses the console, whose verbs reach the stores and the workflow runner', async ({ page }) => {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
@@ -89,6 +90,26 @@ test('Ctrl-K focuses the console, whose verbs reach the stores and the workflow 
   expect(
     await page.evaluate(async () => (await import('/src/stores/useImagesStore.js')).useImagesStore().selectedId),
   ).toBe(102)
+
+  // Edits by hand: the store makes them, and the Activity line names the command.
+  await type('image rename dji_0001 "North 1"')
+  await type('gcp add "Check A" check')
+  await type('gcp disable check')
+  const edited = await page.evaluate(async () => {
+    const images = (await import('/src/stores/useImagesStore.js')).useImagesStore()
+    const gcps = (await import('/src/stores/useGcpsStore.js')).useGcpsStore()
+    const g = gcps.gcps.find((x) => x.name === 'Check A')
+    return { name: images.images.find((i) => i.id === 101).name, role: g?.role, enabled: g?.enabled }
+  })
+  expect(edited).toEqual({ name: 'North 1', role: 'check', enabled: false })
+  await page.locator('.console-tab', { hasText: 'Activity' }).click()
+  await expect(log).toContainText('Renamed image "DJI_0001.JPG" → "North 1"')
+  await expect(log.locator('.entry-activity-glyph').last()).toHaveAttribute('title', /gcp disable "Check A"/)
+  await page.locator('.console-tab', { hasText: 'Pipeline' }).click()
+  await type('help run dense')
+  await expect(log).toContainText('minViews = number ≥ 1')
+  await type('run dense minViews=0')
+  await expect(log).toContainText('dense: minViews is at least 1')
 
   // A saved workflow with an interactive block: the console reports the wait and answers it.
   await page.evaluate(async () => {

@@ -132,7 +132,7 @@ export function createPersistence({
           log(
             `Saved the reconstruction — ${pluralize(list.length - reused, 'cloud')} written, ${reused} unchanged kept`,
             'debug',
-            'Reconstruction',
+            'Sparse',
           )
         }
         return true
@@ -192,7 +192,7 @@ export function createPersistence({
     const status = reconStatus.value
     await restore({ projectId })
     if (status === 'error') reconStatus.value = 'error'
-    log('Reloaded the saved reconstruction after the rerun ended without a new model', 'info', 'Reconstruction')
+    log('Reloaded the saved reconstruction after the rerun ended without a new model', 'info', 'Sparse')
     return true
   }
 
@@ -282,7 +282,7 @@ export function createPersistence({
         `Could not read the saved reconstruction — ${detail}. It is left on disk unchanged; ` +
           'a new reconstruction or import will replace it.',
         'error',
-        'Reconstruction',
+        'Sparse',
       )
       showToast('Saved reconstruction could not be read', { detail, kind: 'error', ms: 8000 })
       return
@@ -336,7 +336,7 @@ export function createPersistence({
         `Cloud "${c.name}": point attributes could not be restored (${c.attributeError}) — ` +
           'the points are intact; re-import the file to recover intensity/classification',
         'warn',
-        'Reconstruction',
+        'Sparse',
       )
       delete c.attributeError
     }
@@ -395,7 +395,7 @@ export function createPersistence({
         `Products restored: ${[n('dem') && pluralize(n('dem'), 'DEM'), n('ortho') && pluralize(n('ortho'), 'ortho')]
           .filter(Boolean)
           .join(' + ')}`,
-        'success',
+        'info',
         'Products',
       )
     }
@@ -404,11 +404,7 @@ export function createPersistence({
 
     if (clouds.value.length) {
       const camTotal = clouds.value.reduce((n, c) => n + c.cameras.size, 0)
-      log(
-        `Reconstruction restored: ${pluralize(clouds.value.length, 'cloud')}, ${camTotal} cameras`,
-        'success',
-        'Reconstruction',
-      )
+      log(`Reconstruction restored: ${pluralize(clouds.value.length, 'cloud')}, ${camTotal} cameras`, 'info', 'Sparse')
     }
 
     // Advertise saved depth maps without loading their planes — densify / ortho
@@ -416,9 +412,9 @@ export function createPersistence({
     // compares against the cloud the pipeline will actually consume.
     if ((await loadDepthIndexIntoMeta(projectId, isCurrentRestore, depthIndexRead)) && isCurrentRestore()) {
       log(
-        `Dense: ${pluralize(depthMapsMeta.value.length, 'saved depth map')} available ` +
+        `${pluralize(depthMapsMeta.value.length, 'saved depth map')} available ` +
           `(${formatBytes(depthMapBytes(depthMapsMeta.value))}, loaded on demand)`,
-        'success',
+        'info',
         'Dense',
       )
     }
@@ -433,7 +429,7 @@ export function createPersistence({
     const heap = mem?.usedJSHeapSize
       ? ` · JS memory (heap + ArrayBuffers) ${formatBytes(mem.usedJSHeapSize)}, heap limit ${formatBytes(mem.jsHeapSizeLimit)}`
       : ''
-    log(`Reconstruction restore timing: ${phases.join(' · ')}${heap}`, 'info', 'Reconstruction')
+    log(`Reconstruction restore timing: ${phases.join(' · ')}${heap}`, 'info', 'Sparse')
   }
 
   return {

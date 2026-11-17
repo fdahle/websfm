@@ -127,7 +127,7 @@ export function createCloudLod({
     )
     return workerFinishLodPool(
       { tmpDir, state, parts, dir, name, extra: r.extra, report: { ...report, startedAt, workers } },
-      { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+      { onLog: (m, l, c) => log(m, l, c ?? 'Products'), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
     )
   }
 
@@ -151,7 +151,11 @@ export function createCloudLod({
         (pool) =>
           workerBuildLod(
             { cloud: { count: cloud.count, pos, col, attributes }, dir, name, pool },
-            { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
+            {
+              onLog: (m, l, c) => log(m, l, c ?? 'Products'),
+              onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+              transfer,
+            },
           ),
         { dir, name, report: { kind: 'build' } },
         onProgress,
@@ -169,7 +173,7 @@ export function createCloudLod({
       await save()
       return meta
     } catch (err) {
-      log(`Level of detail: ${err?.message ?? err}`, 'error', 'Products')
+      log(`Level of detail failed: ${err?.message ?? err}`, 'error', 'Products')
       return null
     } finally {
       building.delete(name)
@@ -204,7 +208,10 @@ export function createCloudLod({
         (pool) =>
           workerBuildLod(
             { file, dir, name, pool },
-            { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+            {
+              onLog: (m, l, c) => log(m, l, c ?? 'Products'),
+              onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+            },
           ),
         { dir, name, report: { kind: 'import' } },
         onProgress,
@@ -231,7 +238,7 @@ export function createCloudLod({
       clouds.value.push(cloud)
       selectedCloudId.value = cloud.id
       log(
-        `Cloud import: added "${cloud.name}" — ${meta.points.toLocaleString()} points, streamed` +
+        `Cloud import: added "${cloud.name}" — ${meta.points.toLocaleString('en')} points, streamed` +
           `${meta.layout.colour ? ', colour' : ''}`,
         'success',
         'Import',
@@ -239,7 +246,7 @@ export function createCloudLod({
       await save()
       return cloud
     } catch (err) {
-      log(`Cloud import: ${file.name}: ${err?.message ?? err}`, 'error', 'Import')
+      log(`Cloud import of ${file.name} failed: ${err?.message ?? err}`, 'error', 'Import')
       return null
     } finally {
       building.delete(name)
@@ -265,7 +272,7 @@ export function createCloudLod({
       log(`Cloud import: ${file.name} is a COPC file — reading its octree in place`, 'info', 'Import')
       const meta = await workerImportCopc(
         { file, dir, name },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+        { onLog: (m, l, c) => log(m, l, c ?? 'Products'), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
       if (projectId() !== pid) {
         await discard(dir, meta)
@@ -302,7 +309,7 @@ export function createCloudLod({
       clouds.value.push(cloud)
       selectedCloudId.value = cloud.id
       log(
-        `Cloud import: added "${cloud.name}" — ${meta.points.toLocaleString()} points, read in place (COPC)` +
+        `Cloud import: added "${cloud.name}" — ${meta.points.toLocaleString('en')} points, read in place (COPC)` +
           `${meta.layout.colour ? ', colour' : ''}`,
         'success',
         'Import',
@@ -310,7 +317,7 @@ export function createCloudLod({
       await save()
       return cloud
     } catch (err) {
-      log(`Cloud import: ${file.name}: ${err?.message ?? err}`, 'error', 'Import')
+      log(`Cloud import of ${file.name} failed: ${err?.message ?? err}`, 'error', 'Import')
       return null
     } finally {
       building.delete(name)
@@ -366,7 +373,7 @@ export function createCloudLod({
         if (!next) break
         attempted.add(next)
         log(
-          `Level of detail: building the octree of "${next.name}" (${next.count.toLocaleString()} points)…`,
+          `Level of detail: building the octree of "${next.name}" (${next.count.toLocaleString('en')} points)…`,
           'info',
           'Products',
         )
@@ -404,7 +411,7 @@ export function createCloudLod({
     const { data, hierarchy } = await lodFiles(pid, cloud.lod)
     return workerExportLod(
       { lod: JSON.parse(JSON.stringify(cloud.lod)), data, hierarchy, format, color },
-      { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+      { onLog: (m, l, c) => log(m, l, c ?? 'Products'), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
     )
   }
 
@@ -416,7 +423,7 @@ export function createCloudLod({
     const { data, hierarchy } = await lodFiles(pid, cloud.lod)
     return workerExportPointTiles(
       { lod: JSON.parse(JSON.stringify(cloud.lod)), data, hierarchy, sim, origin, transform, color },
-      { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+      { onLog: (m, l, c) => log(m, l, c ?? 'Products'), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
     )
   }
 
@@ -504,7 +511,7 @@ export function createCloudLod({
         workerTransformLod(
           { ...input, tiles: { dir, plan, limit }, pool },
           {
-            onLog: (m, l, c) => log(m, l, c),
+            onLog: (m, l, c) => log(m, l, c ?? 'Products'),
             onProgress: (d, t) =>
               onProgress?.(n + d / Math.max(1, t), n + 1, 'Sorting the octree', (n + d / t) / (n + 1)),
           },
@@ -541,7 +548,10 @@ export function createCloudLod({
           (pool) =>
             workerTransformLod(
               { ...input, pool },
-              { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+              {
+                onLog: (m, l, c) => log(m, l, c ?? 'Products'),
+                onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+              },
             ),
           { dir, name: fileName, report: { kind: 'edit', sourcePoints: source.lod.points } },
           onProgress,

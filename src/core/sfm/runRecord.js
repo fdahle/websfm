@@ -65,13 +65,14 @@ export function resolveGates({ cfg, settings, images, log }) {
   if (scaleCtx.factor !== 1 || scaleCtx.mixed) {
     // Only the deriving run reports the inputs behind the factor; an inheriting
     // sub-run has no set of its own to describe and would be fabricating them.
-    if (!injected) log(describeScaleContext(scaleCtx, 'Reprojection gates'), scaleCtx.clamped ? 'warn' : 'info', 'SfM')
+    if (!injected)
+      log(describeScaleContext(scaleCtx, 'Reprojection gates'), scaleCtx.clamped ? 'warn' : 'info', 'Sparse')
     log(
-      `Gates resolved (detect-px → native px, ×${scaleCtx.factor.toFixed(2)}): ` +
-        `PnP/BA ${cfg.reprjThreshold} → ${resolveScaledPx(cfg.reprjThreshold, scaleCtx).toFixed(2)}px, ` +
+      `Reprojection limits at full photo size (×${scaleCtx.factor.toFixed(2)} from the detection size): ` +
+        `registration and bundle adjustment ${cfg.reprjThreshold} → ${resolveScaledPx(cfg.reprjThreshold, scaleCtx).toFixed(2)}px, ` +
         `track filter ${cfg.filterMaxReprojPx} → ${resolveScaledPx(cfg.filterMaxReprojPx, scaleCtx).toFixed(2)}px`,
       'info',
-      'SfM',
+      'Sparse',
     )
   }
   cfg.reprjThreshold = resolveScaledPx(cfg.reprjThreshold, scaleCtx)
@@ -118,19 +119,19 @@ export function resolveRefineIntrinsics({
     if (anyCalibratedDistortion) {
       cfg.refineIntrinsics = 'none'
       log(
-        `refineIntrinsics 'auto' → 'none' ` +
+        `RefineIntrinsics 'auto' → 'none' ` +
           '(a calibrated distortion model exists — self-cal off to avoid double-correcting)',
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     } else if (anyReseauCalibrated) {
       cfg.refineIntrinsics = 'none'
       log(
-        `refineIntrinsics 'auto' → 'none' (a reseau-calibrated film camera, half frames stitched through ` +
+        `RefineIntrinsics 'auto' → 'none' (a reseau-calibrated film camera, half frames stitched through ` +
           "their reseau, or panoramic strip segments: the film's geometry is corrected and the certificate holds; " +
           'choose a self-calibration explicitly to refine it)',
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     } else {
       // Staged self-cal (WS2): registration + rescue solve the base 'f,k1'; the
@@ -140,10 +141,10 @@ export function resolveRefineIntrinsics({
       cfg.refineIntrinsics = SELF_CAL_BASE_TERMS
       cfg.selfCalStaged = true
       log(
-        `refineIntrinsics 'auto' → staged (base '${SELF_CAL_BASE_TERMS}', ` +
+        `RefineIntrinsics 'auto' → staged (base '${SELF_CAL_BASE_TERMS}', ` +
           'escalating to cx,cy / k2 / k3, then k4 on a four-term fisheye, in post-filter passes as the model grows)',
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
   }
@@ -181,11 +182,11 @@ export function logMatchGraphHealth({ imgs, donePairs, log }) {
   const med = (arr) => (arr.length ? [...arr].sort((a, b) => a - b)[arr.length >> 1] : 0)
   const isolated = [...deg.values()].filter((d) => d === 0).length
   log(
-    `match graph — ${pluralize(sizes.length, 'component')}, largest ${sizes[0] ?? 0}/${imgs.length} images` +
+    `Match graph — ${pluralize(sizes.length, 'component')}, largest ${sizes[0] ?? 0}/${imgs.length} images` +
       `${isolated ? `, ${isolated} isolated` : ''}; median ${med([...deg.values()])} pairs/image, ` +
       `median ${med(donePairs.map((e) => e.inlierCount))} inliers/pair`,
     (sizes[0] ?? 0) < imgs.length ? 'warn' : 'info',
-    'Reconstruction',
+    'Sparse',
   )
 }
 
@@ -213,16 +214,17 @@ export function logPerCameraResiduals({ tracks, ids, cameras, keypointsAt, image
     .sort((a, b) => b.s.median - a.s.median)
   const flagged = rows.filter((r) => globalMed > 0 && r.s.median > 2 * globalMed)
   log(
-    `per-camera residuals — global median ${globalMed.toFixed(2)}px; ` +
+    `Per-camera residuals — global median ${globalMed.toFixed(2)}px; ` +
       `${flagged.length}/${pluralize(rows.length, 'camera')} over 2× (${(2 * globalMed).toFixed(2)}px)`,
     flagged.length ? 'warn' : 'info',
-    'Reconstruction',
+    'Sparse',
   )
   for (const r of flagged) {
     log(
-      `  ⚠ ${r.name} — median ${r.s.median.toFixed(2)}px, ` + `p95 ${r.s.p95.toFixed(2)}px (${r.s.count} obs)`,
+      `  ⚠ ${r.name} — median ${r.s.median.toFixed(2)}px, ` +
+        `p95 ${r.s.p95.toFixed(2)}px (${pluralize(r.s.count, 'observation')})`,
       'warn',
-      'Reconstruction',
+      'Sparse',
     )
   }
 }
@@ -232,26 +234,26 @@ export function logPerCameraResiduals({ tracks, ids, cameras, keypointsAt, image
 // clock per stage, and the summed BA solver statistics (bundleSession.js).
 export function logRunTotals({ hist, totalMs, stageTimes, solverTotals, baSolver, log }) {
   const { t2: tracks2, t3: tracks3, t4: tracks4 } = hist
-  log(`track lengths — ${tracks2} ×2-view, ${tracks3} ×3-view, ${tracks4} ×4+-view`, 'info', 'Reconstruction')
+  log(`Track lengths — ${tracks2} ×2-view, ${tracks3} ×3-view, ${tracks4} ×4+-view`, 'info', 'Sparse')
   log(
-    `total time ${(totalMs / 1000).toFixed(1)}s ` +
+    `Total time ${(totalMs / 1000).toFixed(1)}s ` +
       `(${Object.entries(stageTimes)
         .map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`)
         .join(', ')})`,
     'info',
-    'Reconstruction',
+    'Sparse',
   )
   if (solverTotals.calls) {
     const T = solverTotals
     log(
-      `bundle adjustment solver — ${pluralize(T.calls, 'BA call')}, ${(T.ms / 1000).toFixed(1)}s` +
+      `Bundle adjustment solver — ${pluralize(T.calls, 'solve call')}, ${(T.ms / 1000).toFixed(1)}s` +
         `${T.threads > 1 ? ` on ${T.threads} threads` : ''}, largest n ${T.maxN}; ` +
         `${T.solves} solves: ${T.cholesky} Cholesky, PCG ${T.pcgConverged} converged / ${T.pcgPartial} partial / ` +
         `${T.pcgFallback} → Cholesky / ${T.pcgNotPd} not PD (${T.pcgIters} CG it, max ${T.pcgItersMax})` +
         `${T.implicit ? `, ${T.implicit} implicit (past the memory budget)` : ''}; ` +
         `policy ${JSON.stringify(baSolver ?? {})}`,
-      'info',
-      'Reconstruction',
+      'debug',
+      'Sparse',
     )
   }
 }
@@ -297,7 +299,7 @@ export function unregisteredComponents({ imgs, cameras, donePairs, imageByUuid, 
         `${remainingComponents[0].size > 4 ? ', …' : ''}. ${routing[0].toUpperCase()}${routing.slice(1)}; ` +
         `looser global PnP gates are not used.`,
       'warn',
-      'Reconstruction',
+      'Sparse',
     )
   }
   return remainingComponents

@@ -158,8 +158,7 @@ export function createMatchAll({
       : ''
     if (!plan.pairs.length) {
       log(
-        `Matching: ` +
-          (split ? `the match graph is ${split})` : '') +
+        (split ? `The match graph is ${split}` : '') +
           (split && thread ? '; ' : '') +
           thread +
           (plan.pieces || plan.weakPieces
@@ -173,8 +172,7 @@ export function createMatchAll({
     const nNew = plan.pairs.filter((p) => p.source === 'new').length
     for (const p of plan.pairs) tried.add(bridgeKey(p.idA, p.idB))
     log(
-      `Matching: ` +
-        (split ? `the match graph is ${split}, ${plan.detached} outside)` : '') +
+      (split ? `The match graph is ${split}, ${plan.detached} outside` : '') +
         (split && thread ? '; ' : '') +
         thread +
         `. Bridge repair${round > 1 ? ` round ${round}` : ''}: matching ` +
@@ -247,13 +245,13 @@ export function createMatchAll({
     const after = planBridgeRepair({ imageIds: ids, entries: entriesOf(), opts: { ...planOpts, maxPairs: 0 } })
     const loose = (p) => p.detached + p.weakImages
     log(
-      `Matching: bridge repair accepted ${joined}/${pluralize(work.length, 'pair')}; the graph is now in ` +
+      `Bridge repair accepted ${joined}/${pluralize(work.length, 'pair')}; the graph is now in ` +
         `${pluralize(after.components, 'piece')}, the largest ${after.mainSize}/${ids.length} images ` +
         `(was ${plan.mainSize})` +
         (plan.weakPieces || after.weakPieces
           ? `; ${pluralize(after.weakImages, 'image')} still ${after.weakImages === 1 ? 'hangs' : 'hang'} by a thread (was ${plan.weakImages})`
           : ''),
-      loose(after) < loose(plan) ? 'success' : 'info',
+      loose(after) < loose(plan) ? 'info' : 'info',
       'Matching',
     )
     return { joined, grew: loose(after) < loose(plan) && loose(after) > 0 }
@@ -288,7 +286,7 @@ export function createMatchAll({
     const apart = `${pluralize(plan.apart, 'image')} ${plan.apart === 1 ? 'is' : 'are'} still apart after bridge repair`
     if (plan.skipped) {
       log(
-        `Matching: ${apart}; ` +
+        `${apart}; ` +
           {
             native: 'they were detected at full size already, so detecting them again adds nothing',
             learned: 'their features are from a learned detector, which is not detected again at full size',
@@ -307,7 +305,7 @@ export function createMatchAll({
       ...(settings.memBudgetBytes > 0 ? { memBudgetBytes: settings.memBudgetBytes } : {}),
     }
     log(
-      `Matching: ${apart}, detected at ${plan.scale.toFixed(2)}× of their size — detecting ` +
+      `${apart}, detected at ${plan.scale.toFixed(2)}× of their size — detecting ` +
         `${pluralize(plan.loose.length, 'image')} again at full size (≤${detect.maxDim} px, tiled, ` +
         `≤${detect.maxKeypoints.toLocaleString('en-US')} keypoints) with ` +
         `${pluralize(plan.partners.length, 'image')} of the main block they share most pairs with, ` +
@@ -340,10 +338,10 @@ export function createMatchAll({
     const left = after.pieces.reduce((n, p) => n + p.ids.length, 0)
     const seconds = (performance.now() - t0) / 1000
     log(
-      `Matching: after detecting ${pluralize(chosen.length, 'image')} again at full size and matching ` +
+      `After detecting ${pluralize(chosen.length, 'image')} again at full size and matching ` +
         `${pluralize(pairsAgain, 'pair')} again, ${pluralize(left, 'image')} ${left === 1 ? 'is' : 'are'} still apart ` +
         `(was ${plan.apart}); ${(seconds / 60).toFixed(1)} min`,
-      left < plan.apart ? 'success' : 'info',
+      left < plan.apart ? 'info' : 'info',
       'Matching',
     )
     return {
@@ -400,7 +398,7 @@ export function createMatchAll({
       })
       const need = [...new Set(probes.flatMap((p) => [p.idMain, p.idPiece]))].filter((u) => !looks.has(u))
       log(
-        `Matching: ${pluralize(apart.size, 'image')} in ${pluralize(pieces.length, 'piece')} still apart or hanging by a thread` +
+        `${pluralize(apart.size, 'image')} in ${pluralize(pieces.length, 'piece')} still apart or hanging by a thread` +
           `${round > 1 ? ` (turn search round ${round})` : ''} — looking for photos turned against the main block: ` +
           `SIFT at ${settings.turnProbeMaxDim} px on ${pluralize(need.length, 'image')}, ${pluralize(probes.length, 'probe pair')}, ` +
           `${Math.min(POOL_SIZE, Math.max(1, need.length))} workers`,
@@ -460,7 +458,7 @@ export function createMatchAll({
       const convincing = results.filter((r) => r.inliers >= settings.turnMinInliers).length
       for (const [i, p] of decided.pieces.entries()) {
         log(
-          `Matching: piece ${i + 1} (${pluralize(p.size, 'image')}): ` +
+          `Piece ${i + 1} (${pluralize(p.size, 'image')}): ` +
             (p.turn == null
               ? `no turn found (${pluralize(p.voters, 'photo')} with a convincing probe)`
               : `turned ${p.turn}° against the main block, by the probes of ${pluralize(p.voters, 'photo')}; ` +
@@ -471,7 +469,7 @@ export function createMatchAll({
       }
       if (!decided.turns.size) {
         log(
-          `Matching: no photo of the pieces is turned against the main block ` +
+          `No photo of the pieces is turned against the main block ` +
             `(${convincing}/${pluralize(results.length, 'probe')} convincing): they stay as matched`,
           'info',
           'Matching',
@@ -534,10 +532,10 @@ export function createMatchAll({
       if (shouldCancel?.()) return { cancelled: true }
       const left = piecesNow().reduce((n, p) => n + p.length, 0)
       log(
-        `Matching: after detecting ${pluralize(turnedIds.length, 'image')} again turned and matching ` +
+        `After detecting ${pluralize(turnedIds.length, 'image')} again turned and matching ` +
           `${pluralize(pairsAgain, 'pair')} again, ${pluralize(left, 'image')} ${left === 1 ? 'is' : 'are'} still apart ` +
           `(was ${apart.size})`,
-        left < apart.size ? 'success' : 'info',
+        left < apart.size ? 'info' : 'info',
         'Matching',
       )
       rounds.push({
@@ -749,13 +747,13 @@ export function createMatchAll({
       const before = pairs.length
       pairs = pairs.filter(([a, b]) => only.has(a.id) || only.has(b.id))
       log(
-        `Matching: ${pluralize(pairs.length, 'pair')} of ${before} with one of the ${pluralize(only.size, 'selected image')}`,
+        `${pluralize(pairs.length, 'pair')} of ${before} with one of the ${pluralize(only.size, 'selected image')}`,
         'info',
         'Matching',
       )
     }
     if (pairs.length === 0) {
-      log('Match: no image pairs to process (need at least 2 images with keypoints)', 'warn', 'Matching')
+      log('No image pairs to match — it needs 2 or more images with keypoints', 'warn', 'Matching')
       return
     }
 
@@ -801,9 +799,9 @@ export function createMatchAll({
     const crossCheck = settings.crossCheck
     const lightglue = settings.matcher === 'lightglue'
     log(
-      `Matching: ${pluralize(pairs.length, 'pair')} — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}` +
+      `${pluralize(pairs.length, 'pair')} — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}` +
         `; matcher ${lightglue ? 'LightGlue (learned)' : 'brute-force'}` +
-        `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual NN)' : 'off'}, ratio ${settings.ratioThreshold}`}`,
+        `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual nearest neighbours)' : 'off'}, ratio ${settings.ratioThreshold}`}`,
       'info',
       'Matching',
     )
@@ -816,7 +814,7 @@ export function createMatchAll({
       resolvedRansacPx = resolveScaledPx(settings.ransacThreshPx, runCtx)
       if (runCtx.factor !== 1 || runCtx.mixed) {
         log(
-          describeScaleContext(runCtx, `RANSAC gate (${settings.ransacThreshPx} detect-px)`),
+          describeScaleContext(runCtx, `RANSAC threshold (${settings.ransacThreshPx} px at detection size)`),
           runCtx.clamped ? 'warn' : 'info',
           'Matching',
         )
@@ -936,7 +934,7 @@ export function createMatchAll({
       : null
     if (!lightglue && !gpuRun) {
       log(
-        `Matching: backend = WASM (CPU)${gpuRequested ? '' : ' — enable "Use GPU" in Settings ▸ Compute for the WebGPU matcher'}`,
+        `Backend = WASM (CPU)${gpuRequested ? '' : ' — enable "Use GPU" in Settings ▸ Compute for the WebGPU matcher'}`,
         'info',
         'Matching',
       )
@@ -957,7 +955,7 @@ export function createMatchAll({
     if (resume && projects.isPersisting) {
       const verdict = canContinue(resume, key)
       if (verdict.ok) journal = structuredClone(resume)
-      else log(`Matching: the stopped run cannot continue (${verdict.why}); starting again`, 'warn', 'Matching')
+      else log(`The stopped run cannot continue (${verdict.why}); starting again`, 'warn', 'Matching')
     }
     // Pairs a continued run keeps: those its last save held, or all once the loop was done.
     // Only those with a stored result: a pair that errored or was cancelled in flight
@@ -977,7 +975,7 @@ export function createMatchAll({
         }
       })
       log(
-        `Matching: only new pairs — ${pluralize(keptAsMatched, 'pair')} already matched keep their result, ` +
+        `Only new pairs — ${pluralize(keptAsMatched, 'pair')} already matched keep their result, ` +
           `${pluralize(pairs.length - kept.size, 'pair')} to match`,
         'info',
         'Matching',
@@ -990,7 +988,7 @@ export function createMatchAll({
     if (kept.size) {
       if (kept.size > keptAsMatched)
         log(
-          `Matching: continuing the stopped run — ${pluralize(kept.size - keptAsMatched, 'pair')} of ${pairs.length} already matched`,
+          `Continuing the stopped run — ${pluralize(kept.size - keptAsMatched, 'pair')} of ${pairs.length} already matched`,
           'info',
           'Matching',
         )
@@ -1021,7 +1019,7 @@ export function createMatchAll({
           saveMs = performance.now() - t0
           lastSaveAt = performance.now()
           log(
-            `Matching: checkpoint saved ${pluralize(held.length, 'pair')} in ${(saveMs / 1000).toFixed(2)} s`,
+            `Checkpoint saved ${pluralize(held.length, 'pair')} in ${(saveMs / 1000).toFixed(2)} s`,
             'debug',
             'Matching',
           )
@@ -1120,7 +1118,7 @@ export function createMatchAll({
           const before = { matched: stats.matched, weak: stats.weak }
           stats.gated -= rescue.length // re-tallied by the rescue run
           log(
-            `Matching: gate rescue — ${pluralize(nLow, 'image')} under ${pluralize(rescueDegree, 'accepted pair')}; re-testing their ` +
+            `Gate rescue — ${pluralize(nLow, 'image')} under ${pluralize(rescueDegree, 'accepted pair')}; re-testing their ` +
               `${pluralize(rescue.length - nNear, 'gated pair')} on a ${settings.subsetGateRescueScale}× larger sample` +
               (nNear
                 ? `, and ${pluralize(nNear, 'near miss', 'near misses')} (≥ ${nearMin} of ${settings.subsetGateThreshold}) on a ` +
@@ -1166,7 +1164,7 @@ export function createMatchAll({
           }
           await Promise.all(Array.from({ length: concurrency }, drainRescue))
           log(
-            `Matching: gate rescue recovered ${stats.matched - before.matched} accepted` +
+            `Gate rescue recovered ${stats.matched - before.matched} accepted` +
               `${stats.weak - before.weak ? ` + ${stats.weak - before.weak} weak` : ''} ${nounFor(stats.matched - before.matched + stats.weak - before.weak, 'pair')} of ${rescue.length} re-tested`,
             'info',
             'Matching',
@@ -1210,7 +1208,7 @@ export function createMatchAll({
       if (journal && !cancelled && !shouldCancel?.()) await opfs.deleteRunJournal(projectId, 'match').catch(() => {})
       const dc = descCache.stats()
       log(
-        `Matching: descriptors loaded ${dc.loads}× for ${pluralize(ready.length, 'image')}, ` +
+        `Descriptors loaded ${dc.loads}× for ${pluralize(ready.length, 'image')}, ` +
           `resident peak ${(dc.peakBytes / 2 ** 20).toFixed(0)} MiB`,
         'debug',
         'Matching',
@@ -1243,7 +1241,7 @@ export function createMatchAll({
       'Matching',
     )
     if (cancelled || shouldCancel?.()) {
-      log(`Matching cancelled — ${done}/${pairs.length} done`, 'warn', 'Matching')
+      log(`Matching cancelled — ${done}/${pairs.length} done`, 'info', 'Matching')
       return
     }
     const meanRatio = stats.ratios.length ? stats.ratios.reduce((s, r) => s + r, 0) / stats.ratios.length : 0

@@ -76,7 +76,7 @@ export function createTabularExports({
       ? await estimatedPoses(applyGeoref)
       : { poses: poses.value, frame: { crs: currentCrs.value || null } }
     if (!rows.length) {
-      log(`Export: no ${estimated ? 'registered cameras' : 'imported camera poses'}`, 'warn', 'Export')
+      log(`No ${estimated ? 'registered cameras' : 'imported camera poses'}`, 'warn', 'Export')
       return
     }
     const crs = frame.crs && frame.crs !== 'local' ? frame.crs : null
@@ -125,7 +125,7 @@ export function createTabularExports({
             perImage: source === 'estimatedPerImage',
           })
     if (!rows.length) {
-      log(`Export: no ${source === 'entered' ? 'camera groups' : 'registered cameras'}`, 'warn', 'Export')
+      log(`No ${source === 'entered' ? 'camera groups' : 'registered cameras'}`, 'warn', 'Export')
       return
     }
     const t = tableOf(format)

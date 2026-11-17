@@ -42,7 +42,7 @@ onMounted(async () => {
     // default). A baseline run's digest then lives in the saved record next to the log
     // lines it summarises, instead of only in whatever the user remembered to copy.
     // One entry per line, because the log store is line-oriented.
-    for (const line of out.markdown.split('\n')) log(line, 'debug', 'Summary')
+    for (const line of out.markdown.split('\n')) log(line, 'debug', 'System')
   } catch (e) {
     error.value = e?.message || String(e)
   } finally {

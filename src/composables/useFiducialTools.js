@@ -96,7 +96,7 @@ export function useFiducialTools() {
       return
     }
     sensorTableOpen.value = true
-    log(`${candidates.length} film sensors available — pick one and use "Detect fiducials…"`, 'info', 'Fiducial')
+    log(`${candidates.length} film sensors available — pick one and use "Detect fiducials…"`, 'info', 'Fiducials')
   }
 
   function openFiducialCalibrate() {
@@ -107,7 +107,7 @@ export function useFiducialTools() {
       return
     }
     sensorTableOpen.value = true
-    log(`${candidates.length} film sensors available — pick one and use "Calibrate fiducials…"`, 'info', 'Fiducial')
+    log(`${candidates.length} film sensors available — pick one and use "Calibrate fiducials…"`, 'info', 'Fiducials')
   }
 
   return {

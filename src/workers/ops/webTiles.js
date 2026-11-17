@@ -134,7 +134,7 @@ export function makeWebTilesOps() {
 
     const blob = await sink.finish()
     emit('log', [
-      `Web map tiles: ${written.toLocaleString()} ${EXT[tileFormat].toUpperCase()} tiles, zoom ${minZoom}–${maxZoom}, ` +
+      `Web map tiles: ${written.toLocaleString('en')} ${EXT[tileFormat].toUpperCase()} tiles, zoom ${minZoom}–${maxZoom}, ` +
         `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
       'info',
       'Export',

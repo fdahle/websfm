@@ -9,6 +9,8 @@ import { useCommands } from '../../composables/useCommands.js'
 import { commonPrefix } from '../../core/help/commands.js'
 import { collectSystemInfo } from '../../utils/systemInfo.js'
 import { systemSummaryLines } from '../../core/systemSummary.js'
+import { LOG_SOURCE_IDS, logSourceId, logSourceColor } from '../../core/logRules.js'
+import { useI18n } from '../../composables/useI18n.js'
 
 // The command prompt runs through the console environment App builds (useConsoleEnv:
 // the ribbon's dispatch and guard state, the workflow runner, the stores the verbs use).
@@ -17,6 +19,7 @@ const props = defineProps({
 })
 
 const { entries, log } = useLog()
+const { t } = useI18n()
 // Instantiating the store here also activates its log→OPFS streaming from app
 // boot; it owns the on-disk record that scroll-back and export read from.
 const logStore = useLogStore()
@@ -151,17 +154,20 @@ function entryChannel(e) {
 const filterOpen = ref(false)
 const hiddenSources = ref(new Set())
 
+// The sources the log holds, in pipeline order (core/logRules.js); a line saved under
+// an earlier name counts under today's (logSourceId).
 const allSources = computed(() => {
   const s = new Set()
-  for (const e of earlier.value) if (e.source) s.add(e.source)
-  for (const e of entries.value) if (e.source) s.add(e.source)
-  return [...s].sort()
+  for (const e of earlier.value) if (e.source) s.add(logSourceId(e.source))
+  for (const e of entries.value) if (e.source) s.add(logSourceId(e.source))
+  const rank = (id) => (LOG_SOURCE_IDS.includes(id) ? LOG_SOURCE_IDS.indexOf(id) : LOG_SOURCE_IDS.length)
+  return [...s].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
 })
 
 function passesFilter(e) {
   if (activeTab.value !== 'all' && entryChannel(e) !== activeTab.value) return false
   if (!showDetail.value && e.level === 'debug') return false
-  if (hiddenSources.value.has(e.source)) return false
+  if (hiddenSources.value.has(logSourceId(e.source))) return false
   return true
 }
 
@@ -203,20 +209,8 @@ function hideAll() {
   hiddenSources.value = new Set(allSources.value)
 }
 
-// Source colors
-const SOURCE_COLORS = {
-  Images: '#4d9de0',
-  Metadata: '#9b59b6',
-  Detection: '#e67e22',
-  Matching: '#1abc9c',
-  Project: '#2ecc71',
-  Reconstruction: '#e0518a',
-  Console: '#c0a020',
-}
-
-function sourceColor(source) {
-  return SOURCE_COLORS[source] ?? '#888888'
-}
+// Source colours: core/logRules.js.
+const sourceColor = logSourceColor
 
 function sourceStyle(source) {
   const c = sourceColor(source)
@@ -285,7 +279,7 @@ function completeCommand() {
   }
   const shared = commonPrefix(matches)
   if (shared && shared.length > command.value.trimStart().length) command.value = shared
-  log(matches.join('   '), 'debug', 'Console')
+  log(matches.join('   '), 'info', 'Console')
 }
 
 function onPromptKey(e) {
@@ -330,10 +324,9 @@ function onKeyDown(e) {
 // and it cannot be brought back. (The typed `clear` command only empties the view.)
 function onClear() {
   askConfirm({
-    title: 'Clear the console?',
-    message:
-      "Delete every line of this project's log, the saved copy included? Save TXT keeps a copy first. This can't be undone.",
-    confirmLabel: 'Clear',
+    title: t('console.clear.confirmTitle'),
+    message: t('console.clear.confirmMessage'),
+    confirmLabel: t('console.clear.label'),
     onConfirm: async () => {
       resetEarlier()
       await logStore.clearConsole()
@@ -355,7 +348,7 @@ const exportDebug = ref(false)
 // Falls back to what's in memory if the stream can't be read.
 async function saveTxt() {
   const fmt = (e) =>
-    `${e.time}  ${(e.source ?? '').padEnd(10)}  ${e.level.padEnd(7)}  ${stripSourcePrefix(e.source, e.message)}`
+    `${e.time}  ${(logSourceId(e.source) ?? '').padEnd(14)}  ${e.level.padEnd(7)}  ${stripSourcePrefix(e.source, e.message)}`
   let src = await logStore.readAll()
   if (!src || src.length === 0) src = [...earlier.value, ...entries.value]
   src = src.filter((e) => {
@@ -392,9 +385,9 @@ async function saveTxt() {
       <div class="console-tabs">
         <button
           v-for="tab in [
-            { id: 'pipeline', label: 'Pipeline', count: channelCounts.pipeline },
-            { id: 'activity', label: 'Activity', count: channelCounts.activity },
-            { id: 'all', label: 'All', count: channelCounts.all },
+            { id: 'pipeline', label: t('console.tab.pipeline'), count: channelCounts.pipeline },
+            { id: 'activity', label: t('console.tab.activity'), count: channelCounts.activity },
+            { id: 'all', label: t('console.tab.all'), count: channelCounts.all },
           ]"
           :key="tab.id"
           class="console-tab"
@@ -408,50 +401,54 @@ async function saveTxt() {
         <button
           class="btn-action"
           :class="{ active: showSource }"
-          title="Toggle source labels"
+          :title="t('console.source.title')"
           @click="showSource = !showSource"
         >
-          src
+          {{ t('console.source.label') }}
         </button>
         <button
           class="btn-action"
           :class="{ active: showDetail }"
-          title="Show detailed (debug) log entries"
+          :title="t('console.detail.title')"
           @click="showDetail = !showDetail"
         >
-          Detail
+          {{ t('console.detail.label') }}
         </button>
         <button
           class="btn-action"
           :class="{ active: filterOpen }"
-          title="Filter by source"
+          :title="t('console.filter.title')"
           @click="filterOpen = !filterOpen"
         >
-          Filter
+          {{ t('console.filter.label') }}
         </button>
         <div class="export-wrap">
-          <button class="btn-action" title="Save the log to a TXT file" @click="saveTxt">Save TXT</button>
+          <button class="btn-action" :title="t('console.save.title')" @click="saveTxt">
+            {{ t('console.save.label') }}
+          </button>
           <button
             class="btn-action export-caret"
             :class="{ active: exportMenuOpen }"
-            title="Export options"
+            :title="t('console.save.options')"
             @click="exportMenuOpen = !exportMenuOpen"
           >
             ▾
           </button>
           <div v-if="exportMenuOpen" class="export-menu" @mouseleave="exportMenuOpen = false">
-            <div class="export-menu-title">Include in export</div>
+            <div class="export-menu-title">{{ t('console.save.include') }}</div>
             <label class="export-opt">
               <input type="checkbox" v-model="exportActivity" />
-              <span>Activity (user actions)</span>
+              <span>{{ t('console.save.activity') }}</span>
             </label>
             <label class="export-opt">
               <input type="checkbox" v-model="exportDebug" />
-              <span>Detailed (debug) lines</span>
+              <span>{{ t('console.save.debug') }}</span>
             </label>
           </div>
         </div>
-        <button class="btn-clear" title="Clear the log, after asking" @click="onClear">Clear</button>
+        <button class="btn-clear" :title="t('console.clear.title')" @click="onClear">
+          {{ t('console.clear.label') }}
+        </button>
       </div>
     </div>
     <div class="console-main">
@@ -462,34 +459,41 @@ async function saveTxt() {
           class="entry"
           :class="[`level-${entry.level}`, { 'channel-activity': entryChannel(entry) === 'activity' }]"
         >
-          <span v-if="entryChannel(entry) === 'activity'" class="entry-activity-glyph" title="User action">▸</span>
+          <span
+            v-if="entryChannel(entry) === 'activity'"
+            class="entry-activity-glyph"
+            :title="
+              entry.command ? t('console.activity.command', { command: entry.command }) : t('console.activity.glyph')
+            "
+            >▸</span
+          >
           <span class="entry-time">{{ entry.time }}</span>
           <span v-if="showSource" class="entry-source" :style="entry.source ? sourceStyle(entry.source) : {}">{{
-            entry.source ?? '—'
+            logSourceId(entry.source) ?? '—'
           }}</span>
           <span class="entry-msg">{{ stripSourcePrefix(entry.source, entry.message) }}</span>
         </div>
         <div v-if="filteredEntries.length === 0" class="empty">
           {{
             entries.length === 0 && earlier.length === 0
-              ? 'No output yet.'
+              ? t('console.empty.none')
               : activeTab === 'activity'
-                ? 'No activity yet — actions you take appear here.'
-                : 'No entries match the current filter.'
+                ? t('console.empty.activity')
+                : t('console.empty.filtered')
           }}
         </div>
       </div>
 
-      <button v-if="!stickToBottom" class="jump-btn" title="Jump to newest log entries" @click="scrollToBottom">
-        ↓ New logs
+      <button v-if="!stickToBottom" class="jump-btn" :title="t('console.jump.title')" @click="scrollToBottom">
+        {{ t('console.jump.label') }}
       </button>
 
       <div v-if="filterOpen" class="filter-panel">
         <div class="filter-header">
-          <span class="filter-title">Sources</span>
+          <span class="filter-title">{{ t('console.filter.heading') }}</span>
           <div class="filter-links">
-            <button class="filter-link" @click="showAll">All</button>
-            <button class="filter-link" @click="hideAll">None</button>
+            <button class="filter-link" @click="showAll">{{ t('console.filter.all') }}</button>
+            <button class="filter-link" @click="hideAll">{{ t('console.filter.none') }}</button>
           </div>
         </div>
         <div class="filter-items">
@@ -498,7 +502,7 @@ async function saveTxt() {
             <span class="filter-dot" :style="{ background: sourceColor(source) }" />
             <span class="filter-label">{{ source }}</span>
           </label>
-          <div v-if="allSources.length === 0" class="filter-empty">No sources yet.</div>
+          <div v-if="allSources.length === 0" class="filter-empty">{{ t('console.filter.empty') }}</div>
         </div>
       </div>
     </div>
@@ -513,7 +517,7 @@ async function saveTxt() {
         spellcheck="false"
         autocomplete="off"
         autocapitalize="off"
-        placeholder='Type a command — try "help"'
+        :placeholder="t('console.prompt')"
         @keydown="onPromptKey"
       />
     </div>

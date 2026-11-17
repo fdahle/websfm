@@ -99,7 +99,7 @@ export function createRigModel(images, { log = () => {} } = {}) {
       `Camera rig: ${rig.label}, ${rig.bands.length} bands over ${rig.captures.length} captures — ` +
         `a capture's photos share one pose, each band at its lens offset to ${rig.bands.find((b) => b.reference).name}`,
       'info',
-      'Reconstruction',
+      'Sparse',
     )
 
   return {

@@ -131,7 +131,7 @@ describe('help', () => {
     expect(lines.some((l) => l.startsWith('  run'))).toBe(true)
     expect(lines.some((l) => l.startsWith('  decimate'))).toBe(true)
     expect(lines.some((l) => l.startsWith('  raster zoom in'))).toBe(false)
-    expect(lines.at(-1)).toMatch(/more ribbon commands: "help <tab>"/)
+    expect(lines.at(-1)).toMatch(/more commands: "help <tab>"/)
     expect(helpLines('tools').some((l) => l.startsWith('  crop mesh'))).toBe(true)
     expect(helpLines('nonsense')).toBeNull()
   })

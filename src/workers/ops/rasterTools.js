@@ -39,7 +39,7 @@ export function makeRasterToolOps() {
           `${input.grid.gsd.toPrecision(3)}${
             input.grid.level
               ? ` (level ${input.grid.level} of its GeoTIFF; the full ` +
-                `${d.fullWidth}×${d.fullHeight} grid is past ${DEM_TOOL_CELLS.toLocaleString()} cells)`
+                `${d.fullWidth}×${d.fullHeight} grid is past ${DEM_TOOL_CELLS.toLocaleString('en')} cells)`
               : ' (full resolution)'
           }`,
         input.grid.level ? 'warn' : 'info',
@@ -104,7 +104,7 @@ export function makeRasterToolOps() {
         }
         if (input.grid.level) {
           log(
-            `Clip DEM: the clip area is past ${MAX_CLIP_CELLS.toLocaleString()} cells at full resolution; clipped at ` +
+            `Clip DEM: the clip area is past ${MAX_CLIP_CELLS.toLocaleString('en')} cells at full resolution; clipped at ` +
               `${input.grid.gsd.toPrecision(3)} (level ${input.grid.level} of its GeoTIFF)`,
             'warn',
             'Products',

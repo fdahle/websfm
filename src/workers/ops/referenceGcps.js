@@ -199,7 +199,7 @@ export function makeReferenceGcpOps({ rasterize }) {
   }
 
   async function findReferenceMatches([{ local, reference, matcher = 'sift', prior = null }], { emit }) {
-    const log = (m) => emit?.('log', [m, 'info', 'Find GCPs'])
+    const log = (m) => emit?.('log', [m, 'info', 'Georeferencing'])
     const refBands = reference.rgb ? [0, 1, 2] : [reference.band]
     const spec = learnedDetector(matcher)
     // The project ortho, whole, at the coarse size: its stored COG (overview read)
@@ -314,7 +314,7 @@ export function makeReferenceGcpOps({ rasterize }) {
       if (!learnedCache.has(key)) learnedCache.set(key, make())
       return learnedCache.get(key)
     }
-    const onLog = (m, level = 'debug') => emit?.('log', [m, level, 'Find GCPs'])
+    const onLog = (m, level = 'debug') => emit?.('log', [m, level, 'Georeferencing'])
     // One learned look at a reference rect under a hypothesis { scale, rotationDeg }
     // → the same shape as look(), or null.
     async function learnedLook(rect, { scale, rotationDeg }) {
@@ -623,7 +623,7 @@ export function makeReferenceGcpOps({ rasterize }) {
   // inlierFraction, passes, positions (DEM CRS), residual (m, point − DEM, NaN off
   // it), pixel (m), referencePreview (hillshade) }.
   async function alignTerrain([{ points, dem, initial, misfit = 0 }], { emit }) {
-    const log = (m, level = 'info') => emit?.('log', [m, level, 'Find GCPs'])
+    const log = (m, level = 'info') => emit?.('log', [m, level, 'Georeferencing'])
     const n = points.length / 3,
       g = dem.geoTransform
     const at = (tf, i) => applyTransform(tf, [points[3 * i], points[3 * i + 1], points[3 * i + 2]])

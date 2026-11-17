@@ -247,8 +247,8 @@ export async function meshToTiles(
     }
     if (dec.count > target * 1.5) {
       onLog?.(
-        `3D Tiles: tile ${cell.id} kept ${dec.count.toLocaleString()} triangles (target ${target.toLocaleString()}): ` +
-          `${border.size.toLocaleString()} border vertices are locked`,
+        `3D Tiles: tile ${cell.id} kept ${dec.count.toLocaleString('en')} triangles (target ${target.toLocaleString('en')}): ` +
+          `${border.size.toLocaleString('en')} border vertices are locked`,
         'debug',
         'Export',
       )

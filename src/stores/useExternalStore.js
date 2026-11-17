@@ -261,7 +261,7 @@ export const useExternalStore = registerProjectStore(
         }),
       }),
       write: opfs.saveExternalIndex,
-      onError: (err) => log(`Reference raster index save failed — ${err?.message ?? err}`, 'error', 'Import'),
+      onError: (err) => log(`Reference raster index save failed: ${err?.message ?? err}`, 'error', 'Import'),
     })
 
     // Only { purge: true } deletes persisted data; a plain clear (project
@@ -312,7 +312,7 @@ export const useExternalStore = registerProjectStore(
       log(
         `Reference rasters restored: ${rasters.value.length} ` +
           `(${demRasters.value.length} DEM, ${orthoRasters.value.length} ortho) — pixel data loads on demand`,
-        'success',
+        'info',
         'Import',
       )
       if (mixedVerticalDatums.value) {

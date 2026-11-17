@@ -87,7 +87,7 @@ describe('orthoSurfacePayload fit sample', () => {
       }),
     })
     expect(await runs.orthoSurfacePayload({ surface: 'plane' }, local)).toBeNull()
-    expect(log).toHaveBeenCalledWith(expect.stringMatching(/streamed cloud failed — gone/), 'error', 'Products')
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/streamed cloud failed: gone/), 'error', 'Products')
   })
 })
 

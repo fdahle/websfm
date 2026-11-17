@@ -231,14 +231,14 @@ export function makeLodOps({ lazCodec = null } = {}) {
     const on = workers > 1 ? `, ${workers} workers` : ''
     if (kind === 'edit') {
       emit('log', [
-        `Edit: ${meta.points.toLocaleString()} of ${sourcePoints.toLocaleString()} points into a new octree in ${seconds.toFixed(1)} s${on}`,
+        `Edit: ${meta.points.toLocaleString('en')} of ${sourcePoints.toLocaleString('en')} points into a new octree in ${seconds.toFixed(1)} s${on}`,
         'info',
         'Products',
       ])
       return
     }
     emit('log', [
-      `Level of detail: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, ` +
+      `Level of detail: ${meta.points.toLocaleString('en')} points in ${meta.nodeCount.toLocaleString('en')} nodes, ` +
         `${meta.levels} levels, ${seconds.toFixed(1)} s${on}`,
       'info',
       'Products',
@@ -246,7 +246,7 @@ export function makeLodOps({ lazCodec = null } = {}) {
     if (meta.outside) {
       // The octree's cube came from the file header's extent, before any point was read.
       emit('log', [
-        `Level of detail: ${meta.outside.toLocaleString()} points lie outside the extent ${kind === 'import' ? 'the file header gives' : 'measured'} ` +
+        `Level of detail: ${meta.outside.toLocaleString('en')} points lie outside the extent ${kind === 'import' ? 'the file header gives' : 'measured'} ` +
           '— they are kept, but the view and box reads (crop, DEM) can miss them; fix the header (e.g. pdal translate / lasinfo -repair) and import again',
         'warn',
         kind === 'import' ? 'Import' : 'Products',
@@ -377,7 +377,7 @@ export function makeLodOps({ lazCodec = null } = {}) {
       throw err
     }
     log(
-      `COPC: ${meta.points.toLocaleString()} points in ${meta.nodeCount.toLocaleString()} nodes, ${meta.levels} levels, ` +
+      `COPC: ${meta.points.toLocaleString('en')} points in ${meta.nodeCount.toLocaleString('en')} nodes, ${meta.levels} levels, ` +
         `point format ${meta.file.format}${meta.layout.colour ? ', colour' : ''}, read in place ` +
         `(${(file.size / 1024 ** 2).toFixed(1)} MB copied) in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
       'info',
@@ -551,7 +551,7 @@ export function makeLodOps({ lazCodec = null } = {}) {
       blob = new Blob([...(blob ? [blob] : []), ...batch], { type })
     }
     emit('log', [
-      `${format.toUpperCase()} written: ${lod.points.toLocaleString()} points from the octree, ` +
+      `${format.toUpperCase()} written: ${lod.points.toLocaleString('en')} points from the octree, ` +
         `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
       'info',
       'Export',

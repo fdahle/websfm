@@ -153,7 +153,7 @@ export function createXyzParser({ onLog } = {}) {
         for (let i = 0; i < col.length; i++) col[i] = byte(scale01 ? raw[i] * 255 : raw[i])
       }
       onLog?.(
-        `XYZ: read ${count.toLocaleString()} points` +
+        `XYZ: read ${count.toLocaleString('en')} points` +
           `${col ? ` with color (${colMax <= 1.0001 ? '0–1' : '0–255'} range)` : ''}` +
           `${skipped ? `, skipped ${pluralize(skipped, 'non-numeric row')}` : ''}`,
         'info',

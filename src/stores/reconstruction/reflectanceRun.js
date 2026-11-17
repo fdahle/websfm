@@ -70,7 +70,7 @@ export function createReflectanceRun({ dem, frameModelFor, images, log, mainSpar
       urls.push(url)
       return url
     }
-    const onLog = (m, l, c) => log(m, l, c)
+    const onLog = (m, l, c) => log(m, l, c ?? 'Products')
     reconStatus.value = 'running'
     try {
       const inRig = images.value.filter((im) => member.has(im.uuid))
@@ -204,7 +204,7 @@ export function createReflectanceRun({ dem, frameModelFor, images, log, mainSpar
       }
       const plan = await reflectanceBegin(input, { onLog, worker: writer })
       say(
-        `${plan.width.toLocaleString()} × ${plan.height.toLocaleString()} cells at ${plan.gsd.toPrecision(3)} ` +
+        `${plan.width.toLocaleString('en')} × ${plan.height.toLocaleString('en')} cells at ${plan.gsd.toPrecision(3)} ` +
           `${plan.unit ?? 'units'}, ${pluralize(bands.length, 'band')} (${bands.map((b) => b.name).join(', ')}), ` +
           `${pluralize(plan.captures, 'capture')}; ${pluralize(plan.blocks, 'block')} on ` +
           `${pluralize(Math.min(shares, plan.blocks), 'worker')}${POOL_SIZE > 1 ? ' (the GeoTIFF written on one more)' : ''}`,
@@ -255,6 +255,10 @@ export function createReflectanceRun({ dem, frameModelFor, images, log, mainSpar
       const style = reflectanceStyle(bands.map((b) => b.name))
       if (style) await external.setRasterStyle(record.id, style)
       reconStatus.value = 'done'
+      say(
+        `"${name}" added: ${pluralize(bands.length, 'band')} at ${plan.gsd.toPrecision(3)} ${plan.unit ?? 'units'}`,
+        'success',
+      )
       return live
     } catch (err) {
       say(err?.message ?? String(err), 'error')

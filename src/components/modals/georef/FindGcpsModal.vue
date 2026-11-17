@@ -161,7 +161,7 @@ async function find() {
       stableSetId: stableSetId.value || null,
       searchSetId: searchSetId.value || null,
       limit: candidateLimit.value,
-      onLog: (m, level, ctx) => log(m, level, ctx),
+      onLog: (m, level, ctx) => log(m, level, ctx ?? 'Georeferencing'),
     })
     if (token !== generation) return
     const ortho = recon.ortho

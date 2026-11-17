@@ -93,7 +93,7 @@ export function createImageThumbnails({
       trackWrite(
         storage
           .saveImageDerived(pid, uuid, 'thumb', blob)
-          .catch((err) => log(`Thumbnail save failed: ${img.name} — ${err?.message ?? err}`, 'warn', 'Images')),
+          .catch((err) => log(`Saving the thumbnail of ${img.name} failed: ${err?.message ?? err}`, 'warn', 'Images')),
       )
     }
     return img.thumb
@@ -125,7 +125,7 @@ export function createImageThumbnails({
         }
         if (gen !== generation) return null
         failed.add(uuid)
-        log(`Thumbnail unavailable: ${name} — ${message}`, 'warn', 'Images')
+        log(`No thumbnail for ${name}: ${message}`, 'warn', 'Images')
         return null
       })
   }

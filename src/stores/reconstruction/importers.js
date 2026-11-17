@@ -54,11 +54,11 @@ export function createImporters({
       const model = isBin ? parseColmapModelBin(files) : parseColmapModel(files)
       ;({ images: colImages, points: colPoints, droppedDistortion } = readColmapModel(model))
     } catch (err) {
-      log(`COLMAP import: could not parse model — ${err?.message ?? err}`, 'error', 'Reconstruction')
+      log(`COLMAP import failed: the model cannot be read (${err?.message ?? err})`, 'error', 'Import')
       return false
     }
     if (!colImages.length) {
-      log('COLMAP import: no images found (need cameras.txt + images.txt)', 'warn', 'Reconstruction')
+      log('COLMAP import: no images found (need cameras.txt + images.txt)', 'warn', 'Import')
       return false
     }
 
@@ -72,7 +72,7 @@ export function createImporters({
       `COLMAP import: matched ${matched.length}/${colImages.length} images by name` +
         `, ${points.length}/${colPoints.length} points`,
       'info',
-      'Reconstruction',
+      'Sparse',
     )
     if (unmatched.length) {
       log(
@@ -80,7 +80,7 @@ export function createImporters({
           unmatched.slice(0, 8).join(', ') +
           (unmatched.length > 8 ? '…' : ''),
         'warn',
-        'Reconstruction',
+        'Import',
       )
     }
     if (droppedDistortion.length) {
@@ -88,7 +88,7 @@ export function createImporters({
         `COLMAP import: ${nounFor(droppedDistortion.length, 'camera')} ${droppedDistortion.join(', ')} ` +
           'use a lens model WebSfM does not have — read as pinhole (fx/fy/cx/cy)',
         'warn',
-        'Reconstruction',
+        'Import',
       )
     }
     if (cameras.size < 2) {
@@ -96,7 +96,7 @@ export function createImporters({
         'COLMAP import: fewer than 2 images matched the loaded set — nothing to import. ' +
           'Load the matching images first (names must correspond).',
         'warn',
-        'Reconstruction',
+        'Import',
       )
       return false
     }
@@ -112,13 +112,13 @@ export function createImporters({
       log(
         `COLMAP import: kept the lens of ${pluralize(lensByUuid.size, 'camera')} (observations undistorted with it)`,
         'info',
-        'Reconstruction',
+        'Sparse',
       )
     log(
       `COLMAP import: added sparse cloud (${cameras.size} cameras, ${points.length} points)` +
         `${mainSparseId.value === selectedCloudId.value ? ' — set as main' : ''}`,
       'success',
-      'Reconstruction',
+      'Sparse',
     )
     save()
     return true
@@ -163,7 +163,7 @@ export function createImporters({
       resolve,
     )
     if (cameras.size < 2) {
-      log(`${model.format} import: fewer than 2 cameras match loaded images`, 'warn', 'Reconstruction')
+      log(`${model.format} import: fewer than 2 cameras match loaded images`, 'warn', 'Import')
       return false
     }
     upsertSparseCloud(cameras, points, {
@@ -176,7 +176,7 @@ export function createImporters({
     log(
       `${model.format} import: ${matched.length} cameras, ${points.length} points${unmatched.length ? `, ${unmatched.length} unmatched` : ''}`,
       'success',
-      'Reconstruction',
+      'Sparse',
     )
     save()
     return true
@@ -202,7 +202,7 @@ export function createImporters({
     const isMesh = !!parsed.idx
     const n = isMesh ? (parsed.nVerts ?? 0) : (parsed.count ?? 0)
     if (!n) {
-      log(`Cloud import: ${fileName} contained no points`, 'warn', 'Reconstruction')
+      log(`Cloud import: ${fileName} contained no points`, 'warn', 'Import')
       return false
     }
     const pos = parsed.pos instanceof Float64Array ? parsed.pos : Float64Array.from(parsed.pos)
@@ -223,10 +223,10 @@ export function createImporters({
     clouds.value.push(cloud)
     selectedCloudId.value = cloud.id
     log(
-      `Cloud import: added "${cloud.name}" — ${n.toLocaleString()} ${isMesh ? `vertices, ${parsed.count.toLocaleString()} triangles` : 'points'}` +
+      `Cloud import: added "${cloud.name}" — ${n.toLocaleString('en')} ${isMesh ? `vertices, ${parsed.count.toLocaleString('en')} triangles` : 'points'}` +
         `${parsed.col ? ', color' : ''}${parsed.nrm ? ', normals' : ''}`,
       'success',
-      'Reconstruction',
+      'Sparse',
     )
     save()
     return true

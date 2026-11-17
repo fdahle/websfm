@@ -122,7 +122,7 @@ export function createSfmProjectExports({
       log(
         `${pluralize(unmapped.length, 'film scan')} without an interior orientation from the last sparse run ` +
           `(${unmapped.slice(0, 3).join(', ')}${unmapped.length > 3 ? ' …' : ''}): their keypoints are written in scan ` +
-          'pixels, not in their cameras’ frame. Re-run Sparse Model first.',
+          'pixels, not in their cameras’ frame. Run Sparse Model again first.',
         'warn',
         'Export',
       )
@@ -354,7 +354,7 @@ export function createSfmProjectExports({
         if (expectsFilmFrame(sensor) && !fid) {
           log(
             `Undistort: ${im.name} skipped — no interior-orientation transform from the ` +
-              'last sparse run (re-run reconstruction).',
+              'last sparse run (run Sparse Model again).',
             'warn',
             'Export',
           )

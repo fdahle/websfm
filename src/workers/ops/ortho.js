@@ -83,7 +83,7 @@ function makePhotoLoader(images, rasterize, emit) {
       if (rethrowOutOfMemory && isOutOfMemory(err))
         throw Object.assign(new Error(err?.message ?? String(err)), { outOfMemory: true })
       emit('log', [
-        `Ortho: ${im.name ?? m.uuid} — source photo unavailable (${err?.message ?? err}); ` +
+        `Orthophoto: ${im.name ?? m.uuid} — source photo unavailable (${err?.message ?? err}); ` +
           'using its depth-map colour',
         'warn',
         'Products',
@@ -187,11 +187,11 @@ export function makeOrthoOps({ rasterize } = {}) {
         { ...(surface.settings ?? {}), bounds },
         (done, total) => emit('progress', [done, total, 'Rasterising mesh surface…']),
       )
-      if (!grid) throw new Error('Ortho: the mesh has no triangles to rasterise')
+      if (!grid) throw new Error('Orthophoto: the mesh has no triangles to rasterise')
       emit('log', [
-        `Ortho: mesh surface ${grid.width}×${grid.height} @ ` +
+        `Orthophoto: mesh surface ${grid.width}×${grid.height} @ ` +
           `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px from ` +
-          `${grid.triangles.toLocaleString()} triangles, ${grid.count} cells with height`,
+          `${grid.triangles.toLocaleString('en')} triangles, ${grid.count} cells with height`,
         'info',
         'Products',
       ])
@@ -219,20 +219,20 @@ export function makeOrthoOps({ rasterize } = {}) {
         emit,
       )
       const grid = planeSurface(framed, { ...(surface.settings ?? {}), bounds })
-      if (!grid) throw new Error('Ortho: could not fit a plane (need ≥3 spread points)')
+      if (!grid) throw new Error('Orthophoto: could not fit a plane (need ≥3 spread points)')
       const p = grid.plane
       emit('log', [
-        `Ortho: plane surface ${grid.width}×${grid.height} @ ` +
+        `Orthophoto: plane surface ${grid.width}×${grid.height} @ ` +
           `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px — ` +
           `slope ${(Math.hypot(p.a, p.b) * 100).toFixed(1)}%, residual RMS ` +
-          `${p.rms.toPrecision(3)} over ${p.n.toLocaleString()} points` +
-          (p.dropped ? ` (${p.dropped.toLocaleString()} outliers dropped)` : ''),
+          `${p.rms.toPrecision(3)} over ${p.n.toLocaleString('en')} points` +
+          (p.dropped ? ` (${p.dropped.toLocaleString('en')} outliers dropped)` : ''),
         'info',
         'Products',
       ])
       return { grid: { ...grid, frame: frameDescriptor(frame, surface.frame) }, frame, label: 'plane' }
     }
-    throw new Error(`Ortho: unknown surface "${kind}"`)
+    throw new Error(`Orthophoto: unknown surface "${kind}"`)
   }
 
   // Build an orthophoto by reprojecting each surface cell into the cached depth
@@ -269,7 +269,7 @@ export function makeOrthoOps({ rasterize } = {}) {
       const g = surface.grid
       const read = await readDemGrid(g, null, Math.floor(budget / 5 / 5))
       say(
-        `Ortho: DEM surface read from its GeoTIFF at ${read.width}×${read.height} @ ${read.gsd.toPrecision(3)}` +
+        `Orthophoto: DEM surface read from its GeoTIFF at ${read.width}×${read.height} @ ${read.gsd.toPrecision(3)}` +
           `${read.level ? ` (level ${read.level}; the full ${g.fullWidth}×${g.fullHeight} grid exceeds the memory budget)` : ' (full resolution)'}`,
         read.level ? 'warn' : 'info',
       )
@@ -292,7 +292,7 @@ export function makeOrthoOps({ rasterize } = {}) {
         : ''
     if (!geom.identity || photos) {
       say(
-        `Ortho: ${geom.width.toLocaleString()}×${geom.height.toLocaleString()} @ ${geom.gsd.toPrecision(3)} ${unit}/px ` +
+        `Orthophoto: ${geom.width.toLocaleString('en')}×${geom.height.toLocaleString('en')} @ ${geom.gsd.toPrecision(3)} ${unit}/px ` +
           `over the ${label} surface (${built.grid.width}×${built.grid.height} @ ${built.grid.gsd.toPrecision(3)} ${unit}/px)` +
           photos,
       )
@@ -300,8 +300,8 @@ export function makeOrthoOps({ rasterize } = {}) {
     if (want > 0 && geom.gsd > want * (1 + 1e-6)) {
       const side = Math.ceil((Math.max(geom.width, geom.height) * geom.gsd) / want)
       say(
-        `Ortho: the requested ${want.toPrecision(3)} ${unit}/px would need ~${side.toLocaleString()} px on the long side; ` +
-          `a raster is at most ${MAX_ORTHO_SIDE.toLocaleString()} px a side, so this one is ${geom.gsd.toPrecision(3)} ${unit}/px. ` +
+        `Orthophoto: the requested ${want.toPrecision(3)} ${unit}/px would need ~${side.toLocaleString('en')} px on the long side; ` +
+          `a raster is at most ${MAX_ORTHO_SIDE.toLocaleString('en')} px a side, so this one is ${geom.gsd.toPrecision(3)} ${unit}/px. ` +
           'Limit the area (Tools ▸ Model ▸ Region, then rebuild the surface) for a finer GSD.',
         'warn',
       )
@@ -378,7 +378,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     const { bytes: cacheBytes, tabBound } = cacheFor(shares)
     if (tabBound) {
       say(
-        `Ortho: the map/photo cache is held to ${formatBytes(cacheBytes)}${shares > 1 ? ` per worker (${shares} workers)` : ''}, ` +
+        `Orthophoto: the map/photo cache is held to ${formatBytes(cacheBytes)}${shares > 1 ? ` per worker (${shares} workers)` : ''}, ` +
           'below what the memory budget allows, so the browser tab keeps room for the ' +
           `${formatBytes(settings.pageBytes ?? 0)} the open project already holds (16 GB is all a tab gets, page and workers together)`,
       )
@@ -484,7 +484,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     if (decode) {
       const meanScale = decode.decoded ? decode.scaleSum / decode.decoded : 0
       emit('log', [
-        `Ortho: colour from the source photos, decoded at ` +
+        `Orthophoto: colour from the source photos, decoded at ` +
           `${(100 * meanScale).toFixed(0)}% of native on average (≈ 2 photo px per ortho cell, at most native)` +
           `${decode.fellBack ? `, ${decode.fellBack} from depth-map colour (photo unavailable)` : ''}`,
         'info',
@@ -494,7 +494,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     const blocksX = Math.ceil(width / ctx.blockSize),
       blocksY = Math.ceil(height / ctx.blockSize)
     emit('log', [
-      `Ortho: ${pluralize(res.blocks, 'block')} of ${ctx.blockSize}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} ` +
+      `Orthophoto: ${pluralize(res.blocks, 'block')} of ${ctx.blockSize}² (${blocksX}×${blocksY}), ${pluralize(res.visits, 'map visit')} ` +
         `after culling (of ${res.blocks * maps.length}); ${pluralize(res.mapLoads, 'map read')}, ${pluralize(res.photoLoads, 'photo decode')}, ` +
         `${pluralize(res.cacheHits, 'cache hit')} in a ${Number.isFinite(res.grouping?.cacheBytes) ? formatBytes(res.grouping.cacheBytes) : 'default'} cache` +
         `${workers > 1 ? ` per worker, ${workers} workers` : ''}`,
@@ -503,7 +503,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     ])
     if (res.cacheShrinks) {
       emit('log', [
-        `Ortho: the browser refused memory for a photo ${pluralize(res.cacheShrinks, 'time')}; each time the ` +
+        `Orthophoto: the browser refused memory for a photo ${pluralize(res.cacheShrinks, 'time')}; each time the ` +
           `map/photo cache gave up a quarter (to ${formatBytes(res.cacheLimit)} in the end) and the photo was decoded again. A lower memory ` +
           'budget (Settings ▸ Compute) starts the run there',
         'warn',
@@ -512,7 +512,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     }
     if (res.grouping?.predicted && Object.keys(res.grouping.predicted).length) {
       emit('log', [
-        `Ortho: group sizes, predicted read cost — ${Object.entries(res.grouping.predicted)
+        `Orthophoto: group sizes, predicted read cost — ${Object.entries(res.grouping.predicted)
           .map(([g, c]) => `${g}: ${Math.round(c)}`)
           .join(', ')}; chose ${res.grouping.size}`,
         'debug',
@@ -522,7 +522,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     if (res.grouping?.size > 1) {
       const p = res.grouping.predicted ?? {}
       emit('log', [
-        `Ortho: blocks in ${pluralize(res.grouping.groups, 'group')} of up to ${res.grouping.size}, each pass reading a map ` +
+        `Orthophoto: blocks in ${pluralize(res.grouping.groups, 'group')} of up to ${res.grouping.size}, each pass reading a map ` +
           `once for the whole group; predicted read cost ${Math.round(p[res.grouping.size] ?? 0)} against ` +
           `${Math.round(p[1] ?? 0)} block by block (a map read 1, a photo decode 3)`,
         'info',
@@ -531,12 +531,12 @@ export function makeOrthoOps({ rasterize } = {}) {
     }
     const cells = width * height
     emit('log', [
-      `Ortho: ${width}×${height}, ${covered}/${cells} cells coloured ` +
+      `Orthophoto: ${width}×${height}, ${covered}/${cells} cells coloured ` +
         `(${((100 * covered) / cells).toFixed(0)}%) from ${pluralize(maps.length, 'view')} over the ` +
         `${label} surface (${surfaceCells}/${cells} cells had a height) ` +
         `— ${sampled} sampled + ${filled} interpolated; GeoTIFF ${formatBytes(cog.size)} ` +
         `in ${((performance.now() - t0) / 1000).toFixed(1)}s${workers > 1 ? ` on ${workers} workers` : ''}`,
-      'success',
+      'info',
       'Products',
     ])
     // The ortho's quality figures travel with it (its run record): sharpness, and
@@ -553,13 +553,13 @@ export function makeOrthoOps({ rasterize } = {}) {
         seamline === 'graphcut'
           ? 'seamlines by graph cut (colour difference + nadir cost)'
           : `each cell from its most nadir view (finest foreshortened footprint), labels smoothed by ${pluralize(smoothPasses, 'majority pass', 'majority passes')}`
-      emit('log', [`Ortho: mosaic — ${where}; seams ${seams}`, 'info', 'Products'])
+      emit('log', [`Orthophoto: mosaic — ${where}; seams ${seams}`, 'info', 'Products'])
       if (seamCut) {
         const pct = (v) => (100 * v).toFixed(1)
         emit('log', [
-          `Ortho: graph cut on a ${seamCut.width}×${seamCut.height} grid (every ${pluralize(seamCut.factor, 'cell')}), ` +
+          `Orthophoto: graph cut on a ${seamCut.width}×${seamCut.height} grid (every ${pluralize(seamCut.factor, 'cell')}), ` +
             `${pluralize(seamCut.cycles, 'expansion cycle')}, ${pluralize(seamCut.accepted, 'accepted move')}; ${pct(seamCut.changedCells / Math.max(1, seamCut.labelled))}% ` +
-            `of the cells moved off their most nadir view; energy ${seamCut.energy.toLocaleString()} (nearest-nadir ${seamCut.energyNadir.toLocaleString()}, ` +
+            `of the cells moved off their most nadir view; energy ${seamCut.energy.toLocaleString('en')} (nearest-nadir ${seamCut.energyNadir.toLocaleString('en')}, ` +
             `−${pct(1 - seamCut.energy / Math.max(1, seamCut.energyNadir))}%)` +
             (res.seamCutMs
               ? `; survey ${((res.seamCutMs.read + res.seamCutMs.sample) / 1000).toFixed(1)} s (photo reads ${(res.seamCutMs.read / 1000).toFixed(1)} s), cut ${(res.seamCutMs.solve / 1000).toFixed(1)} s`
@@ -578,9 +578,9 @@ export function makeOrthoOps({ rasterize } = {}) {
             ? `; ${res.surveyFromMapRgb} of ${maps.length} images sampled from their depth maps' own colour (as fine as the survey needs, no decode)`
             : '')
         emit('log', [
-          `Ortho: colour balance — gains for ${balance.images} of ${pluralize(maps.length, 'image')} from ` +
-            `${pluralize(balance.pairs, 'overlapping pair')} over ${balance.latticeCells.toLocaleString()} lattice cells (every ` +
-            `${ordinal(balance.latticeStep)}; ${balance.clippedObservations.toLocaleString()} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}` +
+          `Orthophoto: colour balance — gains for ${balance.images} of ${pluralize(maps.length, 'image')} from ` +
+            `${pluralize(balance.pairs, 'overlapping pair')} over ${balance.latticeCells.toLocaleString('en')} lattice cells (every ` +
+            `${ordinal(balance.latticeStep)}; ${balance.clippedObservations.toLocaleString('en')} ${nounFor(balance.clippedObservations, 'clipped sample')} left out); gain min ${f(balance.min)} / median ${f(balance.median)} / max ${f(balance.max)}` +
             (balance.exifPhotos
               ? `, centred on ${pluralize(balance.exifPhotos, 'photo')}' EXIF exposure` +
                 (balance.exifSpread > 1.05 ? ` (it varies ${balance.exifSpread.toFixed(1)}× over the block)` : '')
@@ -597,19 +597,19 @@ export function makeOrthoOps({ rasterize } = {}) {
           const list = maps.map(
             (m, i) => `${name(m)} ${[0, 1, 2].map((c) => res.gains[3 * i + c].toFixed(3)).join('/')}`,
           )
-          emit('log', [`Ortho: gains per image (R/G/B): ${list.join(', ')}`, 'debug', 'Products'])
+          emit('log', [`Orthophoto: gains per image (R/G/B): ${list.join(', ')}`, 'debug', 'Products'])
         }
       }
     }
     if (res.timings)
       emit('log', [
-        `Ortho: time (s)${workers > 1 ? ', summed over the workers' : ''} — ${Object.entries(res.timings)
+        `Orthophoto: time (s)${workers > 1 ? ', summed over the workers' : ''} — ${Object.entries(res.timings)
           .map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`)
           .join(', ')}`,
         'debug',
         'Products',
       ])
-    emit('log', [`Ortho: ${describeOrthoStats(stats)}`, 'info', 'Products'])
+    emit('log', [`Orthophoto: ${describeOrthoStats(stats)}`, 'info', 'Products'])
     emit('progress', [1, 1, 'Done'])
 
     // The geotransform travels WITH the ortho: its grid no longer has to be the
@@ -644,7 +644,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     let blockProgress = null,
       groupLabel = ''
     const pacer = createLogPacer()
-    const heartbeat = createStepProgress({ prefix: 'Ortho: ', unit: 'map visit', pacer })
+    const heartbeat = createStepProgress({ prefix: 'Orthophoto: ', unit: 'map visit', pacer })
     const label = () =>
       groupLabel
         ? `Orthorectifying… ${groupLabel}`
@@ -663,7 +663,7 @@ export function makeOrthoOps({ rasterize } = {}) {
         if (line) emit('log', [line, 'info', 'Products'])
       },
       blocksStart(count) {
-        blockProgress = createBlockProgress(count, { prefix: 'Ortho: ', pacer })
+        blockProgress = createBlockProgress(count, { prefix: 'Orthophoto: ', pacer })
       },
       blockDone() {
         const line = blockProgress?.finished()
@@ -760,7 +760,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     ctx.cacheBytes = ctx.cacheFor(want).bytes
     if (plan.shareModel) {
       emit('log', [
-        `Ortho: workers vs predicted time — ${plan.shareModel.candidates
+        `Orthophoto: workers vs predicted time — ${plan.shareModel.candidates
           .map(
             (c) =>
               `${c.k}: ${Math.round(c.seconds)} s ` +
@@ -789,7 +789,7 @@ export function makeOrthoOps({ rasterize } = {}) {
     }
     if (cur.length) shares.push(cur)
     emit('log', [
-      `Ortho: ${pluralize(plan.groups, 'group')} of up to ${pluralize(plan.groupBlocks, 'block')} dealt to ` +
+      `Orthophoto: ${pluralize(plan.groups, 'group')} of up to ${pluralize(plan.groupBlocks, 'block')} dealt to ` +
         `${pluralize(shares.length, 'worker')}, a ${formatBytes(ctx.cacheBytes)} map/photo cache each`,
       'info',
       'Products',

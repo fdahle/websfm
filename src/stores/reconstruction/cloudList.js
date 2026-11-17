@@ -9,6 +9,7 @@
 import { isStreamed } from '../../core/lod/streamed.js'
 import { computed } from 'vue'
 import { mainOf } from '../../core/products/productSet.js'
+import { productLogSource } from '../../core/logRules.js'
 
 export function createCloudList({
   clouds,
@@ -190,7 +191,10 @@ export function createCloudList({
     const cloud = clouds.value.find((c) => c.id === id && c.kind === 'sparse')
     if (!cloud || mainSparseId.value === id) return
     mainSparseId.value = id
-    log(`Main sparse cloud → "${cloud.name}"`, 'info', 'Reconstruction', { channel: 'activity' })
+    log(`Main sparse cloud → "${cloud.name}"`, 'info', 'Sparse', {
+      channel: 'activity',
+      command: `product main "${cloud.name}"`,
+    })
     save()
   }
 
@@ -218,7 +222,10 @@ export function createCloudList({
     clouds.value = clouds.value.filter((c) => c.id !== id)
     if (selectedCloudId.value === id) selectedCloudId.value = clouds.value[0]?.id ?? null
     ensureMainSparse()
-    log(`Removed cloud "${removed.name}"`, 'info', 'Reconstruction', { channel: 'activity' })
+    log(`Removed cloud "${removed.name}"`, 'info', productLogSource(removed.kind), {
+      channel: 'activity',
+      command: `product remove "${removed.name}"`,
+    })
     save()
     return true
   }
@@ -232,7 +239,10 @@ export function createCloudList({
     if (!cloud || !trimmed || trimmed === cloud.name) return false
     const prev = cloud.name
     cloud.name = trimmed
-    log(`Renamed cloud "${prev}" → "${trimmed}"`, 'info', 'Reconstruction', { channel: 'activity' })
+    log(`Renamed cloud "${prev}" → "${trimmed}"`, 'info', productLogSource(cloud.kind), {
+      channel: 'activity',
+      command: `product rename "${prev}" "${trimmed}"`,
+    })
     save()
     return true
   }

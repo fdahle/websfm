@@ -154,7 +154,7 @@ watch(
       if (req === previewRequest) preview.value = { pairId, matches, kpsA, kpsB }
     } catch (err) {
       // Say why the panel stays empty.
-      if (req === previewRequest) log(`Match preview: ${err?.message ?? err}`, 'warn', 'Matching')
+      if (req === previewRequest) log(`Match preview failed: ${err?.message ?? err}`, 'warn', 'Matching')
     }
   },
   { immediate: true },

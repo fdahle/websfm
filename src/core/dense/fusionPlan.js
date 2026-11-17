@@ -605,8 +605,8 @@ function* planSteps(maps, opts, onLog, hooks) {
   // fusion, so say so.
   if (costStats.p70 > 0.55) {
     onLog(
-      `Fusion: weak cost distribution — p70 ${costStats.p70.toFixed(2)} > 0.55 (most pixels match at ZNCC < 0.45). ` +
-        'Check intrinsics / window size / working resolution.',
+      `Fusion: the depth maps match weakly — 70 % of pixels cost ${costStats.p70.toFixed(2)} or more (> 0.55: most match at a correlation below 0.45). ` +
+        'Check the camera calibration, or build the depth maps at a higher Quality.',
       'warn',
       'Dense',
     )
@@ -723,7 +723,7 @@ function* planSteps(maps, opts, onLog, hooks) {
     }).total
   const fits = (p) => (!budget || p.total <= budget) && (!poolCap || poolOf(p) <= poolCap)
   onLog(
-    `Fusion: measured ${est.candidates.toLocaleString()} candidate px → ≤ ${estCells.toLocaleString()} ` +
+    `Fusion: measured ${est.candidates.toLocaleString('en')} candidate px → ≤ ${estCells.toLocaleString('en')} ` +
       `merge cells at ${mergeCell.toExponential(2)}${est.level ? ` (hash-sampled 1/${2 ** est.level}, +${Math.round((DENSE_TUNING.fuseEstimateMargin - 1) * 100)}% margin)` : ' (exact)'}; ` +
       `projected peak ≈ ${formatBytes(proj.total)} (input ${formatBytes(proj.input)} + accumulator ` +
       `${formatBytes(proj.accumulator)})` +
@@ -764,7 +764,7 @@ function* planSteps(maps, opts, onLog, hooks) {
         proj = parProj
         workers = Math.min(parallel, planned.length)
         onLog(
-          `Fusion: ${slabs.length} slabs along ${axKey} on ${workers} workers (≤ ${Math.ceil(largest).toLocaleString()} cells each); ` +
+          `Fusion: ${slabs.length} slabs along ${axKey} on ${workers} workers (≤ ${Math.ceil(largest).toLocaleString('en')} cells each); ` +
             `projected peak ≈ ${formatBytes(proj.total)} (accumulators ${formatBytes(proj.accumulator)} + finished slabs ` +
             `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`,
           'info',
@@ -787,7 +787,7 @@ function* planSteps(maps, opts, onLog, hooks) {
         proj = tiledProj
         onLog(
           `Fusion: one piece would need ${formatBytes(projectDensifyPeakBytes({ inputBytes, cells: estCells }).total)} — ` +
-            `fusing in ${slabs.length} slabs along ${axKey} (≤ ${Math.ceil(largest).toLocaleString()} cells each); ` +
+            `fusing in ${slabs.length} slabs along ${axKey} (≤ ${Math.ceil(largest).toLocaleString('en')} cells each); ` +
             `projected peak ≈ ${formatBytes(proj.total)} (accumulator ${formatBytes(proj.accumulator)} + finished slabs ` +
             `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`,
           'info',

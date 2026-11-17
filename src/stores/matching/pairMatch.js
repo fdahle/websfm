@@ -163,7 +163,7 @@ export function createPairMatcher({
       if (!kpsA || !kpsB) {
         entry.status = 'error'
         log(
-          `Match failed: keypoints missing for ${imgA.name} / ${imgB.name} — re-run feature detection`,
+          `Match failed: keypoints missing for ${imgA.name} / ${imgB.name} — run Detect Features again`,
           'error',
           'Matching',
         )
@@ -198,7 +198,7 @@ export function createPairMatcher({
       if (!descA || !descB) {
         entry.status = 'error'
         const names = `${imgA.name} / ${imgB.name}`
-        log(`Match failed: descriptors missing for ${names} — re-run feature detection`, 'error', 'Matching')
+        log(`Match failed: descriptors missing for ${names} — run Detect Features again`, 'error', 'Matching')
         touchSoon()
         return
       }
@@ -447,7 +447,7 @@ export function createPairMatcher({
             `${overrode ? `, ratio-override on ${result.inlierCount}≥${settings.overrideInliers} inliers` : ''}), ` +
             `H/F ${hfRatio.toFixed(2)}${entry.degenerate ? ' (degenerate — planar/pure-rotation, poor seed)' : ''}, ` +
             `${spread ? `spread ${spread.uniqueA}/${spread.uniqueB} unique, ${spread.extentA.toFixed(0)}/${spread.extentB.toFixed(0)}px` : 'spread n/a'}` +
-            `${verdict.spreadDegenerate ? ' (positional collapse — REJECTED)' : ''}` +
+            `${verdict.spreadDegenerate ? ' (positional collapse: rejected)' : ''}` +
             `${verdict.weak ? ' (WEAK — PnP bridge only)' : ''}, ` +
             `${settings.verifier === 'magsac' ? 'MAGSAC++' : 'RANSAC'} ${ransacPx.toFixed(2)}px` +
             `${
@@ -488,7 +488,7 @@ export function createPairMatcher({
           'Matching',
         )
       } else if (entry.inlierCount > 0) {
-        log(`Matched: ${label} — ${entry.inlierCount}/${entry.rawCount} inliers`, 'success', 'Matching')
+        log(`Matched: ${label} — ${entry.inlierCount}/${entry.rawCount} inliers`, 'debug', 'Matching')
       } else {
         // Report the recorded cause (ratio-gate vs absolute-inlier floor vs no model),
         // not a blanket "ratio too low" that misreads floor rejections.
@@ -508,8 +508,8 @@ export function createPairMatcher({
       const msg = err?.message ?? String(err)
       const cancelled = /cancel/i.test(msg)
       log(
-        `Match ${cancelled ? 'cancelled' : 'error'}: ${imgA.name} ↔ ${imgB.name}` + `${cancelled ? '' : ` — ${msg}`}`,
-        cancelled ? 'warn' : 'error',
+        `Match ${cancelled ? 'cancelled' : 'failed'}: ${imgA.name} ↔ ${imgB.name}` + `${cancelled ? '' : ` — ${msg}`}`,
+        cancelled ? 'debug' : 'error',
         'Matching',
       )
     }

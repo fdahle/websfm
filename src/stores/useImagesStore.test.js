@@ -285,7 +285,10 @@ describe('saving a mask', () => {
     store.updateMask('image-1', new Blob(['png'], { type: 'image/png' }))
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(lines()).toEqual([
-      ['error', 'Mask not saved: photo.jpg: Storage is full: free space, then run the step again. (uuid-1.png)'],
+      [
+        'error',
+        'Saving the mask of photo.jpg failed: Storage is full: free space, then run the step again. (uuid-1.png)',
+      ],
     ])
   })
 

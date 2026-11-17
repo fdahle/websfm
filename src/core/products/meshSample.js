@@ -120,7 +120,7 @@ export function sampleMesh(mesh, { count = 1_000_000, seed = 1, texture = null }
     } else if (outCol) outCol.fill(128, d, d + 3)
   }
   onLog?.(
-    `Mesh sample: ${N.toLocaleString()} points over area ${total.toPrecision(6)} ` +
+    `Mesh sample: ${N.toLocaleString('en')} points over area ${total.toPrecision(6)} ` +
       `(${(N / total).toPrecision(4)} per unit²), seed ${seed}${tex ? ', colour from the texture' : ''}`,
     'info',
     'Products',

@@ -130,7 +130,7 @@ export function makeReflectanceOps() {
       ])
     if (s.geom.gsd > s.requested * (1 + 1e-9))
       emit('log', [
-        `Reflectance map: ${s.requested.toPrecision(3)} would need more than ${MAX_SIDE.toLocaleString()} cells a side; ` +
+        `Reflectance map: ${s.requested.toPrecision(3)} would need more than ${MAX_SIDE.toLocaleString('en')} cells a side; ` +
           `built at ${s.geom.gsd.toPrecision(3)}`,
         'warn',
         'Products',

@@ -47,13 +47,13 @@ export function createPhotoText({ images, log, save, whenComputeReady }) {
         log(
           `${img.name}: ${pluralize(kept.length, 'text line')} of ${r.lines.length} found ` +
             `(${r.width}×${r.height} px, ${r.tiles} tiles, find ${r.detectMs} ms, read ${r.readMs} ms)`,
-          'info',
+          'debug',
           'Images',
         )
       } catch (err) {
         if (isCancelled()) return
         failed++
-        log(`${img.name}: reading text failed — ${err?.message ?? err}`, 'error', 'Images')
+        log(`${img.name}: reading text failed: ${err?.message ?? err}`, 'error', 'Images')
       }
       onProgress?.(++done, todo.length)
     })

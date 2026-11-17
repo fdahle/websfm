@@ -1,4 +1,5 @@
 import { nextGroupName, moveListEntry } from '../../utils/imageGroups.js'
+import { editCommand } from '../../core/help/consoleEdits.js'
 
 // Image groups (display-only folders, utils/imageGroups.js), split out of
 // useImagesStore. Every mutation is a reversible user edit, so it logs on the
@@ -39,7 +40,7 @@ export function createImageGroups({ imageGroups, images, isPersisting, log, save
       `Created image group "${group.name}"${moved ? ` with ${moved} image${moved !== 1 ? 's' : ''}` : ''}`,
       'info',
       'Images',
-      { channel: 'activity' },
+      { channel: 'activity', command: editCommand('group create', [group.name, namesOf(imageIds)]) },
     )
     persistGroups()
     return group
@@ -51,7 +52,10 @@ export function createImageGroups({ imageGroups, images, isPersisting, log, save
     if (!group || !trimmed || trimmed === group.name) return false
     const previous = group.name
     group.name = trimmed
-    log(`Renamed image group "${previous}" → "${trimmed}"`, 'info', 'Images', { channel: 'activity' })
+    log(`Renamed image group "${previous}" → "${trimmed}"`, 'info', 'Images', {
+      channel: 'activity',
+      command: editCommand('group rename', [previous, trimmed]),
+    })
     persistGroups()
     return true
   }
@@ -71,10 +75,16 @@ export function createImageGroups({ imageGroups, images, isPersisting, log, save
       `Removed image group "${group.name}"${freed ? ` (${freed} image${freed !== 1 ? 's' : ''} now ungrouped)` : ''}`,
       'info',
       'Images',
-      { channel: 'activity' },
+      { channel: 'activity', command: editCommand('group remove', [group.name]) },
     )
     persistGroups()
     return true
+  }
+
+  // The names of images, for the console command an Activity line names.
+  function namesOf(imageIds) {
+    const ids = new Set(imageIds)
+    return images.value.filter((img) => ids.has(img.id)).map((img) => img.name)
   }
 
   function assignGroup(imageIds, groupId) {
@@ -97,6 +107,9 @@ export function createImageGroups({ imageGroups, images, isPersisting, log, save
     const what = `${moved} image${moved !== 1 ? 's' : ''}`
     log(target ? `Moved ${what} to group "${target.name}"` : `Removed ${what} from their group`, 'info', 'Images', {
       channel: 'activity',
+      command: target
+        ? editCommand('group add', [target.name, namesOf(imageIds)])
+        : editCommand('group ungroup', [namesOf(imageIds)]),
     })
     persistGroups()
     return moved

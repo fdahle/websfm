@@ -75,7 +75,7 @@ describe('extendModel: adding images to a saved model', () => {
         expect(cams.get(u).K).toEqual(c.K)
       }
       // The model's frame was rebuilt from the detected keypoints (extendModel.js).
-      const frameLine = logs.find(([m]) => m.startsWith('model frame rebuilt'))?.[0]
+      const frameLine = logs.find(([m]) => m.startsWith('Model frame rebuilt'))?.[0]
       expect(frameLine).toBeTruthy()
       expect(out.summary.extension.frame.medianPx).toBeLessThan(0.01)
       expect(out.summary.selfCalDistortion).toEqual(base.summary.selfCalDistortion)

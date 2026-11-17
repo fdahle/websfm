@@ -203,7 +203,7 @@ export function useDetectTargets() {
           : '') +
         '; check them in Edit GCPs',
       found ? 'success' : 'warn',
-      'GCP',
+      'Georeferencing',
     )
     return { found, tried: n }
   }
@@ -254,7 +254,7 @@ export function useDetectTargets() {
         `${pluralize(n, 'photo')} on ${pluralize(workers, 'worker')} (score ≥ ${settings.minScore}) in ` +
         `${((performance.now() - t0) / 1000).toFixed(1)} s; check them in Edit GCPs`,
       found ? 'success' : 'warn',
-      'GCP',
+      'Georeferencing',
     )
     return { found, tried }
   }

@@ -93,10 +93,10 @@ export function textureLayout(run, cand) {
   for (let f = 0; f < F; f++) if (cand.count[f]) seenFaces++
   if (!seenFaces) throw new Error('No registered photo sees this mesh: is it in the model frame of the cameras?')
   log(
-    `Texture: ${seenFaces.toLocaleString()} of ${F.toLocaleString()} faces seen by at least one of ${views.length} views` +
+    `Texture: ${seenFaces.toLocaleString('en')} of ${F.toLocaleString('en')} faces seen by at least one of ${views.length} views` +
       ` (z-buffer ≤ ${o.bufferSide} px, faces within ${Math.round((Math.acos(o.minCos) * 180) / Math.PI)}° of facing)` +
       (cand.fallbackFaces
-        ? `, ${cand.fallbackFaces.toLocaleString()} of them only partly (textured from the view that hides least of them)`
+        ? `, ${cand.fallbackFaces.toLocaleString('en')} of them only partly (textured from the view that hides least of them)`
         : '') +
       '; ' +
       (cand.orientation === 0
@@ -117,8 +117,8 @@ export function textureLayout(run, cand) {
       consistency = dropInconsistentViews(cand, early.gains, o.consistencyMinTol)
       if (consistency.dropped) {
         log(
-          `Texture: photo consistency dropped ${consistency.dropped.toLocaleString()} views of ` +
-            `${consistency.faces.toLocaleString()} faces that saw something the other photos did not ` +
+          `Texture: photo consistency dropped ${consistency.dropped.toLocaleString('en')} views of ` +
+            `${consistency.faces.toLocaleString('en')} faces that saw something the other photos did not ` +
             `(tolerance ±${((Math.exp(consistency.tolerance) - 1) * 100).toFixed(0)} % in brightness)`,
         )
       }
@@ -176,14 +176,14 @@ export function textureLayout(run, cand) {
   used += flat.count * flat.size * flat.size
   const pageArea = pack.pageHeights.reduce((a, h) => a + h * o.pageSize, 0)
   if (o.unseen === 'remove' && flat.faces)
-    log(`Texture: ${flat.faces.toLocaleString()} faces no photo sees are left out of the textured mesh`)
+    log(`Texture: ${flat.faces.toLocaleString('en')} faces no photo sees are left out of the textured mesh`)
   log(
-    `Texture: ${charts.nCharts.toLocaleString()} charts` +
+    `Texture: ${charts.nCharts.toLocaleString('en')} charts` +
       (merged
-        ? ` (${merged.toLocaleString()} faces of charts under ${o.minChartFaces} faces moved to a neighbour's photo)`
+        ? ` (${merged.toLocaleString('en')} faces of charts under ${o.minChartFaces} faces moved to a neighbour's photo)`
         : '') +
-      ` in ${pieces.count.toLocaleString()} pieces` +
-      (flat.count ? ` + ${flat.count} flat colour cells for ${flat.faces.toLocaleString()} unseen faces` : '') +
+      ` in ${pieces.count.toLocaleString('en')} pieces` +
+      (flat.count ? ` + ${flat.count} flat colour cells for ${flat.faces.toLocaleString('en')} unseen faces` : '') +
       ` on ${pack.nPages} page${pack.nPages === 1 ? '' : 's'} of ${o.pageSize} px, ${((100 * used) / pageArea).toFixed(0)} % filled; ` +
       `texel = ${s >= 0.995 ? 'native photo pixel' : `${(1 / s).toFixed(2)} photo pixels`}` +
       (s < o.maxScale ? ` (lowered from ${o.maxScale === 1 ? 'native' : o.maxScale} to fit ${o.maxPages} pages)` : ''),
@@ -234,7 +234,7 @@ export function textureFinish(run, pages, baked) {
     gainSummary = summary
     log(
       summary.images
-        ? `Texture: colour levelling over ${summary.images} photos from ${summary.observations.toLocaleString()} samples; ` +
+        ? `Texture: colour levelling over ${summary.images} photos from ${summary.observations.toLocaleString('en')} samples; ` +
             `gain median ${summary.median.toFixed(3)}, range ${summary.min.toFixed(3)}–${summary.max.toFixed(3)}` +
             (exif.withExif
               ? `, centred on ${pluralize(exif.withExif, 'photo')}' EXIF exposure` +
@@ -242,7 +242,7 @@ export function textureFinish(run, pages, baked) {
               : '') +
             (summary.clamped ? `, ${pluralize(summary.clamped, 'channel')} held at 2 stops` : '') +
             (summary.rejected
-              ? `; ${summary.rejected.toLocaleString()} samples left out as inconsistent between photos`
+              ? `; ${summary.rejected.toLocaleString('en')} samples left out as inconsistent between photos`
               : '')
         : 'Texture: colour levelling skipped (no face seen by two decoded photos)',
     )
@@ -261,8 +261,8 @@ export function textureFinish(run, pages, baked) {
       adj,
     })
     log(
-      `Texture: seam levelling over ${seamLevel.seamVertices.toLocaleString()} seam vertices ` +
-        `(${seamLevel.unknowns.toLocaleString()} offsets, ${seamLevel.iterations} CG iterations, ` +
+      `Texture: seam levelling over ${seamLevel.seamVertices.toLocaleString('en')} seam vertices ` +
+        `(${seamLevel.unknowns.toLocaleString('en')} offsets, ${seamLevel.iterations} CG iterations, ` +
         `largest offset ${seamLevel.maxOffset.toFixed(0)} levels) in ${((Date.now() - t0) / 1000).toFixed(1)} s`,
     )
   }
@@ -270,10 +270,10 @@ export function textureFinish(run, pages, baked) {
   // Quality figure: the colour step across seams, in the finished atlas.
   const seams = seamStats(adj, labels, idx, cut, px, layout, pages)
   log(
-    `Texture: seams ${seams.seams.toLocaleString()} edges between photos, mean colour step ` +
+    `Texture: seams ${seams.seams.toLocaleString('en')} edges between photos, mean colour step ` +
       `${seams.step.toFixed(1)} levels (median ${seams.median.toFixed(1)})` +
       (seams.sameView
-        ? `; ${seams.sameView.toLocaleString()} cuts inside one photo, step ${seams.sameViewStep.toFixed(1)}`
+        ? `; ${seams.sameView.toLocaleString('en')} cuts inside one photo, step ${seams.sameViewStep.toFixed(1)}`
         : ''),
   )
 
@@ -325,7 +325,7 @@ function weldIfOpen(mesh, share, log) {
   const r = weldVertices({ pos: mesh.pos, idx: mesh.idx, col: mesh.col ?? null })
   log(
     `Texture: ${((100 * open) / adj.length).toFixed(0)} % of edges were open, so the mesh was welded first ` +
-      `(${r.merged.toLocaleString()} corners joined)`,
+      `(${r.merged.toLocaleString('en')} corners joined)`,
   )
   return r.mesh
 }
@@ -347,7 +347,7 @@ function joinCoincident(mesh, log) {
   const I = new Uint32Array(idx.length)
   for (let i = 0; i < idx.length; i++) I[i] = id[idx[i]]
   log(
-    `Texture: ${(nV - m).toLocaleString()} vertex copies at the same position joined first (an earlier texture's seams, or an unwelded import)`,
+    `Texture: ${(nV - m).toLocaleString('en')} vertex copies at the same position joined first (an earlier texture's seams, or an unwelded import)`,
   )
   return { pos: P, idx: I, col: C }
 }

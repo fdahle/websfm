@@ -137,7 +137,7 @@ export const usePosesStore = registerProjectStore(
       isPersisting,
       build: () => ({ crs: currentCrs.value, poses: poses.value }),
       write: opfs.savePoses,
-      onError: (err) => log(`Poses save failed — ${err?.message ?? err}`, 'error', 'Poses'),
+      onError: (err) => log(`Poses save failed: ${err?.message ?? err}`, 'error', 'Poses'),
     })
 
     // Name → image-id matching is shared with GCP observations / footprints /
@@ -171,7 +171,7 @@ export const usePosesStore = registerProjectStore(
         await ensureProjection(sourceCrs)
         await ensureProjection(projCrs)
       } catch (err) {
-        log(`Pose import failed — could not resolve CRS (${err?.message ?? err})`, 'error', 'Pose')
+        log(`Pose import failed: could not resolve the coordinate system (${err?.message ?? err})`, 'error', 'Poses')
         return 0
       }
 
@@ -218,7 +218,7 @@ export const usePosesStore = registerProjectStore(
       log(
         `Poses imported: ${added}${matched ? `, ${matched} matched to images` : ''} (from ${sourceCrs})`,
         'success',
-        'Pose',
+        'Poses',
       )
       await save()
       return added
@@ -242,7 +242,7 @@ export const usePosesStore = registerProjectStore(
         await ensureProjection('EPSG:4326')
         await ensureProjection(projectCrs)
       } catch (err) {
-        log(`EXIF GPS unavailable — could not resolve CRS (${err?.message ?? err})`, 'warn', 'Pose')
+        log(`EXIF GPS unavailable — could not resolve CRS (${err?.message ?? err})`, 'warn', 'Poses')
         return 0
       }
       if (generation !== exifSyncGeneration || projectId !== projects.currentProjectId) return 0
@@ -398,7 +398,7 @@ export const usePosesStore = registerProjectStore(
       pendingExif = null
       if (projectId !== projects.currentProjectId) return
       for (const [crs, added] of byCrs) {
-        log(`EXIF GPS: ${pluralize(added, 'camera position')} added in ${crs}`, 'success', 'Pose')
+        log(`EXIF GPS: ${pluralize(added, 'camera position')} added in ${crs}`, 'success', 'Poses')
         // Positions land in degrees, so nothing can be georeferenced until the user
         // picks a projected CRS. Say so once per batch, when they arrive — with the
         // derived choice and its inputs — rather than first at Build DEM. Only for the
@@ -413,7 +413,7 @@ export const usePosesStore = registerProjectStore(
               `median of ${pluralize(hint.count, 'position')} at ${formatLatLon(hint.lat, hint.lon)} suggests ` +
               `${hint.code} (${hint.name}); set it in Project Settings`,
             'info',
-            'Pose',
+            'Poses',
           )
         }
       }
@@ -511,7 +511,7 @@ export const usePosesStore = registerProjectStore(
       }
       resolveImageMatches()
       await syncExifPoses()
-      log(`Poses restored: ${poses.value.length}`, 'success', 'Pose')
+      log(`Poses restored: ${poses.value.length}`, 'info', 'Poses')
     }
 
     // Re-project all stored poses when the project CRS changes.
@@ -524,7 +524,7 @@ export const usePosesStore = registerProjectStore(
       await ensureProjection(toCrs).catch(() => {})
       poses.value = poses.value.map((p) => reprojectPose(p, fromCrs, toCrs))
       await save()
-      log(`Poses re-projected to ${toCrs}`, 'info', 'Pose')
+      log(`Poses re-projected to ${toCrs}`, 'info', 'Poses')
     }
 
     return {

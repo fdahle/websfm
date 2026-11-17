@@ -105,8 +105,8 @@ describe('registerImages — stalled-model rescue (WS-A)', () => {
   it('fires the rescue when the model stalls at the 2-camera seed', async () => {
     const { ctx, logs } = makeCtx()
     await registerImages(ctx)
-    expect(logs.some(([, , m]) => /registration stalled at 2 cameras/.test(m))).toBe(true)
-    expect(logs.some(([, , m]) => /rescue retriangulation/.test(m))).toBe(true)
+    expect(logs.some(([, , m]) => /registration stalled at 2 cameras/i.test(m))).toBe(true)
+    expect(logs.some(([, , m]) => /rescue retriangulation/i.test(m))).toBe(true)
   })
 
   it('skips the intrinsics solve at 2 cameras — f/k1 are not observable from 2 views', async () => {
@@ -116,13 +116,13 @@ describe('registerImages — stalled-model rescue (WS-A)', () => {
     const { ctx, logs, baCalls } = makeCtx()
     await registerImages(ctx)
     expect(baCalls).toHaveLength(0)
-    expect(logs.some(([, , m]) => /intrinsics not solvable at 2 views/.test(m))).toBe(true)
+    expect(logs.some(([, , m]) => /the calibration cannot be solved from 2 views/.test(m))).toBe(true)
   })
 
   it('stays one-shot: a still-stalled model does not rescue twice', async () => {
     const { ctx, logs } = makeCtx()
     await registerImages(ctx)
-    expect(logs.filter(([, , m]) => /rescue retriangulation/.test(m))).toHaveLength(1)
+    expect(logs.filter(([, , m]) => /rescue retriangulation/i.test(m))).toHaveLength(1)
   })
 
   it('does not rescue when rescueStalled is off', async () => {
@@ -239,7 +239,7 @@ describe('registerImages — in-registration self-cal identifiability (WS-C1)', 
     const solve = baCalls.find((c) => /rescue focal solve/.test(c.label))
     expect(solve).toBeDefined()
     expect(solve.mode).toBe('f')
-    expect(logs.some(([, , m]) => /in-registration self-cal reduced to 'f'/.test(m))).toBe(true)
+    expect(logs.some(([, , m]) => /in-registration self-cal reduced to 'f'/i.test(m))).toBe(true)
   })
 
   it('keeps k1 when the tracks actually span ≥3 views', async () => {

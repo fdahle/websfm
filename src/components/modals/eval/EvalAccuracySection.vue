@@ -102,7 +102,7 @@ async function onToggle(row) {
     await recon.georeference()
     log(`GCP accuracy: refit after ${row.enabled ? 'disabling' : 'enabling'} "${row.name}"`, 'info', 'Evaluate')
   } catch (err) {
-    log(`GCP accuracy: refit failed — ${err.message}`, 'error', 'Evaluate')
+    log(`GCP accuracy: refit failed: ${err.message}`, 'error', 'Evaluate')
   } finally {
     try {
       await refreshGcps()

@@ -101,10 +101,10 @@ async function recheckRegistrations({
     dropped: [],
   }
   log(
-    `registration check — ${pluralize(first.scores.size, 'camera')} against their strongest verified pairs: median ` +
+    `Registration check — ${pluralize(first.scores.size, 'camera')} against their strongest verified pairs: median ` +
       `${first.median.toFixed(2)}px, limit ${first.limit.toFixed(1)}px, ${pluralize(first.flagged.length, 'outlier')}`,
     first.flagged.length ? 'warn' : 'info',
-    'Reconstruction',
+    'Sparse',
   )
   if (!first.flagged.length || cameras.size - first.flagged.length < 2) return record
   for (const { uuid, px } of first.flagged) {
@@ -113,7 +113,7 @@ async function recheckRegistrations({
       `  ${nameOf(uuid)} disagrees with its pairs by ${px.toFixed(1)}px — taken out of the model ` +
         `(${pluralize(gone, 'point')} only it supported) for re-registration`,
       'warn',
-      'Reconstruction',
+      'Sparse',
     )
   }
   refreshTracks()
@@ -133,11 +133,11 @@ async function recheckRegistrations({
     await runBundleAdjust('post-check bundle adjustment (outliers left out)', cfg.baIterations, 'none', { warm: true })
   }
   log(
-    `registration check: ${record.readmitted.length} re-registered consistently` +
+    `Registration check: ${record.readmitted.length} re-registered consistently` +
       `${record.readmitted.length ? ` (${record.readmitted.join(', ')})` : ''}, ${record.dropped.length} left out` +
       `${record.dropped.length ? ` (${record.dropped.join(', ')})` : ''}`,
-    record.dropped.length ? 'warn' : 'success',
-    'Reconstruction',
+    record.dropped.length ? 'warn' : 'info',
+    'Sparse',
   )
   return record
 }
@@ -268,12 +268,12 @@ export async function reconstructSingleModel(input, hooks = {}) {
     const now = performance.now()
     stageTimes[label] = now - stageMark
     stageMark = now
-    log(`stage "${label}" took ${stageTimes[label].toFixed(0)}ms`, 'debug', 'Reconstruction')
+    log(`Stage "${label}" took ${stageTimes[label].toFixed(0)}ms`, 'debug', 'Sparse')
   }
   // A finer boundary than markStage for memory measurement only: the bench samples the
   // worker heap and attributes each peak to the segment the next mark closes
   // (scripts/bench/workerHeap.mjs). Debug level; not part of the run record.
-  const memoryMark = (label) => log(`memory mark "${label}"`, 'debug', 'Reconstruction')
+  const memoryMark = (label) => log(`Memory mark "${label}"`, 'debug', 'Sparse')
 
   // Per-track colour: median (per channel) of the source-image RGB sampled at
   // each observing keypoint. Median (not mean) is robust to a stray observation
@@ -325,14 +325,14 @@ export async function reconstructSingleModel(input, hooks = {}) {
   try {
     const imgs = images.filter((img) => img.kpStatus === 'done')
     if (imgs.length < 2) {
-      log('need at least 2 images with keypoints', 'warn', 'Reconstruction')
+      log('Need at least 2 images with keypoints', 'warn', 'Sparse')
       return done('idle')
     }
     log(
-      `starting with ${imgs.length} images, ${donePairs.length} match pairs` +
+      `Starting with ${imgs.length} images, ${donePairs.length} match pairs` +
         `${weakPairs.length ? ` (+${weakPairs.length} weak PnP bridge${weakPairs.length === 1 ? '' : 's'})` : ''}`,
       'info',
-      'Reconstruction',
+      'Sparse',
     )
 
     logMatchGraphHealth({ imgs, donePairs, log })
@@ -395,12 +395,12 @@ export async function reconstructSingleModel(input, hooks = {}) {
           rec.source = Kmap.get(first.uuid).source
         }
         log(
-          `focal from pair geometry — ${pluralize(g.images, 'image')} without a focal in their metadata` +
+          `Focal from pair geometry — ${pluralize(g.images, 'image')} without a focal in their metadata` +
             `${first?.sensor?.label ? ` (${first.sensor.label})` : ''}: f = ${g.s.toFixed(3)} × image size` +
             ` (${first ? Kmap.get(first.uuid).fx.toFixed(0) : '?'}px), ${g.n} of ${pluralize(g.of, 'pair')} agree within 10 %` +
             `${g.own ? '' : ' (pooled over all such images)'}`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       }
     }
@@ -419,11 +419,11 @@ export async function reconstructSingleModel(input, hooks = {}) {
 
     if (!base && defaultKCount > 0) {
       log(
-        `${pluralize(defaultKCount, 'image')} of ${imgs.length} ${defaultKCount === 1 ? 'has' : 'have'} no focal length — using a default FOV guess. ` +
-          `Wrong intrinsics distort the geometry and commonly prevent cameras from registering; ` +
-          `supply a focal length or sensor size for reliable results.`,
+        `${pluralize(defaultKCount, 'image')} of ${imgs.length} ${defaultKCount === 1 ? 'has' : 'have'} no focal length — using a default field of view. ` +
+          `A wrong calibration distorts the geometry and often keeps cameras from registering; ` +
+          `enter the focal length or the sensor size in the sensor table.`,
         defaultKCount === imgs.length ? 'warn' : 'info',
-        'Reconstruction',
+        'Sparse',
       )
     }
 
@@ -452,23 +452,23 @@ export async function reconstructSingleModel(input, hooks = {}) {
         maxFrameMedianPx: cfg.extendFrameMaxMedianPx,
       })
       if (!seeded.ok) {
-        log(`Cannot add the images to the model: ${seeded.reason}`, 'error', 'Reconstruction')
+        log(`Cannot add the images to the model: ${seeded.reason}`, 'error', 'Sparse')
         return { ...done('error'), reason: seeded.reason }
       }
       extension = seeded
       seedPointCount = tracks.liveCount()
       log(
-        `starting from the model: ${pluralize(cameras.size, 'camera')} (held fixed), ` +
-          `${seedPointCount.toLocaleString()} points; ${pluralize(seeded.added.length, 'image')} to add` +
+        `Starting from the model: ${pluralize(cameras.size, 'camera')} (held fixed), ` +
+          `${seedPointCount.toLocaleString('en')} points; ${pluralize(seeded.added.length, 'image')} to add` +
           (seeded.ownLens ? `, ${seeded.ownLens} on a lens the model has not seen` : ''),
         'info',
-        'Reconstruction',
+        'Sparse',
       )
       log(
-        `model frame rebuilt from the detected keypoints: ${seeded.frame.n.toLocaleString()} observations, ` +
+        `Model frame rebuilt from the detected keypoints: ${seeded.frame.n.toLocaleString('en')} observations, ` +
           `median ${seeded.frame.medianPx.toFixed(3)} px, p95 ${seeded.frame.p95Px.toFixed(3)} px from the saved pixels`,
         'debug',
-        'Reconstruction',
+        'Sparse',
       )
       markStage('init')
       report('initPair', 1, `Model: ${pluralize(cameras.size, 'camera')}`, { done: cameras.size, total: imgs.length })
@@ -504,12 +504,12 @@ export async function reconstructSingleModel(input, hooks = {}) {
       seedPointCount = best.points.length
 
       log(
-        `initial pair ${imgA.name} ↔ ${imgB.name} ` +
+        `Initial pair ${imgA.name} ↔ ${imgB.name} ` +
           `(${best.inliers} inliers, ${best.points.length} pts, ${best.angle.toFixed(2)}° parallax)`,
-        'success',
-        'Reconstruction',
+        'info',
+        'Sparse',
       )
-      log(`init reprojection — ${fmtStats(modelReprojStats())}`, 'debug', 'Reconstruction')
+      log(`Init reprojection — ${fmtStats(modelReprojStats())}`, 'debug', 'Sparse')
       // Essential-matrix conditioning: σ2/σ1 ≈ 1 for a valid E. A low ratio of Kᵀ F K
       // means wrong intrinsics OR a degenerate F (near-planar scene: F is undetermined
       // there). When the seed came from the calibrated five-point E instead
@@ -524,13 +524,13 @@ export async function reconstructSingleModel(input, hooks = {}) {
             ? ''
             : fivePt
               ? " — the matcher's F is degenerate here (near-planar scene); the seed pose comes from the calibrated five-point E"
-              : ' — well below 1 points to wrong intrinsics (focal / principal point), which ' +
-                'inflates init reprojection and typically blocks PnP registration'
+              : ' — well below 1 points to a wrong calibration (focal length, principal point), which ' +
+                'raises the initial reprojection error and usually blocks registration'
         log(
-          `essential matrix (Kᵀ F K) σ = [${s1.toFixed(3)}, ${s2.toFixed(3)}, ${s3.toFixed(3)}] — ` +
+          `Essential matrix (Kᵀ F K) σ = [${s1.toFixed(3)}, ${s2.toFixed(3)}, ${s3.toFixed(3)}] — ` +
             `σ2/σ1 ${ratio.toFixed(2)} (ideal ≈ 1.0)${conditioning}`,
           ratio < 0.7 && !fivePt ? 'warn' : 'debug',
-          'Reconstruction',
+          'Sparse',
         )
       }
       markStage('init')
@@ -684,7 +684,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
     await registerImages(registrationCtx)
     snapshots.tick({ force: true })
     const preBaStats = modelReprojStats()
-    log(`pre-BA reprojection — ${fmtStats(preBaStats)}`, 'info', 'Reconstruction')
+    log(`Reprojection before bundle adjustment — ${fmtStats(preBaStats)}`, 'info', 'Sparse')
     markStage('registration')
 
     // ── Bundle adjustment + track filtering (Phase 2 + 3, refinePipeline.js) ──
@@ -779,7 +779,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
           `Camera rig: ${b.band} lens offset ${b.offsetDeg.toFixed(3)}°, ${b.movedDeg.toFixed(3)}° from what the camera ` +
             `records${b.captures ? ` (solved over ${pluralize(b.captures, 'capture')})` : ' (not solved: kept as recorded)'}`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       if (rigCompleted.length)
         log(
@@ -789,7 +789,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
               .map((u) => imageByUuid(u)?.name ?? u)
               .join(', ')}${rigCompleted.length > 3 ? ', …' : ''})`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
     }
 
@@ -861,14 +861,14 @@ export async function reconstructSingleModel(input, hooks = {}) {
           `Rolling shutter: readout ${g.readoutMs.toFixed(1)} ms for ${pluralize(g.cameras, 'camera')}` +
             (g.sensorId ? '' : ' (a photo without a sensor)'),
           'info',
-          'Reconstruction',
+          'Sparse',
         )
       const without = cameras.size - summary.rollingShutter.reduce((n, g) => n + g.cameras, 0)
       if (without)
         log(
           `Rolling shutter: ${pluralize(without, 'camera')} solved as a global shutter (no capture time, or no photo taken close before or after)`,
           'info',
-          'Reconstruction',
+          'Sparse',
         )
     }
 
@@ -880,22 +880,22 @@ export async function reconstructSingleModel(input, hooks = {}) {
     log(
       `Reconstruction complete: ${cameras.size} cameras, ${tracks.liveCount()} points, ` +
         `final reprojection ${fmtStats(finalStats)}`,
-      degenerate ? 'error' : 'success',
-      'Reconstruction',
+      degenerate ? 'error' : 'info',
+      'Sparse',
     )
     log(
       `Reconstruction summary: ${summary.nCameras} cameras, ${summary.nPoints} points, ` +
-        `${pct3plusViewTracks.toFixed(1)}% ≥3-view tracks, pre-BA p95 ${preBaStats.p95.toFixed(1)}px, ` +
-        `post-BA median ${finalStats.median.toFixed(2)}px`,
-      'success',
-      'Reconstruction',
+        `${pct3plusViewTracks.toFixed(1)}% ≥3-view tracks, p95 before bundle adjustment ${preBaStats.p95.toFixed(1)}px, ` +
+        `median after bundle adjustment ${finalStats.median.toFixed(2)}px`,
+      'info',
+      'Sparse',
     )
     const output = done('done', summary)
     memoryMark('compact result')
-    log(`compact model ready: ${summary.nCameras} cameras, ${summary.nPoints} points`, 'info', 'Reconstruction')
+    log(`Compact model ready: ${summary.nCameras} cameras, ${summary.nPoints} points`, 'info', 'Sparse')
     return output
   } catch (err) {
-    log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
+    log(`Sparse Model failed: ${err?.message ?? err}`, 'error', 'Sparse')
     return done('error')
   }
 }

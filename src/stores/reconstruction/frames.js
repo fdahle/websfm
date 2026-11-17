@@ -128,7 +128,7 @@ export function createFrameResolver({
         `Scale: the fitted scale no longer matches the project (${status.reason}) — ` +
           'apply the scale bars again to restore metres',
         'warn',
-        'Scale',
+        'Georeferencing',
       )
     }
 

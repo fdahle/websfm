@@ -359,7 +359,7 @@ export function makeKeypointOps({ rasterize }) {
 
     // Learned detectors stream init/backend lines (first-run runtime load is slow)
     // so the UI shows progress instead of a silent stall.
-    const onLog = emit ? (msg) => emit('log', [msg]) : undefined
+    const onLog = emit ? (msg, l = 'info') => emit('log', [msg, l, 'Detection']) : undefined
 
     // Tiling kicks in only when it'd actually split — a raster ≤ tile size runs the
     // plain single-pass path (identical to the pre-tiling behaviour).

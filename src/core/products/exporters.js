@@ -93,7 +93,7 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
       : () => null
     : (i) => points[i].color
   const hadNormals = flat ? !!flat.nrm : n > 0 && !!points[0]?.normal
-  if (hadNormals) onLog?.('Export: normals dropped (georeference/downsample applied)', 'info', 'Export')
+  if (hadNormals) onLog?.('Normals dropped (georeference/downsample applied)', 'info', 'Export')
   const attrs = flat && flat.attributes && Object.keys(flat.attributes).length ? flat.attributes : null
 
   // Pass 1: the transformed bbox. No copy of the cloud: `at(i)` transforms one point
@@ -136,7 +136,7 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
     }
     if (relative)
       onLog?.(
-        `Export: ${n.toLocaleString()} points written relative to an origin (one Float64 plane would pass the 2 GiB buffer limit)`,
+        `${n.toLocaleString('en')} points written relative to an origin (one Float64 plane would pass the 2 GiB buffer limit)`,
         'debug',
         'Export',
       )
@@ -211,7 +211,7 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
     }
   }
   onLog?.(
-    `Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept`,
+    `Voxel downsample ${cell} → ${m.toLocaleString('en')} of ${n.toLocaleString('en')} points kept`,
     'info',
     'Export',
   )
@@ -265,7 +265,7 @@ function firstPointPerCell({ n, at, hasCol, getC, attrs, cell, min, max, onLog }
     for (const [src, dst] of lists) dst[j] = src[i]
   }
   onLog?.(
-    `Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept ` +
+    `Voxel downsample ${cell} → ${m.toLocaleString('en')} of ${n.toLocaleString('en')} points kept ` +
       `(one real point per cell, so its attributes ${Object.keys(attrs).join(', ')} stay observed values)`,
     'info',
     'Export',

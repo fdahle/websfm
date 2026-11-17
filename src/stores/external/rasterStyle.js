@@ -53,11 +53,11 @@ export function createRasterStyle({
       const buffer = await file.arrayBuffer()
       ;({ meta: next, plane } = await parseRasterFile(buffer, meta.name, {
         forceKind: kind,
-        onLog: (m, l, c) => log(m, l, c),
+        onLog: (m, l, c) => log(m, l, c ?? 'Products'),
       }))
     } catch (err) {
       log(
-        `Reference raster "${meta.name}": re-decode as ${kind.toUpperCase()} failed — ` + `${err?.message ?? err}`,
+        `Reference raster "${meta.name}": re-decode as ${kind.toUpperCase()} failed: ` + `${err?.message ?? err}`,
         'error',
         'Import',
       )
@@ -85,7 +85,7 @@ export function createRasterStyle({
       await opfs.saveExternalPlane(projects.currentProjectId, id, plane.buffer).catch(() => {})
       await save()
     }
-    log(`Reference raster "${meta.name}": now treated as ${kind.toUpperCase()}`, 'success', 'Import')
+    log(`Reference raster "${meta.name}": now treated as ${kind.toUpperCase()}`, 'info', 'Import')
     return true
   }
 
@@ -155,11 +155,11 @@ export function createRasterStyle({
         ;({ style: resolved, previewDataUrl } = await restyleRasterPreview(file, meta.name, style, {
           rangesOnly: !!meta.gpuReady,
           cacheKey: `${projectId}:${id}:${meta.importedAt}:${file.size}:${file.lastModified}`,
-          onLog: (m, l, c) => log(m, l, c),
+          onLog: (m, l, c) => log(m, l, c ?? 'Products'),
         }))
       }
     } catch (err) {
-      log(`Reference raster "${meta.name}": re-style failed — ${err?.message ?? err}`, 'error', 'Import')
+      log(`Reference raster "${meta.name}": re-style failed: ${err?.message ?? err}`, 'error', 'Import')
       return false
     }
 
@@ -182,7 +182,7 @@ export function createRasterStyle({
     log(
       `Reference raster "${meta.name}": restyled — ${describeStyle(meta.style)}` +
         (meta.gpuReady ? ' (GPU display updated)' : ' (preview updated)'),
-      'success',
+      'info',
       'Import',
     )
     // The GPU path restyles the tiles without composing a preview, but the preview
@@ -208,7 +208,7 @@ export function createRasterStyle({
         if (isPersisting()) await save()
       })
       .catch((err) =>
-        log(`Reference raster "${meta.name}": preview refresh failed — ` + `${err?.message ?? err}`, 'warn', 'Import'),
+        log(`Reference raster "${meta.name}": preview refresh failed: ` + `${err?.message ?? err}`, 'warn', 'Import'),
       )
   }
 

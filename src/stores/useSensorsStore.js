@@ -14,6 +14,7 @@ import { estimateBatchFiducialLayout } from '../core/sfm/fiducialCalibration.js'
 import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { pluralize } from '../core/textFormat.js'
+import { editCommand } from '../core/help/consoleEdits.js'
 
 // Sensors are shared camera intrinsics. Each image references one via
 // `image.sensorId`. Sensors arrive two ways:
@@ -50,7 +51,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     isPersisting,
     build: () => ({ sensors: sensors.value }),
     write: opfs.saveSensors,
-    onError: (err) => log(`Sensors save failed — ${err?.message ?? err}`, 'error', 'Sensors'),
+    onError: (err) => log(`Sensors save failed: ${err?.message ?? err}`, 'error', 'Sensors'),
   })
 
   // How many images currently reference a sensor.
@@ -89,7 +90,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     })
     for (const sensor of created) {
       sensors.value.push(sensor)
-      log(`Sensor detected: ${sensor.label}`, 'info', 'Sensor')
+      log(`Sensor detected: ${sensor.label}`, 'info', 'Sensors')
     }
     if (!assign.length) return
     const byId = new Map(pending.map((img) => [img.id, img]))
@@ -169,7 +170,7 @@ export const useSensorsStore = defineStore('sensors', () => {
         `Sensor ${s.label} ${isNew ? 'created' : 'updated'} from file: ${set.join(', ') || 'no values'}` +
           (imageIds.length ? ` — ${pluralize(imageIds.length, 'image')}` : ''),
         'success',
-        'Sensor',
+        'Sensors',
       )
     }
     await save()
@@ -227,7 +228,7 @@ export const useSensorsStore = defineStore('sensors', () => {
         log(
           `Sensor ${s.label}: principal point in mm skipped — needs a pixel size and the image size`,
           'warn',
-          'Sensor',
+          'Sensors',
         )
       }
     }
@@ -326,8 +327,8 @@ export const useSensorsStore = defineStore('sensors', () => {
     log(
       `${changed.length === 1 ? `Sensor ${changed[0].label}` : `${changed.length} sensors`} set to ${kind}`,
       'info',
-      'Sensor',
-      { channel: 'activity' },
+      'Sensors',
+      { channel: 'activity', command: editCommand('sensor set', [changed[0].label, `kind=${kind}`]) },
     )
     save()
     if (isPersisting()) imagesStore.save()
@@ -345,7 +346,10 @@ export const useSensorsStore = defineStore('sensors', () => {
       if (value === 'film' && !s.fiducialCalibration) {
         s.fiducialCalibration = emptyFiducialCalibration(s.focalUnit === 'mm' ? (s.focal ?? 0) : 0)
       }
-      log(`Sensor ${s.label} set to ${value}`, 'info', 'Sensor', { channel: 'activity' })
+      log(`Sensor ${s.label} set to ${value}`, 'info', 'Sensors', {
+        channel: 'activity',
+        command: editCommand('sensor set', [s.label, `kind=${value}`]),
+      })
       save()
       if (isPersisting()) imagesStore.save()
       return
@@ -359,7 +363,7 @@ export const useSensorsStore = defineStore('sensors', () => {
         s.focal = num
         s.focalUnit = 'mm'
       }
-      log(`Sensor ${s.label}: ${field} = ${num}`, 'info', 'Sensor')
+      log(`Sensor ${s.label}: ${field} = ${num}`, 'info', 'Sensors')
       save()
       return
     } else if (LEVER_ARM_FIELDS.has(field)) {
@@ -373,8 +377,8 @@ export const useSensorsStore = defineStore('sensors', () => {
       log(
         `Sensor ${s.label}: GNSS antenna offset ${s.gnssLeverArm ? `(${s.gnssLeverArm.join(', ')}) m` : 'cleared'}`,
         'info',
-        'Sensor',
-        { channel: 'activity' },
+        'Sensors',
+        { channel: 'activity', command: editCommand('sensor set', [s.label, `${field}=${num}`]) },
       )
       save()
       return
@@ -421,8 +425,8 @@ export const useSensorsStore = defineStore('sensors', () => {
       `Sensor ${s.label}: film format set to ${mm} mm${prev ? ` (was ${prev} mm)` : ''}` +
         `${reason ? ` — ${reason}` : ''}`,
       'info',
-      'Sensor',
-      { channel: 'activity' },
+      'Sensors',
+      { channel: 'activity', command: editCommand('sensor film', [s.label, mm]) },
     )
     save()
   }
@@ -468,7 +472,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     cal.marks = clean
     cal.fit = null
     if (!s.kind) s.kind = 'film'
-    log(`Sensor ${s.label}: ${pluralize(clean.length, 'fiducial mark')} set`, 'info', 'Sensor')
+    log(`Sensor ${s.label}: ${pluralize(clean.length, 'fiducial mark')} set`, 'info', 'Sensors')
     save()
   }
 
@@ -483,8 +487,8 @@ export const useSensorsStore = defineStore('sensors', () => {
     }
     log(
       `Sensor ${s.label}: fiducial calibration ${calibration ? 'applied' : 'cleared'}`,
-      calibration ? 'success' : 'info',
-      'Sensor',
+      calibration ? 'info' : 'info',
+      'Sensors',
     )
     save()
     if (isPersisting()) imagesStore.save()
@@ -514,11 +518,11 @@ export const useSensorsStore = defineStore('sensors', () => {
         `Sensor ${s.label}: ${pluralize(g.marks.length, 'fiducial mark')} imported` +
           (isFiducialCalibrated(cal) ? ' — validate them in Calibrate fiducials' : ''),
         'success',
-        'Sensor',
+        'Sensors',
       )
       applied++
     })
-    if (unmatched.length) log(`Camera fiducials: no sensor matched ${unmatched.join(', ')}`, 'warn', 'Sensor')
+    if (unmatched.length) log(`Camera fiducials: no sensor matched ${unmatched.join(', ')}`, 'warn', 'Sensors')
     if (applied) {
       save()
       if (isPersisting()) imagesStore.save()
@@ -564,7 +568,13 @@ export const useSensorsStore = defineStore('sensors', () => {
       moved++
     }
     if (!moved) return 0
-    log(`Moved ${pluralize(moved, 'image')} to sensor ${target.label}`, 'info', 'Sensor', { channel: 'activity' })
+    log(`Moved ${pluralize(moved, 'image')} to sensor ${target.label}`, 'info', 'Sensors', {
+      channel: 'activity',
+      command: editCommand('sensor assign', [
+        target.label,
+        images.value.filter((img) => ids.has(img.id)).map((img) => img.name),
+      ]),
+    })
     save()
     if (isPersisting()) imagesStore.save()
     return moved
@@ -599,7 +609,10 @@ export const useSensorsStore = defineStore('sensors', () => {
         }
     sensors.value.push(sensor)
     for (const img of picked) img.sensorId = sensor.id
-    log(`New sensor ${label} with ${pluralize(picked.length, 'image')}`, 'info', 'Sensor', { channel: 'activity' })
+    log(`New sensor ${label} with ${pluralize(picked.length, 'image')}`, 'info', 'Sensors', {
+      channel: 'activity',
+      command: editCommand('sensor new', [picked.map((img) => img.name)]),
+    })
     save()
     if (isPersisting()) imagesStore.save()
     return sensor.id
@@ -652,7 +665,7 @@ export const useSensorsStore = defineStore('sensors', () => {
           .map((g, i) => `${g.label ?? sensors.value.find((x) => x.id === ids[i])?.label} (${g.imageIds.length})`)
           .join(', '),
       'success',
-      'Sensor',
+      'Sensors',
     )
     save()
     if (isPersisting()) imagesStore.save()
@@ -705,7 +718,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     const data = await opfs.loadSensors(projectId)
     if (data?.sensors?.length) {
       sensors.value = data.sensors
-      log(`Sensors restored: ${sensors.value.length}`, 'success', 'Sensor')
+      log(`Sensors restored: ${sensors.value.length}`, 'info', 'Sensors')
     }
     // Re-derive any sensors for images whose EXIF wasn't grouped yet.
     ensureExifSensors()

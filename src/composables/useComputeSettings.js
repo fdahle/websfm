@@ -78,13 +78,13 @@ export function useComputeSettings() {
     const suffix = hasStoredBudget
       ? ` Using saved manual safety limit ${storedBudgetGb} GB.`
       : ' Using it as the automatic dense-run safety limit.'
-    log(`${deviceBudgetInfo.note}${suffix}`, 'info', 'Compute')
+    log(`${deviceBudgetInfo.note}${suffix}`, 'info', 'System')
     if (hasStoredBudget && storedBudgetGb > MAX_BUDGET_GB) {
       log(
         `Memory budget: the saved ${storedBudgetGb} GB is more than the ${MAX_BUDGET_GB} GB this browser reports; ` +
           `using ${MAX_BUDGET_GB} GB.`,
         'warn',
-        'Compute',
+        'System',
       )
     }
     budgetLogged = true

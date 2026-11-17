@@ -567,9 +567,9 @@ export const poissonHeapBytes = (points, depth) =>
 export function tileShare(ctx, onLog = () => {}) {
   const { sub, grid, tiling, solveArgs } = ctx
   onLog(
-    `Mesh: one solve over ${(sub.pos.length / 3).toLocaleString()} samples would need ≈ ` +
+    `Mesh: one solve over ${(sub.pos.length / 3).toLocaleString('en')} samples would need ≈ ` +
       `${(poissonHeapBytes(sub.pos.length / 3, solveArgs.depth) / 2 ** 30).toFixed(1)} GB — solving in ` +
-      `${tiling.tiles.length} tiles (up to ${Math.max(...tiling.tiles.map((t) => t.samples)).toLocaleString()} ` +
+      `${tiling.tiles.length} tiles (up to ${Math.max(...tiling.tiles.map((t) => t.samples)).toLocaleString('en')} ` +
       `samples each, ${tiling.overlap} leaves of overlap, along ${'xyz'[tiling.axes[0]]}/${'xyz'[tiling.axes[1]]})`,
     'info',
     'Products',
@@ -634,8 +634,8 @@ export function stitchMeshTiles(share, results, onLog = () => {}) {
   const idx = pieces ? pieces.idx : stitched.idx
   const openShare = stitched.seamEdges ? stitched.openSeamEdges / stitched.seamEdges : 0
   onLog(
-    `Mesh: ${nT} tiles stitched — ${stitched.openSeamEdges.toLocaleString()} of ` +
-      `${stitched.seamEdges.toLocaleString()} seam edges open (${(100 * openShare).toFixed(2)} %: the surface's own ` +
+    `Mesh: ${nT} tiles stitched — ${stitched.openSeamEdges.toLocaleString('en')} of ` +
+      `${stitched.seamEdges.toLocaleString('en')} seam edges open (${(100 * openShare).toFixed(2)} %: the surface's own ` +
       'borders where they cross a seam, and where two tiles end a trimmed area differently)' +
       (medianSupport ? `; trimmed against the scene's median support ${fmt(medianSupport)}` : ''),
     'info',
@@ -715,7 +715,7 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
     spacingSource = 'estimated'
     onLog(
       `Mesh: input spacing ${fmt(spacing)} — median nearest-neighbour distance over ≤ ` +
-        `${cfg.spacingSampleMax.toLocaleString()} points (this cloud has no fusion merge cell)`,
+        `${cfg.spacingSampleMax.toLocaleString('en')} points (this cloud has no fusion merge cell)`,
       'info',
       'Products',
     )
@@ -766,7 +766,7 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
       }
       src = { count: kept, pos, nrm }
       onLog(
-        `Mesh: left ${(n0 - kept).toLocaleString()} far stragglers out of the solve — outside the ` +
+        `Mesh: left ${(n0 - kept).toLocaleString('en')} far stragglers out of the solve — outside the ` +
           `${cfg.robustQuantiles.map((q) => `${q * 100}`).join('–')} % box grown by ${cfg.robustMargin * 100} %`,
         'info',
         'Products',
@@ -791,7 +791,7 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
             : `leaves of about ${cfg.leafSpacings} point spacings`
     onLog(
       `Mesh: Auto octree depth ${auto.depth} — leaves ${fmt(auto.leaf)} (${(auto.leaf / spacing).toFixed(1)} ` +
-        `point spacings), ≈ ${auto.triangles.toLocaleString()} triangles; ${why}`,
+        `point spacings), ≈ ${auto.triangles.toLocaleString('en')} triangles; ${why}`,
       'info',
       'Products',
     )
@@ -807,7 +807,7 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
   const predicted = predictMeshTriangles(depth, { count: src.count, spacing, extent })
   if (fixed && predicted > MESH_TUNING.warnTriangles) {
     onLog(
-      `Mesh: depth ${depth} makes ≈ ${predicted.toLocaleString()} triangles from this cloud — more than a ` +
+      `Mesh: depth ${depth} makes ≈ ${predicted.toLocaleString('en')} triangles from this cloud — more than a ` +
         `browser tab holds comfortably; the run may stop out of memory`,
       'warn',
       'Products',
@@ -822,7 +822,7 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
     if (f.count < before && f.count > 0) {
       src = { count: f.count, pos: f.pos, nrm: f.nrm }
       onLog(
-        `Mesh: removed ${(before - f.count).toLocaleString()} isolated points before the solve ` +
+        `Mesh: removed ${(before - f.count).toLocaleString('en')} isolated points before the solve ` +
           `(cells of ${cfg.isolatedCellLeaves} leaves, ${fmt(leaf * cfg.isolatedCellLeaves)})`,
         'info',
         'Products',
@@ -850,7 +850,7 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
   const inCount = sub.pos.length / 3
   if (thin && inCount < src.count) {
     onLog(
-      `Mesh: subsampled input ${src.count.toLocaleString()} → ${inCount.toLocaleString()} points ` +
+      `Mesh: subsampled input ${src.count.toLocaleString('en')} → ${inCount.toLocaleString('en')} points ` +
         `(≈1 per leaf cell, ${fmt(inCell)}; each carries its point count as support) — colour still from the ` +
         'full cloud',
       'info',
@@ -866,7 +866,7 @@ export function prepareMesh(dense, settings = {}, onLog = () => {}) {
   const minComponentShare = cfg.removeFloaters ? Math.max(0, cfg.minPiecePct) / 100 : 0
   const trimDist = cfg.distanceTrim > 0 ? cfg.distanceTrim * sampleCell : 0
   onLog(
-    `Mesh: Poisson over ${inCount.toLocaleString()} points — depth ${depth} (leaf ${fmt(leaf)}), ` +
+    `Mesh: Poisson over ${inCount.toLocaleString('en')} points — depth ${depth} (leaf ${fmt(leaf)}), ` +
       `screening ${cfg.screening}; trim ${cfg.trim}${densityRatio ? ` (support < ${densityRatio} × median)` : ''}, ` +
       `fill holes ${holeAreaRatio ? `≤ ${holeAreaRatio * 100} % of the surrounding piece` : 'off'}, ` +
       `floaters ${minComponentShare ? `< ${cfg.minPiecePct} % of the main support` : 'kept'}` +
@@ -924,18 +924,18 @@ export function completeMesh(dense, ctx, solved, solveMs, onLog = () => {}) {
   const tilesSummary = solved.summary ?? null
   const { nVerts, nTris, pos: rel, idx, stats } = solved
   onLog(
-    `Mesh: solve produced ${nVerts.toLocaleString()} verts / ${nTris.toLocaleString()} tris in ` +
+    `Mesh: the solve made ${nVerts.toLocaleString('en')} vertices / ${nTris.toLocaleString('en')} triangles in ` +
       `${(solveMs / 1000).toFixed(1)}s`,
-    nVerts > 0 ? 'success' : 'warn',
+    nVerts > 0 ? 'info' : 'warn',
     'Products',
   )
   if (stats) {
     onLog(
-      `Mesh: cleanup — extracted ${stats.extractedTris.toLocaleString()} tris; trimmed ` +
-        `${stats.densityRemovedTris.toLocaleString()} unsupported` +
-        (stats.distanceRemovedTris ? ` + ${stats.distanceRemovedTris.toLocaleString()} far` : '') +
-        `; refilled ${pluralize(stats.holesFilled, 'hole')} (${stats.holeTris.toLocaleString()} tris); dropped ` +
-        `${stats.componentsDropped} of ${pluralize(stats.components, 'piece')} (${stats.componentDroppedTris.toLocaleString()} tris)`,
+      `Mesh: cleanup — extracted ${stats.extractedTris.toLocaleString('en')} tris; trimmed ` +
+        `${stats.densityRemovedTris.toLocaleString('en')} unsupported` +
+        (stats.distanceRemovedTris ? ` + ${stats.distanceRemovedTris.toLocaleString('en')} far` : '') +
+        `; refilled ${pluralize(stats.holesFilled, 'hole')} (${stats.holeTris.toLocaleString('en')} tris); dropped ` +
+        `${stats.componentsDropped} of ${pluralize(stats.components, 'piece')} (${stats.componentDroppedTris.toLocaleString('en')} tris)`,
       'info',
       'Products',
     )
@@ -995,8 +995,8 @@ export function completeMesh(dense, ctx, solved, solveMs, onLog = () => {}) {
       }
     }
     onLog(
-      `Mesh: coloured ${(nVerts - misses).toLocaleString()}/${nVerts.toLocaleString()} vertices from the dense cloud` +
-        (misses ? ` (${misses.toLocaleString()} gray fallback — no dense point nearby)` : ''),
+      `Mesh: coloured ${(nVerts - misses).toLocaleString('en')}/${nVerts.toLocaleString('en')} vertices from the dense cloud` +
+        (misses ? ` (${misses.toLocaleString('en')} gray fallback — no dense point nearby)` : ''),
       misses ? 'debug' : 'info',
       'Products',
     )

@@ -45,6 +45,17 @@ Rules that are easy to miss:
   `matches(e, id)` and a tooltip shows `keyLabel(id)`; never compare `e.key` or type
   "(Ctrl+Z)" by hand ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in
   step*, item 4).
+- Console log lines follow [CONTRIBUTING.md](CONTRIBUTING.md) ▸ *The console*: a source
+  from `src/core/logRules.js` (never a new word at the call), a level by what the user
+  should do (`debug` per item, `info` the record with every auto-chosen value and its
+  inputs, one `success` closing line written by the store that started the run, never
+  by core or a worker, `warn` went on, `error` failed), numbers with
+  `toLocaleString('en')`. A hand edit logs on the `activity` channel with the
+  `command` that makes it. `src/core/logRules.test.js` checks all of it.
+- Everything the mouse does can be typed: a new ribbon command is a console command by
+  itself; a new processing step gets an automated workflow block (then it is a `run`
+  stage with `key=value` settings); a new hand edit gets an entry in
+  `core/help/consoleEdits.js` and its store call in `composables/useConsoleEnv.js`.
 - A user-visible change gets a CHANGELOG.md entry under `[Unreleased]`: a bold
   headline, then one sentence in user terms, then any detail and evidence (Other ▸
   What's New shows the first two alone). Never edit a released section or the version

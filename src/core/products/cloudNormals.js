@@ -288,7 +288,7 @@ export function estimateNormals(cloud, opts = {}, onLog, onProgress) {
   }
 
   log(
-    `Normals: ${n.toLocaleString()} points · k=${k}` +
+    `Normals: ${n.toLocaleString('en')} points · k=${k}` +
       (radius > 0 ? ` within r=${radius}` : '') +
       ` · min neighbours ${minNeighbors} · orient ${orientKind}` +
       (orientKind === 'up' ? ` (${up.map((v) => +v.toFixed(3)).join(', ')})` : '') +
@@ -438,9 +438,9 @@ export function estimateNormals(cloud, opts = {}, onLog, onProgress) {
   }
   onProgress?.(1)
   log(
-    `Normals: ${stats.estimated.toLocaleString()} estimated, ` +
-      `${stats.fallback.toLocaleString()} fell back to the reference direction ` +
-      `(< ${minNeighbors} neighbours or zero spread), ${stats.flipped.toLocaleString()} flipped; ` +
+    `Normals: ${stats.estimated.toLocaleString('en')} estimated, ` +
+      `${stats.fallback.toLocaleString('en')} fell back to the reference direction ` +
+      `(< ${minNeighbors} neighbours or zero spread), ${stats.flipped.toLocaleString('en')} flipped; ` +
       `median surface variation ${stats.planarity == null ? '—' : stats.planarity.toExponential(2)} ` +
       `in ${((Date.now() - t0) / 1000).toFixed(1)} s`,
   )

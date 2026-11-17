@@ -52,6 +52,17 @@ function fakeEnv(over = {}) {
     pairState: vi.fn((a, b) => (a === 'u1' && b === 'u2' ? { pid: 'u1--u2', enabled: true, inliers: 120 } : null)),
     setPairEnabled: vi.fn(),
     selectImage: vi.fn(),
+    items: (list) =>
+      ({
+        images: IMAGES,
+        gcps: [
+          { id: 'g1', name: 'GCP 1' },
+          { id: 'g2', name: 'GCP 2' },
+          { id: 'm1', name: 'Marker 1' },
+        ],
+        products: [{ id: 'p1', name: 'Dense cloud' }],
+      })[list] ?? [],
+    edit: vi.fn(),
     tuning: {
       get: (g) => overrides[g] ?? {},
       set: (g, path, v) => {
@@ -117,6 +128,43 @@ describe('run', () => {
     expect(wf.blocks.map((b) => b.type)).toEqual(['detect-features', 'match-features', 'reconstruct'])
     expect(wf.defaults.reusePolicy).toBe('rerun')
     expect(text(env)).toContain('Running detect-features → match-features → reconstruct')
+  })
+
+  it("sets each stage's settings from key=value, typed to the block's fields", () => {
+    const env = fakeEnv()
+    runConsoleLine('run dense minViews=3 removeIsolated=false mesh preset=high trim=strong', env)
+    const [dense, mesh] = env.startWorkflow.mock.calls[0][0].blocks
+    expect(dense.settings.minViews).toBe(3)
+    expect(dense.settings.removeIsolated).toBe(false)
+    expect(mesh.settings.preset).toBe('high')
+    expect(mesh.settings.trim).toBe('strong')
+  })
+
+  it('runs every automated block, a Tools edit too', () => {
+    const env = fakeEnv()
+    runConsoleLine('run filter normals icp clean smooth decimate', env)
+    expect(env.startWorkflow.mock.calls[0][0].blocks.map((b) => b.type)).toEqual([
+      'filter-cloud',
+      'estimate-normals',
+      'align-icp',
+      'clean-mesh',
+      'smooth-mesh',
+      'decimate-mesh',
+    ])
+  })
+
+  it('refuses an unknown setting, a value out of range, and a setting before any stage', () => {
+    for (const [line, said] of [
+      ['run dense quality=high', 'has no setting "quality"'],
+      ['run depth maxSources=0', 'maxSources is at least 1'],
+      ['run mesh trim=wild', 'trim is one of off, gentle, strong'],
+      ['run minViews=3 dense', 'a setting follows the stage'],
+    ]) {
+      const env = fakeEnv()
+      runConsoleLine(line, env)
+      expect(env.startWorkflow).not.toHaveBeenCalled()
+      expect(last(env)).toEqual(['error', expect.stringContaining(said)])
+    }
   })
 
   it('runs a saved workflow by (the start of) its name', () => {
@@ -279,7 +327,7 @@ describe('helpers', () => {
   it('completes tuning keys, stages and image names after a verb', () => {
     const args = argCompletionsFor(fakeEnv())
     expect(completions('set sfm.minpnpi', args)).toEqual(['set sfm.minPnpInlierRatio', 'set sfm.minPnpInliers'])
-    expect(completions('run de', args)).toEqual(['run dem', 'run dense', 'run depth', 'run detect'])
+    expect(completions('run de', args)).toEqual(['run decimate', 'run dem', 'run dense', 'run depth', 'run detect'])
     expect(completions('select oth', args)).toEqual(['select Other photo.jpg'])
   })
 })
@@ -327,5 +375,50 @@ describe('lang', () => {
     runConsoleLine('lang fr', env)
     expect(env.setLanguage).toHaveBeenCalledTimes(1)
     expect(last(env)[0]).toBe('error')
+  })
+})
+
+describe('edit commands', () => {
+  it('resolve names and hand the store call its objects', () => {
+    const env = fakeEnv()
+    runConsoleLine('gcp disable "GCP 2" marker', env)
+    expect(env.edit).toHaveBeenCalledWith('gcp', 'disable', [
+      [
+        { id: 'g2', name: 'GCP 2' },
+        { id: 'm1', name: 'Marker 1' },
+      ],
+    ])
+    runConsoleLine('image rename dji_0001 "North 1"', env)
+    expect(env.edit).toHaveBeenLastCalledWith('image', 'rename', [IMAGES[0], 'North 1'])
+    runConsoleLine('scalebar add "GCP 1" "Marker 1" 2.5 cm', env)
+    expect(env.edit).toHaveBeenLastCalledWith('scalebar', 'add', [
+      { id: 'g1', name: 'GCP 1' },
+      { id: 'm1', name: 'Marker 1' },
+      2.5,
+      'cm',
+    ])
+  })
+
+  it('say why a name does not resolve, and show the usage when arguments are missing', () => {
+    const env = fakeEnv()
+    runConsoleLine('gcp disable GCP', env)
+    expect(last(env)).toEqual(['error', expect.stringContaining('"GCP" matches 2 GCPs')])
+    runConsoleLine('gcp role "GCP 1" boss', env)
+    expect(last(env)).toEqual(['error', '"boss" is not one of control, check, marker'])
+    runConsoleLine('image rename', env)
+    expect(last(env)).toEqual(['warn', 'Usage: image rename <image> <new name>'])
+    expect(env.edit).not.toHaveBeenCalled()
+  })
+
+  it("print the store's reply when it gives one", () => {
+    const env = fakeEnv({ edit: () => ({ text: 'Not a sensor field: iso', level: 'error' }) })
+    runConsoleLine('product main "Dense cloud"', env)
+    expect(last(env)).toEqual(['error', 'Not a sensor field: iso'])
+  })
+
+  it('complete the name being typed, quoted when it has a space', () => {
+    const args = argCompletionsFor(fakeEnv())
+    expect(completions('gcp disable "GCP 1" ma', args)).toEqual(['gcp disable "GCP 1" "Marker 1"'])
+    expect(completions('image enable oth', args)).toEqual(['image enable "Other photo.jpg"'])
   })
 })

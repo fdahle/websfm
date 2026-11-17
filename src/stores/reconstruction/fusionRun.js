@@ -55,7 +55,7 @@ export function createFusionRun({
     const cacheBytes = Math.floor(Math.min(DENSE_TUNING.densifyCacheMaxMiB * 2 ** 20, budget / (4 * workers)))
     const fuseSettings = withRegion({ ...settings, memBudgetBytes: budget, cacheBytes, parallel: workers })
     const PLAN_SHARE = FUSION_PLAN_SHARE
-    const onLog = (m, l, c) => log(m, l, c)
+    const onLog = (m, l, c) => log(m, l, c ?? 'Dense')
     onProgress?.(0, 1, 'Planning fusion…', 0, 'plan')
     // The plan's pre-passes over the pool (core/dense/fusionPlan.js fusionPrepassSteps):
     // worker 0 asks for each pass as a batch, the maps go in contiguous runs to the
@@ -160,7 +160,7 @@ export function createFusionRun({
     log(
       `Dense cloud: fused ${nM} depth maps → ${n} points in ${((performance.now() - t0) / 1000).toFixed(1)}s ` +
         `(${nT} slabs on ${plan.workers} workers)`,
-      n === 0 ? 'error' : 'success',
+      n === 0 ? 'error' : 'info',
       'Dense',
     )
     onProgress?.(1, 1, 'Done', 1)
@@ -170,15 +170,15 @@ export function createFusionRun({
   // Dense Stage B — fuse the Stage A depth maps into a coloured dense cloud.
   // The saved maps of the images that are not disabled (core/imageEnabled.js): a
   // disabled image's map, kept from before, stays out of fusion and the orthophoto.
-  function enabledMaps(maps, category, what) {
+  function enabledMaps(maps, what) {
     const off = disabledUuids(images.value)
     if (!off.size) return maps
     const kept = maps.filter((m) => !off.has(m.uuid))
     if (kept.length < maps.length)
       log(
-        `${category}: ${pluralize(maps.length - kept.length, 'depth map')} of disabled images left out of ${what}`,
+        `${pluralize(maps.length - kept.length, 'depth map')} of disabled images left out of ${what}`,
         'info',
-        category,
+        'Dense',
       )
     return kept
   }
@@ -187,17 +187,26 @@ export function createFusionRun({
     const projectId = projects.currentProjectId,
       sparse = mainSparseCloud.value
     const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
+    const tRun = performance.now()
+    // The run's closing line (CONTRIBUTING.md ▸ The console).
+    const closing = (cloud, nMaps) =>
+      log(
+        `Dense cloud "${cloud.name}": ${cloud.count.toLocaleString('en')} points from ` +
+          `${pluralize(nMaps, 'depth map')} in ${((performance.now() - tRun) / 1000).toFixed(1)} s`,
+        'success',
+        'Dense',
+      )
     let input
     try {
       input = await depthMapInput()
     } catch (err) {
-      log(`Dense: ${err.message}`, 'error', 'Dense')
+      log(`Dense cloud failed: ${err.message}`, 'error', 'Dense')
       return
     }
     const { streamed } = input
-    const maps = enabledMaps(input.maps, 'Dense', 'the dense cloud')
+    const maps = enabledMaps(input.maps, 'the dense cloud')
     if (!maps.length) {
-      log('Dense: compute depth maps before building the dense cloud', 'warn', 'Dense')
+      log('Compute depth maps before building the dense cloud', 'warn', 'Dense')
       return
     }
     // Stage B pre-flight: fusion itself measures the merged cell count (at the real
@@ -212,24 +221,20 @@ export function createFusionRun({
     // 17.7 GB with the previous 95 M-point cloud open.
     const { pageBytes, pagePoolBytes } = pageCloudBytes()
     if (pageBytes > 0)
-      log(`Dense: the open project holds ${formatBytes(pageBytes)} of point data in this tab`, 'debug', 'Dense')
+      log(`The open project holds ${formatBytes(pageBytes)} of point data in this tab`, 'debug', 'Dense')
     // An 'auto' Point position follows the project's scene type (fusionPlan.js
     // resolveFusePosition, resolved where fusion reads it).
     const sceneType = projects.currentSceneType ?? null
     if (settings.position == null || settings.position === 'auto')
       log(
-        `Dense: point position auto → ${resolveFusePosition('auto', sceneType) === 'mean' ? 'mean of the agreeing views' : 'own depth map'} ` +
+        `Point position auto → ${resolveFusePosition('auto', sceneType) === 'mean' ? 'mean of the agreeing views' : 'own depth map'} ` +
           `(${sceneType === 'object' ? 'object capture' : 'aerial / mapping'} project)`,
         'info',
         'Dense',
       )
     settings = { ...settings, pageBytes, pagePoolBytes, sceneType }
     if (streamed)
-      log(
-        'Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use',
-        'info',
-        'Dense',
-      )
+      log('Reading saved maps on demand (one reference + one comparison); releasing planes after use', 'info', 'Dense')
     // Start from fresh workers: the pool's idle ones still hold the depth filter's
     // caches as uncollected garbage, charged to the tab's shared buffer pool.
     releaseIdleWorkers()
@@ -277,14 +282,14 @@ export function createFusionRun({
           if (!done) reconStatus.value = 'error'
           return
         }
-        upsertDenseCloud(done.cloud, { replace: !!settings.replaceMain })
+        closing(upsertDenseCloud(done.cloud, { replace: !!settings.replaceMain }), maps.length)
         denseSummary.value = done.summary
         reconStatus.value = 'done'
         await save()
       } catch (err) {
         if (!stillCurrent()) return
         if (cancelled(err, 'Dense cloud', 'Dense')) return
-        log(`Dense: error: ${densifyErrorText(err)}`, 'error', 'Dense')
+        log(`Dense cloud failed: ${densifyErrorText(err)}`, 'error', 'Dense')
         reconStatus.value = 'error'
       }
       return
@@ -298,7 +303,7 @@ export function createFusionRun({
       } = await workerDensify(
         { maps: mapsInput, streamed, settings: withRegion({ ...settings, memBudgetBytes: budget }) },
         {
-          onLog: (m, l, c) => log(m, l, c),
+          onLog: (m, l, c) => log(m, l, c ?? 'Dense'),
           onProgress: (d, t, lbl, f, phase) => onProgress?.(d, t, lbl, f, phase),
           transfer,
         },
@@ -323,7 +328,7 @@ export function createFusionRun({
       }
       // The worker returns the cloud already split (Float32 pos, Uint8 col, Float32
       // world-space normals for the Poisson mesh), assembled from its fusion slabs.
-      upsertDenseCloud(cloud, { replace: !!settings.replaceMain })
+      closing(upsertDenseCloud(cloud, { replace: !!settings.replaceMain }), maps.length)
       denseSummary.value = dSummary ?? null
       reconStatus.value = 'done'
       await save()
@@ -336,7 +341,7 @@ export function createFusionRun({
       depthMaps.value = new Map()
       const recovered = await loadDepthIndexIntoMeta()
       log(
-        `Dense: error: ${densifyErrorText(err)}. Depth maps were released to the worker` +
+        `Dense cloud failed: ${densifyErrorText(err)}. Depth maps were released to the worker` +
           (recovered
             ? ' — they will be reloaded from disk on the next attempt.'
             : ' and must be recomputed before retrying.'),

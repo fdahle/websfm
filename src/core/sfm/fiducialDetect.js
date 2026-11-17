@@ -343,7 +343,7 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
     const decisive = scores.every((s, k) => k === bestK || scores[bestK] > s + ROTATION_MARGIN)
     rotationK = decisive ? bestK : 0
     onLog?.(
-      `rotation probe: k=${rotationK}${decisive ? '' : ' (undecided → assuming unrotated)'}` +
+      `Rotation probe: k=${rotationK}${decisive ? '' : ' (undecided → assuming unrotated)'}` +
         ` (mean zncc ${scores.map((s) => s.toFixed(3)).join(' / ')} for k=0..3)`,
     )
   }

@@ -422,7 +422,7 @@ async function terrainSearch({ ortho, cloud, dem, file, prior, images, accept, l
   onLog?.(
     `Terrain: ICP RMS ${t.rms.toFixed(1)} m with ${(100 * t.inlierFraction).toFixed(0)} % of the points in range; ${found.length} candidates on the aligned surface`,
     'info',
-    'Find GCPs',
+    'Georeferencing',
   )
   return {
     found,

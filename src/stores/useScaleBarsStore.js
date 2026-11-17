@@ -6,6 +6,8 @@ import * as opfs from '../utils/opfs.js'
 import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { editCommand } from '../core/help/consoleEdits.js'
+import { useGcpsStore } from './useGcpsStore.js'
 
 // Project-scoped store: **scale bars** — known real-world distances between two
 // reproducible points in the reconstruction. They are what gives an
@@ -46,7 +48,7 @@ export const useScaleBarsStore = registerProjectStore(
       isPersisting,
       build: () => ({ bars: bars.value }),
       write: opfs.saveScaleBars,
-      onError: (err) => log(`Scale bar save failed — ${err?.message ?? err}`, 'error', 'Scale'),
+      onError: (err) => log(`Scale bar save failed: ${err?.message ?? err}`, 'error', 'Georeferencing'),
     })
 
     // Bars that can define a scale. A bar is invalid — never silently dropped — when
@@ -80,7 +82,17 @@ export const useScaleBarsStore = registerProjectStore(
         displayUnit: LENGTH_UNITS[unit] ? unit : 'm',
         enabled: true,
       })
-      log(`Added scale bar ${bars.value[bars.value.length - 1].name}`, 'success', 'Scale', { channel: 'activity' })
+      // The console adds a bar between two markers or GCPs, by name; one with a photo
+      // end is drawn in the Scale Bars dialog.
+      const gcpName = (e) => (e?.kind === 'marker' ? useGcpsStore().gcps.find((g) => g.id === e.id)?.name : null)
+      const ends = [gcpName(a), gcpName(b)]
+      log(`Added scale bar ${bars.value[bars.value.length - 1].name}`, 'info', 'Georeferencing', {
+        channel: 'activity',
+        command:
+          ends.every(Boolean) && knownDistance != null
+            ? editCommand('scalebar add', [...ends, knownDistance, unit])
+            : 'scale bars',
+      })
       save()
       return id
     }
@@ -111,7 +123,7 @@ export const useScaleBarsStore = registerProjectStore(
           log(
             `Scale bar "${bar.name}": accuracy must be greater than zero; leave it blank for equal weight`,
             'warn',
-            'Scale',
+            'Georeferencing',
           )
           return false
         }
@@ -124,8 +136,9 @@ export const useScaleBarsStore = registerProjectStore(
       const bar = bars.value.find((b) => b.id === id)
       if (!bar || bar.enabled === enabled) return false
       bar.enabled = enabled
-      log(`Scale bar "${bar.name}" ${enabled ? 'enabled' : 'excluded from the fit'}`, 'info', 'Scale', {
+      log(`Scale bar "${bar.name}" ${enabled ? 'enabled' : 'excluded from the fit'}`, 'info', 'Georeferencing', {
         channel: 'activity',
+        command: editCommand(`scalebar ${enabled ? 'enable' : 'disable'}`, [bar.name]),
       })
       save()
       return true
@@ -135,7 +148,10 @@ export const useScaleBarsStore = registerProjectStore(
       const idx = bars.value.findIndex((b) => b.id === id)
       if (idx < 0) return false
       const [removed] = bars.value.splice(idx, 1)
-      log(`Removed scale bar "${removed.name}"`, 'info', 'Scale', { channel: 'activity' })
+      log(`Removed scale bar "${removed.name}"`, 'info', 'Georeferencing', {
+        channel: 'activity',
+        command: editCommand('scalebar remove', [removed.name]),
+      })
       save()
       return true
     }
@@ -171,7 +187,7 @@ export const useScaleBarsStore = registerProjectStore(
       if (generation !== restoreGeneration || projectId !== projects.currentProjectId) return
       bars.value = restored
       if (bars.value.length) {
-        log(`Scale bars restored: ${bars.value.length}`, 'success', 'Scale')
+        log(`Scale bars restored: ${bars.value.length}`, 'info', 'Georeferencing')
       }
     }
 
