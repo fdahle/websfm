@@ -35,6 +35,9 @@ export function useTextMask() {
   // models are downloaded first, with consent. → `{ failed }`, `{ declined }` or
   // `{ cancelled }`. Called with `busy` already set by the caller.
   async function readPhase(images, force) {
+    // Nothing to read (a mask rerun with other settings): no models needed.
+    const toRead = force ? images : images.filter((img) => !imagesStore.hasPhotoText(img))
+    if (!toRead.length) return { failed: 0, read: 0 }
     if (!(await modelsStore.ensureReady(OCR_MODEL_IDS))) return { declined: true }
     progress.value = { phase: 'read', done: 0, total: images.length }
     const { failed, read } = await imagesStore.readPhotoTexts(images, {
