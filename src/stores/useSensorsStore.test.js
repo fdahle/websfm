@@ -176,3 +176,58 @@ describe('splitSensor', () => {
     expect(store.sensors[1].fiducialCalibration.marks).toEqual(before)
   })
 })
+
+describe('moving images between sensors', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const projects = useProjectsStore()
+    projects.persistenceAvailable = false
+    projects.projects = [{ id: 'project-1', name: 'test', sceneType: 'aerial', crs: 'EPSG:32632' }]
+    projects.currentProjectId = 'project-1'
+  })
+
+  // Two sensors: a (images 1-3, with a focal length set) and b (image 4).
+  function setup() {
+    const store = useSensorsStore()
+    const imagesStore = useImagesStore()
+    store.sensors = [
+      { id: 'a', label: 'CA214732V', focal: 154.4, focalUnit: 'mm', width: 10141, height: 9872 },
+      { id: 'b', label: 'CA214733R', focal: 153.5, focalUnit: 'mm', width: 10200, height: 10772 },
+    ]
+    imagesStore.images = [1, 2, 3, 4].map((n) => ({
+      id: `i${n}`,
+      name: `img${n}.tif`,
+      sensorId: n < 4 ? 'a' : 'b',
+      meta: { width: 10141, height: 9872 },
+    }))
+    return { store, images: imagesStore.images }
+  }
+  const sensorOf = (images, id) => images.find((img) => img.id === id).sensorId
+
+  it('moves images to a sensor and keeps an emptied sensor', () => {
+    const { store, images } = setup()
+    expect(store.assignImagesToSensor(['i4'], 'a')).toBe(1)
+    expect(sensorOf(images, 'i4')).toBe('a')
+    expect(store.sensors.map((s) => s.id)).toEqual(['a', 'b'])
+    // Already there, or no such sensor: nothing moves.
+    expect(store.assignImagesToSensor(['i1'], 'a')).toBe(0)
+    expect(store.assignImagesToSensor(['i1'], 'nope')).toBe(0)
+  })
+
+  it('splits a new sensor off the one the images use, with its calibration', () => {
+    const { store, images } = setup()
+    const id = store.newSensorForImages(['i2', 'i3'])
+    const made = store.sensors.find((s) => s.id === id)
+    expect(made).toMatchObject({ label: 'Sensor 1', focal: 154.4, focalUnit: 'mm' })
+    expect([sensorOf(images, 'i2'), sensorOf(images, 'i3')]).toEqual([id, id])
+    expect(sensorOf(images, 'i1')).toBe('a')
+    expect(store.sensors.find((s) => s.id === 'a').label).toBe('CA214732V')
+  })
+
+  it("copies the first image's sensor when the images come from several", () => {
+    const { store, images } = setup()
+    const id = store.newSensorForImages(['i1', 'i4'])
+    expect(store.sensors.find((s) => s.id === id)).toMatchObject({ label: 'Sensor 1', focal: 154.4, signature: null })
+    expect([sensorOf(images, 'i1'), sensorOf(images, 'i4')]).toEqual([id, id])
+  })
+})

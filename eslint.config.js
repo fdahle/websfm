@@ -100,6 +100,8 @@ export default [
             '0–255',
             '−',
             '+',
+            '⚠',
+            '⑂',
             'WebSfM',
           ],
           attributes: {

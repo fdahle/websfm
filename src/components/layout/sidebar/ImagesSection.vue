@@ -14,6 +14,7 @@ import { isTiff } from '../../../utils/tiff.js'
 import { groupImageSections } from '../../../utils/imageGroups.js'
 import { useVirtualList } from '../../../composables/useVirtualList.js'
 import ContextMenu from './ContextMenu.vue'
+import { useI18n } from '../../../composables/useI18n.js'
 import { useSidebar } from './sidebarContext.js'
 
 defineProps({
@@ -32,6 +33,7 @@ const { images, imageGroups, selectedId } = storeToRefs(useImagesStore())
 const { sensors } = storeToRefs(useSensorsStore())
 const { poses } = storeToRefs(usePosesStore())
 const { footprintSet } = storeToRefs(useFootprintsStore())
+const { t } = useI18n()
 
 // ── Groups ───────────────────────────────────────────────────────────────────
 // With no groups the list is flat, exactly as before groups existed. Once one
@@ -42,6 +44,41 @@ const { footprintSet } = storeToRefs(useFootprintsStore())
 const UNGROUPED = '__ungrouped__'
 const ungroupedCollapsed = ref(false)
 const sections = computed(() => groupImageSections(images.value, imageGroups.value))
+
+// Group by ▸ Sensors lists the images under their sensors instead (every sensor,
+// in the Sensors section's order, then "No sensor" while any image has none), and
+// dropping images on a sensor's header moves them to it. A sensor section's key is
+// `sensor:<id>`. The choice is this browser's (a per-viewer convenience).
+const GROUP_BY_KEY = 'websfm.images.groupBy'
+const SENSORLESS = '__nosensor__'
+const sensorKey = (id) => `sensor:${id}`
+const isSensorKey = (key) => typeof key === 'string' && key.startsWith('sensor:')
+function storedGroupBy() {
+  try {
+    return localStorage.getItem(GROUP_BY_KEY) === 'sensor' ? 'sensor' : 'group'
+  } catch {
+    return 'group'
+  }
+}
+const groupBy = ref(storedGroupBy())
+const bySensor = computed(() => groupBy.value === 'sensor')
+function setGroupBy(mode) {
+  groupBy.value = mode
+  try {
+    localStorage.setItem(GROUP_BY_KEY, mode)
+  } catch {
+    // Storage blocked: the choice lasts for this session.
+  }
+}
+const collapsedSensorKeys = ref(new Set())
+const sensorSections = computed(() => {
+  const by = new Map(sensors.value.map((s) => [s.id, []]))
+  const none = []
+  for (const img of images.value) (by.get(img.sensorId) ?? none).push(img)
+  const out = sensors.value.map((s) => ({ groupKey: sensorKey(s.id), sensor: s, images: by.get(s.id) }))
+  if (none.length) out.push({ groupKey: SENSORLESS, sensor: null, images: none })
+  return out
+})
 // An expanded image contributes a third row kind, its 'details' card, right after
 // it — so every element the list renders is one entry here (the virtual list's unit).
 const rows = computed(() => {
@@ -49,6 +86,22 @@ const rows = computed(() => {
   const pushImage = (img, groupKey) => {
     out.push({ kind: 'image', key: img.id, img, groupKey })
     if (isExpanded(img.id)) out.push({ kind: 'details', key: `details:${img.id}`, img, groupKey })
+  }
+  if (bySensor.value) {
+    for (const { groupKey, sensor, images } of sensorSections.value) {
+      const collapsed = collapsedSensorKeys.value.has(groupKey)
+      out.push({
+        kind: 'group',
+        key: `group:${groupKey}`,
+        groupKey,
+        group: null,
+        sensor,
+        count: images.length,
+        collapsed,
+      })
+      if (!collapsed) for (const img of images) pushImage(img, groupKey)
+    }
+    return out
   }
   if (!imageGroups.value.length) {
     for (const img of images.value) pushImage(img, undefined)
@@ -66,13 +119,31 @@ const rows = computed(() => {
 const visibleIds = computed(() => rows.value.filter((r) => r.kind === 'image').map((r) => r.img.id))
 
 function membersOf(groupKey) {
+  if (bySensor.value) return sensorSections.value.find((x) => x.groupKey === groupKey)?.images ?? []
   const s = sections.value.find((x) => (x.group?.id ?? UNGROUPED) === groupKey)
   return s ? s.images : []
 }
 
 function setCollapsed(groupKey, collapsed) {
-  if (groupKey === UNGROUPED) ungroupedCollapsed.value = collapsed
+  if (isSensorKey(groupKey) || groupKey === SENSORLESS) {
+    const next = new Set(collapsedSensorKeys.value)
+    if (collapsed) next.add(groupKey)
+    else next.delete(groupKey)
+    collapsedSensorKeys.value = next
+  } else if (groupKey === UNGROUPED) ungroupedCollapsed.value = collapsed
   else sidebar.imageGroup({ op: 'collapse', id: groupKey, collapsed })
+}
+
+// A section header's name and tooltip: a sensor, "No sensor", a group or "Ungrouped".
+function headerName(row) {
+  if (row.sensor) return row.sensor.label
+  if (row.group) return row.group.name
+  return bySensor.value ? t('sidebar.images.noSensor') : 'Ungrouped'
+}
+function headerTitle(row) {
+  if (row.sensor) return t('sidebar.images.sensorHeader', { name: row.sensor.label, n: row.count })
+  if (bySensor.value) return t('sidebar.images.noSensorTitle')
+  return row.group ? `${row.group.name} — ${row.count} image${row.count !== 1 ? 's' : ''}` : 'Images in no group'
 }
 function toggleGroup(row) {
   setCollapsed(row.groupKey, !row.collapsed)
@@ -112,7 +183,8 @@ function isImageDrag(e) {
   return !!e.dataTransfer?.types?.includes(DRAG_TYPE)
 }
 function onDragOver(e, groupKey) {
-  if (!groupKey || !isImageDrag(e)) return
+  // "No sensor" takes no drop: an image without a sensor gets one again at once.
+  if (!groupKey || groupKey === SENSORLESS || !isImageDrag(e)) return
   e.preventDefault()
   e.dataTransfer.dropEffect = 'move'
   dropTarget.value = groupKey
@@ -131,7 +203,9 @@ function onDrop(e, groupKey) {
   } catch {
     return
   }
-  sidebar.imageGroup({ op: 'assign', imageIds, groupId: groupKey === UNGROUPED ? null : groupKey })
+  if (isSensorKey(groupKey)) sidebar.assignSensor({ imageIds, sensorId: groupKey.slice('sensor:'.length) })
+  else if (groupKey !== SENSORLESS)
+    sidebar.imageGroup({ op: 'assign', imageIds, groupId: groupKey === UNGROUPED ? null : groupKey })
 }
 
 // Group header context menu. { x, y, row }
@@ -154,8 +228,11 @@ function groupCtxSelect() {
   closeGroupMenu()
 }
 function groupCtxCollapseAll(collapsed) {
-  for (const g of imageGroups.value) if (g.collapsed !== collapsed) setCollapsed(g.id, collapsed)
-  ungroupedCollapsed.value = collapsed
+  if (bySensor.value) collapsedSensorKeys.value = new Set(collapsed ? sensorSections.value.map((x) => x.groupKey) : [])
+  else {
+    for (const g of imageGroups.value) if (g.collapsed !== collapsed) setCollapsed(g.id, collapsed)
+    ungroupedCollapsed.value = collapsed
+  }
   closeGroupMenu()
 }
 
@@ -260,6 +337,20 @@ const imagesFocused = computed(() => sidebar.focus?.kind === 'image')
 watch(imagesFocused, (focused) => {
   if (!focused) localSelected.value = []
 })
+
+// Sensors ▸ a sensor's image count: list by sensor, open that sensor and select its images.
+watch(
+  () => sidebar.imageSelection,
+  (req) => {
+    if (!req) return
+    setGroupBy('sensor')
+    const key = sensorKey(req.sensorId)
+    if (collapsedSensorKeys.value.has(key)) setCollapsed(key, false)
+    localSelected.value = [...req.ids]
+    anchor.value = req.ids[0] ?? null
+    nextTick(() => revealRow(`group:${key}`))
+  },
+)
 
 watch(selectedId, (newId) => {
   if (suppressWatch) {
@@ -369,6 +460,18 @@ function ctxMoveTo(groupId) {
   sidebar.imageGroup({ op: 'assign', imageIds: ctxTargets.value.map((img) => img.id), groupId })
   closeMenu()
 }
+// Set sensor ▸ (the sensors not every target already uses) and New sensor.
+const ctxSensorTargets = computed(() =>
+  sensors.value.filter((s) => ctxTargets.value.some((img) => img.sensorId !== s.id)),
+)
+function ctxSetSensor(sensorId) {
+  sidebar.assignSensor({ imageIds: ctxTargets.value.map((img) => img.id), sensorId })
+  closeMenu()
+}
+function ctxNewSensor() {
+  sidebar.newSensor(ctxTargets.value.map((img) => img.id))
+  closeMenu()
+}
 function ctxUngroup() {
   sidebar.imageGroup({ op: 'assign', imageIds: ctxTargets.value.map((img) => img.id), groupId: null })
   closeMenu()
@@ -432,16 +535,35 @@ function revealRow(key) {
       </div>
       <span class="meta-progress-label">Reading metadata… {{ metaDone }}/{{ images.length }}</span>
     </div>
+    <div v-if="open && images.length" class="group-by" role="group" :aria-label="t('sidebar.images.groupBy')">
+      <span class="group-by-label">{{ t('sidebar.images.groupBy') }}</span>
+      <button
+        class="group-by-btn"
+        :class="{ on: !bySensor }"
+        :aria-pressed="!bySensor"
+        :title="t('sidebar.images.byGroupTitle')"
+        @click="setGroupBy('group')"
+      >
+        {{ t('sidebar.images.byGroup') }}
+      </button>
+      <button
+        class="group-by-btn"
+        :class="{ on: bySensor }"
+        :aria-pressed="bySensor"
+        :title="t('sidebar.images.bySensorTitle')"
+        @click="setGroupBy('sensor')"
+      >
+        {{ t('sidebar.images.bySensor') }}
+      </button>
+    </div>
     <ul v-if="open" ref="listEl" class="item-list" @dragleave="onListDragLeave" @dragend="dropTarget = null">
       <li v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"></li>
       <template v-for="row in visibleRows" :key="row.key">
         <li
           v-if="row.kind === 'group'"
           class="group-hd"
-          :class="{ 'drop-target': dropTarget === row.groupKey, 'group-ungrouped': !row.group }"
-          :title="
-            row.group ? `${row.group.name} — ${row.count} image${row.count !== 1 ? 's' : ''}` : 'Images in no group'
-          "
+          :class="{ 'drop-target': dropTarget === row.groupKey, 'group-ungrouped': !row.group && !row.sensor }"
+          :title="headerTitle(row)"
           @click="toggleGroup(row)"
           @contextmenu="openGroupCtx($event, { row })"
           @dragover="onDragOver($event, row.groupKey)"
@@ -458,7 +580,7 @@ function revealRow(key) {
             @keydown.esc.prevent.stop="cancelGroupRename"
             @blur="commitGroupRename"
           />
-          <span v-else class="group-name">{{ row.group ? row.group.name : 'Ungrouped' }}</span>
+          <span v-else class="group-name">{{ headerName(row) }}</span>
           <span class="group-count">{{ row.count }}</span>
         </li>
         <li
@@ -474,7 +596,7 @@ function revealRow(key) {
             'drop-target': row.groupKey && dropTarget === row.groupKey,
           }"
           :title="rowTitle(row.img)"
-          :draggable="imageGroups.length > 0 && editingImageId !== row.img.id"
+          :draggable="(bySensor || imageGroups.length > 0) && editingImageId !== row.img.id"
           @click="handleItemClick($event, row.img)"
           @dblclick="sidebar.openImage(row.img.id)"
           @contextmenu="onRightClick($event, row.img)"
@@ -643,6 +765,20 @@ function revealRow(key) {
           </div>
         </div>
         <button v-if="ctxInGroup" class="ctx-item" @click="ctxUngroup">Remove from group</button>
+        <div class="ctx-sep"></div>
+        <div v-if="ctxSensorTargets.length" class="ctx-sub-wrap">
+          <button class="ctx-item ctx-has-sub">
+            {{ t('sidebar.images.setSensor') }}<span class="ctx-arrow">▸</span>
+          </button>
+          <div class="ctx-submenu">
+            <button v-for="s in ctxSensorTargets" :key="s.id" class="ctx-item" @click="ctxSetSensor(s.id)">
+              {{ s.label }}
+            </button>
+          </div>
+        </div>
+        <button class="ctx-item" :title="t('sidebar.images.newSensorTitle')" @click="ctxNewSensor">
+          {{ t('sidebar.images.newSensor', { n: ctxTargets.length }) }}
+        </button>
         <template v-if="ctxIsTiff">
           <div class="ctx-sep"></div>
           <button
@@ -714,6 +850,13 @@ function revealRow(key) {
             Move down
           </button>
         </template>
+        <button
+          v-if="menu.row.sensor"
+          class="ctx-item"
+          @click="fromGroupMenu((row) => sidebar.showProductInfo({ sensorId: row.sensor.id }))"
+        >
+          {{ t('sidebar.images.sensorInfo') }}
+        </button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="groupCtxCollapseAll(true)">Collapse all</button>
         <button class="ctx-item" @click="groupCtxCollapseAll(false)">Expand all</button>
@@ -745,6 +888,36 @@ function revealRow(key) {
   color: var(--text-dim);
   border: 1px solid currentColor;
   border-radius: 3px;
+}
+/* Group by: Groups | Sensors — a small segmented switch under the header. */
+.group-by {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 12px 4px 26px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.group-by-label {
+  margin-right: 2px;
+}
+.group-by-btn {
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.group-by-btn:hover {
+  color: var(--text);
+}
+.group-by-btn.on {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(14, 99, 156, 0.18);
 }
 /* Image group headers — lighter than a section header, heavier than a row. */
 .group-hd {

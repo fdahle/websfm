@@ -40,8 +40,8 @@ names no camera, so scans are grouped by roll, the file name without its frame
 number; the make and model a film scanner writes are not taken as the camera. It
 has to be corrected by hand when that is still misleading — a zoom lens used at
 different settings, two physically different cameras that report the same model
-string, or one camera spread over several rolls. Frames extracted from a video
-carry no EXIF; they get one
+string, or one camera spread over several rolls (Images ▸ Group by ▸ Sensors
+shows and changes it). Frames extracted from a video carry no EXIF; they get one
 sensor per video (named after it), since all frames of a video come from one
 camera. A group whose scan formats or fiducial fits point to more than one camera
 is marked in the Sensors list, and **Split camera group…** splits it

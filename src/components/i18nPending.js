@@ -32,7 +32,6 @@ export const I18N_PENDING = [
   'src/components/layout/sidebar/ProductsSection.vue',
   'src/components/layout/sidebar/ReconstructionSection.vue',
   'src/components/layout/sidebar/ReferenceSection.vue',
-  'src/components/layout/sidebar/SensorsSection.vue',
   'src/components/layout/sidebar/VectorRows.vue',
   'src/components/modals/PipelineModals.vue',
   'src/components/modals/ProjectModals.vue',

@@ -26,6 +26,13 @@ keeps the lens it was solved with, so editing a group later does not change a fi
 model or what was built from it. To start the next run from what a model solved, open
 the Sensor table, choose **Estimated** and **Use for next run** on the group.
 
+## See and change a photo's sensor
+In the sidebar, **Images ▸ Group by ▸ Sensors** lists the photos under their sensors.
+Drag photos onto another sensor to move them there, or right-click them ▸ **Set sensor**.
+**New sensor from selection** gives them a sensor of their own, a copy of the one they
+used. Click a sensor's photo count in **Sensors** to select its photos. A sensor left
+without photos stays, so you can move them back; **Remove sensor** drops it.
+
 ## When WebSfM suggests a split
 A group that may hold photos of more than one camera gets a **⑂** in the Sensors list,
 and the Sparse Reconstruction dialog says so at the top. Two things point to another

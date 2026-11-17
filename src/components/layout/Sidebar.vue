@@ -103,6 +103,13 @@ watch(
     if (count > previous) open.value.reference = true
   },
 )
+// A sensor's image count selects its images in Images, so that section opens.
+watch(
+  () => sidebar.imageSelection,
+  (req) => {
+    if (req) open.value.images = true
+  },
+)
 </script>
 
 <template>

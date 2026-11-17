@@ -526,6 +526,61 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (isPersisting()) imagesStore.save()
   }
 
+  // Move images to a sensor (Images ▸ drag onto a sensor, or Set sensor ▸). A sensor
+  // left with no images stays, listed with 0, so they can be moved back; Remove
+  // sensor drops it. → the number moved.
+  function assignImagesToSensor(imageIds, sensorId) {
+    const target = sensors.value.find((s) => s.id === sensorId)
+    if (!target) return 0
+    const ids = new Set(imageIds)
+    let moved = 0
+    for (const img of images.value) {
+      if (!ids.has(img.id) || img.sensorId === sensorId) continue
+      img.sensorId = sensorId
+      moved++
+    }
+    if (!moved) return 0
+    log(`Moved ${pluralize(moved, 'image')} to sensor ${target.label}`, 'info', 'Sensor', { channel: 'activity' })
+    save()
+    if (isPersisting()) imagesStore.save()
+    return moved
+  }
+
+  // A new sensor for these images (Images ▸ New sensor from selection), named
+  // "Sensor N". Taken from one sensor that keeps other images, it is that sensor's
+  // split (its calibration copied, a layout estimated from the photos estimated
+  // again); otherwise a copy of the first image's sensor, or one from its EXIF.
+  // → the new sensor's id, or null.
+  function newSensorForImages(imageIds) {
+    const ids = new Set(imageIds)
+    const picked = images.value.filter((img) => ids.has(img.id))
+    if (!picked.length) return null
+    const label = `Sensor ${nextSensorNumber()}`
+    const from = new Set(picked.map((img) => img.sensorId))
+    const sourceId = from.size === 1 ? picked[0].sensorId : null
+    const rest = sourceId ? images.value.filter((img) => img.sensorId === sourceId && !ids.has(img.id)) : []
+    if (sourceId && rest.length && sensors.value.some((s) => s.id === sourceId)) {
+      return splitSensor(sourceId, [{ imageIds: rest.map((img) => img.id) }, { label, imageIds: [...ids] }])[1] ?? null
+    }
+    const base = sensors.value.find((s) => s.id === picked[0].sensorId)
+    const sensor = base
+      ? { ...structuredClone(toRaw(base)), id: crypto.randomUUID(), label, signature: null }
+      : {
+          id: crypto.randomUUID(),
+          ...sensorFromExif(picked[0].meta),
+          label,
+          distortionModel: 'pinhole',
+          signature: null,
+          source: 'exif',
+        }
+    sensors.value.push(sensor)
+    for (const img of picked) img.sensorId = sensor.id
+    log(`New sensor ${label} with ${pluralize(picked.length, 'image')}`, 'info', 'Sensor', { channel: 'activity' })
+    save()
+    if (isPersisting()) imagesStore.save()
+    return sensor.id
+  }
+
   // Fold `sourceId` into `targetId`: move its images, then drop it.
   function mergeSensors(targetId, sourceId) {
     if (targetId === sourceId) return
@@ -648,6 +703,8 @@ export const useSensorsStore = defineStore('sensors', () => {
     importFiducialMarks,
     addSensors,
     assignSensor,
+    assignImagesToSensor,
+    newSensorForImages,
     mergeSensors,
     splitSensor,
     removeSensor,

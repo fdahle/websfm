@@ -49,7 +49,13 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
   } = actions
   const imagesStore = useImagesStore()
   const { imageById, selectImage, renameImage } = imagesStore
-  const { imageCount: sensorImageCount, mergeSensors } = useSensorsStore()
+  const sensorsStore = useSensorsStore()
+  const { imageCount: sensorImageCount, mergeSensors } = sensorsStore
+  // A request for the Images section to select these images ({ ids, sensorId, n }), from
+  // a sensor's image count: the section lists them under their sensor and selects them,
+  // and the sidebar opens the section. `n` makes a repeat of the same request a change.
+  const imageSelection = ref(null)
+  let imageSelectionSeq = 0
   const {
     selectCloud,
     setCloudVisible,
@@ -232,6 +238,17 @@ export function useSidebarActions({ tabs, viewers, state, actions }) {
     },
     openSensor: () => {
       sensorTableOpen.value = true
+    },
+    // Images ▸ drag onto a sensor or Set sensor ▸: { imageIds, sensorId }.
+    assignSensor: ({ imageIds, sensorId }) => sensorsStore.assignImagesToSensor(imageIds, sensorId),
+    newSensor: (imageIds) => sensorsStore.newSensorForImages(imageIds),
+    // Sensors ▸ a sensor's image count: select its images in the Images section.
+    imageSelection,
+    selectSensorImages: (sensorId) => {
+      const ids = imagesStore.images.filter((img) => img.sensorId === sensorId).map((img) => img.id)
+      if (!ids.length) return
+      imageSelection.value = { ids, sensorId, n: ++imageSelectionSeq }
+      focusRow('image', ids[0])
     },
     // Matches
     openMatches: () => {

@@ -6,6 +6,11 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **See and change which photos use which sensor.** Images ▸ Group by ▸ Sensors lists the
+  photos under their sensors: drag photos onto another sensor, or right-click ▸ Set sensor
+  or New sensor from selection. Clicking a sensor's photo count in Sensors selects its
+  photos. Before, a photo's sensor showed only in its details, and moving one meant the
+  Split camera group dialog.
 - **Mask the film frame of each scan.** Tools ▸ Images ▾ ▸ Auto mask ▸ **Frame** finds
   where the photograph begins on every scan, past any bright scanner bed and the dark film
   border with its fiducials, dials and data strip, and masks the frame, with an inset for
