@@ -348,9 +348,11 @@ const groupReason = (g) => (busy.value ? t('autoMask.disabled.busy') : g.w ? nul
         <div class="group-info">
           <span class="group-title">{{ groupLabel(g) }}</span>
           <span class="group-count">{{ t('autoMask.group.count', { n: g.images.length }) }}</span>
-          <span v-if="rule === 'frame' && frameMask.found.value.size" class="group-count">{{
-            t('autoMask.frame.groupFound', { found: framesFound(g), n: g.images.length })
-          }}</span>
+          <span
+            v-if="rule === 'frame' && g.images.some((img) => frameMask.found.value.has(img.id))"
+            class="group-count"
+            >{{ t('autoMask.frame.groupFound', { found: framesFound(g), n: g.images.length }) }}</span
+          >
           <span v-if="rule === 'text'" class="group-count">{{
             groupText(g).read
               ? t('autoMask.text.groupRead', { ...groupText(g), n: g.images.length })

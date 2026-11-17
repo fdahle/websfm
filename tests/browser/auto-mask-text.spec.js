@@ -146,6 +146,8 @@ test('reads the text on the photos and masks it', async ({ page, browserName }) 
   await scanGroup.getByRole('button', { name: 'Apply to group' }).click()
   await expect(dialog.locator('.subbar .hint', { hasText: 'photos masked' })).toBeVisible({ timeout: 60_000 })
   await expect(scanGroup).toContainText('frame found on 3 of 3')
+  await expect(scanGroup.getByRole('button', { name: 'Apply to group' })).toBeEnabled()
+  await expect(dialog.locator('.group', { hasText: '1200 × 900' })).not.toContainText('frame found')
   const framed = await page.evaluate(async () => {
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
     const img = useImagesStore().images.find((i) => i.name === 'scan-1.jpg')
