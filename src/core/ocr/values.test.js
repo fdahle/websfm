@@ -13,7 +13,6 @@ describe('parseLine: focal length', () => {
     expect(values('CAL F.L. 153.891', 'focal')).toEqual(['153.891'])
     expect(values('FL 152.87', 'focal')).toEqual(['152.87'])
     expect(values('151.982 mm', 'focal')).toEqual(['151.982'])
-    expect(values('5l.92mm', 'focal')).toEqual([])
     expect(values('15l.92mm', 'focal')).toEqual(['151.92'])
   })
 
@@ -25,8 +24,17 @@ describe('parseLine: focal length', () => {
     expect(values('215.47', 'focal')).toEqual([])
   })
 
-  it('drops a reading cut off in front ("3.46 mm" of 153.46)', () => {
-    expect(values('3.46 mm', 'focal')).toEqual([])
+  it('fills the leading digits of a cut-off reading into the 6 in band, marked as filled', () => {
+    const r = parseLine('3.46mm', 0.98).find((x) => x.name === 'focal')
+    expect(r).toMatchObject({ value: '153.46', filled: true })
+    expect(r.weight).toBeCloseTo(0.98 * 0.6, 9)
+    expect(values('5l.92mm', 'focal')).toEqual(['151.92'])
+    expect(values('CAL F.L. 2.87', 'focal')).toEqual(['152.87'])
+  })
+
+  it('fills nothing without a decimal point, or where no completion fits the band', () => {
+    expect(values('396mm', 'focal')).toEqual([])
+    expect(values('62.31mm', 'focal')).toEqual([])
   })
 })
 
@@ -56,8 +64,18 @@ describe('voteValue', () => {
     const photos = [lines('152.86', 'ARIZ CSR-D'), lines('152.86', '152.86'), lines('152.66'), lines('9-6-78')].map(
       photoValues,
     )
-    expect(voteValue(photos.map((p) => p.focal))).toEqual({ value: '152.86', photos: 2, of: 3, share: 2 / 3 })
-    expect(voteValue(photos.map((p) => p.date))).toEqual({ value: '1978-09-06', photos: 1, of: 1, share: 1 })
+    expect(voteValue(photos.map((p) => p.focal))).toEqual({
+      value: '152.86',
+      photos: 2,
+      of: 3,
+      share: 2 / 3,
+      filled: false,
+    })
+    expect(voteValue(photos.map((p) => p.date))).toMatchObject({ value: '1978-09-06', photos: 1, of: 1 })
     expect(voteValue([[], []])).toBeNull()
+  })
+  it('says when the winner was only ever filled in', () => {
+    const cut = [[{ text: '3.46mm', textScore: 0.98 }], [{ text: '3.46 mm', textScore: 0.9 }]].map(photoValues)
+    expect(voteValue(cut.map((p) => p.focal))).toMatchObject({ value: '153.46', photos: 2, filled: true })
   })
 })

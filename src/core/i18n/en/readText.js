@@ -22,6 +22,7 @@ export default {
     none: 'nothing read',
     onPhotos: '{value} ({photos, number} of {of, number} photos)',
     focalValue: '{mm, number, ::.000} mm',
+    filled: 'leading digits not on the photos, filled in for a 6 in lens',
     current: 'camera: {mm, number, ::.000} mm',
     currentNone: 'camera: not set',
     use: 'Use {mm, number, ::.000} mm',

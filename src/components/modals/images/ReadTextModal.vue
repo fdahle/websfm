@@ -116,6 +116,7 @@ const rows = computed(() =>
                 of: cam.focal.of,
               })
             }}</span>
+            <span v-if="cam.focal.filled" class="dim">{{ t('readText.camera.filled') }}</span>
             <span v-if="cam.sensor?.kind === 'film'" class="dim">{{
               cam.currentMm != null
                 ? t('readText.camera.current', { mm: cam.currentMm })

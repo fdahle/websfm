@@ -42,6 +42,10 @@ const BARE_FOCAL_BANDS = [
   [205, 215],
   [298, 310],
 ]
+// A focal length read without its leading digits ("3.46 mm" where the card is cut off at
+// the photograph's edge, "51.92mm") is filled in only into the 6 in band, where nearly
+// every frame camera's calibrated value lies, and only when one completion fits.
+export const FILL_BAND = [147.4, 157.4]
 export const YEAR_RANGE = [1900, 2030]
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
@@ -51,6 +55,26 @@ function focal(token) {
   if (!/^\d{2,3}\.\d{1,3}$/.test(v)) return null
   const n = Number(v)
   return n >= FOCAL_RANGE[0] && n <= FOCAL_RANGE[1] ? v : null
+}
+
+/**
+ * A focal length read without its leading one or two digits, completed into FILL_BAND
+ * when exactly one completion lands there; null otherwise (and for a read without a
+ * decimal point, whose digits could sit anywhere).
+ */
+function filledFocal(token) {
+  const v = toDigits(token).replace(/\.$/, '')
+  if (!/^\d{1,2}\.\d{2,3}$/.test(v)) return null
+  const fits = []
+  for (const lost of [1, 2]) {
+    const step = 10 ** (v.indexOf('.') + lost - 1)
+    for (let p = 1; p < 10 ** lost; p++) {
+      if (lost === 2 && p < 10) continue
+      const n = Number(`${p}${v}`)
+      if (n >= FILL_BAND[0] && n <= FILL_BAND[1] && step) fits.push(`${p}${v}`)
+    }
+  }
+  return fits.length === 1 ? fits[0] : null
 }
 
 function isoDate(year, month, day) {
@@ -70,17 +94,22 @@ function isoDate(year, month, day) {
  */
 export function parseLine(text, score) {
   const reads = []
+  let v2
   const upper = String(text ?? '').toUpperCase()
   // Focal length with its label: "CAL F.L. 153.891", "FL 152.87", "F.L.=152,86".
   const labelled = new RegExp(`(?:C\\.?\\s*A?\\.?\\s*L?\\.?\\s*)?F\\.?\\s*L\\.?\\s*[=:]?\\s*(${NUM}{4,8})`, 'g')
   for (const m of upper.matchAll(labelled)) {
     const v = focal(m[1])
     if (v) reads.push({ name: 'focal', value: v, raw: m[0], weight: score })
+    else if ((v2 = filledFocal(m[1])))
+      reads.push({ name: 'focal', value: v2, raw: m[0], weight: score * 0.6, filled: true })
   }
   // With its unit: "151.982 mm", "153.46MM".
   for (const m of upper.matchAll(new RegExp(`(?<![A-Z0-9])(${NUM}{4,8})\\s*MM\\b`, 'g'))) {
     const v = focal(m[1])
     if (v && !reads.some((r) => r.value === v)) reads.push({ name: 'focal', value: v, raw: m[0], weight: score })
+    else if (!v && (v2 = filledFocal(m[1])) && !reads.some((r) => r.value === v2))
+      reads.push({ name: 'focal', value: v2, raw: m[0], weight: score * 0.6, filled: true })
   }
   // A bare decimal near a common lens ("152.86" alone, "UAGI 6056 151,78"); not a
   // thousands group ("13,000") or a clock ("14:06").
@@ -126,25 +155,32 @@ export function photoValues(lines) {
 /**
  * The value the photos agree on: each photo votes once per value it shows (its best
  * reading's weight), the heaviest value wins. `perPhoto` is `[[read]]`, one list per
- * photo. Returns `{ value, photos, of, share }` (photos showing the winner, photos with
- * any reading of this kind), or null when none has one.
+ * photo. Returns `{ value, photos, of, share, filled }` (photos showing the winner,
+ * photos with any reading of this kind, and whether every photo showed it only with its
+ * leading digits filled in), or null when none has one.
  */
 export function voteValue(perPhoto) {
   const weight = new Map(),
-    photos = new Map()
+    photos = new Map(),
+    whole = new Map() // value → photos that show it whole (not filled in)
   let of = 0
   for (const reads of perPhoto) {
     if (!reads.length) continue
     of++
-    const best = new Map()
-    for (const r of reads) best.set(r.value, Math.max(best.get(r.value) ?? 0, r.weight))
+    const best = new Map(),
+      seenWhole = new Set()
+    for (const r of reads) {
+      best.set(r.value, Math.max(best.get(r.value) ?? 0, r.weight))
+      if (!r.filled) seenWhole.add(r.value)
+    }
     for (const [v, w] of best) {
       weight.set(v, (weight.get(v) ?? 0) + w)
       photos.set(v, (photos.get(v) ?? 0) + 1)
+      if (seenWhole.has(v)) whole.set(v, (whole.get(v) ?? 0) + 1)
     }
   }
   if (!of) return null
   let value = null
   for (const [v, w] of weight) if (value == null || w > weight.get(value)) value = v
-  return { value, photos: photos.get(value), of, share: photos.get(value) / of }
+  return { value, photos: photos.get(value), of, share: photos.get(value) / of, filled: !whole.get(value) }
 }

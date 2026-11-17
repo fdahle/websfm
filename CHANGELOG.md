@@ -48,6 +48,11 @@ Notable changes to websfm. The format follows
   after hist_sfm's rules: "152.86" and "UAGI 6056 151,78" give 152.86 and 151.78 mm,
   "9-6-78" 6 Sep 1978, "22-8.80" 22 Aug 1980 and the end of a TMA data line "… 12 27 68"
   27 Dec 1968, matching the flight dates of the Casa Grande, Iceland and TMA test scans.
+  A focal length whose leading digits are not on the scan (a TMA data card cut off at the
+  photograph's edge reads "3.46 mm") is completed into the 6 in band when exactly one
+  completion fits, and the dialog says so: the TMA R camera votes 153.46 mm on 10 of 10
+  scans, the value of its calibration; Casa Grande reads 152.86 mm whole on 22 of 22
+  (certificate 152.865).
 - **Match large sets without positions in a fraction of the time.** Match Features ▸
   Pairing ▸ **Similar images** pairs each photo with the 20 photos that look most like it,
   and up to 20 more spread over the scene, found from the features already detected,

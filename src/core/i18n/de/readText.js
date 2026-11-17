@@ -21,6 +21,7 @@ export default {
     none: 'nichts gelesen',
     onPhotos: '{value} ({photos, number} von {of, number} Fotos)',
     focalValue: '{mm, number, ::.000} mm',
+    filled: 'führende Ziffern nicht auf den Fotos, für ein 6-Zoll-Objektiv ergänzt',
     current: 'Kamera: {mm, number, ::.000} mm',
     currentNone: 'Kamera: nicht gesetzt',
     use: '{mm, number, ::.000} mm übernehmen',

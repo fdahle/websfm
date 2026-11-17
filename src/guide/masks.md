@@ -81,7 +81,9 @@ clearly in bold, and what a camera's photos print: the calibrated focal length
 ("CAL F.L. 153.891", "152.86 mm") and the date of the flight. Each photo votes, and the
 value most of them show wins, with how many show it. For a film camera, **Use** sets
 that focal length on the camera, as Calibrate fiducials does; compare it with the
-camera's calibration certificate when you have one. Auto mask ▸ Text reads the photos
+camera's calibration certificate when you have one. Where a data card is cut off at the
+photograph's edge and only the last digits show ("3.46 mm"), the value is completed for
+a 6 in (152 mm) lens and marked so: check it before you use it. Auto mask ▸ Text reads the photos
 the same way, so one reading serves both.
 
 ## Paint a mask
