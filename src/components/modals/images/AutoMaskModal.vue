@@ -574,7 +574,13 @@ const groupReason = (g) => (busy.value ? t('autoMask.disabled.busy') : g.w ? nul
   padding: 4px 9px;
 }
 .btn:hover:not(:disabled) {
+  /* The global .btn:hover (style.css) would paint it pale, like a disabled button. */
+  background: var(--accent);
   filter: brightness(1.1);
+}
+.btn.ghost:hover:not(:disabled) {
+  background: var(--hover-bg);
+  filter: none;
 }
 .btn:disabled {
   opacity: 0.4;
