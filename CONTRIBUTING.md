@@ -253,8 +253,8 @@ A dialog that runs a processing step lays out its settings as numbered steps, in
 order the run applies them. That covers every Reconstruct dialog (Detect and Match
 Features, Sparse Model, Depth Maps, Dense Cloud, DEM, Orthophoto, Mesh), every Tools
 dialog that takes settings and has a Run button (Filter, Crop, Clean mesh, Texture,
-Contours, Optimize cameras, Detect fiducials …), and any new one. A dialog built around a
-live preview, a result table or a readout (Auto mask, Reseau, Section, Mesh area &
+Contours, Optimize cameras, Detect fiducials, Auto mask …), and any new one. A dialog built around a
+live preview, a result table or a readout (Reseau, Section, Mesh area &
 volume) is a workbench: it uses the same fields but no numbered steps.
 
 1. Each stage is a `<SettingsStep step="n" title="…" :effect="…">`, listed **once**, in

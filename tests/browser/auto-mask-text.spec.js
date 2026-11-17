@@ -1,8 +1,9 @@
 import { test, expect } from './fixtures.js'
 import { readFileSync } from 'node:fs'
 
-// Auto Mask ▸ Text end to end: the PP-OCR models download (with the prompt), run in the
-// compute workers, read the text on the photos and mask it. Three photos drawn in the
+// Auto Mask end to end: the PP-OCR models download (with the prompt), run in the compute
+// workers, read the text on the photos and mask it; then the film frame and the text in
+// one run. Three photos drawn in the
 // page carry a data strip at the same place (read on all three: recurring text) and one
 // a date on the photograph; the five Aukerman photos of the fixture carry none. The
 // models are not in the repository (npm run fetch:models), so without them the test is
@@ -100,17 +101,28 @@ test('reads the text on the photos and masks it', async ({ page, browserName }) 
     )
     .toBe(3)
 
-  await page.evaluate(async () => {
-    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
-    useModalsStore().autoMaskOpen = true
+  // The dialog on the scans' sensor: Text alone. Run closes it; the masks are written in
+  // the progress window and a toast sums them up.
+  const scanSensor = await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    return useImagesStore().images.find((i) => i.name === 'scan-0.jpg').sensorId
   })
   const dialog = page.locator('.auto-mask')
-  await dialog.getByRole('button', { name: 'Text', exact: true }).click()
-  const scanGroup = dialog.locator('.group', { hasText: '1600 × 1200' })
-  await scanGroup.getByRole('button', { name: 'Apply to group' }).click()
-  // The download prompt for the two models, then the run.
+  async function openAutoMask() {
+    await page.evaluate(async () => {
+      const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+      useModalsStore().autoMaskOpen = true
+    })
+    await dialog.locator('select').selectOption(scanSensor)
+  }
+  await openAutoMask()
+  await dialog.getByRole('button', { name: 'Off', exact: true }).click()
+  await dialog.getByRole('checkbox', { name: 'Mask text' }).check()
+  await dialog.getByRole('button', { name: 'Mask 3 photos' }).click()
+  await expect(dialog).toHaveCount(0)
+  // The download prompt for the two models comes before the progress window.
   await page.getByRole('button', { name: /^Download \(/ }).click()
-  await expect(dialog.locator('.subbar .hint', { hasText: 'photos masked' })).toBeVisible({ timeout: 180_000 })
+  await expect(page.locator('.toast', { hasText: 'Text on 3 photos' })).toBeVisible({ timeout: 180_000 })
 
   const result = await page.evaluate(async () => {
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
@@ -127,42 +139,54 @@ test('reads the text on the photos and masks it', async ({ page, browserName }) 
   }
   expect(result[0].texts.some((t) => t.includes('9-6-78'))).toBe(true)
 
-  // The mask covers the data strip and the date, and leaves the ground alone.
-  const coverage = await page.evaluate(async () => {
-    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
-    const img = useImagesStore().images.find((i) => i.name === 'scan-0.jpg')
-    const bmp = await createImageBitmap(img.mask.blob)
-    const c = new OffscreenCanvas(bmp.width, bmp.height)
-    const g = c.getContext('2d')
-    g.drawImage(bmp, 0, 0)
-    const at = (x, y) => g.getImageData(x, y, 1, 1).data[3] > 127
-    return { strip: at(1560, 400), date: at(420, 590), ground: at(800, 300), size: [bmp.width, bmp.height] }
-  })
-  expect(coverage).toEqual({ strip: true, date: true, ground: false, size: [1600, 1200] })
+  const maskAt = (name, points) =>
+    page.evaluate(
+      async ([name, points]) => {
+        const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+        const img = useImagesStore().images.find((i) => i.name === name)
+        const bmp = await createImageBitmap(img.mask.blob)
+        const c = new OffscreenCanvas(bmp.width, bmp.height)
+        const g = c.getContext('2d')
+        g.drawImage(bmp, 0, 0)
+        const out = { size: [bmp.width, bmp.height] }
+        for (const [k, [x, y]] of Object.entries(points)) out[k] = g.getImageData(x, y, 1, 1).data[3] > 127
+        return out
+      },
+      [name, points],
+    )
 
-  // Frame: the black band down the right side of the scans is their only frame; it is
-  // masked where no text was, and the ground stays.
-  await dialog.getByRole('button', { name: 'Frame', exact: true }).click()
-  await scanGroup.getByRole('button', { name: 'Apply to group' }).click()
-  await expect(dialog.locator('.subbar .hint', { hasText: 'photos masked' })).toBeVisible({ timeout: 60_000 })
-  await expect(scanGroup).toContainText('frame found on 3 of 3')
-  await expect(scanGroup.getByRole('button', { name: 'Apply to group' })).toBeEnabled()
-  await expect(dialog.locator('.group', { hasText: '1200 × 900' })).not.toContainText('frame found')
-  const framed = await page.evaluate(async () => {
-    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
-    const img = useImagesStore().images.find((i) => i.name === 'scan-1.jpg')
-    const bmp = await createImageBitmap(img.mask.blob)
-    const c = new OffscreenCanvas(bmp.width, bmp.height)
-    const g = c.getContext('2d')
-    g.drawImage(bmp, 0, 0)
-    const at = (x, y) => g.getImageData(x, y, 1, 1).data[3] > 127
-    return { band: at(1510, 700), ground: at(800, 300), left: at(5, 600) }
+  // The mask covers the data strip and the date, and leaves the ground alone.
+  expect(await maskAt('scan-0.jpg', { strip: [1560, 400], date: [420, 590], ground: [800, 300] })).toEqual({
+    strip: true,
+    date: true,
+    ground: false,
+    size: [1600, 1200],
   })
-  expect(framed).toEqual({ band: true, ground: false, left: false })
+
+  // Film frame and Text together, replacing the masks: the black band down the right side
+  // is the scans' only frame, the date on the photograph comes from the text (read before,
+  // so no download), and nothing else is left of the old masks.
+  await openAutoMask()
+  await dialog.getByRole('button', { name: 'Film frame', exact: true }).click()
+  await dialog.getByRole('checkbox', { name: 'Mask text' }).check()
+  await dialog.getByRole('radio', { name: 'Replace' }).check()
+  await dialog.getByRole('button', { name: 'Mask 3 photos' }).click()
+  const toast = page.locator('.toast', { hasText: 'Film frame on 3 photos' })
+  await expect(toast).toBeVisible({ timeout: 60_000 })
+  await expect(toast).toContainText('Text on 3 photos')
+  await expect(toast).not.toContainText('without a frame')
+  expect(
+    await maskAt('scan-0.jpg', { band: [1510, 700], date: [420, 590], ground: [800, 300], left: [5, 600] }),
+  ).toEqual({ band: true, date: true, ground: false, left: false, size: [1600, 1200] })
+  // The other photos were not touched.
+  const others = await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    return useImagesStore().images.filter((i) => !i.name.startsWith('scan-') && i.mask).length
+  })
+  expect(others).toBe(0)
 
   // Read Text: what was read, and the focal length the camera's photos agree on, which a
   // film camera takes over.
-  await page.keyboard.press('Escape')
   const sensorId = await page.evaluate(async () => {
     const { useImagesStore } = await import('/src/stores/useImagesStore.js')
     const { useSensorsStore } = await import('/src/stores/useSensorsStore.js')

@@ -11,7 +11,7 @@ import { pluralize } from '../core/textFormat.js'
 
 export const OCR_MODEL_IDS = ['ppocr_det', 'ppocr_rec_en']
 
-// Auto Mask ▸ Text (AutoMaskModal.vue) and Read text (ReadTextModal.vue): read the text
+// Auto Mask ▸ Text (useAutoMaskRun.js) and Read text (ReadTextModal.vue): read the text
 // on the photos (once per photo, images/photoText.js); Auto Mask then masks what
 // core/ocr/textRun.js textMaskPlan says: sure
 // text where it was found, and with `recurring` the text a camera prints at the same
@@ -25,9 +25,15 @@ export function useTextMask() {
   const { log } = useLog()
 
   const busy = ref(false)
-  // { phase: 'read' | 'mask', done, total } while a run is on.
+  // { phase: 'read' | 'mask', done, total } while a run is on; `onProgress` (a
+  // maskText option) hears each change too.
   const progress = ref(null)
   let cancelled = false
+  let onProgress = null
+  const setProgress = (p) => {
+    progress.value = p
+    onProgress?.(p)
+  }
 
   const sensorOf = (img) => sensorsStore.sensors.find((s) => s.id === img.sensorId) ?? null
 
@@ -39,12 +45,12 @@ export function useTextMask() {
     const toRead = force ? images : images.filter((img) => !imagesStore.hasPhotoText(img))
     if (!toRead.length) return { failed: 0, read: 0 }
     if (!(await modelsStore.ensureReady(OCR_MODEL_IDS))) return { declined: true }
-    progress.value = { phase: 'read', done: 0, total: images.length }
+    setProgress({ phase: 'read', done: 0, total: images.length })
     const { failed, read } = await imagesStore.readPhotoTexts(images, {
       force,
       budgetBytes: memBudgetBytes.value,
       isCancelled: () => cancelled,
-      onProgress: (done, total) => (progress.value = { phase: 'read', done, total }),
+      onProgress: (done, total) => setProgress({ phase: 'read', done, total }),
     })
     if (cancelled) {
       log('Reading text cancelled; the text read so far is kept', 'warn', 'Images')
@@ -72,13 +78,15 @@ export function useTextMask() {
   /**
    * Mask the text on `images` (image records). `existing`: 'merge' adds the text to a
    * photo's mask, 'replace' makes the text its whole mask (none where no text is).
+   * `onProgress({ phase, done, total })`: as the photos are read, then masked.
    * Resolves `{ masked, cleared, skipped, failed }`, or `{ declined }` when the models
    * were not downloaded, or `{ cancelled }`.
    */
-  async function maskText(images, { padPx, recurring, existing }) {
+  async function maskText(images, { padPx, recurring, existing, onProgress: hear = null }) {
     if (busy.value || !images.length) return null
     busy.value = true
     cancelled = false
+    onProgress = hear
     try {
       const phase = await readPhase(images, false)
       if (phase.declined || phase.cancelled) return phase
@@ -105,7 +113,7 @@ export function useTextMask() {
         skipped = 0,
         regions = 0,
         spread = 0
-      progress.value = { phase: 'mask', done: 0, total: frames.length }
+      setProgress({ phase: 'mask', done: 0, total: frames.length })
       for (const [k, f] of frames.entries()) {
         const p = plan.get(f.id)
         if (p.skipped) {
@@ -128,7 +136,7 @@ export function useTextMask() {
           regions += p.polygons.length
           spread += p.recurring
         }
-        progress.value = { phase: 'mask', done: k + 1, total: frames.length }
+        setProgress({ phase: 'mask', done: k + 1, total: frames.length })
       }
       log(
         `Auto Mask ▸ Text: ${pluralize(masked, 'photo')} masked, ${pluralize(regions, 'text region')}` +
@@ -143,6 +151,7 @@ export function useTextMask() {
     } finally {
       busy.value = false
       progress.value = null
+      onProgress = null
     }
   }
 

@@ -160,6 +160,7 @@ const {
   hasSparse,
   matchNodePositions,
   matchSummaries,
+  onAutoMaskRun,
   onCameraImport,
   onMetashapeImport,
   onCloudImport,
@@ -427,7 +428,14 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
     <CameraPoseTableModal v-if="poseTableOpen" :poses="poses" :crs="currentCrs" @close="poseTableOpen = false" />
 
     <MaskManagerModal v-if="maskManagerOpen" @close="maskManagerOpen = false" @edit="editMask" />
-    <AutoMaskModal v-if="autoMaskOpen" @close="autoMaskOpen = false" />
+    <AutoMaskModal
+      v-if="autoMaskOpen"
+      :images="images"
+      :sensors="sensors"
+      :has-text="imagesStore.hasPhotoText"
+      @close="autoMaskOpen = false"
+      @run="onAutoMaskRun"
+    />
     <ReadTextModal v-if="readTextOpen" @close="readTextOpen = false" />
   </Teleport>
 

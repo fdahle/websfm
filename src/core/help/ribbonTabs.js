@@ -583,7 +583,7 @@ export const TABS = [
                 label: 'Auto mask…',
                 icon: 'mask',
                 needs: ['images', 'imagesReady'],
-                blurb: 'Mask a border strip or the text on every image (film edges, data strips)',
+                blurb: 'Mask the edges (a fixed strip or the film frame), the text on the photos, or both',
               },
               {
                 id: 'read-text',

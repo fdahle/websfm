@@ -14,32 +14,41 @@ doesn't change earlier results: rerun detection, or depth maps, to apply it.
 Mask what moves or misleads where it covers much of many images: film borders and data
 strips, sky, the operator's shadow, a turntable, passing vehicles.
 
+## Auto mask
+**Tools ▸ Images ▾ ▸ Auto mask…** masks the photos by rule, in two steps run in this
+order: the **Edges** (a fixed strip, or the film frame found on each scan), then the
+**Text** on the photos. Turn on one or both: on film scans the frame covers the border
+with its data strip, and Text adds what is printed or written inside the photograph.
+**Photos** limits the run to one sensor, such as one film roll. **Run** writes the masks
+in the progress window; check them with the **Mask** toggle on the photo, or in
+**View ▸ Masks**. For film whose frame shifts between scans, **Generate background
+masks** in [Detect Fiducials](guide:film-fiducials) is another way.
+
+## Edges
+<!-- param: edges  default: Film frame on film scans, else Off -->
+**Fixed strip** masks the same band along the edges of every photo: quick, for a
+vignetted edge or scans that all sit alike in the scanner. **Film frame** finds where the
+photograph begins on each scan (below) and masks around it, so it follows a frame that
+shifts from scan to scan. **Off** leaves the edges alone, for a run that masks text only.
+
 ## Mask border
 <!-- param: border  default: 40 px -->
-**Tools ▸ Images ▾ ▸ Auto mask…** masks a band of this many pixels along the image
-edges: for the frame and fiducial border of film scans, or a vignetted edge. Images
-are grouped by size, each with a preview; **Apply to group** or **Apply to all
-groups**. For film whose frame shifts between scans, **Generate background masks** in
-[Detect Fiducials](guide:film-fiducials) fits better.
+The width of the fixed strip on each side, in pixels of the photo. Give the bottom more
+where a data strip runs along it.
 
 ## Link all sides
 <!-- param: linked  default: on -->
 Sets all four margins at once. Turn it off to give each side its own, such as a wider
 bottom band over a data strip.
 
-## If a mask exists
-<!-- param: existing  default: Merge -->
-**Merge** adds the border or the text to an existing mask; **Replace** keeps only the
-new one. With all margins at 0, or on a photo without text, Replace removes the mask.
-
 ## Mask the film frame
-**Auto mask ▸ Frame** finds, on each scan, where the photograph begins: past any bright
-scanner bed, through the dark film border with its fiducials, dials and data strip, to the
-first stretch of picture. Scans of one size are checked against each other, since a
-camera's frames sit in the scanner almost alike: a side that lands far from the others
-(dark ground or sky at the photograph's edge, a bright mark on the frame) takes theirs. A
-side without a dark border is left unmasked. Check the preview; for photos without a film
-frame use **Mask border** or nothing.
+**Film frame** finds, on each scan, where the photograph begins: past any bright scanner
+bed, through the dark film border with its fiducials, dials and data strip, to the first
+stretch of picture. Scans of one size are checked against each other, since a camera's
+frames sit in the scanner almost alike: a side that lands far from the others (dark
+ground or sky at the photograph's edge, a bright mark on the frame) takes theirs. A side
+without a dark border is left unmasked, so for photos without a film frame use **Fixed
+strip** or nothing.
 
 ## Inset
 <!-- param: frameInset  default: 0.5 -->
@@ -48,18 +57,14 @@ fiducial notches and the rounded corners of the frame reach into the photograph:
 when the mask leaves them, lower it to keep more of the picture.
 
 ## Mask text
-**Auto mask ▸ Text** finds and reads the text on each photo (frame numbers, the data
-strip, a data card, annotations written on the print) and masks it, so tie points are
-not matched between copies of the same print. Text is read with PaddleOCR in the browser
-(a one-time download of about 13 MB, with your permission); what it reads is kept, so a
-second run with other settings only redraws the masks. A line counts as text when it
-reads clearly with at least three letters or digits: buildings and field edges are found
-too, but read as nonsense, and stay unmasked.
-
-On film scans, mask the frame first ([Detect Fiducials](guide:film-fiducials) ▸
-**Generate background masks**, or **Mask border**): the fiducials and the frame edge match
-between frames as the print does, and most printed text lies on the frame anyway. Text
-then adds what is printed or written inside the photograph.
+<!-- param: text  default: off -->
+Finds and reads the text on each photo (frame numbers, the data strip, a data card,
+annotations written on the print) and masks it, so tie points are not matched between
+copies of the same print. Text is read with PaddleOCR in the browser (a one-time download
+of about 13 MB, with your permission); what it reads is kept, so a second run with other
+settings only redraws the masks. A line counts as text when it reads clearly with at
+least three letters or digits: buildings and field edges are found too, but read as
+nonsense, and stay unmasked.
 
 ## Padding
 <!-- param: textPad  default: 20 -->
@@ -69,11 +74,16 @@ letters, or for bold or blurred print; at 0 the boxes follow the letters closely
 ## Recurring text
 <!-- param: textRecurring  default: on -->
 Masks text that a camera prints at the same place on its photos (the data strip, the
-frame counter, the dials of a data card) on every photo of that camera, including those
+frame counter, the dials of a data card) on every photo of that sensor, including those
 where it was not read, such as under glare. Placed through the
 [fiducials](help:fiducial-marks) where every photo has them, else by its position on the
-photo. It needs text found on at least three photos of a camera. Turn it off to mask only
+photo. It needs text found on at least three photos of a sensor. Turn it off to mask only
 what was read on each photo.
+
+## If a mask exists
+<!-- param: existing  default: Merge -->
+**Merge** adds the edges and the text to a photo's mask; **Replace** keeps only the new
+mask. With Replace and Text alone, a photo without text loses its mask.
 
 ## Read text
 **Tools ▸ Images ▾ ▸ Read text…** lists the text read on each photo, the lines read
@@ -83,8 +93,8 @@ value most of them show wins, with how many show it. For a film camera, **Use** 
 that focal length on the camera, as Calibrate fiducials does; compare it with the
 camera's calibration certificate when you have one. Where a data card is cut off at the
 photograph's edge and only the last digits show ("3.46 mm"), the value is completed for
-a 6 in (152 mm) lens and marked so: check it before you use it. Auto mask ▸ Text reads the photos
-the same way, so one reading serves both.
+a 6 in (152 mm) lens and marked so: check it before you use it. Auto mask's Text step reads
+the photos the same way, so one reading serves both.
 
 ## Paint a mask
 Open an image and choose **Tools ▸ Images ▾ ▸ Edit mask**. The toolbox has **Brush**

@@ -903,15 +903,18 @@ export const FIDUCIAL_SPOT_DEFAULTS = {
   maskDarkPixels: false,
 }
 
-// Auto Mask (AutoMaskModal.vue; src/guide/masks.md border / linked / existing /
-// frameInset / textPad / textRecurring): masks from a rule, the outer pixels of each side or the
-// text on the photos.
+// Auto Mask (AutoMaskModal.vue; src/guide/masks.md edges / border / linked / frameInset /
+// text / textPad / textRecurring / existing): masks the edges of the photos (a fixed strip
+// or the film frame), the text on them, or both.
 export const AUTO_MASK_DEFAULTS = {
-  rule: 'border', // 'border' | 'frame' | 'text'
+  // Step 1, the edges: 'off' | 'strip' (a fixed band) | 'frame' (the film frame found on
+  // each scan). null: 'frame' when the project has a film sensor, else 'off'.
+  edges: null,
   border: 40, // px excluded on each side
   linked: true, // editing one side sets all four
   existing: 'merge', // 'merge' (union with the image's mask) | 'replace'
   frameInset: 0.5, // % of the long side masked inside the frame found (notches, corners)
+  text: false, // step 2: read and mask the text on the photos
   textPad: 20, // px added around each text box
   textRecurring: true, // mask text a camera prints at the same place on every photo
 }

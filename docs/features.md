@@ -72,7 +72,7 @@ product or an imported raster is open in front.
 | Tools ▸ Images | Image quality… | Score sharpness and exposure; exclude blurry images. | [Image Quality, Region and Orientation](../src/guide/model-tools.md) |
 | Tools ▸ Images | Detect targets… | Mark GCP targets: checker mats where the model expects them, or AprilTags. | [Detect Targets](../src/guide/detect-targets.md) |
 | Tools ▸ Images | Reduce overlap… | Disable the photos a dense block does not need for depth maps. | [Reduce Overlap](../src/guide/reduce-overlap.md) |
-| Tools ▸ Images | Auto mask… | Mask a border strip or the text on every image (film edges, data strips). | [Masks](../src/guide/masks.md) |
+| Tools ▸ Images | Auto mask… | Mask the edges (a fixed strip or the film frame), the text on the photos, or both. | [Masks](../src/guide/masks.md) |
 | Tools ▸ Images | Read text… | Read the text on the photos: frame numbers, data strips, the focal length printed on them. | [Masks](../src/guide/masks.md) |
 | Tools ▸ Images | Detect fiducials… | Find the fiducial marks on scanned film frames. | [Film Scans & Fiducials](../src/guide/film-fiducials.md) |
 | Tools ▸ Images | Calibrate fiducials… | Camera-certificate or batch-estimated fiducial layout. | [Film Scans & Fiducials](../src/guide/film-fiducials.md) |

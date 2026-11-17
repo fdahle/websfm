@@ -11,7 +11,7 @@ Notable changes to websfm. The format follows
   or New sensor from selection. Clicking a sensor's photo count in Sensors selects its
   photos. Before, a photo's sensor showed only in its details, and moving one meant the
   Split camera group dialog.
-- **Mask the film frame of each scan.** Tools ▸ Images ▾ ▸ Auto mask ▸ **Frame** finds
+- **Mask the film frame of each scan.** Tools ▸ Images ▾ ▸ Auto mask ▸ Edges ▸ **Film frame** finds
   where the photograph begins on every scan, past any bright scanner bed and the dark film
   border with its fiducials, dials and data strip, and masks the frame, with an inset for
   the notches and rounded corners; no fiducials needed. A side that lands far from the
@@ -24,7 +24,7 @@ Notable changes to websfm. The format follows
   of each scan against 69–75 %. Frame and Text together gave the same pairs as Frame
   alone there: the print sits on the frame. On 37 Casa Grande scans every side agreed with
   its camera's other scans to 1.5 % but for three a frame, which took the median.
-- **Mask the text on film scans.** Tools ▸ Images ▾ ▸ Auto mask ▸ **Text** finds and reads
+- **Mask the text on film scans.** Tools ▸ Images ▾ ▸ Auto mask ▸ **Mask text** finds and reads
   the frame numbers, data strips, data cards and annotations on the photos and masks them,
   so the same print on every frame no longer matches between frames; text a camera prints
   at the same place is masked on all of its photos, even where glare hid it. It runs
@@ -126,6 +126,12 @@ Notable changes to websfm. The format follows
   [docs/features.md](docs/features.md), generated from the ribbon so it stays complete.
 
 ### Changed
+- **Auto mask runs like the other tools, and masks the edges and the text in one run.**
+  Its settings are two numbered steps, Edges (Off, Fixed strip or Film frame) and Text,
+  and Run writes the masks in the progress window, where the dialog used to stay open
+  with Apply buttons per image size while settings could still change under a run.
+  **Photos** limits a run to one sensor, such as one film roll. With Edges and Text both
+  on, the text is added to the edge mask, so If a mask exists ▸ Replace keeps both.
 - **Film scans get one sensor per roll.** Scans that name no camera are grouped by the
   roll in their file name (`CA214732V0046.tif` → CA214732V), and by scan format within
   it, instead of by exact image size. On the TMA Rachel set (58 scans) exact sizes made 7

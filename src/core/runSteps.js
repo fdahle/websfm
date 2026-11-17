@@ -26,6 +26,20 @@ export const FUSION_STEPS = [
   { id: 'fuse', label: 'Fusing the depth maps' },
 ]
 
+/** Auto Mask: the edges (a strip or the film frame), then reading and masking the text. */
+export function autoMaskSteps({ edges = 'off', text = false } = {}) {
+  return [
+    ...(edges === 'frame' ? [{ id: 'edges', label: 'Finding the film frames' }] : []),
+    ...(edges === 'strip' ? [{ id: 'edges', label: 'Masking the edge strips' }] : []),
+    ...(text
+      ? [
+          { id: 'read', label: 'Reading the text' },
+          { id: 'mask', label: 'Masking the text' },
+        ]
+      : []),
+  ]
+}
+
 /** @type {RunStep[]} */
 export const MESH_STEPS = [
   { id: 'prepare', label: 'Preparing the points' },

@@ -14,6 +14,7 @@ import { showToast } from './useToasts.js'
 import { defaultExportName, exportFileName } from '../core/exportNames.js'
 import { useProjectMerge } from './useProjectMerge.js'
 import { useDetectTargets } from './useDetectTargets.js'
+import { useAutoMaskRun } from './useAutoMaskRun.js'
 
 // What each run-style dialog does on Run, lifted out of App.vue: close the dialog,
 // then hand the settings to the pipeline (usePipeline) — and, for the few that
@@ -62,6 +63,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     toolModal,
     coregisterInitial,
     importProjectOpen,
+    autoMaskOpen,
   } = storeToRefs(useModalsStore())
   const demCoregistration = useDemCoregistration()
   const { patchImageView } = useImageViewSettings()
@@ -184,6 +186,13 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
 
   // Image quality: scoring runs behind the shared progress bar; the dialog stays open
   // underneath and fills in as the scores land.
+  // Auto Mask (Tools ▸ Images ▾): the edges, then the text, in the progress window.
+  const { runAutoMask } = useAutoMaskRun(exportProgress)
+  async function onAutoMaskRun(req) {
+    autoMaskOpen.value = false
+    await runAutoMask(req)
+  }
+
   async function onImageQualityEstimate(ids) {
     const total = ids?.length ?? images.value.length
     exportProgress.open('Scoring Image Quality', total, () => cancelRun('image quality cancelled'), {
@@ -416,6 +425,7 @@ export function useDialogRuns({ pipeline, openImageTab, refreshGcpReport, reques
     onMergeCloudsRun,
     onEditSelection,
     onOptimizeCamerasRun,
+    onAutoMaskRun,
     onImageQualityEstimate,
     onImageQualityGroup,
     onImageQualityRemove,

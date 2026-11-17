@@ -8,25 +8,24 @@ import { mapConcurrent } from '../utils/concurrency.js'
 import { consistentMargins, nativeFrameMargins } from '../core/maskFrame.js'
 import { pluralize } from '../core/textFormat.js'
 
-// Auto Mask ▸ Frame (AutoMaskModal.vue): find the film frame on each scan
+// Auto Mask ▸ Film frame (useAutoMaskRun.js): find the film frame on each scan
 // (core/maskFrame.js, in the workers, one scan per worker), make the frames of a group
 // of same-size scans consistent (a side far off the group's takes its median), and mask
-// outside them, grown by the inset. `found` keeps each photo's native margins for the
-// dialog's preview, until the dialog closes.
+// outside them, grown by the inset.
 export function useFrameMask() {
   const imagesStore = useImagesStore()
   const { log } = useLog()
   const busy = ref(false)
   const progress = ref(null) // { done, total }
-  const found = ref(new Map()) // image id → { top, right, bottom, left } native px
   let cancelled = false
 
   /**
    * Mask outside the frame on `groups` (Auto Mask's size groups: `{ w, h, images }`).
    * `insetPct`: % of the long side added inside the frame. `existing`: 'merge' | 'replace'.
+   * `onProgress(done, total)`: after each scan is searched.
    * → `{ masked, none, replaced, failed }` or `{ cancelled }`.
    */
-  async function maskFrame(groups, { insetPct, existing }) {
+  async function maskFrame(groups, { insetPct, existing, onProgress = null }) {
     const sized = groups.filter((g) => g.w && g.h && g.images.length)
     const total = sized.reduce((n, g) => n + g.images.length, 0)
     if (busy.value || !total) return null
@@ -57,13 +56,13 @@ export function useFrameMask() {
             log(`${img.name}: frame detection failed — ${err?.message ?? err}`, 'error', 'Images')
           }
           progress.value = { done: ++done, total }
+          onProgress?.(done, total)
         },
       )
       if (cancelled) {
         log('Auto Mask ▸ Frame cancelled; no mask was written', 'warn', 'Images')
         return { cancelled: true }
       }
-      const next = new Map(found.value)
       for (const g of sized) {
         const imgs = g.images.filter((img) => raw.has(img.id))
         if (!imgs.length) continue
@@ -77,7 +76,6 @@ export function useFrameMask() {
           const r = raw.get(img.id),
             c = consistent[k]
           const m = nativeFrameMargins(c, r.sx, r.sy, r.natW, r.natH, insetPct / 100)
-          next.set(img.id, m)
           if (c.replaced.length) replaced++
           const sides = ['top', 'right', 'bottom', 'left']
           if (sides.every((s) => !m[s])) {
@@ -96,7 +94,6 @@ export function useFrameMask() {
           masked++
         }
       }
-      found.value = next
       log(
         `Auto Mask ▸ Frame: ${pluralize(masked, 'photo')} masked` +
           (replaced ? `, ${replaced} with a side from the group's median` : '') +
@@ -118,5 +115,5 @@ export function useFrameMask() {
     cancelRun('Auto Mask cancelled')
   }
 
-  return { maskFrame, cancel, busy, progress, found }
+  return { maskFrame, cancel, busy, progress }
 }

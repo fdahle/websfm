@@ -12,6 +12,7 @@ import { smoothMeshShorts } from './smoothMesh.js'
 import { alignIcpShorts } from './alignIcp.js'
 import { fiducialDetectShorts } from './fiducialDetect.js'
 import { contoursShorts } from './contours.js'
+import { autoMaskShorts } from './autoMask.js'
 import { outputEffect } from './output.js'
 import { CATALOGS, renderAll } from '../i18n/index.js'
 import {
@@ -62,6 +63,16 @@ const RAW = {
     { images: 84 },
   ),
   contours: contoursShorts(CONTOUR_DEFAULTS, { interval: 2, levels: 48, unit: 'm', onMap: true }),
+  autoMask: autoMaskShorts({
+    edges: 'strip',
+    sides: { top: 1200, right: 1200, bottom: 1250, left: 1200 },
+    frameInset: 0.5,
+    text: true,
+    textPad: 120,
+    textRecurring: true,
+    existing: 'replace',
+  }),
+  autoMaskFrame: autoMaskShorts({ edges: 'frame', frameInset: 2.5, text: false, existing: 'merge' }),
 }
 const inLanguage = (lang) => Object.fromEntries(Object.entries(RAW).map(([d, s]) => [d, renderAll(s, lang)]))
 const SHORTS = inLanguage('en')
