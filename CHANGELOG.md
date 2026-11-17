@@ -186,6 +186,13 @@ Notable changes to websfm. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **A model made mostly of oblique photos comes out level.** Where a film flight's sparse
+  model holds more obliques than verticals, the aerial orientation, the products' frame and
+  the 3D view take up from the vertical photos, found by comparing each look with the
+  sparse cloud's ground plane, or from the ground plane itself when every photo is oblique.
+  Rachel's first run kept 12 left obliques and 4 verticals and came out about 60° off
+  level, because up followed the larger group; a nadir block (within 25° of its ground)
+  is unchanged.
 - **Mask editing keeps your tool when you open another photo.** The Eraser, Rectangle or
   Smart Select you picked, the brush size and the overlay opacity now carry over from
   photo to photo instead of going back to the Brush at 20 px on each one.

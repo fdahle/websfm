@@ -1474,6 +1474,20 @@ normal (`planeUpOverride`): a terrain-following flight tilts its camera plane wi
 slope (rarely beyond ~25°) while the gimbal still points down. Blind spots: obliques
 shallower than 25°, and a vertical camera grid before a façade (a nadir block turned 90°).
 
+**Mixed looks, read against the ground** (`mixedLookUp`). The trim keeps the verticals only
+while they are the larger group. A partial model of a trimetrogon flight can be mostly one
+oblique side (Rachel, first run: 12 left obliques, 4 verticals, one bent strip, no usable
+camera plane), and its trimmed look is ~60° off. Where the sparse cloud is clearly a plane
+(smallest spread ≤ 30 % of the middle, after dropping the farthest 10 % of up to 20,000
+sampled points), its normal, turned toward the cameras, is the ground's. When the camera
+reading is more than 25° off it, the viewing directions are grouped (a seed and every
+direction within 25° of it, largest group first): a group of at least two cameras within
+25° of the normal is the vertical one and gives up; without one, a reading more than 40°
+off (an oblique-only model) takes the normal itself. A nadir set agrees with its ground
+within a few degrees and is never touched; a terrain-following nadir flight over a slope
+under 40° keeps its cameras' reading. The auto-orient, the products' local frame and the
+viewer all apply it.
+
 **Sign.** The plane normal and viewing direction take their side from the viewing
 direction, which assumes the cameras look down; ground-level photos look up at their
 subject. Outside an aerial project, the mean image-up axis decides the sign when it lies

@@ -78,7 +78,10 @@ export function useModelTools({ activateTab, editableClouds, meshClouds, runEdit
     [...(reconstructionStore.mainSparseCloud?.cameras?.values() ?? [])].map((c) => cameraCenter(c))
   // Up as the cameras read it (estimateUpFromCameras), +Z when they cannot say.
   const camerasUp = () => [
-    ...(estimateUpFromCameras(sparseCameras.value, { aerial: projects.currentSceneType === 'aerial' }) ?? [0, 0, 1]),
+    ...(estimateUpFromCameras(sparseCameras.value, {
+      aerial: projects.currentSceneType === 'aerial',
+      points: projects.currentSceneType === 'aerial' ? (reconstructionStore.mainSparseCloud?.points ?? null) : null,
+    }) ?? [0, 0, 1]),
   ]
   function openOrientTool() {
     activateTab('viewer')

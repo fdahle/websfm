@@ -214,7 +214,11 @@ function canonicalToScanFor(img, cam) {
 const viewerSceneUp = computed(() =>
   reconstructionStore.orientationState.active
     ? normalizeOrientation(reconstructionStore.orientation).up
-    : estimateUpFromCameras(sparseCameras.value, { aerial: currentSceneType.value === 'aerial' }),
+    : estimateUpFromCameras(sparseCameras.value, {
+        aerial: currentSceneType.value === 'aerial',
+        // The ground plane says which look is vertical in a mixed TMA block (geometry.js mixedLookUp).
+        points: currentSceneType.value === 'aerial' ? (reconstructionStore.mainSparseCloud?.points ?? null) : null,
+      }),
 )
 
 // Queue layer changes while the 3D tab is hidden. Each cloud has its own GPU

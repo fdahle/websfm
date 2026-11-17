@@ -803,7 +803,7 @@ export function createSparseRun({
         // An extension is in the model's frame already.
         let upTurn = null
         if (!base && projects.currentSceneType === 'aerial') {
-          const R = aerialUpRotation(camMap)
+          const R = aerialUpRotation(camMap, pts)
           if (R) {
             upTurn = R
             const oriented = rotateReconstruction(camMap, pts, R, { inPlace: true })
@@ -811,11 +811,15 @@ export function createSparseRun({
             pts = oriented.points
             // Which camera signal set "up" — an oblique set's viewing directions are
             // not vertical, so say when the level camera plane overrode them.
-            const how = sceneUpFromCameras([...camMap.values()])
+            const how = sceneUpFromCameras([...camMap.values()], pts)
             log(
               how.source === 'camera-plane'
                 ? `Oriented model Z-up from the level camera plane (aerial; the mean viewing direction is ${how.viewTiltDeg.toFixed(1)}° off it — an oblique capture)`
-                : 'Oriented model Z-up from the mean viewing direction (aerial: cameras above ground)',
+                : how.source === 'vertical-group'
+                  ? `Oriented model Z-up from its ${how.cameras} vertical cameras (aerial; the cameras' main look is ${how.viewTiltDeg.toFixed(1)}° off the ground plane — mostly obliques)`
+                  : how.source === 'ground-plane'
+                    ? `Oriented model Z-up from the ground plane (aerial; every camera looks obliquely, the main look ${how.viewTiltDeg.toFixed(1)}° off it)`
+                    : 'Oriented model Z-up from the mean viewing direction (aerial: cameras above ground)',
               'info',
               'Reconstruction',
             )

@@ -137,7 +137,7 @@ export function medianTriangulationAngle(camA, camB, pts) {
 // callers fall back to world +Z. Accepts a Map<*, {R,t}> or an array of { R, t }.
 // `aerial`: the project is an aerial survey (the sign then follows the cameras'
 // viewing direction, see `signed` below).
-export function estimateUpFromCameras(cameras, { aerial = false } = {}) {
+export function estimateUpFromCameras(cameras, { aerial = false, points = null } = {}) {
   const list = cameras && typeof cameras.values === 'function' ? [...cameras.values()] : cameras || []
   if (list.length < 2) return null
 
@@ -180,6 +180,9 @@ export function estimateUpFromCameras(cameras, { aerial = false } = {}) {
   // A level camera plane seen obliquely outranks both readings (planeUpOverride).
   const plane = planeUpOverride(list, viewUp, axisUp)
   if (plane) return signed(plane.up)
+  // A mixed vertical/oblique block, read against its ground plane (mixedLookUp).
+  const mixed = points ? mixedLookUp(list, viewUp, points) : null
+  if (mixed) return signed(mixed.up)
   if (!viewUp) return axisUp
   if (!axisUp) return viewUp
 
@@ -297,6 +300,119 @@ export function trimmedViewDirection(dirs) {
     m = unit(keep.reduce((s, d) => [s[0] + d[0], s[1] + d[1], s[2] + d[2]], [0, 0, 0]))
   }
   return m
+}
+
+// ── Mixed looks: the vertical group, or the ground plane ─────────────────────
+// trimmedViewDirection keeps the block's main look, which is the verticals only while
+// they are the larger group. A partial TMA model can be mostly one oblique side:
+// Rachel's first run kept 12 left obliques and 4 verticals, the trim settled on the
+// obliques, and the model and every view of it came out ~60° off level. The cloud's
+// ground plane says which look is vertical. When the camera reading is more than
+// MIXED_LOOK_DEG off the plane's normal, the group of viewing directions within
+// MIXED_LOOK_DEG of it gives up instead; when no group is, and the reading is more than
+// OBLIQUE_ONLY_DEG off (an oblique-only model; a nadir flight over a 25° slope is not
+// one), the normal itself does. A nadir set agrees with its ground within a few degrees
+// and is never touched; the plane counts only where it is clearly flat (the smallest
+// spread ≤ GROUND_FLAT_RATIO of the middle one), which an object scan is not.
+const MIXED_LOOK_DEG = 25
+const OBLIQUE_ONLY_DEG = 40
+const VIEW_GROUP_DEG = 25 // directions within this of a group's seed belong to it
+const GROUND_FLAT_RATIO = 0.3
+const GROUND_SAMPLE = 20000 // points read for the plane (an even stride)
+const GROUND_TRIM = 0.9 // the nearest share of them around the median centre
+
+const angleDeg = (a, b) => (Math.acos(Math.min(1, Math.max(-1, dot3(a, b)))) * 180) / Math.PI
+
+// Viewing directions in groups of one look each (TMA: vertical, left, right ~60° apart):
+// the direction with the most others within VIEW_GROUP_DEG seeds a group, which takes
+// them, and so on. → [{ mean (unit), n }], largest first.
+export function viewGroups(dirs) {
+  const cos = Math.cos((VIEW_GROUP_DEG * Math.PI) / 180)
+  let left = dirs.map((_, i) => i)
+  const groups = []
+  while (left.length) {
+    let seed = left[0],
+      most = -1
+    for (const i of left) {
+      let n = 0
+      for (const j of left) if (dot3(dirs[i], dirs[j]) >= cos) n++
+      if (n > most) [seed, most] = [i, n]
+    }
+    const members = left.filter((j) => dot3(dirs[seed], dirs[j]) >= cos)
+    const sum = members.reduce((s, j) => [s[0] + dirs[j][0], s[1] + dirs[j][1], s[2] + dirs[j][2]], [0, 0, 0])
+    groups.push({ mean: unit(sum), n: members.length })
+    const taken = new Set(members)
+    left = left.filter((j) => !taken.has(j))
+  }
+  return groups.filter((g) => g.mean)
+}
+
+// The ground plane's normal, pointing at the cameras, or null where the cloud is not
+// clearly a plane. `points`: SparsePoints ({ pos }, flat xyz) or [{ x, y, z }].
+export function groundUp(points, cameras) {
+  const flat = points?.pos
+  // SparsePoints' pos may hold spare capacity past `length`.
+  const n = Math.min(points?.length ?? 0, flat ? Math.floor(flat.length / 3) : Infinity)
+  if (n < 20 || !cameras?.length) return null
+  const step = Math.max(1, Math.floor(n / GROUND_SAMPLE))
+  const P = []
+  for (let i = 0; i < n; i += step) {
+    const p = flat ? [flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]] : [points[i].x, points[i].y, points[i].z]
+    if (Number.isFinite(p[0]) && Number.isFinite(p[1]) && Number.isFinite(p[2])) P.push(p)
+  }
+  if (P.length < 20) return null
+  const med = [0, 1, 2].map((k) => {
+    const v = P.map((p) => p[k]).sort((a, b) => a - b)
+    return v[v.length >> 1]
+  })
+  const d2 = P.map((p) => (p[0] - med[0]) ** 2 + (p[1] - med[1]) ** 2 + (p[2] - med[2]) ** 2)
+  const cut = [...d2].sort((a, b) => a - b)[Math.floor(GROUND_TRIM * (d2.length - 1))]
+  const Q = P.filter((_, i) => d2[i] <= cut)
+  const c = [0, 1, 2].map((k) => Q.reduce((s, p) => s + p[k], 0) / Q.length)
+  const M = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+  ]
+  for (const p of Q) {
+    const d = [p[0] - c[0], p[1] - c[1], p[2] - c[2]]
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) M[i][j] += d[i] * d[j]
+  }
+  const { values, vectors } = jacobiEigen3(M)
+  const [, mid, lo] = [0, 1, 2].sort((a, b) => values[b] - values[a])
+  if (!(values[mid] > 0) || Math.sqrt(Math.max(0, values[lo]) / values[mid]) > GROUND_FLAT_RATIO) return null
+  let up = unit(vectors[lo])
+  if (!up) return null
+  // Toward the cameras: they fly above the ground.
+  let cc = [0, 0, 0]
+  for (const cam of cameras) {
+    const C = cameraCenter(cam)
+    cc = [cc[0] + C[0], cc[1] + C[1], cc[2] + C[2]]
+  }
+  const toCams = [cc[0] / cameras.length - c[0], cc[1] / cameras.length - c[1], cc[2] / cameras.length - c[2]]
+  if (dot3(up, toCams) < 0) up = [-up[0], -up[1], -up[2]]
+  return up
+}
+
+// The up a mixed or oblique look gives, or null to keep the camera reading `viewUp`.
+// → { up, source: 'vertical-group' | 'ground-plane', viewTiltDeg, cameras? }
+export function mixedLookUp(cameras, viewUp, points) {
+  const list = (cameras && typeof cameras.values === 'function' ? [...cameras.values()] : cameras || []).filter(
+    (c) => c?.R && c?.t,
+  )
+  if (!viewUp || !points || list.length < 2) return null
+  const ground = groundUp(points, list)
+  if (!ground) return null
+  const viewTiltDeg = angleDeg(viewUp, ground)
+  if (viewTiltDeg <= MIXED_LOOK_DEG) return null
+  const dirs = list.map((c) => unit([c.R[2][0], c.R[2][1], c.R[2][2]])).filter(Boolean)
+  const vertical = viewGroups(dirs)
+    .map((g) => ({ up: [-g.mean[0], -g.mean[1], -g.mean[2]], n: g.n }))
+    .filter((g) => g.n >= 2 && angleDeg(g.up, ground) <= MIXED_LOOK_DEG)
+    .sort((a, b) => b.n - a.n)[0]
+  if (vertical) return { up: vertical.up, source: 'vertical-group', viewTiltDeg, cameras: vertical.n }
+  if (viewTiltDeg > OBLIQUE_ONLY_DEG) return { up: ground, source: 'ground-plane', viewTiltDeg }
+  return null
 }
 
 function unit(v) {

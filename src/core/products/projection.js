@@ -18,7 +18,7 @@
 // Conventions match geometry.js: rotation R is row-major [[…],[…],[…]] mapping
 // world→camera (x_cam = R·x_world + t); t is [x,y,z].
 
-import { planeUpOverride, trimmedViewDirection, IMAGE_UP_SIGN_COS } from '../sfm/geometry.js'
+import { mixedLookUp, planeUpOverride, trimmedViewDirection, IMAGE_UP_SIGN_COS } from '../sfm/geometry.js'
 
 // ── small vector helpers ─────────────────────────────────────────────────────
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -86,12 +86,17 @@ export function estimateUpFromViewingDirs(cameras) {
 // The cameras' reading of "up" for products and the aerial auto-orient: a level
 // camera plane seen obliquely (geometry.js planeUpOverride — St Nazaire's
 // south-facing −26°/−50° frames put the viewing-direction mean 55° off vertical),
-// else the viewing-direction mean. { up: null } keeps the cloud-PCA fallback.
-// → { up, source: 'camera-plane' | 'cameras' | null, viewTiltDeg }
-export function sceneUpFromCameras(cams) {
+// else, with `points`, the vertical group of a mixed vertical/oblique block or the
+// ground plane of an oblique-only one (geometry.js mixedLookUp), else the
+// viewing-direction mean. { up: null } keeps the cloud-PCA fallback.
+// → { up, source: 'camera-plane' | 'vertical-group' | 'ground-plane' | 'cameras' | null,
+//     viewTiltDeg, cameras? (the vertical group's size) }
+export function sceneUpFromCameras(cams, points = null) {
   const view = estimateUpFromViewingDirs(cams)
   const plane = planeUpOverride(cams, view, null)
   if (plane) return { up: plane.up, source: 'camera-plane', viewTiltDeg: plane.viewTiltDeg }
+  const mixed = mixedLookUp(cams, view, points)
+  if (mixed) return mixed
   return { up: view, source: view ? 'cameras' : null, viewTiltDeg: null }
 }
 
@@ -227,7 +232,7 @@ export function basisFromUp(up) {
 //   cameras: iterable of { R, t }   points: [{ x, y, z }]
 export function buildLocalFrame(cameras = [], points = []) {
   const cams = [...cameras]
-  let { up, source } = sceneUpFromCameras(cams)
+  let { up, source } = sceneUpFromCameras(cams, points)
   if (!up) {
     up = estimateUpFromCloud(points, null)
     source = 'cloud-pca'
@@ -267,9 +272,9 @@ export function buildLocalFrame(cameras = [], points = []) {
 // (e.g. a convergent object-scan rig — nothing to orient). Aerial nadir surveys
 // resolve cleanly: cameras look down, so up points toward them and this rotation
 // lifts them above the ground (fixes the SfM gauge/flip ambiguity).
-export function aerialUpRotation(cameras) {
+export function aerialUpRotation(cameras, points = null) {
   const cams = cameras instanceof Map ? [...cameras.values()] : [...cameras]
-  const { up } = sceneUpFromCameras(cams)
+  const { up } = sceneUpFromCameras(cams, points)
   if (!up) return null
   const { east, north, up: u } = basisFromUp(up)
   return [east.slice(), north.slice(), u.slice()]
