@@ -16,16 +16,12 @@ import { validateFiducialCalibration } from '../sfm/fiducialCalibration.js'
 import { isFiducialCalibrated } from '../sfm/fiducialModel.js'
 import { SENSOR_TUNING } from '../tuning.js'
 import { median } from '../stats.js'
+import { rollOf } from '../io/sensor.js'
 
 const medianOrNull = (v) => (v.length ? median(v) : null)
 
-// The roll of a photo: its file name without the extension and the trailing frame
-// number (CA215731L0040.tif → CA215731L). Null when nothing is left.
-export function rollOf(name) {
-  const base = String(name ?? '').replace(/\.[^.]+$/, '')
-  const roll = base.replace(/[\s_.-]*\d+$/, '')
-  return roll && roll !== base ? roll : null
-}
+// rollOf lives with the EXIF grouping, which makes a sensor per roll of film scans.
+export { rollOf }
 
 // The scan formats of a group → [{ key, w, h, ids }]. A scan batch has one exact size,
 // and on the Melville scans sizes 3 px apart were other cameras (their fiducial fits

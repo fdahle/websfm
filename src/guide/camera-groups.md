@@ -12,11 +12,14 @@ distortion and, for scanned film, one [fiducial](help:fiducial-marks) layout:
 right when the group is one camera. When it holds photos of two cameras, one of them is
 calibrated wrongly, and the model bends to make up for it.
 
-WebSfM groups photos by their EXIF: camera, focal length and image size. Scans have no
-EXIF, so they are grouped by size alone, and a calibration file you import groups them
-by the values it gives. Two cameras of the same size, or rolls of one survey flown with
-different lenses, can end up in one group, and splitting them can improve the model
-considerably.
+WebSfM groups photos by their EXIF: camera, focal length and image size. Scans name no
+camera, so they are grouped by roll (the file name without its frame number, as in
+`CA214732V0046.tif`), one group per roll and scan format, and named after the roll; scans
+without a frame number in the name are grouped by size. The make and model a film
+scanner writes into its scans are not the camera's, so they are left out (Show
+information lists them as *Scanned with*). A calibration file you import groups photos
+by the values it gives. Two cameras with the same EXIF, or rolls of one camera you want
+solved together, need a split or a merge by hand.
 
 A group's values are your starting point: a run never changes them. Each sparse model
 keeps the lens it was solved with, so editing a group later does not change a finished

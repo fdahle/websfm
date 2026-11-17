@@ -1,7 +1,9 @@
 import { ref, watch, computed, toRaw } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
-import { exifSignature, sensorFromExif } from '../core/io/sensor.js'
+import { sensorFromExif, sensorGroupOf } from '../core/io/sensor.js'
+import { planExifSensors } from '../core/sensors/exifGroups.js'
+import { SENSOR_TUNING } from '../core/tuning.js'
 import { DISTORTION_MODELS, DISTORTION_COEFFS, inferDistortionModel } from '../core/sfm/distortion.js'
 import * as opfs from '../utils/opfs.js'
 import { createDocumentSaver } from '../utils/documentSaver.js'
@@ -15,7 +17,8 @@ import { pluralize } from '../core/textFormat.js'
 
 // Sensors are shared camera intrinsics. Each image references one via
 // `image.sensorId`. Sensors arrive two ways:
-//   - automatically, grouped from image EXIF (same camera + focal + dimensions)
+//   - automatically, grouped from image EXIF (same camera + focal + dimensions), or
+//     for film scans without camera tags by roll (core/sensors/exifGroups.js)
 //   - explicitly, imported from a calibration file (utils/sensor.js)
 //
 // Project-scoped, but NOT registry-driven: its restore must run *before* images
@@ -69,51 +72,30 @@ export const useSensorsStore = defineStore('sensors', () => {
   // Auto-create / assign sensors from EXIF. Images with an identical signature
   // collapse into one sensor; only images lacking a sensorId are touched, so a
   // manual reassignment is never overwritten.
+  // A camera groups by make, model, focal length and size; a film scan by its roll
+  // (core/sensors/exifGroups.js). A sensorId that points to no existing sensor (a
+  // restore race, a removed sensor) is re-resolved.
   function ensureExifSensors() {
     if (!images.value.length) return
-    let changed = false
-    // Indexed once per run: this runs once per image's EXIF landing, so a search
-    // per image made an import O(images² × sensors).
-    const liveIds = new Set(sensors.value.map((s) => s.id))
-    const bySignature = new Map()
-    for (const s of sensors.value) if (s.signature && !bySignature.has(s.signature)) bySignature.set(s.signature, s)
-    for (const img of images.value) {
-      // Skip images already bound to a live sensor. A sensorId that points to no
-      // existing sensor (e.g. a restore race, or a removed sensor) is re-resolved.
-      const bound = img.sensorId && liveIds.has(img.sensorId)
-      if (bound || !img.meta) continue
-      const sig = exifSignature(img.meta)
-      if (!sig) continue
-      let sensor = bySignature.get(sig)
-      if (!sensor) {
-        const seed = sensorFromExif(img.meta)
-        // No make/model in EXIF (scanned/historic imagery): give it a numbered
-        // "Sensor N" name instead of the generic "Unknown camera", keeping any
-        // focal suffix exifLabel added.
-        if (!(img.meta.make || img.meta.model)) {
-          seed.label = seed.label.replace('Unknown camera', `Sensor ${nextSensorNumber()}`)
-        }
-        sensor = {
-          id: crypto.randomUUID(),
-          ...seed,
-          // EXIF carries no lens coefficients — start pinhole; the user opts into a
-          // distortion model (and self-calibration) in the sensor table (D3).
-          distortionModel: 'pinhole',
-          signature: sig,
-          source: 'exif',
-        }
-        sensors.value.push(sensor)
-        liveIds.add(sensor.id)
-        bySignature.set(sig, sensor)
-        log(`Sensor detected: ${sensor.label}`, 'info', 'Sensor')
-      }
-      img.sensorId = sensor.id
-      changed = true
+    // Only the unbound images are planned, so the scan per EXIF landing stays cheap.
+    const live = new Set(sensors.value.map((s) => s.id))
+    const pending = images.value.filter((img) => img.meta && !(img.sensorId && live.has(img.sensorId)))
+    if (!pending.length) return
+    let n = nextSensorNumber()
+    const { created, assign } = planExifSensors(pending, sensors.value, {
+      tolFrac: SENSOR_TUNING.formatTolFrac,
+      newId: () => crypto.randomUUID(),
+      nextNumber: () => n++,
+    })
+    for (const sensor of created) {
+      sensors.value.push(sensor)
+      log(`Sensor detected: ${sensor.label}`, 'info', 'Sensor')
     }
-    if (changed) {
-      save()
-      if (isPersisting()) imagesStore.save()
-    }
+    if (!assign.length) return
+    const byId = new Map(pending.map((img) => [img.id, img]))
+    for (const [imageId, sensorId] of assign) byId.get(imageId).sensorId = sensorId
+    save()
+    if (isPersisting()) imagesStore.save()
   }
 
   // Re-group whenever an image is added/removed, its EXIF lands, or its sensor
@@ -131,7 +113,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     for (const i of images.value) {
       mix(i.id)
       mix(i.sensorId)
-      mix(i.meta ? exifSignature(i.meta) : '')
+      mix(i.meta ? (sensorGroupOf(i.meta, i.name)?.key ?? '') : '')
     }
     return `${images.value.length}:${h}`
   })

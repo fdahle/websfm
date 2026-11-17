@@ -35,10 +35,13 @@ A sensor definition carries:
 <!-- TODO(image): assets/sensor-grouping.svg - a set of image thumbnails partitioned into two sensor groups, each group pointing at a single shared K matrix and distortion block, with the per-image pose R,t shown as the only thing that varies within a group. -->
 
 WebSfM auto-groups images into sensors from EXIF (camera make, model, focal
-length, image dimensions), which is right for most digital projects. It has to
-be corrected by hand when EXIF is absent or misleading — scanned film, a zoom
-lens used at different settings, or two physically different cameras that report
-the same model string. Frames extracted from a video carry no EXIF; they get one
+length, image dimensions), which is right for most digital projects. Scanned film
+names no camera, so scans are grouped by roll, the file name without its frame
+number; the make and model a film scanner writes are not taken as the camera. It
+has to be corrected by hand when that is still misleading — a zoom lens used at
+different settings, two physically different cameras that report the same model
+string, or one camera spread over several rolls. Frames extracted from a video
+carry no EXIF; they get one
 sensor per video (named after it), since all frames of a video come from one
 camera. A group whose scan formats or fiducial fits point to more than one camera
 is marked in the Sensors list, and **Split camera group…** splits it

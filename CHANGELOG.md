@@ -120,6 +120,16 @@ Notable changes to websfm. The format follows
   place in the ribbon and its guide article, is in
   [docs/features.md](docs/features.md), generated from the ribbon so it stays complete.
 
+### Changed
+- **Film scans get one sensor per roll.** Scans that name no camera are grouped by the
+  roll in their file name (`CA214732V0046.tif` → CA214732V), and by scan format within
+  it, instead of by exact image size. On the TMA Rachel set (58 scans) exact sizes made 7
+  sensors: frames of one roll cropped a pixel apart were split over several, while the R
+  cameras of three flights shared one, as did CA215731L and CA215732V on Melville (both
+  10130 × 9872 px, focal lengths 154.40 and 153.46 mm). By roll it is 12 sensors, one per
+  camera of its reference calibration. Scans without a frame number in the name are
+  still grouped by size.
+
 ### Performance
 - **Texturing a mesh is about four times faster.** Tools ▸ Mesh ▸ Texture now spreads its
   photo work over every processor core: finding which photos see each face, and copying

@@ -9,7 +9,8 @@
 // Two entry points:
 //   - parseRows/guessMapping/buildSensors/planSensorImport: delimited-text import
 //     (one row per sensor, or per image with an image column), mirroring gcp.js.
-//   - exifSignature/sensorFromExif: derive/group sensors from image EXIF.
+//   - exifSignature/sensorGroupOf/sensorFromExif: derive/group sensors from image
+//     EXIF (and, for film scans, from the roll in the file name).
 
 import { sniffDelimiter, parseRows } from './gcp.js'
 import { IMAGE_COLUMN, makeNameResolver } from './nameMatch.js'
@@ -329,6 +330,45 @@ export function exifSignature(meta) {
   ]
   const sig = parts.filter(Boolean).join('|')
   return sig || null
+}
+
+// The roll of a photo: its file name without the extension and the trailing frame
+// number (CA215731L0040.tif → CA215731L). Null when nothing is left.
+export function rollOf(name) {
+  const base = String(name ?? '').replace(/\.[^.]+$/, '')
+  const roll = base.replace(/[\s_.-]*\d+$/, '')
+  return roll && roll !== base ? roll : null
+}
+
+// Which sensor a photo joins when it is added: { key, roll } or null (nothing to go by).
+//
+// A photo whose tags name a camera (make or model), a video or a band groups by
+// exifSignature, as always. A photo without them is a scan, and a scan's size says
+// little about its camera: the archive crops each frame by hand (one TMA roll is
+// 10140 and 10141 px wide), while two cameras of one flight can be scanned to the
+// same size (Melville: CA215731L and CA215732V, both 10130 × 9872, focal lengths
+// 154.40 and 153.46 mm). Its roll does say it: one roll is one camera. So a scan with
+// a roll groups by roll, and by size only within it (sameScanFormat); one without a
+// roll (001.tif …) by its exact size, as before.
+export function sensorGroupOf(meta, name) {
+  if (!meta) return null
+  const camera = meta.make || meta.model || meta.videoSource || meta.band
+  const roll = camera ? null : rollOf(name)
+  if (!roll) {
+    const key = exifSignature(meta)
+    return key ? { key, roll: null } : null
+  }
+  const focal = meta.focalLength != null ? `|f${meta.focalLength}` : ''
+  return { key: `roll:${roll}${focal}`, roll }
+}
+
+// Is a photo of `meta`'s size the same scan format as `sensor`? Within tolFrac of the
+// sensor's size in both dimensions (SENSOR_TUNING.formatTolFrac): frames cropped one
+// by one differ by a few pixels, another format by far more.
+export function sameScanFormat(sensor, meta, tolFrac) {
+  const { width: w, height: h } = meta ?? {}
+  if (!(sensor?.width > 0 && sensor?.height > 0 && w > 0 && h > 0)) return true
+  return Math.abs(w - sensor.width) <= tolFrac * sensor.width && Math.abs(h - sensor.height) <= tolFrac * sensor.height
 }
 
 // A human label for an EXIF-derived sensor.
