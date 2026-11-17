@@ -189,7 +189,13 @@ describe('one home per tool', () => {
       ].includes(c.id)
     )
 
-  it('keeps every tool in the Tools tab and none in View or a contextual tab', () => {
+  // The two modes that live with their object or their stage, not in Tools.
+  const HOMES = {
+    'img-mask-edit': PICTURE_TAB.groups.find((g) => g.label === 'Edit'),
+    'edit-gcps': TABS.find((t) => t.id === 'reconstruct').groups.find((g) => g.label === 'Georeferencing'),
+  }
+
+  it('keeps every other tool in the Tools tab and none in View or a contextual tab', () => {
     const elsewhere = leafCommands([
       ...TABS.filter((t) => t.id !== 'tools').flatMap((t) => t.groups),
       CAMERA_GROUP,
@@ -199,16 +205,28 @@ describe('one home per tool', () => {
       ...rasterTab({ kind: 'dem', imported: true }).groups,
       ...rasterTab({ kind: 'ortho', imported: false }).groups,
     ])
-    expect(elsewhere.filter(isTool).map((c) => c.id)).toEqual([])
-    for (const id of [
-      'img-mask-edit',
-      'edit-gcps',
-      'view-select-rect',
-      'measure-length',
-      'measure-volume',
-      'mesh-measure',
-    ])
+    expect(elsewhere.filter((c) => isTool(c) && !(c.id in HOMES)).map((c) => c.id)).toEqual([])
+    for (const id of ['view-select-rect', 'measure-length', 'measure-volume', 'mesh-measure'])
       expect(toolIds.has(id), id).toBe(true)
+  })
+
+  it('puts Edit Mask on the Picture tab and Edit GCPs in Georeferencing, once each', () => {
+    const all = leafCommands([
+      ...TABS.flatMap((t) => t.groups),
+      CAMERA_GROUP,
+      SCENE_GROUP,
+      MAP_GROUP,
+      ...PICTURE_TAB.groups,
+      ...rasterTab({ kind: 'dem', imported: true }).groups,
+      ...rasterTab({ kind: 'ortho', imported: false }).groups,
+    ])
+    for (const [id, group] of Object.entries(HOMES)) {
+      expect(
+        leafCommands([group]).map((c) => c.id),
+        id,
+      ).toContain(id)
+      expect(all.filter((c) => c.id === id).length, id).toBe(1)
+    }
   })
 
   it('greys DEM-only measuring instead of hiding it, and keeps the menu the same on the map', () => {

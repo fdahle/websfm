@@ -52,8 +52,8 @@ honest accuracy test.
 
 **Import ▸ GCP File** reads a table of point names and coordinates, optionally with
 image marks (image name, pixel x/y). Check the columns it guessed before importing. To
-mark points, open an image and choose **Tools ▸ Images ▾ ▸ Edit GCPs**; with the 2D map
-in front, the same entry places the surveyed points on the map. Right-click adds a
+mark points, open an image and choose **Reconstruct ▸ Georeferencing ▸ Edit GCPs**; with
+the 2D map in front, the same button places the surveyed points on the map. Right-click adds a
 point directly.
 
 ## Method

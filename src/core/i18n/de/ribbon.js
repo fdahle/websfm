@@ -27,6 +27,7 @@ export default {
     features: 'Features',
     sparse: 'Sparse',
     georeferencing: 'Georeferenzierung',
+    edit: 'Bearbeiten',
     dense: 'Dense',
     products: 'Produkte',
     model: 'Modell',
@@ -216,7 +217,7 @@ export default {
       tip: 'Kameraposen und Kalibrierung bestimmen und die Verknüpfungspunkte triangulieren',
     },
     'find-gcps': {
-      label: 'GCPs\nfinden',
+      label: 'GCPs finden',
       tip: 'GCPs automatisch finden, indem die Fotos einem Referenz-Orthofoto zugeordnet werden',
     },
     'georeference': {
@@ -279,10 +280,10 @@ export default {
       label: 'Panoramastreifen teilen…',
       blurb: 'Panorama-Scans (Optical Bar) in Abschnitte einer Reihenmesskamera zerlegen',
     },
-    'img-mask-edit': { label: 'Maske bearbeiten', blurb: 'Die Maske des Bildes im Vordergrund malen' },
+    'img-mask-edit': { label: 'Maske\nbearbeiten', tip: 'Die Maske dieses Fotos malen' },
     'edit-gcps': {
       label: 'GCPs bearbeiten',
-      blurb: 'GCPs auf dem Bild im Vordergrund markieren oder auf der Karte setzen',
+      tip: 'GCPs auf dem Bild im Vordergrund markieren oder auf der Karte setzen',
     },
     'menu-model': { label: 'Modell' },
     'optimize-cameras': {

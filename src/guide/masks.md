@@ -97,7 +97,7 @@ a 6 in (152 mm) lens and marked so: check it before you use it. Auto mask's Text
 the photos the same way, so one reading serves both.
 
 ## Paint a mask
-Open an image and choose **Tools ▸ Images ▾ ▸ Edit mask**. The toolbox has **Brush**
+Open a photo and choose **Edit Mask** on its **Picture** tab. The toolbox has **Brush**
 (B), **Eraser** (E), **Rectangle** (R, Alt-drag erases), **Smart Select** (S),
 **Invert** (I), **Import** and **Clear**; `[` and `]` change the brush size, and undo
 goes back ten steps. The mask is saved when you leave editing. Very large scans can't

@@ -475,7 +475,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         recon.setImageLayer({ visible: !recon.imageLayer?.visible })
         break
       }
-      // Tools ▸ Images ▾ ▸ Edit GCPs: the mode of the view in front.
+      // Reconstruct ▸ Georeferencing ▸ Edit GCPs: the mode of the view in front.
       case 'edit-gcps':
         if (activeView.value === 'map') mapGcpEdit.value = !mapGcpEdit.value
         else handleCommand('img-gcp-edit')

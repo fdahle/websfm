@@ -126,6 +126,10 @@ Notable changes to websfm. The format follows
   [docs/features.md](docs/features.md), generated from the ribbon so it stays complete.
 
 ### Changed
+- **Edit Mask is on the Picture tab, Edit GCPs in Reconstruct ▸ Georeferencing.** Open a
+  photo and Edit Mask sits beside its Mask toggle; Edit GCPs and Find GCPs share one
+  button's space before Georeference. Tools ▸ Images ▾ now holds only the tools that work
+  on many photos at once.
 - **Auto mask runs like the other tools, and masks the edges and the text in one run.**
   Its settings are two numbered steps, Edges (Off, Fixed strip or Film frame) and Text,
   and Run writes the masks in the progress window, where the dialog used to stay open

@@ -55,6 +55,7 @@ product or an imported raster is open in front.
 | Reconstruct ▸ Features | Detect Features | Find keypoints in every photo, with SIFT or a learned detector. | [Detect Features](../src/guide/detect-features.md) |
 | Reconstruct ▸ Features | Match Features | Match keypoints between image pairs and verify each pair geometrically. | [Match Features](../src/guide/match-features.md) |
 | Reconstruct ▸ Sparse | Sparse Model | Solve the camera poses and calibration, and triangulate the tie points. | [Sparse Reconstruction](../src/guide/sparse-reconstruction.md) |
+| Reconstruct ▸ Georeferencing | Edit GCPs | Mark GCPs on the image in front, or place them on the map. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
 | Reconstruct ▸ Georeferencing | Find GCPs | Find GCPs automatically by matching the photos to a reference orthophoto. Aerial projects only. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
 | Reconstruct ▸ Georeferencing | Georeference | Place the model in a coordinate system, from GCPs or camera positions. Aerial projects only. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
 | Reconstruct ▸ Georeferencing | Scale Bars | Scale the model from known distances between points in the photos. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
@@ -78,8 +79,6 @@ product or an imported raster is open in front.
 | Tools ▸ Images | Calibrate fiducials… | Camera-certificate or batch-estimated fiducial layout. | [Film Scans & Fiducials](../src/guide/film-fiducials.md) |
 | Tools ▸ Images | Detect reseau… | Measure the reseau crosses: scan placement and film deformation per scan. | [Detect Reseau](../src/guide/reseau.md) |
 | Tools ▸ Images | Split panoramic strips… | Cut panoramic (optical-bar) scans into frame-camera segments. | [Split Panoramic Strips](../src/guide/panoramic.md) |
-| Tools ▸ Images | Edit mask | Paint the mask of the image in front. | [Masks](../src/guide/masks.md) |
-| Tools ▸ Images | Edit GCPs | Mark GCPs on the image in front, or place them on the map. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
 | Tools ▸ Model | Optimize cameras… | Re-run bundle adjustment with chosen lens parameters. | [Optimize Cameras](../src/guide/optimize-cameras.md) |
 | Tools ▸ Model | Gradual selection… | Remove weak tie points by error, views or angle. | [Sparse Reconstruction](../src/guide/sparse-reconstruction.md) |
 | Tools ▸ Model | Region… | A box that limits depth maps, fusion, mesh and DEM. | [Image Quality, Region and Orientation](../src/guide/model-tools.md) |
@@ -175,6 +174,7 @@ product or an imported raster is open in front.
 | Picture ▸ Image | Image Info, Remove |  |  |
 | Picture ▸ View | Fit View, Zoom In, Zoom Out |  |  |
 | Picture ▸ Toggles | Keypoints, Mask, Depth, GCPs, Residuals, Fiducials |  |  |
+| Picture ▸ Edit | Edit Mask | Paint the mask of this photo. | [Masks](../src/guide/masks.md) |
 
 ## DEM / Orthophoto
 

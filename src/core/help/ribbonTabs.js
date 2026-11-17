@@ -24,9 +24,12 @@
 // `disabled: true` = "Coming soon": only for work already planned in TODO.md.
 //
 // ONE HOME PER TOOL. Anything that enters a mode or opens a toolbox (selection,
-// mask/GCP editing, measuring, region, orient…) lives in the Tools tab, in its
-// object family's menu. The View tab and the contextual tabs (Picture, DEM /
-// Orthophoto) only show and arrange: camera presets, toggles, fit/zoom, styling,
+// measuring, region, orient…) lives in the Tools tab, in its object family's menu,
+// which holds the tools that act on many objects at once. Two modes live elsewhere:
+// one that edits the object in front lives on that object's contextual tab (Edit Mask
+// on Picture), and one that is a step of a pipeline stage lives in that stage's group
+// (Edit GCPs in Reconstruct ▸ Georeferencing). Otherwise the View tab and the
+// contextual tabs only show and arrange: camera presets, toggles, fit/zoom, styling,
 // on-map, remove. A command that does appear twice (Rebuild / Export on a raster
 // tab) is the SAME object below, so its prerequisites cannot drift.
 
@@ -458,20 +461,35 @@ export const TABS = [
         // Plain buttons, not a menu: a pipeline step done once per project, and the
         // step a new user most needs to find. Between Sparse and Dense: a GCP
         // adjustment rebuilds the sparse model and invalidates depth maps and
-        // everything after them (guide: getting-started ▸ 4).
+        // everything after them (guide: getting-started ▸ 4). In work order: get the
+        // GCPs (by hand or found), then fit; Scale Bars for a project without a CRS.
         // No "Project CRS" entry here: CRS is project *configuration*, set from the
         // Settings modal (App.vue `handleSetCrs`), not a tool that transforms data.
-        // Edit GCPs is a mode, so it lives in Tools ▸ Images ▾ (ONE HOME PER TOOL).
         label: 'Georeferencing',
         commands: [
           {
-            id: 'find-gcps',
-            guide: 'georeferencing',
-            tip: 'Find GCPs automatically by matching the photos to a reference orthophoto',
-            label: 'Find\nGCPs',
-            icon: 'map-pin',
-            needs: ['sparse'],
-            aerialOnly: true,
+            pair: [
+              // One mode for the view in front: on an image a click marks a GCP (the
+              // floating GcpToolbar), on the map it places/moves surveyed points.
+              {
+                id: 'edit-gcps',
+                guide: 'georeferencing',
+                tip: 'Mark GCPs on the image in front, or place them on the map',
+                label: 'Edit GCPs',
+                icon: 'map-pin',
+                activeKey: 'gcpEdit',
+                needs: ['gcpView'],
+              },
+              {
+                id: 'find-gcps',
+                guide: 'georeferencing',
+                tip: 'Find GCPs automatically by matching the photos to a reference orthophoto',
+                label: 'Find GCPs',
+                icon: 'map-pin',
+                needs: ['sparse'],
+                aerialOnly: true,
+              },
+            ],
           },
           // One entry point for both GCP-constrained adjustment + final similarity fit
           // and the cheap transform-only path. The modal explains/validates each mode.
@@ -625,29 +643,6 @@ export const TABS = [
                 icon: 'image',
                 needs: ['images', 'imagesReady'],
                 blurb: 'Cut panoramic (optical-bar) scans into frame-camera segments',
-              },
-              { section: 'Edit' },
-              // A mode on the image in front; brush/eraser/rect/invert/undo live in the
-              // floating MaskToolbar over the image view.
-              {
-                id: 'img-mask-edit',
-                guide: 'masks',
-                label: 'Edit mask',
-                icon: 'pencil',
-                activeKey: 'maskEdit',
-                needs: ['imageView'],
-                blurb: 'Paint the mask of the image in front',
-              },
-              // One mode for the view in front: on an image a click marks a GCP (the
-              // floating GcpToolbar), on the map it places/moves surveyed points.
-              {
-                id: 'edit-gcps',
-                guide: 'georeferencing',
-                label: 'Edit GCPs',
-                icon: 'map-pin',
-                activeKey: 'gcpEdit',
-                needs: ['gcpView'],
-                blurb: 'Mark GCPs on the image in front, or place them on the map',
               },
             ],
           },
@@ -1467,7 +1462,23 @@ export const PICTURE_TAB = {
         { id: 'img-toggle-fiducials', label: 'Fiducials', icon: 'target', activeKey: 'showFiducials', filmOnly: true },
       ],
     },
-    // Edit mask / Edit GCPs are tools: both in Tools ▸ Images ▾.
+    // A mode on the photo in front, beside its Mask toggle (ONE HOME PER TOOL);
+    // brush/eraser/rect/invert/undo live in the floating MaskToolbar over the image.
+    // Edit GCPs is in Reconstruct ▸ Georeferencing.
+    {
+      label: 'Edit',
+      commands: [
+        {
+          id: 'img-mask-edit',
+          guide: 'masks',
+          tip: 'Paint the mask of this photo',
+          label: 'Edit\nMask',
+          icon: 'pencil',
+          activeKey: 'maskEdit',
+          needs: ['imageView'],
+        },
+      ],
+    },
   ],
 }
 
