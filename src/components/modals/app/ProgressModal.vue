@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { formatClock, formatRemaining } from '../../../utils/timeFormat.js'
-import { stepStates } from '../../../core/runSteps.js'
+import { phaseUnit, stepStates } from '../../../core/runSteps.js'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -64,12 +64,21 @@ const stepRows = computed(() => (props.steps.length > 1 ? stepStates(props.steps
 const stepPct = computed(() => (props.total > 1 ? Math.min(100, Math.floor((100 * props.current) / props.total)) : 0))
 const STEP_MARK = { done: '✓', running: '●', todo: '○', skipped: '–' }
 const STEP_TITLE = { done: 'Done', running: 'Running', todo: 'Still to come', skipped: 'Not needed in this run' }
+// A step that runs only when the run finds it needed (a repair of a split graph) is not
+// promised while it is still to come.
+const maybe = (s) => s.state === 'todo' && s.optional
+const stepTitle = (s) => (maybe(s) ? 'Runs only if needed' : STEP_TITLE[s.state])
+const stepMark = (s) => (maybe(s) ? '◌' : STEP_MARK[s.state])
+// The unit the current phase counts in: a step may count images inside a run of pairs.
+const unitNow = computed(() => phaseUnit(props.steps, props.phase, props.unit))
 
 // Built here rather than interpolated in the template: Vue's whitespace: 'condense'
 // strips a leading whitespace-only text node inside an element, so the space before
 // the unit in `<template v-if="unit"> {{ unit }}</template>` was silently dropped and
 // rendered "1 / 3images".
-const countText = computed(() => `${Math.floor(props.current)} / ${props.total}${props.unit ? ` ${props.unit}` : ''}`)
+const countText = computed(
+  () => `${Math.floor(props.current)} / ${props.total}${unitNow.value ? ` ${unitNow.value}` : ''}`,
+)
 
 // Elapsed-time timer. The modal is created fresh per run (v-if), so timing it
 // from mount measures the run; the ticker just refreshes the display each second.
@@ -407,8 +416,8 @@ onBeforeUnmount(() => {
            "Filtering depth maps (cross-view)" is more reassuring than "63%". -->
       <div v-if="label" class="progress-phase" :title="label">{{ label }}</div>
       <ol v-if="stepRows.length" class="steps" aria-label="Steps">
-        <li v-for="s in stepRows" :key="s.id" class="step" :class="s.state" :title="STEP_TITLE[s.state]">
-          <span class="step-mark" aria-hidden="true">{{ STEP_MARK[s.state] }}</span>
+        <li v-for="s in stepRows" :key="s.id" class="step" :class="s.state" :title="stepTitle(s)">
+          <span class="step-mark" aria-hidden="true">{{ stepMark(s) }}</span>
           <span class="step-label">{{ s.label }}</span>
           <template v-if="s.state === 'running' && showCount && !complete">
             <span class="step-count">{{ countText }}</span>

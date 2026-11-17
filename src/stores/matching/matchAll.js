@@ -28,6 +28,7 @@ import { gapDetectSettings, planGapRedetect } from '../../core/features/gapRedet
 import { decideTurns, planTurnProbes, turnSearchPieces } from '../../core/features/turnSearch.js'
 import { computeSourceOf } from '../../utils/image.js'
 import { laterPassSpan, pairPassEnd, spanFraction } from '../../core/features/matchProgress.js'
+import { matchSteps } from '../../core/runSteps.js'
 import { sequentialPairs } from '../../core/features/sequentialPairs.js'
 import { descriptorLoader, selectRetrievalPairs } from './retrievalRun.js'
 import { spreadExtras } from '../../core/features/retrieval.js'
@@ -593,8 +594,10 @@ export function createMatchAll({
 
     // Each image with the `k` that look most like it (stores/matching/retrievalRun.js),
     // before any pair is matched: Similar images, and Sequential ▸ Find revisits.
-    const similarPairs = (k, extra = 0) =>
-      selectRetrievalPairs(ready, {
+    let retrievalRan = false // the step list names the search when it ran
+    const similarPairs = (k, extra = 0) => {
+      retrievalRan = true
+      return selectRetrievalPairs(ready, {
         neighbors: k,
         extra,
         loadDescriptors: descriptorLoader({
@@ -605,6 +608,7 @@ export function createMatchAll({
         isCancelled: () => !!shouldCancel?.(),
         onProgress: (f) => onProgress?.(0, 0, `Finding similar images (${Math.round(f * 100)} %)`, 0, 'retrieval'),
       })
+    }
     let pairs = []
     if (strategy === 'sequential') {
       pairs = sequentialPairs(ready, {
@@ -847,9 +851,21 @@ export function createMatchAll({
       ready.some((im) => learnedDetector(im.detector))
     const pairSpan = [0, pairPassEnd({ rescue: canRescue, bridgeRounds, postShare: settings.progressPostShare })]
     let barAt = 0
+    // The progress dialog's step list (core/runSteps.js matchSteps), sent with the pair
+    // pass's first report: only the passes that can run here. A run on a selection inside
+    // another (Detect gaps again, turned photos) reports through its caller, which keeps
+    // the outer list.
+    let steps = matchSteps({
+      retrieval: retrievalRan,
+      rescue: canRescue,
+      bridge: bridgeRounds > 0,
+      gap: gapPossible,
+      turn: turnPossible,
+    })
     const progress = (k, n, span, label, phase) => {
       barAt = Math.max(barAt, spanFraction(span, k, n))
-      onProgress?.(k, n, label, barAt, phase)
+      onProgress?.(k, n, label, barAt, phase, steps ?? undefined)
+      steps = null
     }
     // Tally this run's outcomes for the completion summary. Skipped = too few raw
     // matches to bother verifying; rejected = verified but failed the count/ratio
@@ -984,7 +1000,7 @@ export function createMatchAll({
         if (entry) tally(pairId(a.uuid, b.uuid), entry)
       }
       done = kept.size
-      progress(done, pairs.length, pairSpan)
+      progress(done, pairs.length, pairSpan, undefined, 'pairs')
     }
     const todo = pairs.map((_, i) => i).filter((i) => !kept.has(i))
     const finished = [...kept]
@@ -1044,7 +1060,7 @@ export function createMatchAll({
         // A pair that errored, or that Cancel cut off, has no saved result: the journal
         // must not list it, or Continue would skip it.
         if (isDone(i)) finished.push(i)
-        progress(done, pairs.length, pairSpan)
+        progress(done, pairs.length, pairSpan, undefined, 'pairs')
         checkpoint()
       }
     }
@@ -1302,11 +1318,13 @@ export function createMatchAll({
         lgTiled: settings.matcher === 'lightglue' ? settings.lgTiled : null,
       },
     }
+    // What is left of the bar: halves when both later passes can run.
+    const gapSpan = [barAt, turnPossible ? barAt + (1 - barAt) / 2 : 1]
     if (gapPossible) {
       const gap = await redetectGaps(images, ready, settings, requested, {
         onProgress,
         shouldCancel,
-        span: [barAt, 1],
+        span: gapSpan,
       })
       if (gap) matchRun.value = { ...matchRun.value, gapRedetect: gap }
     }
@@ -1314,7 +1332,7 @@ export function createMatchAll({
       const turned = await turnPieces(images, ready, settings, requested, {
         onProgress,
         shouldCancel,
-        span: [barAt, 1],
+        span: [gapPossible ? gapSpan[1] : barAt, 1],
       })
       if (turned) matchRun.value = { ...matchRun.value, turnSearch: turned }
     }

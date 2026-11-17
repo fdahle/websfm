@@ -6,7 +6,13 @@
 // the GPU), with its first report.
 import { SFM_PHASES } from './sfm/progressPlan.js'
 
-/** @typedef {{ id: string, label: string }} RunStep */
+/**
+ * A step owns the phase of its id and every `<id>-…` phase under it (matching's 'turn'
+ * runs 'turn-probe', 'turn-detect', 'turn-match'). `optional`: it runs only when the run
+ * finds it needed (a repair of a split graph). `units`: the unit a phase counts in, where
+ * it is not the run's (detecting images again inside a run that counts pairs).
+ * @typedef {{ id: string, label: string, optional?: boolean, units?: Record<string, string> }} RunStep
+ */
 
 /** @type {RunStep[]} */
 export const SPARSE_STEPS = SFM_PHASES.map(({ key, label }) => ({ id: key, label }))
@@ -40,6 +46,40 @@ export function autoMaskSteps({ edges = 'off', text = false } = {}) {
   ]
 }
 
+/**
+ * Matching: the pair pass, then the passes that can follow it, in run order
+ * (stores/matching/matchAll.js). The later ones are optional: each runs only when the
+ * graph needs it, so a step to come is said to run only if needed.
+ */
+export function matchSteps({ retrieval = false, rescue = false, bridge = false, gap = false, turn = false } = {}) {
+  return [
+    ...(retrieval ? [{ id: 'retrieval', label: 'Finding similar images' }] : []),
+    { id: 'pairs', label: 'Matching the pairs' },
+    ...(rescue ? [{ id: 'rescue', label: 'Re-testing pairs the quick check skipped', optional: true }] : []),
+    ...(bridge ? [{ id: 'bridge', label: 'Repairing a split graph', optional: true }] : []),
+    ...(gap
+      ? [
+          {
+            id: 'gap',
+            label: 'Detecting the gaps again at full size',
+            optional: true,
+            units: { 'gap-detect': 'images' },
+          },
+        ]
+      : []),
+    ...(turn
+      ? [
+          {
+            id: 'turn',
+            label: 'Finding turned photos',
+            optional: true,
+            units: { 'turn-probe': '', 'turn-detect': 'images' },
+          },
+        ]
+      : []),
+  ]
+}
+
 /** @type {RunStep[]} */
 export const MESH_STEPS = [
   { id: 'prepare', label: 'Preparing the points' },
@@ -55,11 +95,21 @@ export const MESH_STEPS = [
  * → [{ id, label, state }], or [] while the phase is not one of the steps.
  */
 export function stepStates(steps, phase, seen = []) {
-  const at = steps.findIndex((s) => s.id === phase)
+  const at = steps.findIndex((s) => ownsPhase(s, phase))
   if (at < 0) return []
-  const reported = new Set(seen)
   return steps.map((s, i) => ({
     ...s,
-    state: i === at ? 'running' : i > at ? 'todo' : reported.has(s.id) ? 'done' : 'skipped',
+    state: i === at ? 'running' : i > at ? 'todo' : seen.some((p) => ownsPhase(s, p)) ? 'done' : 'skipped',
   }))
+}
+
+/** Whether `phase` is the step's own, or one of its `<id>-…` phases. */
+export function ownsPhase(step, phase) {
+  return !!phase && (phase === step.id || phase.startsWith(`${step.id}-`))
+}
+
+/** The unit the current phase counts in: its step's `units` entry, else the run's. */
+export function phaseUnit(steps, phase, unit) {
+  const step = steps.find((s) => ownsPhase(s, phase))
+  return step?.units && phase in step.units ? step.units[phase] : unit
 }

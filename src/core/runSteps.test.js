@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SPARSE_STEPS, autoMaskSteps, depthMapSteps, stepStates } from './runSteps.js'
+import { SPARSE_STEPS, autoMaskSteps, depthMapSteps, matchSteps, phaseUnit, stepStates } from './runSteps.js'
 import { SFM_PHASES } from './sfm/progressPlan.js'
 
 describe('run steps', () => {
@@ -25,5 +25,37 @@ describe('run steps', () => {
     expect(stepStates(steps, 'filter', ['filter']).map((s) => s.state)).toEqual(['skipped', 'skipped', 'running'])
     expect(stepStates(steps, 'unknown')).toEqual([])
     expect(stepStates(steps, '')).toEqual([])
+  })
+
+  it('lists the matching passes that can run, the later ones optional', () => {
+    expect(matchSteps().map((s) => s.id)).toEqual(['pairs'])
+    const all = matchSteps({ retrieval: true, rescue: true, bridge: true, gap: true, turn: true })
+    expect(all.map((s) => s.id)).toEqual(['retrieval', 'pairs', 'rescue', 'bridge', 'gap', 'turn'])
+    expect(all.filter((s) => s.optional).map((s) => s.id)).toEqual(['rescue', 'bridge', 'gap', 'turn'])
+  })
+
+  it('lets a step own its sub-phases', () => {
+    const steps = matchSteps({ bridge: true, turn: true })
+    // Bridge repair's rounds and the turn search's three parts are one step each.
+    expect(stepStates(steps, 'bridge-2', ['pairs', 'bridge-1']).map((s) => s.state)).toEqual([
+      'done',
+      'running',
+      'todo',
+    ])
+    expect(stepStates(steps, 'turn-detect', ['pairs', 'turn-probe']).map((s) => s.state)).toEqual([
+      'done',
+      'skipped',
+      'running',
+    ])
+    // A phase that only shares the start of an id is not the step's.
+    expect(stepStates([{ id: 'turn', label: '' }], 'turnover')).toEqual([])
+  })
+
+  it('counts a phase in its own unit', () => {
+    const steps = matchSteps({ gap: true, turn: true })
+    expect(phaseUnit(steps, 'turn-detect', 'pairs')).toBe('images')
+    expect(phaseUnit(steps, 'turn-probe', 'pairs')).toBe('')
+    expect(phaseUnit(steps, 'turn-match', 'pairs')).toBe('pairs')
+    expect(phaseUnit(steps, 'pairs', 'pairs')).toBe('pairs')
   })
 })

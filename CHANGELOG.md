@@ -6,6 +6,14 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Matching shows its steps.** The progress dialog of Match Features lists the passes the
+  run can take (finding similar images, matching the pairs, re-testing gated pairs,
+  repairing a split graph, detecting the gaps again, finding turned photos) with a bar and
+  count for the running one; a pass that runs only when the graph needs it is marked ◌,
+  "runs only if needed". Before, everything after the pair pass shared the last tenth of
+  one bar: on Rachel the turned-photo search detected 23 photos again and matched 1,058
+  pairs again (about 10 minutes) with the bar standing near 100 %. The detecting part now
+  counts in images.
 - **Flights in opposite directions match with SuperPoint, DISK and ALIKED.** When matching
   leaves pieces apart, or held to the block only by weak pairs, a small SIFT look at
   their photos measures how each is turned against the main block, and photos turned a
