@@ -30,7 +30,8 @@ A sensor definition carries:
   calibration): its coefficients alone do not say so.
 - A **kind**: a normal digital camera, or `film` for a scanned analogue frame,
   which additionally carries [fiducial marks](help:fiducial-marks) and a
-  calibration certificate.
+  calibration certificate. A film sensor without marks works on the scan's pixels,
+  like a digital one, with its focal guessed from a typical aerial camera.
 
 <!-- TODO(image): assets/sensor-grouping.svg - a set of image thumbnails partitioned into two sensor groups, each group pointing at a single shared K matrix and distortion block, with the per-image pose R,t shown as the only thing that varies within a group. -->
 

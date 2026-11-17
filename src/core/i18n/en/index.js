@@ -7,5 +7,6 @@ import filterCloud from './filterCloud.js'
 import readText from './readText.js'
 import ribbon from './ribbon.js'
 import sidebar from './sidebar.js'
+import sparse from './sparse.js'
 
-export default { autoMask, common, dialog, filterCloud, readText, ribbon, sidebar }
+export default { autoMask, common, dialog, filterCloud, readText, ribbon, sidebar, sparse }

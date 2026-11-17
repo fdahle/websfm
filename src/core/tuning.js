@@ -68,6 +68,17 @@ export const DETECT_TUNING = {
 // bundle-adjustment / track filtering). `settings` from the caller still overrides.
 // NOT here (owned by its module): init-pair thresholds → core/sfm/initPair.js.
 export const SFM_TUNING = {
+  // ── A film scan's focal when nothing gives it (reconstruction.js resolveK) ──
+  // A sensor marked film without a format or pixel size: fx = focal ÷ filmScanShortMm ×
+  // the scan's short side, the focal defaulting to filmGuessFocalMm, a 6-inch lens (the
+  // usual aerial mapping camera). The short side is the 9-inch frame plus the margins the
+  // archive keeps: Rachel's corner fiducials span 9084 px of a 9872–10200 px short side.
+  // Against its certificates (153.46 / 154.40 mm at 25 µm ≈ 6,140 px) the guess is
+  // −3.5 % on the verticals and −0.3 % on the obliques; the digital default, the scan
+  // width, was +65 %.
+  filmGuessFocalMm: 152.4,
+  filmScanShortMm: 254,
+
   // ── Bundle-adjustment linear solver (bundle/solve.rs SolverOpts) ──
   // Policy for the reduced camera system of every bundle adjustment. null ⇒ the crate
   // default: PCG from n ≥ 600 (≈ 100 cameras), rel_tol 1e-10, 2,000 iterations, Cholesky

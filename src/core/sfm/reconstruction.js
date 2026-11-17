@@ -162,7 +162,7 @@ export function sensorWidthMm(meta) {
 //      often wrong than a declared format, so it ranks below it; see path 2)
 //   4. EXIF 35mm-equivalent focal
 //   5. focal (mm, from sensor or EXIF) × imageWidth ÷ derivable sensor width
-//   6. default-FOV guess (fx = max(w,h)) — poor; registration may fail
+//   6. default-FOV guess (fx = max(w,h); a film scan: a 6-inch lens on 9-inch film)
 // Returns { fx, fy, cx, cy, source } where `source` explains the path taken.
 export function resolveK(meta, sensor = null) {
   const w = scanWidthPx(meta, sensor)
@@ -245,6 +245,16 @@ export function resolveK(meta, sensor = null) {
   //    f = half-diagonal ÷ π/2) rather than a ~53° pinhole field of view: a GoPro-
   //    class 4000×3000 frame gets f ≈ 1590 px against a true ≈ 1700.
   const fisheye = isFisheyeModel(sensor?.distortionModel)
+  // A film scan (the user's word, Sensors ▸ Kind) assumes a 6-inch lens, or the focal
+  // entered, over a scan whose short side spans the 9-inch frame and its margins
+  // (SFM_TUNING.filmScanShortMm): Rachel's TMA rolls come out within 4 % of their
+  // certificates, where max(w, h) was 65 % long.
+  if (sensor?.kind === 'film' && !fisheye) {
+    const mm = sensorFocalMm ?? SFM_TUNING.filmGuessFocalMm
+    const fx = (mm / SFM_TUNING.filmScanShortMm) * Math.min(w, h)
+    const what = sensorFocalMm != null ? `focal ${mm}mm` : `a ${mm}mm lens assumed`
+    return { fx, fy: fx, cx, cy, source: `default FOV (film scan: ${what}, no film format or pixel size)` }
+  }
   const fx = fisheye ? Math.hypot(w, h) / Math.PI : Math.max(w, h)
   // Callers test the 'default FOV' prefix, so the fisheye note goes inside the brackets.
   const lens = fisheye ? 'fisheye; ' : ''

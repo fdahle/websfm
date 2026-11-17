@@ -9,6 +9,7 @@ import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import { matchPairStats, usedKeysForPair, usedPairCounts } from '../core/eval/usedMatches.js'
 import { suggestSensorSplits } from '../core/sensors/splitSuggestions.js'
+import { filmScanGuess } from '../core/sensors/filmGuess.js'
 
 // State derived from the project stores alone, lifted out of App.vue: what the
 // workspace is ready for (the ribbon, console and workflow guards), the match
@@ -71,6 +72,10 @@ export function useWorkspaceState() {
   const sensorSplits = computed(
     () => new Map(suggestSensorSplits({ sensors: sensors.value, images: images.value }).map((x) => [x.sensorId, x])),
   )
+
+  // Camera groups whose photos look like scanned film the user has not classified
+  // (core/sensors/filmGuess.js): Sensors and Sparse ask whether to treat them as film.
+  const filmGuess = computed(() => filmScanGuess({ sensors: sensors.value, images: images.value }))
 
   // Distinct current images that carry each preselect evidence source — the Match
   // modal gates its "Preselect by" methods on these (poses link by image.id, as do
@@ -196,6 +201,7 @@ export function useWorkspaceState() {
     footprintImageCount,
     incompleteSensorIds,
     sensorSplits,
+    filmGuess,
     sparseReady,
     cloudReady,
     denseReady,

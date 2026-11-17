@@ -21,6 +21,13 @@ information lists them as *Scanned with*). A calibration file you import groups 
 by the values it gives. Two cameras with the same EXIF, or rolls of one camera you want
 solved together, need a split or a merge by hand.
 
+Photos with no camera tags that look like scans (roll numbers in the names, large square
+frames, greyscale, or a scanner's tags) are not film until you say so: Sensors and
+Sparse Model ask whether to **Treat as film**. Film starts the focal from a typical
+aerial camera rather than from a digital camera's guess, which is far too long for
+aerial film, and opens the film fields (focal, format, fiducials). **Digital** keeps the
+groups as they are and stops asking.
+
 A group's values are your starting point: a run never changes them. Each sparse model
 keeps the lens it was solved with, so editing a group later does not change a finished
 model or what was built from it. To start the next run from what a model solved, open

@@ -17,7 +17,8 @@ const emit = defineEmits(['toggle'])
 // sidebar.incompleteSensorIds — Set of sensor ids with no usable calibration,
 // flagged with a ⚠; sidebar.selectSensorImages(sensorId) selects its images in Images.
 const sidebar = useSidebar()
-const { sensors } = storeToRefs(useSensorsStore())
+const sensorsStore = useSensorsStore()
+const { sensors } = storeToRefs(sensorsStore)
 const { t } = useI18n()
 
 // Per-sensor expand state
@@ -49,6 +50,17 @@ function splitHint(x) {
   ]
   return t('sidebar.sensors.split', { n: x.groups.length, why })
 }
+// Photos that look like scanned film, their sensors not yet classified
+// (core/sensors/filmGuess.js, via sidebar.filmGuess): ask whether they are film.
+const filmGuess = computed(() => sidebar.filmGuess ?? null)
+const filmGuessText = computed(() => {
+  const g = filmGuess.value
+  if (!g) return ''
+  const why = ['noCamera', ...g.signs].map((k) => ({ key: `sidebar.sensors.filmSign.${k}` }))
+  return t('sidebar.sensors.filmGuess', { n: g.images, why })
+})
+const answerFilmGuess = (kind) => sensorsStore.setSensorsKind(filmGuess.value?.sensorIds ?? [], kind)
+
 function countTitle(id) {
   const n = sidebar.sensorImageCount(id)
   return n ? t('sidebar.sensors.count', { n }) : t('sidebar.sensors.countNone')
@@ -76,6 +88,25 @@ function fromMenu(fn) {
       <span v-if="sensors.length" class="badge">{{ sensors.length }}</span>
     </button>
     <ul v-if="open" class="item-list">
+      <li v-if="filmGuess" class="film-guess">
+        <span>{{ filmGuessText }}</span>
+        <span class="film-guess-actions">
+          <button
+            class="film-guess-btn primary"
+            :title="t('sidebar.sensors.filmGuessFilmTitle', { groups: filmGuess.sensorIds.length })"
+            @click="answerFilmGuess('film')"
+          >
+            {{ t('sidebar.sensors.filmGuessFilm') }}
+          </button>
+          <button
+            class="film-guess-btn"
+            :title="t('sidebar.sensors.filmGuessDigitalTitle', { groups: filmGuess.sensorIds.length })"
+            @click="answerFilmGuess('digital')"
+          >
+            {{ t('sidebar.sensors.filmGuessDigital') }}
+          </button>
+        </span>
+      </li>
       <template v-for="sensor in sensors" :key="sensor.id">
         <li
           class="list-item"
@@ -202,5 +233,36 @@ function fromMenu(fn) {
 }
 .count-btn:disabled {
   cursor: default;
+}
+/* "These photos look like scanned film": a question with two answers. */
+.film-guess {
+  margin: 4px 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--warn, #d9a441);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.film-guess-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.film-guess-btn {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border, #555);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.film-guess-btn.primary {
+  border-color: var(--accent);
+}
+.film-guess-btn:hover {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 </style>

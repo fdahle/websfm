@@ -169,6 +169,15 @@ export function makeScanCentreToPinhole({ K, dist = null, selfCal = null, fiduci
   }
 }
 
+// Does a sparse run move this sensor's photos into a fiducial frame? Only a film sensor
+// with fiducial marks (ingest.js applyFiducialFrames): one without any — film by the
+// user's word, its focal still a guess — keeps the scan's pixels, as a digital camera
+// does, and a photo of it lacks no transform. `filmMissing` (below) is a photo whose
+// sensor expects a frame the run did not give it: dense, the GCP tools and exports skip it.
+export function expectsFilmFrame(sensor) {
+  return sensor?.kind === 'film' && !!sensor.fiducialCalibration?.marks?.length
+}
+
 // ONE join from the persisted run record to each image's frame model — the
 // calibrated bag of its sensor (or the run's self-calibrated fisheye lens), the
 // composed self-cal bag, the film transform.
@@ -227,7 +236,7 @@ function resolverFromSummary(summary, sensors) {
         dist: lens.k1 || lens.k2 || lens.k3 || lens.p1 || lens.p2 ? lens : null,
         selfCal: null,
         fiducial,
-        filmMissing: sensor?.kind === 'film' && !fiducial,
+        filmMissing: expectsFilmFrame(sensor) && !fiducial,
       }
     }
     const selfCal = sc && (sc.k1 || sc.k2 || sc.k3) ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null
@@ -235,7 +244,7 @@ function resolverFromSummary(summary, sensors) {
       dist: sensor ? distortionOf(sensor) : null,
       selfCal,
       fiducial,
-      filmMissing: sensor?.kind === 'film' && !fiducial,
+      filmMissing: expectsFilmFrame(sensor) && !fiducial,
     }
   }
 }
@@ -304,7 +313,7 @@ function resolverFromCalibration(calibration, sensors) {
       dist: g ? g.dist : sensor ? distortionOf(sensor) : null,
       selfCal: g ? g.selfCal : null,
       fiducial,
-      filmMissing: sensor?.kind === 'film' && !fiducial,
+      filmMissing: expectsFilmFrame(sensor) && !fiducial,
     }
   }
 }

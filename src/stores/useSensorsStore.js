@@ -309,6 +309,30 @@ export const useSensorsStore = defineStore('sensors', () => {
   // sensibly (done here so the two can't drift).
   const FIDUCIAL_NUMERIC = new Set(['ppxMm', 'ppyMm', 'focalMm'])
 
+  // Answer Sensors' "these look like scanned film" question (core/sensors/filmGuess.js)
+  // for several camera groups at once: 'film' or 'digital', saved once. Either answer
+  // classifies them, so the question is not asked about them again.
+  function setSensorsKind(ids, kind) {
+    if (kind !== 'digital' && kind !== 'film') return
+    const set = new Set(ids)
+    const changed = sensors.value.filter((s) => set.has(s.id) && s.kind !== kind)
+    if (!changed.length) return
+    for (const s of changed) {
+      s.kind = kind
+      if (kind === 'film' && !s.fiducialCalibration) {
+        s.fiducialCalibration = emptyFiducialCalibration(s.focalUnit === 'mm' ? (s.focal ?? 0) : 0)
+      }
+    }
+    log(
+      `${changed.length === 1 ? `Sensor ${changed[0].label}` : `${changed.length} sensors`} set to ${kind}`,
+      'info',
+      'Sensor',
+      { channel: 'activity' },
+    )
+    save()
+    if (isPersisting()) imagesStore.save()
+  }
+
   function updateSensor(id, field, value) {
     const s = sensors.value.find((x) => x.id === id)
     if (!s) return
@@ -694,6 +718,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     importSensors,
     importCameraGroups,
     updateSensor,
+    setSensorsKind,
     markReseauStitched,
     markPanoramicSegments,
     applyFilmFormat,

@@ -13,6 +13,12 @@
 // that agree with each other is robust. Measured: ETH3D playground 3,444 px and terrace 3,405 px
 // (truth ≈ 3,430); South Building 2,638 px (COLMAP 2,560, EXIF 2,485 — EXIF is kept).
 //
+// It needs pairs whose optical axes converge. Two cameras looking along parallel axes
+// (a vertical aerial strip) leave the focal undetermined from F alone, and
+// the pair values scatter: Rachel's 58 TMA scans, matched with SIFT, gave 0.25–1.67 ×
+// the image size against a truth of ≈ 0.6, no consensus, and the default kept. Film
+// scans therefore take resolveK's film guess instead.
+//
 // The search assumes both images of a pair share the field of view (one scale factor
 // s = f / max(w, h)), so it runs per sensor group where a group has enough pairs, else
 // over all guessed images together.

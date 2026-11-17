@@ -2739,9 +2739,25 @@ window.bench = {
     gcpSigma = null,
     gcpMarkSigma = null,
     demCheck = null,
+    sensorKind = null,
     ...overrides
   } = {}) {
     const settings = { ...withPreset(RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, preset), ...overrides }
+    // `sensorKind: 'film' | 'digital'`: answer the "these look like scanned film" question
+    // (core/sensors/filmGuess.js) for every sensor, as the button in Sensors does; the log
+    // says what the guess saw first.
+    if (sensorKind) {
+      const { filmScanGuess } = await import('/src/core/sensors/filmGuess.js')
+      const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+      const guess = filmScanGuess({ sensors: sensorsStore.sensors, images: useImagesStore().images })
+      console.log(
+        `== filmGuess: ${guess ? `${guess.images} images in ${guess.sensorIds.length} sensors, signs ${guess.signs.join(', ')}` : 'none'}`,
+      )
+      sensorsStore.setSensorsKind(
+        sensorsStore.sensors.map((x) => x.id),
+        sensorKind,
+      )
+    }
     // `demHold: { referenceId: 'last', sigma }`: Georeference ▸ Hold to a reference DEM,
     // with the raster an `importraster:<tag>` stage brought in last. Without `sigma`, the
     // dialog's: the raster's declared vertical accuracy, else DEM_HOLD_DEFAULTS.sigma.

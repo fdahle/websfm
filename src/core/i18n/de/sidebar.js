@@ -26,6 +26,20 @@ export default {
       'Enthält vielleicht Bilder von {n} Kameras ({why}). Rechtsklick auf den Sensor und Kameragruppe aufteilen… wählen',
     splitFormats: '{n} Scanformate',
     splitMisfit: '{roll} passt schlecht zum Rahmenmarken-Layout',
+    filmGuess: '{n, plural, one {# Foto sieht} other {# Fotos sehen}} wie gescannter Film aus ({why}).',
+    filmSign: {
+      noCamera: 'keine Kamera-Tags',
+      scanner: 'Scanner-Tags',
+      roll: 'Rollennummern in den Namen',
+      square: 'große quadratische Bilder',
+      grey: 'Graustufen',
+    },
+    filmGuessFilm: 'Als Film behandeln',
+    filmGuessFilmTitle:
+      'Setzt {groups, plural, one {seinen Sensor} other {ihre # Sensoren}} auf Film: die Brennweite beginnt bei einer typischen Luftbildkamera (6-Zoll-Objektiv auf 9-Zoll-Film), bis Sie die der Kamera eintragen, und Rahmenmarken lassen sich kalibrieren',
+    filmGuessDigital: 'Digital',
+    filmGuessDigitalTitle:
+      '{groups, plural, one {Seinen Sensor} other {Ihre # Sensoren}} digital lassen und nicht mehr fragen',
     count: '{n, plural, one {# Bild} other {# Bilder}}: klicken, um sie unter Bilder auszuwählen',
     countNone: 'Kein Bild verwendet diesen Sensor',
     source: 'Quelle',

@@ -97,7 +97,8 @@ function onReduceOverlapRun({ disableIds, kept, enabled, coverage }) {
     'Images',
   )
 }
-const { sensors } = storeToRefs(useSensorsStore())
+const sensorsStore = useSensorsStore()
+const { sensors } = storeToRefs(sensorsStore)
 // What Sparse Reconstruction can build on: the usable matched pairs and the images
 // they link (the same filter as the store's usableMatchCount).
 const { matchStore } = storeToRefs(useMatchesStore())
@@ -290,6 +291,7 @@ const {
   onToolEditRun,
   posedImageCount,
   sensorSplits,
+  filmGuess,
   startMarkingPoint,
 } = useAppContext()
 // Is the fitted scale still describing the current model + measurements? Read at
@@ -388,6 +390,7 @@ const exportingFootprints = computed(
       :pairs="matchedLinks.pairs"
       :sensors="sensors.length"
       :sensor-splits="[...sensorSplits.values()].map((x) => ({ label: x.label, groups: x.groups.length }))"
+      :film-guess="filmGuess"
       :model-cameras="extendState.modelCameras"
       :new-images="extendState.newImages"
       :has-products="extendState.hasProducts"
@@ -395,6 +398,7 @@ const exportingFootprints = computed(
       :prefill="reconstructPrefill"
       @close="closeReconstructModal"
       @run="onReconstructRun"
+      @classify-sensors="({ sensorIds, kind }) => sensorsStore.setSensorsKind(sensorIds, kind)"
     />
   </Teleport>
 

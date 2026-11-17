@@ -1,6 +1,6 @@
 import { toRaw } from 'vue'
 import { computeSourceOf } from '../../utils/image.js'
-import { makeFrameModelResolver, makeScanCentreToPinhole } from '../../core/sfm/displayFrame.js'
+import { expectsFilmFrame, makeFrameModelResolver, makeScanCentreToPinhole } from '../../core/sfm/displayFrame.js'
 import { distortionOf, hasDistortion } from '../../core/sfm/distortion.js'
 import { Keypoints, KP_STRIDE, asKeypoints } from '../../core/features/keypoints.js'
 import { buildColmapModel, serializeColmapModelBinParts, serializeColmapModelParts } from '../../core/io/colmapModel.js'
@@ -135,7 +135,7 @@ export function createSfmProjectExports({
       const risky = exportImages.some(({ uuid }) => {
         const im = imgByUuid.get(uuid)
         const sensor = sensorById.get(im?.sensorId)
-        return sensor?.kind === 'film' || !!distortionOf(sensor)
+        return expectsFilmFrame(sensor) || !!distortionOf(sensor)
       })
       if (risky) {
         throw new Error(
@@ -351,7 +351,7 @@ export function createSfmProjectExports({
         const im = imgByUuid.get(uuid)
         const sensor = im.sensorId ? sensorById.get(im.sensorId) : null
         const fid = fidByUuid.get(uuid) ?? null
-        if (sensor?.kind === 'film' && !fid) {
+        if (expectsFilmFrame(sensor) && !fid) {
           log(
             `Undistort: ${im.name} skipped — no interior-orientation transform from the ` +
               'last sparse run (re-run reconstruction).',

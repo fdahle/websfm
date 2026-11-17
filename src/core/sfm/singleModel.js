@@ -359,7 +359,9 @@ export async function reconstructSingleModel(input, hooks = {}) {
 
     // No focal in the metadata (resolveK's default-FOV guess): estimate it from the
     // verified pair geometry before registration builds on it (focalFromPairs.js).
-    // Film scans and fisheye lenses keep their own paths, and self-calibration 'none'
+    // Film scans and fisheye lenses keep their own paths (resolveK's film guess: a
+    // vertical aerial block's pairs look along near-parallel axes, which do not fix the
+    // focal — focalFromPairs.js), and self-calibration 'none'
     // (the user's "leave the intrinsics as they are") keeps the guess too.
     if (!base && defaultKCount > 0 && cfg.refineIntrinsics !== 'none') {
       const imgByUuid = new Map(imgs.map((im) => [im.uuid, im]))

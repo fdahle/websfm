@@ -36,7 +36,11 @@ all, it estimates one from the image pairs before reconstruction starts: for the
 focal length, every verified pair's [essential matrix](help:essential-matrix) has two
 equal singular values, and the value most of the strongest pairs agree on pins it to a few
 percent. Only when the pairs disagree, or are too few, does it fall back to a default
-field of view (focal ≈ image width), logged loudly because it is a guess.
+field of view (focal ≈ image width), logged loudly because it is a guess. Pairs of
+vertical aerial photos look along nearly parallel axes, which do not fix the focal, so a
+sensor of kind **Film** skips the pair estimate and starts from a typical mapping camera
+instead: a 6-inch lens on 9-inch film (or the focal you entered), over a scan that keeps
+the frame's margins. That lands within a few percent of most aerial cameras.
 
 Because of that sensitivity, focal length is the first parameter
 [self-calibration](help:self-calibration) refines, and usually the only one worth

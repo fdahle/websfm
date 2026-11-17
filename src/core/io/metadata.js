@@ -242,6 +242,9 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
     subSecTime: camera(scalarText(e.SubSecTimeOriginal ?? e.SubSecTime)),
     // The film scanner whose tags these were, and when it scanned: { device, date }.
     scan: scanner ? { device: scanner, date: scanDate } : null,
+    // Colour channels (TIFF SamplesPerPixel; null when the file does not say): a
+    // greyscale scan has one, a sign of film (core/sensors/filmGuess.js).
+    channels: tagNumber(e.SamplesPerPixel) ?? null,
     gpsLat: e.latitude ?? metadataNumber(e, ['GPSLatitude']) ?? null,
     gpsLon: e.longitude ?? metadataNumber(e, ['GPSLongitude']) ?? null,
     gpsAlt: e.GPSAltitude ?? metadataNumber(e, ['AbsoluteAltitude']) ?? null,

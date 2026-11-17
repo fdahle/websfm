@@ -23,6 +23,7 @@ import {
 import { checkNumberFields } from '../../../utils/numberFields.js'
 import { sparseEffects, sparseShorts, sparseModeEffect } from '../../../core/stepEffects/sparse.js'
 import { withShorts } from '../../../core/stepEffects/format.js'
+import { useI18n } from '../../../composables/useI18n.js'
 
 const props = defineProps({
   // Set when Georeference hands off here for its GCP-constrained adjustment path.
@@ -38,6 +39,9 @@ const props = defineProps({
   sensors: { type: Number, default: 0 },
   // Camera groups that may hold photos of more than one camera: [{ label, groups }].
   sensorSplits: { type: Array, default: () => [] },
+  // Photos that look like scanned film, their sensors not classified
+  // (core/sensors/filmGuess.js): { sensorIds, images, signs } or null.
+  filmGuess: { type: Object, default: null },
   // Add to the model: the main model's cameras, the images with features it lacks,
   // whether anything was built from it, and why it cannot take more (or null).
   modelCameras: { type: Number, default: 0 },
@@ -48,7 +52,19 @@ const props = defineProps({
   prefill: { type: Object, default: null },
 })
 
-const emit = defineEmits(['close', 'run'])
+// 'classify-sensors': answer the film question, { sensorIds, kind: 'film' | 'digital' }.
+const emit = defineEmits(['close', 'run', 'classify-sensors'])
+const { t } = useI18n()
+const filmGuessText = computed(() =>
+  props.filmGuess
+    ? t('sparse.filmGuess.text', {
+        n: props.filmGuess.images,
+        groups: props.filmGuess.sensorIds.length,
+        why: ['noCamera', ...props.filmGuess.signs].map((k) => ({ key: `sidebar.sensors.filmSign.${k}` })),
+      })
+    : '',
+)
+const classify = (kind) => emit('classify-sensors', { sensorIds: props.filmGuess.sensorIds, kind })
 const { recommendations } = useDatasetRecommendations()
 
 // Prefill from the single source of truth (core/sfm/sfm.js falls back to the same
@@ -205,6 +221,14 @@ provideStepLayout('sparse-reconstruction')
 
     <!-- Not behind Advanced: no setting here helps, only a split in Sensors does. -->
     <WarnBox v-if="effects.splits">{{ effects.splits }}</WarnBox>
+    <!-- The focal a scan starts from depends on it: asked before the run, not after. -->
+    <WarnBox v-if="filmGuess">
+      {{ filmGuessText }}
+      <span class="film-guess-actions">
+        <button class="btn btn-primary" @click="classify('film')">{{ t('sparse.filmGuess.film') }}</button>
+        <button class="btn" @click="classify('digital')">{{ t('sparse.filmGuess.digital') }}</button>
+      </span>
+    </WarnBox>
 
     <PresetCards
       :model-value="activePreset"
@@ -425,6 +449,11 @@ provideStepLayout('sparse-reconstruction')
      applies here — not inside SettingsField). .btn lives in the global stylesheet. -->
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
+.film-guess-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
 .adjust-intro {
   margin: 0;
   font-size: 13px;

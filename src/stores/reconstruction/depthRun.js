@@ -7,7 +7,7 @@ import { toRaw } from 'vue'
 import { depthMapSteps } from '../../core/runSteps.js'
 import { computeSourceOf } from '../../utils/image.js'
 import { isImageEnabled } from '../../core/imageEnabled.js'
-import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
+import { expectsFilmFrame, makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { rollingShutterWarps } from '../../core/sfm/rollingShutter.js'
 import {
   qualityToMaxDim,
@@ -172,7 +172,7 @@ export function createDepthRun({
         // so depth maps / fusion / DEM / ortho all stay pinhole (matches sparse).
         const s = im.sensorId ? sensorById.get(im.sensorId) : null
         const fid = fidByUuid.get(uuid) ?? null
-        if (s?.kind === 'film' && !fid) {
+        if (expectsFilmFrame(s) && !fid) {
           // Three distinct causes — point the user at the actual fix, not always "re-run".
           const cal = s.fiducialCalibration
           const nMarks = isFiducialCalibrated(cal) ? cal.marks.length : 0

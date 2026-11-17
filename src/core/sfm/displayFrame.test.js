@@ -69,7 +69,13 @@ describe('makeFrameModelResolver', () => {
         ],
         fiducialTransforms: [{ uuid: 'u3', A: fit.A, frame }],
       },
-      sensors: [{ id: 's1', k1: -0.1, distortionModel: 'radial' }, { id: 's2' }, { id: 's3', kind: 'film' }],
+      sensors: [
+        { id: 's1', k1: -0.1, distortionModel: 'radial' },
+        { id: 's2' },
+        { id: 's3', kind: 'film', fiducialCalibration: { marks: [{ x: 0, y: 0 }] } },
+        // Film by the user's word, no marks yet: the run keeps its scan pixels.
+        { id: 's4', kind: 'film', fiducialCalibration: { marks: [] } },
+      ],
     })
     const a = resolve({ uuid: 'u1', sensorId: 's1' })
     expect(a.dist.k1).toBe(-0.1)
@@ -77,6 +83,7 @@ describe('makeFrameModelResolver', () => {
     expect(resolve({ uuid: 'u2', sensorId: 's2' }).selfCal).toBeNull() // all-zero bag ⇒ none
     expect(resolve({ uuid: 'u3', sensorId: 's3' }).fiducial.frame).toBe(frame)
     expect(resolve({ uuid: 'u4', sensorId: 's3' }).filmMissing).toBe(true)
+    expect(resolve({ uuid: 'u5', sensorId: 's4' }).filmMissing).toBe(false)
   })
   it("gives a sensorless image its own self-cal row, and no other image's", () => {
     const resolve = makeFrameModelResolver({

@@ -6,6 +6,16 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **WebSfM asks whether scans are film.** When photos carry no camera tags and look like
+  scans (roll numbers in the names, large square frames, greyscale, or a scanner's tags),
+  Sensors and Sparse Model ask whether to **Treat as film**; a film sensor without a focal
+  then starts from a 6-inch lens on 9-inch film instead of a digital camera's guess.
+  Rachel's 58 TMA scans, imported bare, started at the scan width (10,141 px against a true
+  ≈ 6,140) and registered 16; as film the guess is −3.5 % on the verticals and −0.3 % on
+  the obliques. The focal from pair geometry stays off for film: on the same scans the
+  vertical pairs, looking along near-parallel axes, scattered from 0.25 to 1.67 × the image
+  size. A film sensor without fiducial marks now keeps the scan's pixels in depth maps,
+  Find GCPs and exports, as its sparse run does; before, every photo of it was skipped.
 - **See and change which photos use which sensor.** Images ▸ Group by ▸ Sensors lists the
   photos under their sensors: drag photos onto another sensor, or right-click ▸ Set sensor
   or New sensor from selection. Clicking a sensor's photo count in Sensors selects its

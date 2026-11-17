@@ -27,6 +27,20 @@ export default {
     split: 'May hold photos of {n} cameras ({why}). Right-click the sensor and choose Split camera group…',
     splitFormats: '{n} scan formats',
     splitMisfit: '{roll} fits the fiducial layout badly',
+    // Photos that look like scanned film, their sensors not classified (core/sensors/filmGuess.js).
+    filmGuess: '{n, plural, one {# photo looks} other {# photos look}} like scanned film ({why}).',
+    filmSign: {
+      noCamera: 'no camera tags',
+      scanner: 'scanner tags',
+      roll: 'roll numbers in the names',
+      square: 'large square frames',
+      grey: 'greyscale',
+    },
+    filmGuessFilm: 'Treat as film',
+    filmGuessFilmTitle:
+      'Set {groups, plural, one {its sensor} other {their # sensors}} to Film: the focal starts from a typical aerial camera (a 6-inch lens on 9-inch film) until you enter the camera’s own, and fiducial marks can be calibrated',
+    filmGuessDigital: 'Digital',
+    filmGuessDigitalTitle: 'Keep {groups, plural, one {its sensor} other {their # sensors}} digital and stop asking',
     count: '{n, plural, one {# image} other {# images}}: click to select them in Images',
     countNone: 'No images use this sensor',
     source: 'Source',
