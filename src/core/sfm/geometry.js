@@ -348,7 +348,8 @@ export function viewGroups(dirs) {
 }
 
 // The ground plane's normal, pointing at the cameras, or null where the cloud is not
-// clearly a plane. `points`: SparsePoints ({ pos }, flat xyz) or [{ x, y, z }].
+// clearly a plane. `points`: SparsePoints ({ pos }, flat xyz), [{ x, y, z }], or any
+// iterable of { x, y, z } with a `length` (the products worker's pointView).
 export function groundUp(points, cameras) {
   const flat = points?.pos
   // SparsePoints' pos may hold spare capacity past `length`.
@@ -356,9 +357,18 @@ export function groundUp(points, cameras) {
   if (n < 20 || !cameras?.length) return null
   const step = Math.max(1, Math.floor(n / GROUND_SAMPLE))
   const P = []
-  for (let i = 0; i < n; i += step) {
-    const p = flat ? [flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]] : [points[i].x, points[i].y, points[i].z]
-    if (Number.isFinite(p[0]) && Number.isFinite(p[1]) && Number.isFinite(p[2])) P.push(p)
+  const keep = (x, y, z) => {
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) P.push([x, y, z])
+  }
+  if (flat) for (let i = 0; i < n; i += step) keep(flat[3 * i], flat[3 * i + 1], flat[3 * i + 2])
+  else if (Array.isArray(points)) for (let i = 0; i < n; i += step) keep(points[i].x, points[i].y, points[i].z)
+  else {
+    let i = 0
+    for (const p of points) {
+      if (i >= n) break
+      if (i % step === 0) keep(p.x, p.y, p.z)
+      i++
+    }
   }
   if (P.length < 20) return null
   const med = [0, 1, 2].map((k) => {

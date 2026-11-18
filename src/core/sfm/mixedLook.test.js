@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { estimateUpFromCameras, groundUp, mixedLookUp, viewGroups } from './geometry.js'
 import { sceneUpFromCameras, buildLocalFrame } from '../products/projection.js'
+import { pointView } from '../products/pointView.ts'
 
 // A synthetic trimetrogon flight, turned by an arbitrary rotation Q so nothing lines up
 // with the axes: cameras at 1000 m along +x, verticals looking straight down, left
@@ -93,6 +94,14 @@ describe('mixed vertical / oblique looks', () => {
       z: pts.pos[3 * i + 2],
     }))
     expect(signedAngle(buildLocalFrame(mostlyObliques, pointList).up, trueUp)).toBeLessThan(3)
+  })
+
+  // The products worker hands the frame a pointView (an iterable with a length, no
+  // index): the DEM and the orthophoto of a local frame build from it.
+  it('reads the cloud as the products worker passes it', () => {
+    const view = pointView({ pos: Float32Array.from(pts.pos), count: pts.length })
+    expect(signedAngle(groundUp(view, mostlyObliques), trueUp)).toBeLessThan(1)
+    expect(signedAngle(buildLocalFrame(mostlyObliques, view).up, trueUp)).toBeLessThan(3)
   })
 
   it('takes the ground plane when every camera looks obliquely', () => {
