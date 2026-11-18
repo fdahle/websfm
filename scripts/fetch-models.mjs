@@ -19,7 +19,9 @@ import { MODELS, isRedistributable } from '../src/core/models/registry.js'
 
 const RELEASE = 'https://github.com/fdahle/websfm/releases/download/models-v1/'
 // Bump the release tag + these together (and MODEL_CACHE_NAME in registry.js)
-// when a weight file changes under the same name.
+// when a weight file changes under the same name. A new model's file goes on the
+// release before the push (`gh release upload models-v1 public/models/<file>`), or
+// the deploy fails on a 404 here.
 const SHA256 = {
   'aliked.onnx': 'd2e9e51fc57c2dd79d1a259ce4620b8e0e51f83cbfc402fa2b0b2d8ae789aaa4',
   'disk.onnx': 'f02f18e254bd52d978981c715a4e7961f15afaa23290379b9b357f6745df12c4',
