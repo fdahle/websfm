@@ -353,31 +353,34 @@ watch(tab, resetSort)
 </template>
 
 <style scoped>
-/* The tabs are taller than a title line; the negative margin keeps the header as
-   slim as it was before the shell's 13px padding (the tabs had 8px). */
+/* The tabs look like the ribbon's (layout/Ribbon.vue .tab): plain text, the active
+   one underlined in the accent colour. They fill the header's height through its
+   13px padding, so the underline sits on the header's bottom border, as the
+   ribbon's sits on its tab row's. */
 .tabs {
   display: flex;
   gap: 2px;
-  margin: -5px 0;
+  align-self: stretch;
+  margin: -13px 0 -13px -12px;
 }
 .tab {
+  display: flex;
+  align-items: flex-end;
   background: none;
   border: none;
+  border-bottom: 2px solid transparent;
   color: var(--text-dim);
   font: inherit;
-  font-size: 13px;
-  padding: 7px 14px;
+  font-size: 12px;
+  padding: 0 12px 9px;
   cursor: pointer;
-  border-radius: 5px;
 }
 .tab:hover {
-  background: var(--hover-bg);
   color: var(--text);
 }
 .tab.active {
-  background: var(--bg);
   color: var(--text);
-  box-shadow: inset 0 -2px 0 var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 .subbar {
@@ -452,6 +455,8 @@ table {
 thead th {
   position: sticky;
   top: 0;
+  /* Above positioned cells (a thumbnail, a select) scrolling under it. */
+  z-index: 1;
   background: var(--panel);
   text-align: left;
   padding: 10px 12px;

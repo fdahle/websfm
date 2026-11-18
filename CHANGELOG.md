@@ -299,6 +299,9 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **The Image Table keeps its column names on top.** Scrolling the Metadata tab no longer
+  draws the thumbnails over the header row, and the Metadata, Intrinsics and Extrinsics
+  tabs now look like the ribbon's tabs.
 - **An excluded pair stays excluded.** A pair you exclude from reconstruction in the
   match list (or with `pair disable`) is no longer switched back on when Detect and Match
   Features matches it again or matches are imported over it.

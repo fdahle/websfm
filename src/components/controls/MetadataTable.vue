@@ -163,6 +163,8 @@ table {
 thead th {
   position: sticky;
   top: 0;
+  /* Above the thumbnails (ImageThumb is position: relative) scrolling under it. */
+  z-index: 1;
   background: var(--panel);
   text-align: left;
   padding: 10px 12px;
