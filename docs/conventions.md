@@ -165,6 +165,22 @@ A change that makes a step faster or better either becomes a setting or doesn't:
 Say in the CHANGELOG entry what the measurement was, so the next person can tell which
 case it is.
 
+## Every dialog's frame
+
+Every dialog is a `ModalShell` (`components/modals/ui/ModalShell.vue`), and its title bar
+is the shell's alone, so all dialogs look alike:
+
+- the title is the shell's `title` (an Experimental badge in `#badge`), never markup of
+  the dialog's own; a count or the CRS a table is in goes in `subtitle`, the dim line
+  under it;
+- header controls (the presets menu, a refresh button, a List/Graph toggle) go in
+  `#actions`, beside the close button; tabs go in `#tabs`, as
+  `<button class="modal-tab" :class="{ active }">`, in a row under the header;
+- a choice of a few options is a `SegmentedControl`, a select `field-select`, the
+  buttons in `#footer`.
+
+A unit test (`src/components/modals/ui/modalShellSlots.test.js`) fails on a slot the shell does not have.
+
 ## Dialogs of a processing step
 
 A dialog that runs a processing step lays out its settings as numbered steps, in the

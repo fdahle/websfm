@@ -385,8 +385,7 @@ provideStepLayout('match-features')
 
 <template>
   <ModalShell title="Match Features" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Match Features</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <SettingsGroup v-if="limited" title="Source">

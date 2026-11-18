@@ -218,8 +218,7 @@ provideStepLayout('orthophoto')
 
 <template>
   <ModalShell title="Build Orthophoto" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Build Orthophoto</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <PresetCards :model-value="activePreset" :base-id="baseId" :presets="ORTHO_PRESET_META" @select="selectPreset" />

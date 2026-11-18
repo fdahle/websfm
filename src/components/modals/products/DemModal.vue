@@ -188,8 +188,7 @@ provideStepLayout('dem')
 
 <template>
   <ModalShell title="Build DEM" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Build DEM</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
 

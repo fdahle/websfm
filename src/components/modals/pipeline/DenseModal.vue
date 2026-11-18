@@ -88,8 +88,7 @@ provideStepLayout('dense-cloud')
 
 <template>
   <ModalShell title="Build Dense Cloud" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Build Dense Cloud</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <PresetCards

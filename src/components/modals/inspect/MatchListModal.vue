@@ -3,6 +3,7 @@ import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import ViewerMatch from '../../viewers/ViewerMatch.vue'
 import MatchGraph from '../../viewers/MatchGraph.vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
 import { useVirtualList } from '../../../composables/useVirtualList.js'
 import { useTableSort, compareRaw } from '../../../composables/useTableSort.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
@@ -228,27 +229,21 @@ const selectedUsedKeys = computed(() =>
 <template>
   <ModalShell
     :title="t('matchList.title')"
+    :subtitle="matchSummaries.length ? t('matchList.count', { n: matchSummaries.length }) : ''"
     :aria-label="t('matchList.ariaLabel')"
     width="min(96vw, 1440px)"
     height="min(88vh, 1000px)"
     flush
     @close="emit('close')"
   >
-    <template #header>
-      <div class="match-head">
-        <span class="match-title">{{ t('matchList.title') }}</span>
-        <span v-if="matchSummaries.length" class="modal-count">{{
-          t('matchList.count', { n: matchSummaries.length })
-        }}</span>
-        <div class="view-toggle">
-          <button class="view-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">
-            {{ t('matchList.view.list') }}
-          </button>
-          <button class="view-btn" :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'">
-            {{ t('matchList.view.graph') }}
-          </button>
-        </div>
-      </div>
+    <template #actions>
+      <SegmentedControl
+        v-model="viewMode"
+        :options="[
+          { id: 'list', label: t('matchList.view.list') },
+          { id: 'graph', label: t('matchList.view.graph') },
+        ]"
+      />
     </template>
 
     <div class="modal-main">
@@ -401,54 +396,6 @@ const selectedUsedKeys = computed(() =>
 /* Roomy on purpose: the right panel holds two photos side by side, so the
    preview is the constraint — at 1100×75vh each half was barely wider than a
    thumbnail once the list took its 320px (hence the large width/height). */
-
-/* #header replaces the shell's title: title, pair count and the List/Graph toggle,
-   spread over the free width with the toggle beside the close button. */
-.match-head {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.match-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  flex: 1;
-}
-
-.modal-count {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-/* List / Graph segmented toggle */
-.view-toggle {
-  display: flex;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.view-btn {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 3px 12px;
-  cursor: pointer;
-}
-
-.view-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-.view-btn.active {
-  background: var(--accent);
-  color: #fff;
-}
 
 /* Two-panel layout */
 .modal-main {

@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import MetadataTable from '../../controls/MetadataTable.vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
 import { useTableSort } from '../../../composables/useTableSort.js'
 import { estimatedIntrinsics, estimatedPose } from '../../../core/sfm/cameraEstimated.js'
 
@@ -162,28 +163,38 @@ watch(tab, resetSort)
 
 <template>
   <ModalShell title="Image Table" width="min(92vw, 960px)" height="80vh" flush @close="emit('close')">
-    <template #header>
-      <div class="tabs">
-        <button class="tab" :class="{ active: tab === 'metadata' }" @click="tab = 'metadata'">Metadata</button>
-        <button class="tab" :class="{ active: tab === 'intrinsics' }" @click="tab = 'intrinsics'">Intrinsics</button>
-        <button class="tab" :class="{ active: tab === 'extrinsics' }" @click="tab = 'extrinsics'">Extrinsics</button>
-      </div>
+    <template #tabs>
+      <button
+        v-for="[id, label] in [
+          ['metadata', 'Metadata'],
+          ['intrinsics', 'Intrinsics'],
+          ['extrinsics', 'Extrinsics'],
+        ]"
+        :key="id"
+        class="modal-tab"
+        role="tab"
+        :aria-selected="tab === id"
+        :class="{ active: tab === id }"
+        @click="tab = id"
+      >
+        {{ label }}
+      </button>
     </template>
 
     <!-- Initial/Estimated toggle (intrinsics & extrinsics only) -->
     <div v-if="tab !== 'metadata'" class="subbar">
-      <div class="seg">
-        <button class="seg-btn" :class="{ active: mode === 'initial' }" @click="mode = 'initial'">Initial</button>
-        <button
-          class="seg-btn"
-          :class="{ active: mode === 'estimated' }"
-          :disabled="!anyEstimated"
-          :title="anyEstimated ? '' : 'Run a reconstruction to get estimated values'"
-          @click="mode = 'estimated'"
-        >
-          Estimated
-        </button>
-      </div>
+      <SegmentedControl
+        v-model="mode"
+        :options="[
+          { id: 'initial', label: 'Initial' },
+          {
+            id: 'estimated',
+            label: 'Estimated',
+            disabled: !anyEstimated,
+            reason: 'Run a reconstruction to get estimated values',
+          },
+        ]"
+      />
       <span v-if="tab === 'intrinsics' && mode === 'initial'" class="hint">
         Inherited from each image's sensor (read-only).
         <button class="link" @click="emit('open-sensor-table')">Edit in Sensor Table →</button>
@@ -353,36 +364,6 @@ watch(tab, resetSort)
 </template>
 
 <style scoped>
-/* The tabs look like the ribbon's (layout/Ribbon.vue .tab): plain text, the active
-   one underlined in the accent colour. They fill the header's height through its
-   13px padding, so the underline sits on the header's bottom border, as the
-   ribbon's sits on its tab row's. */
-.tabs {
-  display: flex;
-  gap: 2px;
-  align-self: stretch;
-  margin: -13px 0 -13px -12px;
-}
-.tab {
-  display: flex;
-  align-items: flex-end;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 0 12px 9px;
-  cursor: pointer;
-}
-.tab:hover {
-  color: var(--text);
-}
-.tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-}
-
 .subbar {
   display: flex;
   align-items: center;
@@ -390,32 +371,6 @@ watch(tab, resetSort)
   padding: 8px 16px;
   border-bottom: 1px solid var(--panel-border);
   flex-shrink: 0;
-}
-.seg {
-  display: inline-flex;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  overflow: hidden;
-}
-.seg-btn {
-  background: var(--bg);
-  border: none;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 4px 12px;
-  cursor: pointer;
-}
-.seg-btn + .seg-btn {
-  border-left: 1px solid var(--panel-border);
-}
-.seg-btn.active {
-  background: var(--accent);
-  color: #fff;
-}
-.seg-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 .hint {
   font-size: 11px;

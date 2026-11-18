@@ -102,8 +102,7 @@ provideStepLayout('align-icp')
 
 <template>
   <ModalShell title="Align to Reference (ICP)" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Align to Reference (ICP)</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <WarnBox v-if="!clouds.length || !refChoices.length"

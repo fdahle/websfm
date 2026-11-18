@@ -52,8 +52,7 @@ function run() {
 
 <template>
   <ModalShell title="Detect Targets" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Detect Targets</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <p class="field-hint">

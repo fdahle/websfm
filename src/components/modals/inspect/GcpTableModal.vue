@@ -37,8 +37,7 @@ const emit = defineEmits([
     flush
     @close="emit('close')"
   >
-    <template #header>
-      <span class="gcp-title">Control &amp; Markers</span>
+    <template #actions>
       <button class="modal-refresh" title="Refresh accuracy report" @click="emit('refresh-report')">⟳</button>
     </template>
     <GcpTable
@@ -67,15 +66,6 @@ const emit = defineEmits([
 /* The table is absolutely positioned inside the (filling) body. */
 :deep(.modal-body) {
   position: relative;
-}
-
-/* #header replaces the shell's title, so the title look is restated here; it takes
-   the free width so the refresh button sits beside the close button. */
-.gcp-title {
-  flex: 1;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
 }
 
 .modal-refresh {

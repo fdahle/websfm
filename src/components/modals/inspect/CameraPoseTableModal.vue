@@ -29,6 +29,11 @@ const {
 } = useTableSort(() => props.poses, value, { initialKey: 'imageName', compare })
 
 const matchedCount = computed(() => props.poses.filter((p) => p.imageId).length)
+const subtitle = computed(
+  () =>
+    `${props.poses.length} pose${props.poses.length === 1 ? '' : 's'} · ${matchedCount.value} matched to loaded images` +
+    (props.crs ? ` · positions in ${props.crs}` : ''),
+)
 
 function show(value) {
   if (!Number.isFinite(value)) return '—'
@@ -42,21 +47,13 @@ function show(value) {
 <template>
   <ModalShell
     title="Camera Poses"
+    :subtitle="subtitle"
     aria-label="Camera Poses Table"
     width="min(96vw, 1400px)"
     height="80vh"
     flush
     @close="emit('close')"
   >
-    <template #header>
-      <div>
-        <div class="pose-title">Camera Poses</div>
-        <div class="subtitle">
-          {{ poses.length }} pose{{ poses.length === 1 ? '' : 's' }} · {{ matchedCount }} matched to loaded images
-          <template v-if="crs"> · positions in {{ crs }}</template>
-        </div>
-      </div>
-    </template>
     <div class="note">
       Unmatched rows are retained and will link automatically when an image with the same filename is added.
     </div>
@@ -120,18 +117,9 @@ function show(value) {
 </template>
 
 <style scoped>
-.pose-title {
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-}
-.subtitle,
 .note {
   color: var(--text-dim);
   font-size: 12px;
-}
-.subtitle {
-  margin-top: 3px;
 }
 .note {
   padding: 8px 16px;

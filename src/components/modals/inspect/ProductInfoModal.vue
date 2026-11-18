@@ -108,10 +108,6 @@ watch(info, (now) => {
 
 <template>
   <ModalShell v-if="info" :title="info.title" width="440px" flush @close="emit('close')">
-    <template #header>
-      <span class="info-title" :title="info.title">{{ info.title }}</span>
-    </template>
-
     <div v-if="previewUrl" class="preview">
       <img :src="previewUrl" :alt="info.title" class="preview-img" />
     </div>
@@ -126,17 +122,6 @@ watch(info, (now) => {
 </template>
 
 <style scoped>
-/* As ImageInfoModal: a smaller title that ellipsizes, clear of the close button. */
-.info-title {
-  flex: 1;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text);
-}
-
 .preview {
   background: #000;
   text-align: center;

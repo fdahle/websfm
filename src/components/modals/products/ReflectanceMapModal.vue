@@ -37,10 +37,10 @@ function run() {
 
 <template>
   <ModalShell title="Reflectance Map" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Reflectance Map <ExperimentalBadge id="reflectance" /></span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
+    <template #badge><ExperimentalBadge id="reflectance" /></template>
     <WarnBox v-if="!rig">No photo here is a band of a multispectral camera (MicaSense RedEdge or Altum).</WarnBox>
     <WarnBox v-else-if="!dem">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>): the map lies on it.</WarnBox>
     <template v-else>

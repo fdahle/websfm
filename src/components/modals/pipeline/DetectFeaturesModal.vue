@@ -497,8 +497,7 @@ provideStepLayout('detect-features')
 
 <template>
   <ModalShell title="Detect Features" @close="onShellClose">
-    <template #header>
-      <span class="modal-title">Detect Features</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <SettingsField

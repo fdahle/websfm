@@ -38,10 +38,6 @@ const gpsUrl = computed(() => {
 
 <template>
   <ModalShell :title="image.name" width="520px" flush @close="$emit('close')">
-    <template #header>
-      <span class="info-title" :title="image.name">{{ image.name }}</span>
-    </template>
-
     <div class="preview">
       <img
         v-if="!image.previewPending && !image.previewFailed"
@@ -85,18 +81,6 @@ const gpsUrl = computed(() => {
 </template>
 
 <style scoped>
-/* #header replaces the shell's title: a smaller name that ellipsizes, kept clear
-   of the close button. */
-.info-title {
-  flex: 1;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text);
-}
-
 .preview {
   background: #000;
   text-align: center;

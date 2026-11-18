@@ -116,8 +116,7 @@ provideStepLayout('contours')
 
 <template>
   <ModalShell title="Contour Lines" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Contour Lines</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <WarnBox v-if="!dem">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>).</WarnBox>

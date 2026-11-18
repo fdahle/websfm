@@ -80,8 +80,7 @@ provideStepLayout('texture-mesh')
 
 <template>
   <ModalShell title="Texture Mesh" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Texture Mesh</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <NoSourceWarn v-if="!meshes.length" kind="mesh" />

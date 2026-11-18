@@ -185,10 +185,7 @@ provideStepLayout('sparse-reconstruction')
     :title="props.groundControlAdjustment ? 'Adjust with Ground Control' : 'Sparse Reconstruction'"
     @close="emit('close')"
   >
-    <template #header>
-      <span class="modal-title">{{
-        props.groundControlAdjustment ? 'Adjust with Ground Control' : 'Sparse Reconstruction'
-      }}</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <p v-if="props.groundControlAdjustment" class="adjust-intro">

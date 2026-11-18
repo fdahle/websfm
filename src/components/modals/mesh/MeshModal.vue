@@ -117,8 +117,7 @@ provideStepLayout('mesh')
 
 <template>
   <ModalShell title="Build Mesh" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Build Mesh</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <WarnBox v-if="!sources.length && !hasDense">

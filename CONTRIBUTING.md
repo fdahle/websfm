@@ -102,6 +102,7 @@ Read the section your change touches:
 | a control that can be disabled | [Disabled controls say why](docs/conventions.md#disabled-controls-say-why) |
 | words a user reads | [Text in the UI](docs/conventions.md#text-in-the-ui), [Menu labels](docs/conventions.md#menu-labels) |
 | a step made faster or better | [An option or not](docs/conventions.md#an-option-or-not) |
+| any dialog | [Every dialog's frame](docs/conventions.md#every-dialogs-frame) |
 | a dialog that runs a processing step | [Dialogs of a processing step](docs/conventions.md#dialogs-of-a-processing-step) |
 | log lines, or anything the mouse can do | [The console](docs/conventions.md#the-console) |
 

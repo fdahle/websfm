@@ -218,6 +218,10 @@ Notable changes to WebSfM. The format follows
   still need a DEM, and the model frame still needs a raster to measure on.
 
 ### Changed
+- **Every dialog has the same title bar.** The Inspect tables (Image Table, Camera Poses,
+  Control & Markers, Matches) and the image and product information now show their title
+  like every other dialog, with counts in a line under it and their controls beside the
+  close button; the Image Table's tabs sit in a row of their own.
 - **The log says why a georeference was dropped.** A georeference is kept only while what
   it was fitted on stays the same; when it is dropped, the console now says what changed
   (the camera positions, the GCPs, the photos, the cameras, the sparse model or the CRS,

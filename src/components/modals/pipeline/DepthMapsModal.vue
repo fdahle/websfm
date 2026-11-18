@@ -165,8 +165,7 @@ function run() {
 
 <template>
   <ModalShell title="Build Depth Maps" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Build Depth Maps</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <!-- Cards, not a select: no value/default on the FieldHelp (the Guide marker's default shows). -->

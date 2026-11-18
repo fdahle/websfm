@@ -101,8 +101,7 @@ function run() {
 
 <template>
   <ModalShell title="Co-register DEM" @close="emit('close')">
-    <template #header>
-      <span class="modal-title">Co-register DEM</span>
+    <template #actions>
       <SettingsPresetsMenu :dialog="dialog" />
     </template>
     <WarnBox v-if="!dems.length">Build a DEM first (<strong>Reconstruct ▸ DEM</strong>).</WarnBox>
