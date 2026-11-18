@@ -66,7 +66,7 @@ export default [
       'vue/multi-word-component-names': 'off',
     },
   },
-  // UI text by language (CONTRIBUTING ▸ Text in the UI): a component keeps no bare
+  // UI text by language (docs/conventions.md ▸ Text in the UI): a component keeps no bare
   // English in its text or in the attributes a user reads. Every component, but those
   // still waiting for conversion (src/components/i18nPending.js, a list that only shrinks).
   {

@@ -188,7 +188,7 @@ export function createFusionRun({
       sparse = mainSparseCloud.value
     const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
     const tRun = performance.now()
-    // The run's closing line (CONTRIBUTING.md ▸ The console).
+    // The run's closing line (docs/conventions.md ▸ The console).
     const closing = (cloud, nMaps) =>
       log(
         `Dense cloud "${cloud.name}": ${cloud.count.toLocaleString('en')} points from ` +

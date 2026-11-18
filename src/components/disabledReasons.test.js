@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse } from '@vue/compiler-sfc'
 
-// CONTRIBUTING ▸ Disabled controls say why: a control that can be disabled carries a
+// docs/conventions.md ▸ Disabled controls say why: a control that can be disabled carries a
 // title (its hover tooltip) saying why, in the user's terms. Disabled elements swallow
 // mouse events in some browsers, so the title sits on the disabled element itself.
 // This walks every component template and lists any element with a `disabled`

@@ -1,6 +1,6 @@
 # Changelog
 
-Notable changes to websfm. The format follows
+Notable changes to WebSfM. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]

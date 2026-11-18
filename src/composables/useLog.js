@@ -59,12 +59,12 @@ function checkLine(level, source) {
       : ''
   if (bad && !warned.has(bad)) {
     warned.add(bad)
-    console.warn(`log line with ${bad}, not in core/logRules.js (CONTRIBUTING.md ▸ The console)`)
+    console.warn(`log line with ${bad}, not in core/logRules.js (docs/conventions.md ▸ The console)`)
   }
 }
 
 export function useLog() {
-  // The rules are in CONTRIBUTING.md ▸ The console; the sources, levels and channels
+  // The rules are in docs/conventions.md ▸ The console; the sources, levels and channels
   // in core/logRules.js. `opts.channel` separates the two kinds of line that share
   // this stream:
   //   'pipeline' (default) — the record: what a detector, matcher, SfM/dense run, or

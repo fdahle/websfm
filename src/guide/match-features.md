@@ -22,7 +22,7 @@
   Math ($…$) and images (![alt](assets/foo.png)) work as in the glossary.
 
   Write for the user, briefly: what the setting does and when to change it, about
-  80 words a section (CONTRIBUTING.md ▸ Keep the in-app help in step).
+  80 words a section (docs/conventions.md ▸ Keep the in-app help in step).
 -->
 ---
 id: match-features

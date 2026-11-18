@@ -1,4 +1,4 @@
-// Components that still hold English in their template or script (CONTRIBUTING ▸ Text in
+// Components that still hold English in their template or script (docs/conventions.md ▸ Text in
 // the UI). Every other component is checked: ESLint's vue/no-bare-strings-in-template
 // (eslint.config.js) and bareText.test.js. The list only shrinks: convert a file, then
 // take it off. A new component is never added here. Not part of the app.

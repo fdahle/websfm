@@ -610,7 +610,7 @@ function judgeReference(
   }
 }
 
-// Debug, one line per map (CONTRIBUTING.md ▸ The console): the run's progress bar
+// Debug, one line per map (docs/conventions.md ▸ The console): the run's progress bar
 // shows the pass moving, and its summary line is at info.
 function logReference(onLog, s, label, mi, nMaps, nCand, cfg, tMap) {
   onLog(

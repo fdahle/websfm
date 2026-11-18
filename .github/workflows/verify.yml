@@ -23,6 +23,7 @@ on:
       - 'AGENTS.md'
       - 'CLAUDE.md'
       - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
       - 'docs/**'
   pull_request:
     paths-ignore:
@@ -32,6 +33,7 @@ on:
       - 'AGENTS.md'
       - 'CLAUDE.md'
       - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
       - 'docs/**'
 permissions:
   contents: read

@@ -1,5 +1,5 @@
 // The console panel (components/layout/DevConsole.vue): its tabs, buttons and filter.
-// The log lines and the command replies stay in English (CONTRIBUTING.md ▸ Text in
+// The log lines and the command replies stay in English (docs/conventions.md ▸ Text in
 // the UI), so they are not here.
 export default {
   tab: {

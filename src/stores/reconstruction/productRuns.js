@@ -95,7 +95,7 @@ export function createProductRuns({
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
   // settings.points 'ground' builds a DTM from the ground class (LAS 2) of a
   // classified cloud instead, and 'classes' a DEM of the chosen classes (a canopy DSM).
-  // A raster run's closing line (CONTRIBUTING.md ▸ The console): its size, cell and time.
+  // A raster run's closing line (docs/conventions.md ▸ The console): its size, cell and time.
   // A tiled raster keeps a preview overview in width/height/gsd; its full size is
   // fullWidth/fullHeight/fullGsd.
   function rasterClosing(what, record, t0) {

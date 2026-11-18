@@ -5,7 +5,7 @@ import { babelParse } from '@vue/compiler-sfc'
 import { LOG_SOURCES, LOG_SOURCE_IDS, LOG_LEVEL_IDS, LEGACY_SOURCES, logSourceId, logSourceColor } from './logRules.js'
 import { resolveCommand } from './help/commands.js'
 
-// CONTRIBUTING.md ▸ The console: every log line in src/ is read here, as written, and
+// docs/conventions.md ▸ The console: every log line in src/ is read here, as written, and
 // held to the rules a person cannot check by eye across 1,400 lines. A line is
 // `log(message, level, source, opts)`, `onLog(message, level, source)` or a worker's
 // `emit('log', [message, level, source])`.
@@ -136,7 +136,7 @@ describe('logRules table', () => {
   })
 })
 
-describe('log lines (CONTRIBUTING.md ▸ The console)', () => {
+describe('log lines (docs/conventions.md ▸ The console)', () => {
   it('are found', () => {
     expect(CALLS.length).toBeGreaterThan(1000)
   })

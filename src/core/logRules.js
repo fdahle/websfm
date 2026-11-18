@@ -1,6 +1,6 @@
 // What a console line may be: its source, level and channel. The one table the console
 // (DevConsole: badge colours, the source filter, its order) and the logging rules test
-// (logRules.test.js) read. The rules themselves are in CONTRIBUTING.md ▸ The console.
+// (logRules.test.js) read. The rules themselves are in docs/conventions.md ▸ The console.
 //
 // A line is `log(message, level, source, { channel, command })` (composables/useLog.js),
 // or `onLog(message, level, source)` from core and the workers.

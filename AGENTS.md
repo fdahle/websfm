@@ -4,9 +4,10 @@ WebSfM is a browser photogrammetry app: Vue 3 + Pinia UI, a web-worker pool, and
 Rust compiled to WebAssembly. Read these before changing code:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the layers, and which files a change touches.
-- [CONTRIBUTING.md](CONTRIBUTING.md): what a change needs, including **Keep the
-  in-app help in step**, which applies to every change to a setting, operation or
-  user-visible feature.
+- [CONTRIBUTING.md](CONTRIBUTING.md): what a pull request needs.
+- [docs/conventions.md](docs/conventions.md): the rules a change follows, including
+  **Keep the in-app help in step**, which applies to every change to a setting,
+  operation or user-visible feature.
 - [docs/METHODS.md](docs/METHODS.md): the algorithms, when a change touches the maths.
 
 Rules that are easy to miss:
@@ -21,7 +22,7 @@ Rules that are easy to miss:
 - Third-party code, tables, models or data taken in by hand get an entry in
   `src/core/help/licenses.js`, their license text under `licenses/` and a line in
   [THIRD_PARTY.md](THIRD_PARTY.md). npm packages and crates are listed by the build
-  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Third-party code and data*).
+  ([docs/conventions.md](docs/conventions.md) ▸ *Third-party code and data*).
 - Use every core for heavy CPU work. Spread independent items (images, pairs, maps,
   blocks) over the worker pool (`POOL_SIZE`, `worker:` pins a call; split as in
   `core/dense/depthSplit.js`, each worker with its share of the memory budget), or run
@@ -33,19 +34,19 @@ Rules that are easy to miss:
   order, each listed once as a group (its header with a short fact opens it; its
   advanced fields in `#tuning` show with Show advanced settings), effects from
   `src/core/stepEffects/` in two lengths
-  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Dialogs of a processing step*).
+  ([docs/conventions.md](docs/conventions.md) ▸ *Dialogs of a processing step*).
 - A disabled control has a `title` saying why, in the user's terms
-  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Disabled controls say why*; a unit test checks).
+  ([docs/conventions.md](docs/conventions.md) ▸ *Disabled controls say why*; a unit test checks).
 - UI text goes through the catalogues in `src/core/i18n/<lang>/`: `t('area.key')` in a
   template, `msg('area.key', params)` returned from core and workers, never an English
   sentence built in code. Every component is checked but those in
   `src/components/i18nPending.js`, a list that only shrinks: never add a new one to it
-  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Text in the UI*).
+  ([docs/conventions.md](docs/conventions.md) ▸ *Text in the UI*).
 - Keyboard shortcuts live in `src/core/help/shortcuts.js`: a handler tests
   `matches(e, id)` and a tooltip shows `keyLabel(id)`; never compare `e.key` or type
-  "(Ctrl+Z)" by hand ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in
+  "(Ctrl+Z)" by hand ([docs/conventions.md](docs/conventions.md) ▸ *Keep the in-app help in
   step*, item 4).
-- Console log lines follow [CONTRIBUTING.md](CONTRIBUTING.md) ▸ *The console*: a source
+- Console log lines follow [docs/conventions.md](docs/conventions.md) ▸ *The console*: a source
   from `src/core/logRules.js` (never a new word at the call), a level by what the user
   should do (`debug` per item, `info` the record with every auto-chosen value and its
   inputs, one `success` closing line written by the store that started the run, never
@@ -72,7 +73,7 @@ Rules that are easy to miss:
   COLMAP or ODM, not the maintainers. Say what a setting does and when to change it,
   briefly, in their terms. Never name a test dataset, a bench number or a date in the
   app; the evidence goes in CHANGELOG.md, the method detail in docs/METHODS.md
-  ([CONTRIBUTING.md](CONTRIBUTING.md) ▸ *Keep the in-app help in step*). Use the names
+  ([docs/conventions.md](docs/conventions.md) ▸ *Keep the in-app help in step*). Use the names
   in [docs/terms.md](docs/terms.md).
 - The name is **WebSfM** in anything people read (UI text, messages, docs, help).
   Lowercase `websfm` stays only in identifiers: URLs, the repo and npm package, the

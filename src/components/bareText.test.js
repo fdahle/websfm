@@ -4,7 +4,7 @@ import { parse } from '@vue/compiler-sfc'
 import { execFileSync } from 'node:child_process'
 import { I18N_PENDING } from './i18nPending.js'
 
-// CONTRIBUTING ▸ Text in the UI: a converted file keeps its words in the catalogues.
+// docs/conventions.md ▸ Text in the UI: a converted file keeps its words in the catalogues.
 // ESLint's vue/no-bare-strings-in-template sees text and plain attributes only; this
 // looks where it cannot: string literals in template expressions
 // ({{ ok ? 'Choose a projected CRS' : '' }}, :hint="`Saved as ${x}`") and in the

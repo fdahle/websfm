@@ -77,7 +77,14 @@ describe('file references in the documentation', () => {
   })
 
   it('cover the documents they should (a guard on the file list above)', () => {
-    for (const d of ['README.md', 'ARCHITECTURE.md', 'AGENTS.md', 'CONTRIBUTING.md', 'docs/METHODS.md']) {
+    for (const d of [
+      'README.md',
+      'ARCHITECTURE.md',
+      'AGENTS.md',
+      'CONTRIBUTING.md',
+      'docs/conventions.md',
+      'docs/METHODS.md',
+    ]) {
       expect(docs).toContain(d)
     }
   })

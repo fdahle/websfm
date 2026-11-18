@@ -1,7 +1,7 @@
 // Deutsch: das Menüband (die englischen Texte stehen in core/help/ribbonTabs.js und
 // commands.js; core/help/ribbonText.js macht daraus die Schlüssel). Fachbegriffe, die
 // man auch im Deutschen englisch sagt (Sparse, Dense, Fiducials …), bleiben englisch
-// (CONTRIBUTING ▸ Text in the UI).
+// (docs/conventions.md ▸ Text in the UI).
 // "\n" bricht ein Etikett auf zwei Zeilen.
 export default {
   tab: {

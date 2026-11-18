@@ -7,7 +7,7 @@
 // Unlike PresetCards this sets ONE setting, so there is no "· modified" state — the
 // selected card simply is the current value.
 //   options: [{ id, label, blurb?, disabled?, reason? }]
-// `reason` says why a disabled card cannot be chosen (its tooltip; CONTRIBUTING ▸
+// `reason` says why a disabled card cannot be chosen (its tooltip; docs/conventions.md ▸
 // Disabled controls say why).
 // An option's label, blurb and reason: a string or a message (core/i18n).
 import { tx } from '../../../composables/useI18n.js'

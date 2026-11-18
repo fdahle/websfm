@@ -1,5 +1,5 @@
 // Console commands for the edits a user makes by hand: rename a photo, disable a GCP,
-// set a product as main… (CONTRIBUTING.md ▸ The console ▸ Everything can be typed).
+// set a product as main… (docs/conventions.md ▸ The console ▸ Everything can be typed).
 // Each is `<noun> <action> <arguments>` ("gcp disable GCP 3" with the name quoted when
 // it has spaces), its own command in the console's Edit group. An edit confirmed in the
 // Activity tab names its command (`editCommand` below); a unit test checks that every

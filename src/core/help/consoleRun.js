@@ -1,5 +1,5 @@
 // The console's `run`: every processing step a workflow can run unattended is a stage
-// it takes, with that step's settings as key=value (CONTRIBUTING.md ▸ The console ▸
+// it takes, with that step's settings as key=value (docs/conventions.md ▸ The console ▸
 // Everything can be typed). Derived from the workflow blocks (core/workflow.js), so a
 // new automated block is a `run` stage the moment it exists, with the same settings the
 // Workflow Builder shows. Pure.

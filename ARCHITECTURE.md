@@ -114,21 +114,21 @@ to the algorithm; the other steps differ only in file names.
 | To … | Start in | Also touch |
 | --- | --- | --- |
 | change an algorithm | `core/<stage>/` or `crates/<crate>/` | its `*.test.js`; `npm run build:wasm` for Rust; [docs/METHODS.md](docs/METHODS.md) if the method changes |
-| add or change a setting | the `*_DEFAULTS` in `core/defaults.user.js` and the dialog in `components/modals/` | the guide section in `src/guide/` (see [CONTRIBUTING](CONTRIBUTING.md#keep-the-in-app-help-in-step)) |
+| add or change a setting | the `*_DEFAULTS` in `core/defaults.user.js` and the dialog in `components/modals/` | the guide section in `src/guide/` (see [conventions](docs/conventions.md#keep-the-in-app-help-in-step)) |
 | tune an internal threshold | `core/tuning.js` | the test that pins it |
 | add a ribbon command | `core/help/ribbonTabs.js`: its `tip` (what it does) and `guide` (its article); its German in `core/i18n/de/ribbon.js` | `composables/useCommandDispatch.js`; it becomes a console command automatically (`core/help/commands.js`); `npm run docs:features` adds it to [docs/features.md](docs/features.md) |
-| add or change text a user reads | its message in `core/i18n/en/<area>.js` | `t('area.key')` in the template, `msg('area.key', …)` from core ([CONTRIBUTING](CONTRIBUTING.md#text-in-the-ui)) |
-| add a processing step, tool or import | its run in a store or composable | its log lines and closing line ([CONTRIBUTING](CONTRIBUTING.md#what-an-operation-logs)); an automated block in `core/workflow.js` makes it a console `run` stage |
+| add or change text a user reads | its message in `core/i18n/en/<area>.js` | `t('area.key')` in the template, `msg('area.key', …)` from core ([conventions](docs/conventions.md#text-in-the-ui)) |
+| add a processing step, tool or import | its run in a store or composable | its log lines and closing line ([conventions](docs/conventions.md#what-an-operation-logs)); an automated block in `core/workflow.js` makes it a console `run` stage |
 | add an edit made by hand (sidebar, table, right-click) | the store call | its Activity line names a console command: an entry in `core/help/consoleEdits.js`, carried out in `composables/useConsoleEnv.js` |
 | add or change a keyboard shortcut | its entry in `core/help/shortcuts.js` | the handler asks `matches(e, id)`, a tooltip shows `keyLabel(id)` (`utils/shortcutLabels.js`); the Shortcuts dialog lists it by itself |
 | add an import format | a reader in `core/io/` | `composables/useImportRouting.js` (and `core/io/importKind.js` for dropped files) |
 | add an export format | a writer in `core/products/exporters.js` or `core/io/` | `components/modals/products/ExportModal.vue`, `workers/ops/export.js` |
 | add per-project state | a store in `stores/` | register it with `registerProjectStore` (`stores/projectStores.js`) so it saves and reopens with the project |
 | change a WebGPU kernel | `workers/gpu/`.| PatchMatch exists twice (WGSL, Rust `mvs.rs`) and changes in both; `tests/bench/patchmatchCases.js` holds both to the same accuracy (`npm test` for Rust, the nightly browser suite and `scripts/bench/gpu-depth-check.mjs` for WGSL) ([`workers/gpu/README.md`](src/workers/gpu/README.md)) |
-| add or change a processing dialog | its `SettingsStep`s in `components/modals/` | the effect lines in `core/stepEffects/<dialog>.js` and their test ([CONTRIBUTING](CONTRIBUTING.md#dialogs-of-a-processing-step)) |
+| add or change a processing dialog | its `SettingsStep`s in `components/modals/` | the effect lines in `core/stepEffects/<dialog>.js` and their test ([conventions](docs/conventions.md#dialogs-of-a-processing-step)) |
 | mark a feature experimental | an entry in `core/help/experimental.js` | an `ExperimentalBadge` where the feature shows; remove both once it is checked on real data |
 | explain a concept | a new entry in `src/glossary/<category>/` | aliases auto-link it in all help text |
-| take in third-party code, a model or data | an entry in `core/help/licenses.js` | its license text under `licenses/`, a line in [THIRD_PARTY.md](THIRD_PARTY.md) ([CONTRIBUTING](CONTRIBUTING.md#third-party-code-and-data)) |
+| take in third-party code, a model or data | an entry in `core/help/licenses.js` | its license text under `licenses/`, a line in [THIRD_PARTY.md](THIRD_PARTY.md) ([conventions](docs/conventions.md#third-party-code-and-data)) |
 | add an example dataset | `core/examples.js` | `scripts/examples/make-example.py`, `scripts/fetch-examples.mjs`, a walkthrough in `src/guide/` |
 
 ## Conventions worth knowing
@@ -162,7 +162,7 @@ to the algorithm; the other steps differ only in file names.
   why.
 - **Log derived values with their inputs.** Every automatically chosen value gets a
   log line, so a run can be reproduced from its log. Sources, levels and channels are
-  in `core/logRules.js`, the rules in [CONTRIBUTING](CONTRIBUTING.md#the-console).
+  in `core/logRules.js`, the rules in [conventions](docs/conventions.md#the-console).
 - **Everything can be typed.** The console reaches every ribbon command
   (`core/help/commands.js`), every automated workflow block with its settings
   (`core/help/consoleRun.js`) and every hand edit (`core/help/consoleEdits.js`).

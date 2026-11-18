@@ -2,6 +2,7 @@
 
 @AGENTS.md
 @CONTRIBUTING.md
+@docs/conventions.md
 
 Personal, machine-specific notes go in CLAUDE.local.md (gitignored).
 

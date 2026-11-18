@@ -44,7 +44,7 @@ import { useImagesStore } from '../useImagesStore.js'
 import { useModelsStore } from '../useModelsStore.js'
 import { nounFor, pluralize } from '../../core/textFormat.js'
 
-// A count in a log line, in English as the line is (CONTRIBUTING.md ▸ The console).
+// A count in a log line, in English as the line is (docs/conventions.md ▸ The console).
 const en = (n) => n.toLocaleString('en')
 
 export function createMatchAll({

@@ -58,7 +58,8 @@ scripts/bench/configs/
 
 # Internal development docs, kept locally and never published: everything under
 # dev/ (plan, done log, verification register, planning specs) and personal Claude
-# Code notes. CLAUDE.md itself is public: it imports AGENTS.md and CONTRIBUTING.md.
+# Code notes. CLAUDE.md itself is public: it imports AGENTS.md, CONTRIBUTING.md
+# and docs/conventions.md.
 /dev/
 CLAUDE.local.md
 

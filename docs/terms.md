@@ -2,7 +2,7 @@
 
 The words WebSfM's interface, help, messages and docs use for the same things, so a
 thing has one name wherever a user meets it. Write for people who know photogrammetry
-from Metashape, COLMAP or ODM ([CONTRIBUTING.md](../CONTRIBUTING.md) ▸ *Keep the in-app
+from Metashape, COLMAP or ODM ([conventions.md](conventions.md) ▸ *Keep the in-app
 help in step*).
 
 This is not the glossary: the glossary (`src/glossary/`) explains concepts to users,
