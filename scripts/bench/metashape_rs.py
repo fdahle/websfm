@@ -3,7 +3,7 @@ leave-one-out GCP splits the WebSfM bench ran (RSH-5, dev/TODO.md ▸ 3: the Mav
 block, mavic-rs5-HV-0*.json).
 
     python metashape_rs.py --images <dir> --gcps GCPs.csv --splits <dir> --ws <dir>
-        [--models off,on] [--out result.json]
+        [--models off,on,full] [--variants base,norefs,center,norefs-center] [--out result.json]
 
 For each model (off: Shutter.Model.Disabled, on: Shutter.Model.Regularized, which
 Agisoft recommends for drones, full: Shutter.Model.Full) the photos are aligned once at Metashape's API defaults
@@ -97,9 +97,37 @@ def align(doc, images, model):
     return chunk, time.time() - t0
 
 
-def run_split(chunk, gcps, split, model):
+def offset_enu(chunk, est_internal, ref_geo):
+    """est (chunk internal) minus ref (chunk CRS), metres east / north / up."""
+    T = chunk.transform.matrix
+    est = T.mulp(est_internal)
+    ref = chunk.crs.unproject(ref_geo)
+    d = chunk.crs.localframe(est).mulv(est - ref)
+    return [d.x, d.y, d.z]
+
+
+def camera_offsets(chunk):
+    """Mean and spread of the aligned cameras' positions against their EXIF references
+    (the up part shows a datum offset: DJI writes heights above sea level)."""
+    ds = [offset_enu(chunk, cam.center, cam.reference.location) for cam in chunk.cameras
+          if cam.transform is not None and cam.reference.location is not None]
+    if not ds:
+        return None
+    mean = [sum(d[k] for d in ds) / len(ds) for k in range(3)]
+    sd = [math.sqrt(sum((d[k] - mean[k]) ** 2 for d in ds) / len(ds)) for k in range(3)]
+    return {"mean": mean, "sd": sd, "n": len(ds)}
+
+
+def run_split(chunk, gcps, split, variant):
+    """variant: {"refs": the cameras' EXIF positions stay references, "shift": px added
+    to every mark (−0.5 reads a top-left-edge mark as pixel-centre)}."""
     c = chunk.copy()
     by_name = {Path(cam.photo.path).name: cam for cam in c.cameras if cam.photo}
+    if not variant["refs"]:
+        for cam in c.cameras:
+            cam.reference.enabled = False
+            cam.reference.location_enabled = False
+            cam.reference.rotation_enabled = False
     markers = {}
     for label, g in split.items():
         ref = gcps[label]
@@ -111,7 +139,8 @@ def run_split(chunk, gcps, split, model):
         for image, x, y in g["marks"]:
             cam = by_name.get(image)
             if cam is not None:
-                m.projections[cam] = Metashape.Marker.Projection(Metashape.Vector([x, y]), True)
+                p = Metashape.Vector([x + variant["shift"], y + variant["shift"]])
+                m.projections[cam] = Metashape.Marker.Projection(p, True)
         markers[label] = (m, g["role"])
     t0 = time.time()
     c.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_k1=True, fit_k2=True, fit_k3=True,
@@ -120,9 +149,34 @@ def run_split(chunk, gcps, split, model):
     out = {"seconds": seconds, "markers": {}}
     for label, (m, role) in markers.items():
         out["markers"][label] = {"role": role, "error": marker_error(c, m), "marks": len(m.projections)}
-    aligned = sum(1 for cam in c.cameras if cam.transform is not None)
-    out["aligned"] = aligned
+    out["aligned"] = sum(1 for cam in c.cameras if cam.transform is not None)
+    cal = c.sensors[0].calibration if c.sensors else None
+    if cal is not None:
+        out["calibration"] = {k: getattr(cal, k) for k in ("f", "cx", "cy", "k1", "k2", "k3", "p1", "p2")}
+    out["cameraOffsets"] = camera_offsets(c)
     return out
+
+
+def summarise(splits):
+    checks = [m["error"] for s in splits.values() for m in s["markers"].values()
+              if m["role"] == "check" and m["error"]]
+    controls = [m["error"] for s in splits.values() for m in s["markers"].values()
+                if m["role"] == "control" and m["error"]]
+    return (
+        {"H": rms([math.hypot(e[0], e[1]) for e in checks]), "V": rms([e[2] for e in checks]), "n": len(checks),
+         "meanE": sum(e[0] for e in checks) / len(checks), "meanN": sum(e[1] for e in checks) / len(checks),
+         "meanU": sum(e[2] for e in checks) / len(checks)},
+        {"H": rms([math.hypot(e[0], e[1]) for e in controls]), "V": rms([e[2] for e in controls]),
+         "n": len(controls)},
+    )
+
+
+VARIANTS = {
+    "base": {"refs": True, "shift": 0.0},
+    "norefs": {"refs": False, "shift": 0.0},
+    "center": {"refs": True, "shift": -0.5},
+    "norefs-center": {"refs": False, "shift": -0.5},
+}
 
 
 def main():
@@ -132,6 +186,7 @@ def main():
     ap.add_argument("--splits", required=True)
     ap.add_argument("--ws", required=True)
     ap.add_argument("--models", default="off,on")
+    ap.add_argument("--variants", default="base", help=",".join(VARIANTS))
     ap.add_argument("--out")
     a = ap.parse_args()
 
@@ -147,22 +202,15 @@ def main():
         chunk, align_s = align(doc, images, model)
         doc.save()
         per = {"alignSeconds": align_s, "aligned": sum(1 for c in chunk.cameras if c.transform is not None),
-               "splits": {}}
-        for name, split in splits.items():
-            per["splits"][name] = run_split(chunk, gcps, split, model)
-            print(model, name, json.dumps(per["splits"][name]), flush=True)
-        checks = [m["error"] for s in per["splits"].values() for m in s["markers"].values()
-                  if m["role"] == "check" and m["error"]]
-        controls = [m["error"] for s in per["splits"].values() for m in s["markers"].values()
-                    if m["role"] == "control" and m["error"]]
-        per["checkRms"] = {"H": rms([math.hypot(e[0], e[1]) for e in checks]), "V": rms([e[2] for e in checks]),
-                           "n": len(checks)}
-        per["controlRms"] = {"H": rms([math.hypot(e[0], e[1]) for e in controls]),
-                             "V": rms([e[2] for e in controls]), "n": len(controls)}
+               "alignedOffsets": camera_offsets(chunk), "variants": {}}
         sensor = chunk.sensors[0] if chunk.sensors else None
         per["sensor"] = {"rolling_shutter": str(sensor.rolling_shutter) if sensor else None}
+        for vname in a.variants.split(","):
+            splits_out = {name: run_split(chunk, gcps, split, VARIANTS[vname]) for name, split in splits.items()}
+            check, control = summarise(splits_out)
+            per["variants"][vname] = {"checkRms": check, "controlRms": control, "splits": splits_out}
+            print(model, vname, "check", json.dumps(check), "control", json.dumps(control), flush=True)
         result["models"][model] = per
-        print(model, "check RMS", json.dumps(per["checkRms"]), flush=True)
     text = json.dumps(result, indent=1)
     if a.out:
         Path(a.out).write_text(text)
