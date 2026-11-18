@@ -51,7 +51,7 @@ export function useRibbonState({
   const { gcps } = storeToRefs(useGcpsStore())
   const { poses } = storeToRefs(usePosesStore())
   const { sensors } = storeToRefs(useSensorsStore())
-  const { depthMapCount, dem } = storeToRefs(useReconstructionStore())
+  const { depthMapCount, dem, currentFrameSignature } = storeToRefs(useReconstructionStore())
   const { hasReferenceDem } = storeToRefs(useExternalStore())
   const { records: measurementRecords } = storeToRefs(useMeasurementsStore())
   const { imageViewPrefs, showKeypointsFor } = useImageViewSettings()
@@ -83,6 +83,7 @@ export function useRibbonState({
     fiducialImageCount: images.value.filter((i) => i.fiducialDetections?.length).length,
     fiducialMarkSensorCount: sensors.value.filter((s) => s.fiducialCalibration?.marks?.length).length,
     sparseReady: sparseReady.value,
+    sparseGeoreferenced: sparseReady.value && currentFrameSignature.value?.source === 'georef',
     depthMapCount: depthMapCount.value,
     cloudReady: cloudReady.value,
     denseReady: denseReady.value,

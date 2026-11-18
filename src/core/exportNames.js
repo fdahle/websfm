@@ -60,6 +60,8 @@ export function defaultExportName(
       return `${base}-${kind}`
     case 'measurements':
       return `${base}-measurements`
+    case 'allmaps':
+      return `${base}-allmaps`
     case 'contours':
       return `${base}-contours`
     // Each terrain raster adds its own suffix (-slope, -aspect, -hillshade).

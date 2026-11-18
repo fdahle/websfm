@@ -151,6 +151,7 @@ product or an imported raster is open in front.
 | Export ▸ Interoperability | SfM Project | The cameras, features and sparse model for COLMAP, OpenMVG, VisualSFM, Metashape or NeRF tools. | [Import from COLMAP and other SfM tools](../src/guide/import-sfm.md) |
 | Export ▸ Interoperability | Undistorted Images | The photos with the lens distortion removed, as JPEG or PNG. |  |
 | Export ▸ Interoperability | 3D Tiles | A point cloud or mesh as Cesium 3D Tiles. | [Export 3D Tiles](../src/guide/export-3d-tiles.md) |
+| Export ▸ Interoperability | Allmaps | Each aligned photo georeferenced for Allmaps and other IIIF viewers, from your IIIF image server. | [Export to Allmaps](../src/guide/export-allmaps.md) |
 
 ## Other
 

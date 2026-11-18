@@ -404,6 +404,9 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'export-tiles3d':
         exportKind.value = 'tiles3d'
         break
+      case 'export-allmaps':
+        exportKind.value = 'allmaps'
+        break
       // On a product's tab (its Export), that product; elsewhere the main one.
       case 'export-dem':
       case 'export-ortho': {

@@ -1,5 +1,6 @@
 // The 2D map's view state kept in reconstruction.json: each product's layer
-// (visible, opacity), the layer stack, the unticked layers and the Photos layer.
+// (visible, opacity), the layer stack, the unticked layers and the Photos layer; and,
+// beside the Photos layer, where the photos are served from (Export ▸ Allmaps).
 //
 // Moved verbatim from the store: what it shares comes in by name; names the store
 // defines further down come in late (late.js).
@@ -8,6 +9,7 @@ import { ref, watch } from 'vue'
 import { productMapBlocker } from '../../core/products/productLayers.js'
 import { normalizeMapOrder } from '../../core/products/mapOrder.js'
 import { IMAGE_LAYER_ID, normalizeImageLayer } from '../../core/products/imageOverlay.js'
+import { normalizeIiifImages } from '../../core/io/allmaps.js'
 
 export function createMapView({ dem, ortho, save }) {
   // Map-layer view state per computed product, by its id ({ 'dem-…': { visible,
@@ -61,5 +63,25 @@ export function createMapView({ dem, ortho, save }) {
     save()
   }
 
-  return { productLayers, mapOrder, setMapOrder, mapHidden, setMapLayerHidden, imageLayer, setImageLayer }
+  // The photos' IIIF address ({ template, version }, core/io/allmaps.js), kept from the
+  // last Export ▸ Allmaps so the next one starts from it; null until one is exported.
+  const iiifImages = ref(null)
+  function setIiifImages(value) {
+    const next = normalizeIiifImages(value)
+    if (JSON.stringify(next) === JSON.stringify(iiifImages.value)) return
+    iiifImages.value = next
+    save()
+  }
+
+  return {
+    productLayers,
+    mapOrder,
+    setMapOrder,
+    mapHidden,
+    setMapLayerHidden,
+    imageLayer,
+    setImageLayer,
+    iiifImages,
+    setIiifImages,
+  }
 }

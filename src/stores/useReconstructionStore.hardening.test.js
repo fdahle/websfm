@@ -297,3 +297,36 @@ it('holds saves while switching projects, until the old project is cleared', asy
   expect(projects.isPersisting).toBe(true)
   for (const spy of [...spies, save]) spy.mockRestore()
 })
+
+it('keeps the photos’ IIIF address with the project, for its next Allmaps export', async () => {
+  setActivePinia(createPinia())
+  const projects = useProjectsStore()
+  projects.persistenceAvailable = true
+  projects.currentProjectId = 'iiif'
+  const store = useReconstructionStore()
+  let saved = null
+  const spies = [
+    vi.spyOn(opfs, 'saveReconstruction').mockImplementation(async (_id, doc) => {
+      saved = doc
+      return { ok: true, files: {} }
+    }),
+    vi.spyOn(opfs, 'loadProducts').mockResolvedValue([]),
+    vi.spyOn(opfs, 'loadDepthIndex').mockResolvedValue(null),
+  ]
+  store.setIiifImages({ template: ' https://iiif.example.org/iiif/3/{stem} ', version: 3 })
+  await vi.waitFor(() =>
+    expect(saved?.iiifImages).toEqual({ template: 'https://iiif.example.org/iiif/3/{stem}', version: 3 }),
+  )
+
+  // Reopened, the project has it back; an older project without one has none.
+  setActivePinia(createPinia())
+  useProjectsStore().currentProjectId = 'iiif'
+  const reopened = useReconstructionStore()
+  const load = vi.spyOn(opfs, 'loadReconstruction').mockResolvedValue(saved)
+  await reopened.restore({ projectId: 'iiif' })
+  expect(reopened.iiifImages).toEqual({ template: 'https://iiif.example.org/iiif/3/{stem}', version: 3 })
+  load.mockResolvedValue({ ...saved, iiifImages: undefined })
+  await reopened.restore({ projectId: 'iiif' })
+  expect(reopened.iiifImages).toBeNull()
+  for (const spy of [...spies, load]) spy.mockRestore()
+})

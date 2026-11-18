@@ -36,6 +36,8 @@ export const NEED_CHECKS = {
   keypoints: { ok: (s) => s.kpImageCount > 0, reason: 'Detect keypoints first' },
   matches: { ok: (s) => s.matchCount > 0, reason: 'Run feature matching first' },
   sparse: { ok: (s) => s.sparseReady, reason: 'Build the sparse model first' },
+  // A georeference fitted for the current CRS (reconstruction/frames.js currentFrameSignature).
+  sparseGeoref: { ok: (s) => !!s.sparseGeoreferenced, reason: 'Georeference the sparse model first' },
   depthMaps: { ok: (s) => s.depthMapCount > 0, reason: 'Compute depth maps first' },
   cloud: { ok: (s) => s.cloudReady, reason: 'Build a point cloud first' },
   dense: { ok: (s) => s.denseReady, reason: 'Build a dense cloud first' },

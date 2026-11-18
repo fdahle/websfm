@@ -333,6 +333,13 @@ const exportSources = computed(() => {
   const estimated = reconstructionStore.mainSparseCloud?.cameras?.size ?? 0
   if (exportKind.value === 'poses') return { imported: poses.value.length, estimated }
   if (exportKind.value === 'sensors') return { entered: sensors.value.length, estimated }
+  // Allmaps: the aligned photos, one name to show the IIIF address it gets, and the
+  // address the project's last Allmaps export used.
+  if (exportKind.value === 'allmaps') {
+    const cams = reconstructionStore.mainSparseCloud?.cameras
+    const aligned = cams ? images.value.filter((img) => cams.has(img.uuid)) : []
+    return { estimated: aligned.length, example: aligned[0]?.name ?? '', iiif: reconstructionStore.iiifImages }
+  }
   return {}
 })
 const footprintsStore = useFootprintsStore()

@@ -559,6 +559,11 @@ export const EXPORT_DEFAULTS = {
   // Matches: 'matches' = every pair with its keypoint index pairs; 'pairs' = the pair
   // list with its counts alone.
   matchContent: 'matches',
+  // Allmaps (core/io/allmaps.js): each photo's IIIF image address, {name} standing for
+  // its file name and {stem} for the name without its extension; the IIIF Image API
+  // version the server speaks (2 or 3).
+  iiifTemplate: '',
+  iiifVersion: 2,
 }
 
 // Point-cloud / mesh import (ImportCloudModal.vue → useReconstructionStore.importCloud).

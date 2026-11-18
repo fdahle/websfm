@@ -13,6 +13,7 @@ import { defaultTiling, singleTileFits } from '../../../core/products/tiles3d.js
 import { defaultExportName } from '../../../core/exportNames.js'
 import FileNameField from '../ui/FileNameField.vue'
 import { pluralize } from '../../../core/textFormat.js'
+import { iiifImageUri, iiifTemplateProblem } from '../../../core/io/allmaps.js'
 
 // One reusable export dialog, parameterised by `kind`. It collects a format + a
 // few settings and emits them on run; App.vue maps the result to the right
@@ -263,6 +264,14 @@ const CONFIG = {
       { value: 'kml', label: 'KML (.kml) — Google Earth, WGS 84' },
     ],
   },
+  allmaps: {
+    title: 'Export to Allmaps',
+    hint:
+      'One Georeference Annotation per aligned photo, in one file. Open it in Allmaps Viewer (paste it in, or ' +
+      'give it its address): each photo is loaded from your IIIF image server and warped onto the map by its ' +
+      'control points, which follow the ground and the lens as Photos on the 2D map does.',
+    formats: [{ value: 'annotations', label: 'Georeference Annotations — IIIF JSON for Allmaps' }],
+  },
 }
 
 const imageTooLarge = computed(() => props.kind === 'ortho' && props.orthoCells > MAX_ORTHO_IMAGE_CELLS)
@@ -302,6 +311,8 @@ const settings = ref({
   // Camera poses and calibration: the estimated ones when the sparse model has any.
   poseSource: props.sources.estimated ? 'estimated' : 'imported',
   sensorSource: props.sources.estimated ? 'estimated' : 'entered',
+  // Allmaps: the address the project's last export used.
+  ...(props.sources.iiif ? { iiifTemplate: props.sources.iiif.template, iiifVersion: props.sources.iiif.version } : {}),
 })
 const estimatedPoses = computed(() => props.kind === 'poses' && settings.value.poseSource === 'estimated')
 // Estimated poses are in the export frame (georeferenced, scaled or oriented) with
@@ -357,6 +368,7 @@ function run() {
     sensors: () => ({ source: settings.value.sensorSource }),
     matches: () => ({ content: settings.value.matchContent }),
     vectors: () => ({ coords: wgs84Offered.value ? settings.value.geoJsonCoords : 'project' }),
+    allmaps: () => ({ iiifTemplate: settings.value.iiifTemplate, iiifVersion: settings.value.iiifVersion }),
     cameraFiducials: () => ({}),
     imageFiducials: () => ({}),
     keypoints: () => ({}),
@@ -465,7 +477,28 @@ const optionsShown = computed(() => {
       return true
   }
 })
+// Allmaps: why the IIIF address cannot name the photos yet ('' when it can), and the
+// address the first aligned photo gets.
+const IIIF_PROBLEMS = {
+  empty: 'Type the IIIF address of the photos first',
+  notUrl: 'The IIIF address must start with https:// (or http://)',
+  noPlaceholder: 'Put {name} or {stem} in the IIIF address, so each photo gets its own',
+}
+const iiifProblem = computed(() =>
+  props.kind === 'allmaps'
+    ? (IIIF_PROBLEMS[iiifTemplateProblem(settings.value.iiifTemplate, props.sources.estimated ?? 0)] ?? '')
+    : '',
+)
+const iiifExample = computed(() =>
+  props.sources.example
+    ? `${props.sources.example} → ${iiifImageUri(settings.value.iiifTemplate, props.sources.example)}`
+    : '',
+)
+// The Export button's reason when it cannot run.
+const runBlocked = computed(() => iiifProblem.value)
+
 const OPTION_TITLES = {
+  allmaps: 'IIIF images',
   tiles3d: 'Tiles',
   undistorted: 'Images',
   dem: 'Cells',
@@ -898,6 +931,32 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
         </SettingsField>
       </template>
 
+      <!-- Allmaps: where the photos are served from -->
+      <template v-else-if="kind === 'allmaps'">
+        <SettingsField label-for="iiiftpl" :hint="iiifProblem || iiifExample">
+          <template #label><FieldHelp op="export-allmaps" param="iiifTemplate">Image address</FieldHelp></template>
+          <input
+            id="iiiftpl"
+            v-model="settings.iiifTemplate"
+            type="url"
+            spellcheck="false"
+            placeholder="https://iiif.example.org/iiif/3/{name}"
+            class="field-input wide"
+          />
+        </SettingsField>
+        <SettingsField label-for="iiifver">
+          <template #label><FieldHelp op="export-allmaps" param="iiifVersion">IIIF Image API</FieldHelp></template>
+          <select id="iiifver" v-model.number="settings.iiifVersion" class="field-input field-select">
+            <option :value="2">Version 2</option>
+            <option :value="3">Version 3</option>
+          </select>
+        </SettingsField>
+        <p class="field-hint">
+          The IIIF server must hold each photo whole, at the size it was imported at:
+          {{ pluralize(sources.estimated ?? 0, 'aligned photo') }} in the file.
+        </p>
+      </template>
+
       <!-- Vector layer (footprints, contours, imported polygons) -->
       <template v-else-if="kind === 'vectors'">
         <SettingsField v-if="wgs84Offered" label="Coordinates" label-for="vcoords">
@@ -963,7 +1022,7 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" @click="run">Export</button>
+      <button class="btn btn-primary" :disabled="!!runBlocked" :title="runBlocked || null" @click="run">Export</button>
     </template>
   </ModalShell>
 </template>

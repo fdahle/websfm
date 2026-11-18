@@ -11,6 +11,7 @@ import * as opfs from '../../utils/opfs.js'
 import { yieldToPaint } from '../../utils/concurrency.js'
 import { normalizeRegion } from '../../core/products/region.js'
 import { normalizeProductLayers } from '../../core/products/productLayers.js'
+import { normalizeIiifImages } from '../../core/io/allmaps.js'
 import { normalizeMapOrder } from '../../core/products/mapOrder.js'
 import { normalizeImageLayer } from '../../core/products/imageOverlay.js'
 import { normalizeOrientation } from '../../core/products/orientation.js'
@@ -33,6 +34,7 @@ export function createPersistence({
   ensureMainSparse,
   georef,
   healthDirty,
+  iiifImages,
   imageLayer,
   isPersisting,
   loadDepthIndexIntoMeta,
@@ -101,6 +103,8 @@ export function createPersistence({
       mapOrder: mapOrder.value,
       mapHidden: mapHidden.value,
       imageLayer: imageLayer.value,
+      // Where the photos are served from, for Export ▸ Allmaps. Absent ⇒ none given.
+      iiifImages: iiifImages.value,
       // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
       summary: summary.value,
       denseSummary: denseSummary.value,
@@ -218,6 +222,7 @@ export function createPersistence({
     mapOrder.value = []
     mapHidden.value = []
     imageLayer.value = null
+    iiifImages.value = null
     summary.value = null
     denseSummary.value = null
     depthSummary.value = null
@@ -355,6 +360,7 @@ export function createPersistence({
     mapOrder.value = normalizeMapOrder(data.mapOrder) // absent ⇒ the default stack
     mapHidden.value = normalizeMapOrder(data.mapHidden) // a list of ids, as the order
     imageLayer.value = normalizeImageLayer(data.imageLayer)
+    iiifImages.value = normalizeIiifImages(data.iiifImages)
     summary.value = data.summary ?? null
     denseSummary.value = data.denseSummary ?? null
     depthSummary.value = data.depthSummary ?? null

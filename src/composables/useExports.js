@@ -25,6 +25,10 @@ import { ensureProjection, transform } from '../core/crs.js'
 import { similarityForExport } from '../core/products/exportFrame.js'
 import { pluralize } from '../core/textFormat.js'
 import { fileSafe, exportFileName } from '../core/exportNames.js'
+import { georefFrameOf } from '../core/products/frameSpec.js'
+import { photoGridBuilder } from '../core/products/photoGrid.js'
+import { annotationPage, georeferenceAnnotation, iiifImageUri } from '../core/io/allmaps.js'
+import { PHOTO_GRID_TUNING } from '../core/tuning.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -223,6 +227,74 @@ export function useExports({
     )
   }
 
+  // Export ▸ Allmaps: each aligned photo as a Georeference Annotation (core/io/allmaps.js),
+  // its control points the photo's ground grid in the georeferenced model, the same one
+  // the map's Photos layer draws (core/products/photoGrid.js). On the main thread: a
+  // grid is ~0.3 ms a photo.
+  async function doExportAllmaps({ fileName, iiifTemplate, iiifVersion }) {
+    const t0 = performance.now()
+    const frame = georefFrameOf(recon.currentFrameSignature)
+    const cloud = mainSparseCloud.value
+    if (!frame || !cloud?.cameras?.size) throw new Error('the sparse model is not georeferenced')
+    const crs = currentCrs.value
+    await ensureProjection(crs)
+    const toLonLat = (c) => transform(c, crs, 'EPSG:4326')
+    const gridFor = photoGridBuilder({
+      cameras: cloud.cameras,
+      pos: cloud.points?.pos,
+      toMap: frame.fromSfm,
+      frameModel: recon.frameModelFor,
+    })
+    const aligned = images.value.filter((img) => img.uuid && cloud.cameras.has(img.uuid))
+    log(
+      `Allmaps: ${pluralize(aligned.length, 'aligned photo')} of ${images.value.length.toLocaleString('en')}, ` +
+        `IIIF images at ${iiifTemplate.trim()} (Image API ${iiifVersion}); control points: each photo's ` +
+        `${PHOTO_GRID_TUNING.gridCells + 1} × ${PHOTO_GRID_TUNING.gridCells + 1} rays cast onto the tie points ` +
+        `from ${crs}, written in WGS 84, thin plate spline`,
+      'info',
+      'Export',
+    )
+    const annotations = []
+    const noGrid = []
+    for (const img of aligned) {
+      const grid = gridFor(img)
+      const annotation = grid
+        ? georeferenceAnnotation({
+            grid,
+            width: img.meta.width,
+            height: img.meta.height,
+            uri: iiifImageUri(iiifTemplate, img.name),
+            version: iiifVersion,
+            toLonLat,
+          })
+        : null
+      if (annotation) annotations.push(annotation)
+      else noGrid.push(img.name)
+    }
+    if (noGrid.length) {
+      log(
+        `${pluralize(noGrid.length, 'aligned photo')} left out, with no ground under enough of the photo ` +
+          `(a camera below the tie points, a view past the horizon, or no image size): ${noGrid.slice(0, 5).join(', ')}` +
+          (noGrid.length > 5 ? ' …' : ''),
+        'warn',
+        'Export',
+      )
+    }
+    if (!annotations.length) throw new Error('no aligned photo could be placed on the ground')
+    const name = `${exportFileName(fileName, `${projectBase()}-allmaps`)}.json`
+    downloadBlob(name, JSON.stringify(annotationPage(annotations)), 'application/json')
+    // The project keeps the address for its next export.
+    recon.setIiifImages({ template: iiifTemplate, version: iiifVersion })
+    const skipped = images.value.length - aligned.length
+    log(
+      `Exported ${pluralize(annotations.length, 'photo')} as Georeference Annotations for Allmaps ("${name}")` +
+        (skipped ? `; ${pluralize(skipped, 'photo')} not in the sparse model` : '') +
+        ` in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+      'success',
+      'Export',
+    )
+  }
+
   async function onExportRun(settings) {
     const kind = exportKind.value,
       target = exportTargetCloud.value,
@@ -247,6 +319,7 @@ export function useExports({
       else if (kind === 'keypoints') await doExportKeypoints(settings)
       else if (kind === 'matches') await doExportMatches(settings)
       else if (kind === 'vectors') await doExportVectors(settings, vectorSet)
+      else if (kind === 'allmaps') await doExportAllmaps(settings)
     } catch (err) {
       const detail = String(err?.message ?? err)
       log(`Export failed: ${detail}`, 'error', 'Export')

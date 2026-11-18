@@ -89,6 +89,7 @@ export default {
     ortho: 'Zuerst ein Orthofoto erstellen',
     products: 'Zuerst ein DEM oder Orthofoto erstellen',
     poses: 'Zuerst Kameraposen importieren',
+    sparseGeoref: 'Zuerst das Sparse-Modell georeferenzieren',
     posesOrSparse: 'Zuerst Kameraposen importieren oder das Sparse-Modell erstellen',
     measurements: 'Zuerst eine Messung speichern (Werkzeuge ▸ Messen)',
     footprints: 'Zuerst Footprints berechnen (Werkzeuge ▸ Modell ▸ Footprints aus Posen)',
@@ -465,6 +466,10 @@ export default {
       tip: 'Die Fotos ohne Objektivverzeichnung, als JPEG oder PNG',
     },
     'export-tiles3d': { label: '3D Tiles', tip: 'Eine Punktwolke oder ein Mesh als Cesium 3D Tiles' },
+    'export-allmaps': {
+      label: 'Allmaps',
+      tip: 'Jedes ausgerichtete Foto georeferenziert für Allmaps und andere IIIF-Viewer, von Ihrem IIIF-Bildserver',
+    },
     'open-project-settings': {
       label: 'Projekt-\neinstellungen',
       tip: 'Name, Koordinatensystem und weitere Einstellungen dieses Projekts',

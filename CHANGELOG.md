@@ -6,6 +6,20 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Aligned photos open in Allmaps.** Export ▸ Allmaps writes one Georeference Annotation
+  per aligned photo, the IIIF format Allmaps reads, so the scans on your IIIF image server
+  open in Allmaps Viewer warped onto the map. You give the photos' IIIF address with
+  `{name}` or `{stem}` for each file name, and the project keeps it for the next export;
+  the control points are the ground grid Photos
+  on the map draws each photo with (13 × 13 rays cast onto the tie points, in WGS 84,
+  thin plate spline), and the mask is the photo's frame, a film scan's fiducial frame,
+  without what lies past the horizon. Needs a georeferenced sparse model. Checked against
+  Allmaps itself: `@allmaps/annotation` 1.0.0-beta.38 parses the file (169 control
+  points, a 48-point mask), and `@allmaps/transform` 1.0.0-beta.53's thin plate spline
+  through them lands within 0.011 m (median), 0.17 m (95th percentile) and 0.75 m (at the
+  frame's edge) of WebSfM's own ray cast at 2,232 pixels between the grid's nodes: a
+  synthetic 4,000 × 3,000 px photo tilted 15° with barrel distortion (k1 −0.12) over
+  30 m hills, at 0.10 m ground pixel size.
 - **Keep using one version.** Every release from now on also stays at its own address,
   which never updates (`websfm.app/v/0.9.0/`): About ▸ Version ▸ Keep using … opens it,
   and About lists the other versions. websfm.app itself stays the newest version. A

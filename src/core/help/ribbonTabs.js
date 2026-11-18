@@ -1198,6 +1198,15 @@ export const TABS = [
             icon: 'layers',
             needs: ['cloud'],
           },
+          // Each aligned photo as a Georeference Annotation (core/io/allmaps.js).
+          {
+            id: 'export-allmaps',
+            guide: 'export-allmaps',
+            tip: 'Each aligned photo georeferenced for Allmaps and other IIIF viewers, from your IIIF image server',
+            label: 'Allmaps',
+            icon: 'footprint',
+            needs: ['sparse', 'sparseGeoref'],
+          },
         ],
       },
     ],

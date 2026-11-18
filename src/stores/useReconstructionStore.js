@@ -246,8 +246,17 @@ export const useReconstructionStore = registerProjectStore(
       const live = new Set(now.map((p) => p.previewUrl).filter(Boolean))
       for (const p of before ?? []) if (p.previewUrl && !live.has(p.previewUrl)) URL.revokeObjectURL(p.previewUrl)
     })
-    const { productLayers, mapOrder, setMapOrder, mapHidden, setMapLayerHidden, imageLayer, setImageLayer } =
-      createMapView({ dem, ortho, save: late(() => save) })
+    const {
+      productLayers,
+      mapOrder,
+      setMapOrder,
+      mapHidden,
+      setMapLayerHidden,
+      imageLayer,
+      setImageLayer,
+      iiifImages,
+      setIiifImages,
+    } = createMapView({ dem, ortho, save: late(() => save) })
 
     const {
       makeCloudId,
@@ -302,6 +311,7 @@ export const useReconstructionStore = registerProjectStore(
       georef,
       healthDirty,
       imageLayer,
+      iiifImages,
       isPersisting,
       loadDepthIndexIntoMeta,
       log,
@@ -995,6 +1005,8 @@ export const useReconstructionStore = registerProjectStore(
       setMapLayerHidden,
       imageLayer,
       setImageLayer,
+      iiifImages,
+      setIiifImages,
       // Triangulated marker positions (SfM frame) for the model-frame map.
       markerPositions,
     }
