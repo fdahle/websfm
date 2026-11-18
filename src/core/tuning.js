@@ -291,6 +291,19 @@ export const SFM_TUNING = {
   secondaryBoundaryImages: 12, // registered overlap halo used to align arbitrary frames
   seedRetryMax: 4, // retry alternate initial pairs when the primary stalls tiny
   seedRetryMinFraction: 0.5, // below this registered share, seed choice is still suspect
+  // ── Pairs checked against the finished model (core/sfm/pairAgreement.js) ──
+  // A match agrees when its Sampson error under the solved relative pose is within
+  // pairCheckEpiPx (detection px, scaled like the reprojection gates); a pair agrees
+  // when at least pairCheckAgreeFrac of its matches do and it does not join more
+  // keypoints of *different* model points than of the same one (≥ pairCheckMinSplit).
+  // A photo is contested when pairs conflicting with the model carry at least
+  // pairCheckContestedFrac of its scored matches (≥ pairCheckMinPairs scored pairs).
+  pairCheckEpiPx: 4,
+  pairCheckAgreeFrac: 0.5,
+  pairCheckMinSplit: 5,
+  pairCheckMinMatches: 15,
+  pairCheckContestedFrac: 0.5,
+  pairCheckMinPairs: 2,
   // ── GCP triangulation, robust mode (gcpTriangulation.js; guides and target detection) ──
   // Absolute floor (native px) of the median cut max(3 × median, floor): on a clean set
   // the median is ~0, and a pure multiple would reject honest marks over noise. The cut
