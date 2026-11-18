@@ -91,7 +91,7 @@ calibration, coverage and disconnected parts before building depth maps.
 
 Every pair is also checked against the finished model. A warning names a pair that may
 be a false match: one that holds a photo in place while most of that photo's other
-matches disagree with the model, as repeated façades or a symmetric building can
+pairs disagree with the model, as repeated façades or a symmetric building can
 cause. In **View ▸ Inspect ▸ Matches** the Model column marks it *may be false*: exclude
 it there and run Sparse Model again.
 

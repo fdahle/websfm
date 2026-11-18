@@ -195,8 +195,51 @@ describe('findSuspectPairs', () => {
     expect(photos.get('X').contested).toBe(true)
     expect(['Y', 'Z1', 'Z2', 'Z3'].some((u) => photos.get(u).contested)).toBe(false)
     expect(suspects).toEqual([
-      { index: 0, idA: 'X', idB: 'Y', reason: 'holds', photo: 'X', conflictShare: 300 / 340, weight: 40 },
+      {
+        index: 0,
+        idA: 'X',
+        idB: 'Y',
+        reason: 'holds',
+        photo: 'X',
+        conflicts: 3,
+        pairs: 4,
+        conflictShare: 0.75,
+        weight: 40,
+      },
     ])
+  })
+
+  it('a strong false pair that lost does not turn the photo against its true pairs', () => {
+    // Y keeps its place on three thin true pairs; the false pair X–Y has more matches
+    // than all three together but is one witness against three (Aukerman, planted).
+    const scores = [
+      S('Y', 'Z1', PAIR_AGREES, 20),
+      S('Y', 'Z2', PAIR_AGREES, 20),
+      S('Y', 'Z3', PAIR_AGREES, 20),
+      S('X', 'Y', PAIR_CONFLICTS, 190),
+      S('Z1', 'Z2', PAIR_AGREES, 300),
+      S('Z2', 'Z3', PAIR_AGREES, 300),
+      S('X', 'W1', PAIR_AGREES, 300),
+      S('X', 'W2', PAIR_AGREES, 300),
+    ]
+    const { photos, suspects } = findSuspectPairs(scores, opts)
+    expect(photos.get('Y').contested).toBe(false)
+    expect(suspects.map((x) => [x.idA, x.idB, x.reason])).toEqual([['X', 'Y', 'contradicts']])
+  })
+
+  it('a photo with many agreeing pairs is not held by any of them, however many false pairs it has', () => {
+    // A photo at the crossing of two laps past a repeated façade: 3 true pairs, 4 false.
+    const scores = [
+      ...['N1', 'N2', 'N3'].map((u) => S('P', u, PAIR_AGREES, 200)),
+      ...['F1', 'F2', 'F3', 'F4'].map((u) => S('P', u, PAIR_CONFLICTS, 20)),
+    ]
+    expect(findSuspectPairs(scores, { ...opts, maxHolders: 2 }).photos.get('P').contested).toBe(false)
+    expect(findSuspectPairs(scores, opts).photos.get('P').contested).toBe(true) // without the cap
+  })
+
+  it('one pair against one decides nothing', () => {
+    const scores = [S('Y', 'Z', PAIR_AGREES, 50), S('X', 'Y', PAIR_CONFLICTS, 50), S('Z', 'W', PAIR_AGREES, 300)]
+    expect(findSuspectPairs(scores, opts).photos.get('Y').contested).toBe(false)
   })
 
   it('names a false pair the model overruled, between two photos that sit well', () => {
@@ -208,7 +251,17 @@ describe('findSuspectPairs', () => {
     ]
     const { suspects } = findSuspectPairs(scores, opts)
     expect(suspects).toEqual([
-      { index: 0, idA: 'A', idB: 'B', reason: 'contradicts', photo: null, conflictShare: 0, weight: 30 },
+      {
+        index: 0,
+        idA: 'A',
+        idB: 'B',
+        reason: 'contradicts',
+        photo: null,
+        conflicts: 0,
+        pairs: 0,
+        conflictShare: 0,
+        weight: 30,
+      },
     ])
   })
 
@@ -229,13 +282,19 @@ describe('findSuspectPairs', () => {
 
   it('ranks the most contested photo first', () => {
     const scores = [
-      // P: holder 50, conflicts 400 → 0.89; Q: holder 50, conflicts 100 → 0.67
+      // P: 1 agreeing, 3 conflicting pairs → 0.75; Q: 1 agreeing, 2 conflicting → 0.67
       S('P', 'H1', PAIR_AGREES, 50),
       S('P', 'W1', PAIR_CONFLICTS, 200),
       S('P', 'W2', PAIR_CONFLICTS, 200),
+      S('P', 'W3', PAIR_CONFLICTS, 200),
       S('Q', 'H2', PAIR_AGREES, 50),
-      S('Q', 'W3', PAIR_CONFLICTS, 100),
-      ...['H1', 'H2', 'W1', 'W2', 'W3'].flatMap((u, i, all) => [S(u, all[(i + 1) % all.length], PAIR_AGREES, 1000)]),
+      S('Q', 'W1', PAIR_CONFLICTS, 100),
+      S('Q', 'W2', PAIR_CONFLICTS, 100),
+      ...['H1', 'H2', 'W1', 'W2', 'W3'].flatMap((u, i, all) => [
+        S(u, all[(i + 1) % all.length], PAIR_AGREES, 1000),
+        S(u, all[(i + 2) % all.length], PAIR_AGREES, 1000),
+        S(u, all[(i + 3) % all.length], PAIR_AGREES, 1000),
+      ]),
     ]
     const holds = findSuspectPairs(scores, opts).suspects.filter((s) => s.reason === 'holds')
     expect(holds.map((s) => s.photo)).toEqual(['P', 'Q'])
@@ -293,7 +352,16 @@ describe('packPairCheck', () => {
 })
 
 describe('describePairCheck', () => {
-  const holds = (k) => ({ idA: `a${k}`, idB: `b${k}`, reason: 'holds', photo: `a${k}`, conflictShare: 0.8, weight: 40 })
+  const holds = (k) => ({
+    idA: `a${k}`,
+    idB: `b${k}`,
+    reason: 'holds',
+    photo: `a${k}`,
+    conflicts: 4,
+    pairs: 5,
+    conflictShare: 0.8,
+    weight: 40,
+  })
   const counts = { scored: 1234, agrees: 1200, conflicts: 34, contested: 5, holds: 5, contradicts: 2 }
   const suspects = [
     ...[1, 2, 3, 4, 5].map(holds),
@@ -307,14 +375,14 @@ describe('describePairCheck', () => {
     const warns = at('warn')
     expect(warns).toHaveLength(4)
     expect(warns[0]).toContain('a1.jpg ↔ b1.jpg (40 matches) may be a false match')
-    expect(warns[0]).toContain('80%')
+    expect(warns[0]).toContain("holds a1.jpg in place while 4 of that photo's 5 pairs disagree")
     expect(warns[0]).toContain('View ▸ Inspect ▸ Matches')
     expect(warns[3]).toContain('2 more pairs')
   })
 
   it('records the counts at info in English numbers, each suspect at debug', () => {
     expect(at('info')[0]).toBe(
-      'Pair check: 1,234 pairs checked against the model, 1,200 agree, 34 disagree; 5 photos sit where most of their matches disagree',
+      'Pair check: 1,234 pairs checked against the model, 1,200 agree, 34 disagree; 5 photos sit where most of their pairs disagree',
     )
     expect(at('info')[1]).toContain('2 pairs disagree with the model without moving it')
     expect(at('debug')).toHaveLength(7)
@@ -403,11 +471,10 @@ describe('pairCheckVerdicts', () => {
     const { pairCheck } = packPairCheck(scores, { contestedFrac: 0.5, minPairs: 2, epiTolPx: 4 })
     const v = pairCheckVerdicts(pairCheck)
     expect(v.size).toBe(9)
-    expect(v.get('X--Y')).toMatchObject({ verdict: 'holds', held: 'X', matches: 40 })
-    expect(v.get('X--Y').heldShare).toBeCloseTo(200 / 240)
+    expect(v.get('X--Y')).toMatchObject({ verdict: 'holds', held: 'X', heldConflicts: 2, heldPairs: 3, matches: 40 })
     expect(v.get('X--Z1').verdict).toBe('disagrees') // stored key: uuids sorted
     expect(v.get('W--Y').verdict).toBe('overruled')
-    expect(v.get('Y--Z1')).toMatchObject({ verdict: 'agrees', held: null, heldShare: null })
+    expect(v.get('Y--Z1')).toMatchObject({ verdict: 'agrees', held: null, heldPairs: null })
     expect(pairCheckVerdicts(null).size).toBe(0)
   })
 })

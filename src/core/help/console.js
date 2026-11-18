@@ -10,7 +10,9 @@
 //   startWorkflow(workflow) → Promise<boolean> the workflow runner's start()
 //   workflowStatus() → { running, pause }, respond(action), stopWorkflow()
 //   stats() → snapshot (statsLines), images() → [{ id, uuid, name }],
-//   matchPairs() → [{ nameA, nameB, idA, idB, inliers, enabled, weak, used }]
+//   matchPairs() → [{ nameA, nameB, idA, idB, inliers, enabled, weak, used, check, held }]
+//                  check: the main model's verdict (pairAgreement.js pairCheckVerdicts) or null;
+//                  held: the photo a 'holds' pair holds
 //   pairState(uuidA, uuidB) → { pid, enabled, inliers } | null, setPairEnabled(pid, on)
 //   selectImage(id)
 //   items(list) → [{ id, name }] for a list of core/help/consoleEdits.js (images, gcps …)
@@ -107,6 +109,27 @@ export function matchStatsLines(pairs, images) {
     }
     const weakest = [...verified].sort((a, b) => a.inliers - b.inliers).slice(0, 5)
     lines.push(`Weakest: ${weakest.map((p) => `${p.nameA} ↔ ${p.nameB} (${fmtN(p.inliers)})`).join(', ')}`)
+  }
+  // The main model's check of every pair (Sparse Model ▸ pair check).
+  const checked = pairs.filter((p) => p.check)
+  if (checked.length) {
+    const n = (v) => checked.filter((p) => p.check === v).length
+    const holds = checked.filter((p) => p.check === 'holds').sort((a, b) => b.inliers - a.inliers)
+    lines.push(
+      `Model check: ${fmtN(n('agrees'))} agree, ${fmtN(checked.length - n('agrees'))} disagree ` +
+        `(${fmtN(holds.length)} may be false, ${fmtN(n('overruled'))} overruled by the model)`,
+    )
+    if (holds.length) {
+      lines.push(
+        `May be false: ${holds
+          .slice(0, 8)
+          .map((p) => `${p.nameA} ↔ ${p.nameB} (holds ${p.held ?? '?'})`)
+          .join(', ')}${holds.length > 8 ? `, and ${fmtN(holds.length - 8)} more` : ''}`,
+      )
+      lines.push(
+        `Exclude one with: pair disable ${quoteArg(holds[0].nameA)} ${quoteArg(holds[0].nameB)}, then run Sparse Model again`,
+      )
+    }
   }
   const excluded = pairs.filter((p) => !p.enabled)
   if (excluded.length) {

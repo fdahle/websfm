@@ -57,7 +57,11 @@ function verdictText(check) {
   if (!check) return ''
   const v = check.verdict
   if (v === 'holds')
-    return t('matchList.verdictLong.holds', { photo: trimExt(check.heldName ?? ''), share: check.heldShare })
+    return t('matchList.verdictLong.holds', {
+      photo: trimExt(check.heldName ?? ''),
+      conflicts: check.heldConflicts,
+      pairs: check.heldPairs,
+    })
   if (v === 'agrees')
     return check.epiAgreeFrac != null
       ? t('matchList.verdictLong.agrees', { share: check.epiAgreeFrac })

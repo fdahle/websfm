@@ -276,10 +276,16 @@ inliers on two *different* points (split), and the Sampson error under the solve
 pose (within 4 detection px; pinhole, so approximate under rolling shutter). A pair
 disagrees when under half its matches are within that, or when its split matches (≥ 5)
 outnumber those on one point; the split count catches a false match shifted along its
-epipolar line, which the error alone passes. A photo is contested when disagreeing pairs
-carry at least half its scored matches (≥ 2 scored pairs). Suspects: an agreeing pair
-between a contested and an uncontested photo *holds* the contested one in place (the
-likely false pair, ranked by the contested photo's disagreeing share); a disagreeing pair
+epipolar line, which the error alone passes. A photo is contested when more than half of
+its scored pairs disagree (≥ 2 scored pairs): pairs, not matches, because each partner
+photo is one witness while a repeated façade gives one coincidence many matches (counted
+by matches, a strong planted false pair that lost outweighed the photo's few true pairs
+and had them named), and at most 2 of them agree: a photo with many agreeing pairs is not
+held in place by any one of them, however many false pairs it also has (photos where two
+laps past South Building's repeated façade cross have 7–14 agreeing against 10–19
+overruled pairs, and sit right). Suspects: an agreeing pair between a contested and an
+uncontested photo *holds* the contested one in place (the likely false pair, ranked by
+the contested photo's share of disagreeing pairs); a disagreeing pair
 between two uncontested photos is a false pair the model overruled. "Disagrees with the
 model" alone would point at the true pairs. A merged secondary model adds its pairs'
 scores before the suspects are found. Nothing is excluded automatically: the log names

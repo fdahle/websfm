@@ -296,14 +296,18 @@ export const SFM_TUNING = {
   // pairCheckEpiPx (detection px, scaled like the reprojection gates); a pair agrees
   // when at least pairCheckAgreeFrac of its matches do and it does not join more
   // keypoints of *different* model points than of the same one (≥ pairCheckMinSplit).
-  // A photo is contested when pairs conflicting with the model carry at least
-  // pairCheckContestedFrac of its scored matches (≥ pairCheckMinPairs scored pairs).
+  // A photo is contested when more than pairCheckContestedFrac of its scored pairs
+  // conflict with the model (≥ pairCheckMinPairs scored pairs); pairs, not matches,
+  // so one strong false pair cannot outvote several true ones; and at most
+  // pairCheckMaxHolders of them agree, since a photo with many agreeing pairs is not
+  // held in place by any one of them.
   pairCheckEpiPx: 4,
   pairCheckAgreeFrac: 0.5,
   pairCheckMinSplit: 5,
   pairCheckMinMatches: 15,
   pairCheckContestedFrac: 0.5,
   pairCheckMinPairs: 2,
+  pairCheckMaxHolders: 2,
   // ── GCP triangulation, robust mode (gcpTriangulation.js; guides and target detection) ──
   // Absolute floor (native px) of the median cut max(3 × median, floor): on a clean set
   // the median is ~0, and a pure multiple would reject honest marks over noise. The cut

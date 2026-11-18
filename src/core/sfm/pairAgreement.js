@@ -10,12 +10,17 @@
 //                       matches sit in it: on one 3D point (`inModel`), on two different
 //                       points (`split`), and their Sampson error under the solved
 //                       relative pose. → agrees | conflicts | unscored.
-//   findSuspectPairs    per photo, how much of its scored matches conflicts. A photo
-//                       mostly in conflict is misplaced, and the pairs that hold it
-//                       there are its agreeing pairs to photos that are not: those are
-//                       the suspects ('holds'). A conflicting pair between two photos
-//                       that both sit well is a false pair the model overruled
-//                       ('contradicts'; harmless to this model, still wrong).
+//   findSuspectPairs    per photo, how many of its scored pairs conflict. A photo with
+//                       more conflicting pairs than agreeing ones is misplaced, and the
+//                       pairs that hold it there are its agreeing pairs to photos that
+//                       are not: those are the suspects ('holds'). A conflicting pair
+//                       between two photos that both sit well is a false pair the model
+//                       overruled ('contradicts'; harmless to this model, still wrong).
+//
+// The vote is by pairs, not matches: each partner photo is one independent witness,
+// while a repeated façade gives one coincidence many matches. Counted by matches, a
+// strong false pair that *lost* outweighed a photo's few true pairs and had them named
+// as the suspects (planted pairs on Aukerman, 11-18).
 //
 // The epipolar error alone misses a match shifted along its epipolar line (windows
 // repeated along the flight line); the split count catches that one, when both
@@ -201,22 +206,23 @@ function sampson(F, xa, ya, xb, yb) {
  * The suspects among scored pairs (see the top of the file).
  *
  * @param {ReturnType<typeof scorePairAgreement>} scores
- * @param {{ contestedFrac: number, minPairs: number }} o
- * @returns {{ photos: Map<string, {agree: number, conflict: number, pairs: number, contested: boolean}>,
- *   suspects: Array<{index: number, idA: string, idB: string, reason: 'holds' | 'contradicts', photo: string | null, conflictShare: number, weight: number}>}}
- *   `index` into `scores`; `photo` the misplaced photo a 'holds' pair holds and
- *   `conflictShare` that photo's share of conflicting matches; suspects sorted most
- *   telling first: 'holds' before 'contradicts', the most contested photo first, then
- *   by matches
+ * @param {{ contestedFrac: number, minPairs: number, maxHolders?: number }} o
+ * @returns {{ photos: Map<string, {agree: number, conflict: number, pairs: number, conflictShare: number, contested: boolean}>,
+ *   suspects: Array<{index: number, idA: string, idB: string, reason: 'holds' | 'contradicts', photo: string | null, conflicts: number, pairs: number, conflictShare: number, weight: number}>}}
+ *   per photo its agreeing and conflicting scored pairs (contested: more than
+ *   contestedFrac of them conflict, with at least minPairs, and at most maxHolders agree); `index` into `scores`;
+ *   `photo` the misplaced photo a 'holds' pair holds, with its `conflicts` of `pairs`;
+ *   suspects sorted most telling first: 'holds' before 'contradicts', the most
+ *   contested photo first, then by matches
  */
-export function findSuspectPairs(scores, { contestedFrac, minPairs }) {
+export function findSuspectPairs(scores, { contestedFrac, minPairs, maxHolders = Infinity }) {
   const photos = new Map()
   const tally = (uuid, s) => {
     let p = photos.get(uuid)
     if (!p) photos.set(uuid, (p = { agree: 0, conflict: 0, pairs: 0, conflictShare: 0, contested: false }))
     p.pairs++
-    if (s.status === PAIR_AGREES) p.agree += s.n
-    else p.conflict += s.n
+    if (s.status === PAIR_AGREES) p.agree++
+    else p.conflict++
   }
   for (const s of scores) {
     if (s.status === PAIR_UNSCORED) continue
@@ -224,9 +230,12 @@ export function findSuspectPairs(scores, { contestedFrac, minPairs }) {
     tally(s.idB, s)
   }
   for (const p of photos.values()) {
-    const total = p.agree + p.conflict
-    p.conflictShare = total > 0 ? p.conflict / total : 0
-    p.contested = p.pairs >= minPairs && total > 0 && p.conflictShare >= contestedFrac
+    p.conflictShare = p.pairs > 0 ? p.conflict / p.pairs : 0
+    // Strictly more: one pair against one cannot say which photo or pair is wrong. And
+    // held by few: a photo with many agreeing pairs is not "held" by any one of them,
+    // however many false pairs it also has (two laps past a repeated façade gave photos
+    // 8 agreeing against 9 overruled pairs; South Building, planted, 11-18).
+    p.contested = p.pairs >= minPairs && p.conflictShare > contestedFrac && p.agree <= maxHolders
   }
   const suspects = []
   scores.forEach((s, index) => {
@@ -241,6 +250,8 @@ export function findSuspectPairs(scores, { contestedFrac, minPairs }) {
         idB: s.idB,
         reason: 'holds',
         photo: held,
+        conflicts: photos.get(held).conflict,
+        pairs: photos.get(held).pairs,
         conflictShare: photos.get(held).conflictShare,
         weight: s.n,
       })
@@ -251,6 +262,8 @@ export function findSuspectPairs(scores, { contestedFrac, minPairs }) {
         idB: s.idB,
         reason: 'contradicts',
         photo: null,
+        conflicts: 0,
+        pairs: 0,
         conflictShare: 0,
         weight: s.n,
       })
@@ -288,8 +301,8 @@ export const SUSPECT_CONTRADICTS = 2
  * → { pairCheck, counts: { scored, agrees, conflicts, contested, holds, contradicts },
  *     suspects } (`suspects` as findSuspectPairs ranks them)
  */
-export function packPairCheck(scores, { contestedFrac, minPairs, epiTolPx }) {
-  const { photos, suspects } = findSuspectPairs(scores, { contestedFrac, minPairs })
+export function packPairCheck(scores, { contestedFrac, minPairs, maxHolders, epiTolPx }) {
+  const { photos, suspects } = findSuspectPairs(scores, { contestedFrac, minPairs, maxHolders })
   const n = scores.length
   const uuids = []
   const at = new Map()
@@ -357,7 +370,7 @@ export function describePairCheck(counts, suspects, nameOf, { warnMax = 3 } = {}
     `Pair check: ${plural(counts.scored, 'pair')} checked against the model, ${fmt(counts.agrees)} agree, ` +
       `${fmt(counts.conflicts)} disagree` +
       (counts.contested
-        ? `; ${plural(counts.contested, 'photo sits', 'photos sit')} where most of ${counts.contested === 1 ? 'its' : 'their'} matches disagree`
+        ? `; ${plural(counts.contested, 'photo sits', 'photos sit')} where most of ${counts.contested === 1 ? 'its' : 'their'} pairs disagree`
         : ''),
     'info',
   ])
@@ -365,7 +378,7 @@ export function describePairCheck(counts, suspects, nameOf, { warnMax = 3 } = {}
   for (const s of holds.slice(0, warnMax)) {
     lines.push([
       `${nameOf(s.idA)} ↔ ${nameOf(s.idB)} (${plural(s.weight, 'match', 'matches')}) may be a false match: it holds ` +
-        `${nameOf(s.photo)} where ${Math.round(100 * s.conflictShare)}% of that photo's matches disagree with the model. ` +
+        `${nameOf(s.photo)} in place while ${fmt(s.conflicts)} of that photo's ${fmt(s.pairs)} pairs disagree with the model. ` +
         'Exclude the pair in View ▸ Inspect ▸ Matches and run Sparse Model again.',
       'warn',
     ])
@@ -385,7 +398,7 @@ export function describePairCheck(counts, suspects, nameOf, { warnMax = 3 } = {}
     lines.push([
       `Pair check: ${nameOf(s.idA)} ↔ ${nameOf(s.idB)}, ${plural(s.weight, 'match', 'matches')}, ` +
         (s.reason === 'holds'
-          ? `holds ${nameOf(s.photo)} (${Math.round(100 * s.conflictShare)}% of its matches disagree)`
+          ? `holds ${nameOf(s.photo)} (${fmt(s.conflicts)} of its ${fmt(s.pairs)} pairs disagree)`
           : 'overruled by the model'),
       'debug',
     ])
@@ -440,26 +453,26 @@ export const VERDICT_RANK = { holds: 4, disagrees: 3, overruled: 2, agrees: 1 }
 /**
  * Each checked pair's verdict, keyed as the matches store keys a pair (the two uuids
  * sorted, joined by `--`):
- *   holds      agrees, and holds a photo where most of its matches disagree: may be false
+ *   holds      agrees, and holds a photo where most of its pairs disagree: may be false
  *   overruled  disagrees between two photos that sit well: a false pair the model overruled
- *   disagrees  disagrees, with a photo that sits where most of its matches disagree
+ *   disagrees  disagrees, with a photo that sits where most of its pairs disagree
  *   agrees
- * → Map pid → { verdict, held (uuid | null), matches, inModel, split, epiAgreeFrac
- *   (null without a baseline), epiMedianPx, heldShare (the held photo's disagreeing
- *   share of matches, holds only) }
+ * → Map pid → { verdict, held (uuid | null), heldConflicts, heldPairs (the held photo's
+ *   disagreeing and scored pairs, holds only), matches, inModel, split, epiAgreeFrac
+ *   (null without a baseline), epiMedianPx }
  */
 export function pairCheckVerdicts(pc) {
   const out = new Map()
   if (!pc?.status) return out
   const n = pc.status.length
-  // The held photo's share of disagreeing matches, from the columns themselves.
-  const agree = new Map(),
+  // Each photo's disagreeing and scored pairs, from the columns themselves.
+  const conflict = new Map(),
     total = new Map()
-  const add = (m, u, v) => m.set(u, (m.get(u) ?? 0) + v)
+  const add = (m, u) => m.set(u, (m.get(u) ?? 0) + 1)
   for (let i = 0; i < n; i++) {
     for (const u of [pc.a[i], pc.b[i]]) {
-      add(total, u, pc.matches[i])
-      if (pc.status[i] === PAIR_AGREES) add(agree, u, pc.matches[i])
+      add(total, u)
+      if (pc.status[i] === PAIR_CONFLICTS) add(conflict, u)
     }
   }
   for (let i = 0; i < n; i++) {
@@ -479,7 +492,8 @@ export function pairCheckVerdicts(pc) {
     out.set(pid, {
       verdict,
       held: h >= 0 ? pc.uuids[h] : null,
-      heldShare: h >= 0 ? 1 - (agree.get(h) ?? 0) / total.get(h) : null,
+      heldConflicts: h >= 0 ? (conflict.get(h) ?? 0) : null,
+      heldPairs: h >= 0 ? total.get(h) : null,
       matches: pc.matches[i],
       inModel: pc.inModel[i],
       split: pc.split[i],

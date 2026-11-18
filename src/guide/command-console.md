@@ -57,7 +57,8 @@ inputs are missing is refused with the reason, as Preflight shows it.
 pairs, the registered cameras and points of the sparse model, dense clouds, meshes,
 the DEM and orthophoto, control points, saved measurements, and the frame the
 numbers are in. `stats matches` describes the match graph: the inliers per pair,
-the images with no verified pair, the weakest pairs and the pairs you excluded.
+the images with no verified pair, the weakest pairs, the pairs you excluded and, after
+Sparse Model, its check of every pair, naming the pairs that may be false matches.
 
 ## Edits by hand
 What you change by hand in the sidebar, the tables or a right-click menu can be typed

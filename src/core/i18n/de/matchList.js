@@ -32,8 +32,8 @@ export default {
   },
   verdictLong: {
     holds:
-      'Vielleicht ein falsches Match: Es hält {photo} an einer Stelle, an der {share, number, ::percent} der ' +
-      'Matches dieses Fotos dem Modell widersprechen. Das Paar herausnehmen und das Sparse-Modell neu rechnen.',
+      'Vielleicht ein falsches Match: Es hält {photo} an seiner Stelle, obwohl {conflicts, number} von ' +
+      '{pairs, number} Paaren dieses Fotos dem Modell widersprechen. Das Paar herausnehmen und das Sparse-Modell neu rechnen.',
     disagrees:
       'Widerspricht dem Modell: Eines seiner Fotos sitzt dort, wo die meisten seiner Matches widersprechen; ' +
       'das Paar kann also stimmen und das Foto falsch sitzen.',

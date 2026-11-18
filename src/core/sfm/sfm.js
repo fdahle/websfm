@@ -124,6 +124,7 @@ export async function reconstruct(input, hooks = {}) {
     const { pairCheck, counts, suspects } = packPairCheck(model.pairScores, {
       contestedFrac: cfg.pairCheckContestedFrac,
       minPairs: cfg.pairCheckMinPairs,
+      maxHolders: cfg.pairCheckMaxHolders,
       epiTolPx: resolveScaledPx(cfg.pairCheckEpiPx, { factor: cfg.detectScaleFactor }),
     })
     delete model.pairScores

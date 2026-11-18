@@ -3,6 +3,7 @@ import { storeToRefs } from 'pinia'
 import { useImagesStore } from '../stores/useImagesStore.js'
 import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
+import { pairCheckVerdicts } from '../core/sfm/pairAgreement.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { useMeasurementsStore } from '../stores/useMeasurementsStore.js'
 import { useWorkflowsStore } from '../stores/useWorkflowsStore.js'
@@ -234,8 +235,10 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
     images: () => images.value.map((i) => ({ id: i.id, uuid: i.uuid, name: i.name })),
     matchPairs() {
       const byUuid = new Map(images.value.map((i) => [i.uuid, i]))
+      // The main model's check of each pair (core/sfm/pairAgreement.js), keyed as the store keys pairs.
+      const verdicts = pairCheckVerdicts(recon.mainSparseCloud?.pairCheck)
       const out = []
-      for (const [, e] of matchesStore.matchStore) {
+      for (const [pid, e] of matchesStore.matchStore) {
         if (e.status !== 'done' || !(e.inlierCount > 0)) continue
         const a = byUuid.get(e.idA),
           b = byUuid.get(e.idB)
@@ -248,6 +251,8 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
           inliers: e.inlierCount,
           enabled: e.enabled !== false,
           weak: !!e.weak,
+          check: verdicts.get(pid)?.verdict ?? null,
+          held: byUuid.get(verdicts.get(pid)?.held)?.name ?? null,
         })
       }
       return out

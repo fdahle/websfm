@@ -44,5 +44,5 @@ Pairs can also be **disabled by hand** from the match list or the graph view —
 reversible exclusion for a pair that is visibly wrong. Disabled pairs stop
 contributing everywhere the reconstruction reads the graph. The match list's
 **Model** column shows the check: *may be false* for a pair that holds a photo where
-most of that photo's matches disagree (the one to exclude), *overruled* for a likely
+most of that photo's pairs disagree (the one to exclude), *overruled* for a likely
 false pair the model already ignored, *disagrees* for a pair whose photo sits wrong.

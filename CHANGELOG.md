@@ -8,14 +8,20 @@ Notable changes to WebSfM. The format follows
 ### Added
 - **Sparse Model names pairs that may be false matches.** After the run, every pair is
   checked against the finished model, and a warning names a pair that holds a photo in
-  place while most of that photo's other matches disagree; View ▸ Inspect ▸ Matches shows
+  place while most of that photo's other pairs disagree; View ▸ Inspect ▸ Matches shows
   the check in a Model column (may be false, disagrees, overruled, agrees), sorts and
-  filters by it, and colours those pairs in the graph. Each pair's score is saved with the
-  model. South Building (128 photos, default matching): no warning on the healthy model;
-  77 of 1,238 pairs marked overruled, of which 66 share no point in COLMAP's model
-  (false), 6 share 15 or more (true wide-baseline pairs), so overruled is shown calmly.
-  Synthetic: a false pair planted between photos that share no ground is flagged and no
-  true pair is; 17.9 M matches over 900 photos take 3.4 s.
+  filters by it, and colours those pairs in the graph; `stats matches` in the console lists
+  them. Each pair's score is saved with the model. South Building (128 photos, default
+  matching): no warning on the healthy model; 77 of 1,238 pairs marked overruled, of which
+  66 share no point in COLMAP's model (false), 6 share 15 or more (true wide-baseline
+  pairs), so overruled is shown calmly. False pairs planted in the real SfM input (real
+  keypoints that fit one planar map, 104–682 matches, the photo's true pairs cut to 2–3
+  of 15–20 matches): no false warning in 24 Aukerman and 5 South Building trials; the
+  planted pair is overruled whenever its photo stays in the model. SfM never let a planted
+  pair move a photo, so the warning itself is so far tested on synthetic blocks only (a
+  planted false pair is flagged, no true pair is). Two rules came from these runs: a
+  photo is judged by its pairs, not its matches, and one with more than two agreeing pairs
+  is never held. 17.9 M matches over 900 photos take 3.4 s.
 - **Everything you click can be typed in the console.** `run` takes every step a workflow
   can run unattended, with its settings (`run dense minViews=3 mesh preset=high`), and
   the edits you make by hand are commands too (`gcp disable "GCP 12"`, `product main

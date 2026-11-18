@@ -34,8 +34,8 @@ export default {
   },
   verdictLong: {
     holds:
-      'May be a false match: it holds {photo} in place where {share, number, ::percent} of that photo’s ' +
-      'matches disagree with the model. Exclude it and run Sparse Model again.',
+      'May be a false match: it holds {photo} in place while {conflicts, number} of that photo’s ' +
+      '{pairs, plural, one {# pair} other {# pairs}} disagree with the model. Exclude it and run Sparse Model again.',
     disagrees:
       'Disagrees with the model: one of its photos sits where most of its matches disagree, so this pair ' +
       'may be right and that photo misplaced.',

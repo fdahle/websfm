@@ -324,6 +324,35 @@ describe('helpers', () => {
     expect(m).toContain('Excluded by you: a ↔ c')
   })
 
+  it('lists the pairs the model check says may be false, with the command that excludes one', () => {
+    const imgs = ['a', 'b', 'c', 'd'].map((name, i) => ({ id: i + 1, name }))
+    const P = (nameA, nameB, inliers, check, held = null) => ({
+      nameA,
+      nameB,
+      idA: imgs.find((i) => i.name === nameA).id,
+      idB: imgs.find((i) => i.name === nameB).id,
+      inliers,
+      enabled: true,
+      check,
+      held,
+    })
+    const m = matchStatsLines(
+      [
+        P('a', 'b', 300, 'agrees'),
+        P('b', 'c', 300, 'agrees'),
+        P('a', 'd', 40, 'holds', 'd'),
+        P('c', 'd', 90, 'disagrees'),
+        P('a', 'c', 20, 'overruled'),
+      ],
+      imgs,
+    )
+    expect(m).toContain('Model check: 2 agree, 3 disagree (1 may be false, 1 overruled by the model)')
+    expect(m).toContain('May be false: a ↔ d (holds d)')
+    expect(m).toContain('Exclude one with: pair disable a d, then run Sparse Model again')
+    // No check (a model solved before it): no such lines.
+    expect(matchStatsLines([P('a', 'b', 300, null)], imgs).some((l) => l.startsWith('Model check'))).toBe(false)
+  })
+
   it('completes tuning keys, stages and image names after a verb', () => {
     const args = argCompletionsFor(fakeEnv())
     expect(completions('set sfm.minpnpi', args)).toEqual(['set sfm.minPnpInlierRatio', 'set sfm.minPnpInliers'])
