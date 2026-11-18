@@ -110,7 +110,6 @@ export const I18N_PENDING = [
   'src/components/modals/products/ContoursModal.vue',
   'src/components/modals/products/CoregisterDemModal.vue',
   'src/components/modals/products/DemModal.vue',
-  'src/components/modals/products/ExportModal.vue',
   'src/components/modals/products/OrthoModal.vue',
   'src/components/modals/products/ProductSymbologyModal.vue',
   'src/components/modals/products/RasterStyleModal.vue',
@@ -136,6 +135,5 @@ export const I18N_PENDING = [
   'src/components/viewers/ViewerMap.vue',
   'src/components/viewers/ViewerMatch.vue',
   'src/components/viewers/ZoomField.vue',
-  'src/components/viewers/map/MapLayersPanel.vue',
   'src/components/viewers/raster/GpuRasterCanvas.vue',
 ]

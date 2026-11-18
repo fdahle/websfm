@@ -12,7 +12,9 @@ import { MAX_ORTHO_IMAGE_CELLS } from '../../../core/products/exporters.js'
 import { defaultTiling, singleTileFits } from '../../../core/products/tiles3d.js'
 import { defaultExportName } from '../../../core/exportNames.js'
 import FileNameField from '../ui/FileNameField.vue'
-import { pluralize } from '../../../core/textFormat.js'
+import { t } from '../../../composables/useI18n.js'
+import { CATALOGS } from '../../../core/i18n/index.js'
+import I18nText from '../../I18nText.vue'
 import { iiifImageUri, iiifTemplateProblem } from '../../../core/io/allmaps.js'
 
 // One reusable export dialog, parameterised by `kind`. It collects a format + a
@@ -63,245 +65,66 @@ const props = defineProps({
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
 const frameLabel = computed(() => {
-  if (props.hasGeoref) return 'Georeference (transform into the project CRS)'
-  if (props.hasScale && props.hasOrientation)
-    return 'Apply scale and orientation (metres, levelled — no CRS is attached)'
-  if (props.hasScale) return 'Apply scale (write metres — no CRS is attached)'
-  return 'Apply orientation (levelled, with your origin and heading — model units)'
+  if (props.hasGeoref) return t('export.frame.georef')
+  if (props.hasScale && props.hasOrientation) return t('export.frame.scaleOrient')
+  if (props.hasScale) return t('export.frame.scale')
+  return t('export.frame.orient')
 })
 const emit = defineEmits(['close', 'run'])
 
-// Per kind: the title, the formats ({ value, label, hint? }) and a `hint` for every
-// format. The Format field shows the chosen format's hint, else the kind's: what the
-// file holds, which the label alone does not say.
-const CONFIG = {
-  cloud: {
-    title: 'Export Point Cloud',
-    formats: [
-      { value: 'ply-binary', label: 'PLY — binary (compact)' },
-      { value: 'ply-ascii', label: 'PLY — ASCII (text)' },
-      { value: 'las', label: 'LAS 1.2 (surveying standard)' },
-      { value: 'laz', label: 'LAZ — compressed LAS (5–10× smaller)' },
-      {
-        value: 'copc',
-        label: 'COPC — cloud-optimized LAZ (streams in QGIS, Potree)',
-        hint: 'LAZ 1.4 stored as a level-of-detail octree: QGIS, Potree, PDAL and WebSfM read the part they show, so a large cloud opens at once.',
-      },
-      { value: 'xyz', label: 'XYZ — plain text (x y z r g b)' },
-    ],
-  },
-  mesh: {
-    title: 'Export Mesh',
-    formats: [
-      { value: 'ply-binary', label: 'PLY — binary (faces)' },
-      { value: 'ply-ascii', label: 'PLY — ASCII (text)' },
-      { value: 'glb', label: 'glTF binary (.glb)' },
-      { value: 'obj', label: 'Wavefront OBJ (.obj)' },
-      { value: 'stl', label: 'STL — binary (no colour)' },
-    ],
-  },
-  model: {
-    title: 'Export Model',
-    formats: [
-      { value: 'json', label: 'JSON — cameras + tracks' },
-      {
-        value: 'transforms',
-        label: 'transforms.json — NeRF / 3DGS',
-        hint: 'Camera-to-world poses (OpenGL convention) + intrinsics for nerfstudio, instant-ngp and 3D Gaussian Splatting. Local SfM frame; pinhole.',
-      },
-    ],
-  },
-  colmap: {
-    title: 'Export SfM Project',
-    hint:
-      'Exchange a complete COLMAP workspace, its feature database, a sparse model, or camera transforms for NeRF / ' +
-      'Gaussian-Splatting tools. Unsupported descriptor encodings are omitted while keypoints and verified matches ' +
-      'are retained.',
-    formats: [
-      { value: 'workspace', label: 'COLMAP workspace — database + sparse model' },
-      { value: 'database', label: 'COLMAP database.db — cameras + features + matches' },
-      { value: 'txt', label: 'Text (.txt) — zipped' },
-      { value: 'bin', label: 'Binary (.bin) — zipped' },
-      { value: 'transforms', label: 'transforms.json — NeRF / 3DGS' },
-      { value: 'openmvg', label: 'OpenMVG sfm_data.json' },
-      { value: 'nvm', label: 'VisualSFM NVM v3' },
-      {
-        value: 'metashape',
-        label: 'Metashape XML — cameras, calibration, markers',
-        hint:
-          'For File ▸ Import ▸ Import Cameras, then Import Markers, in Agisoft Metashape: the registered cameras ' +
-          'with their calibration, and the GCPs with their marks. In WGS 84 when the project is georeferenced.',
-      },
-    ],
-  },
-  tiles3d: {
-    title: 'Export 3D Tiles',
-    hint:
-      'For globe viewers (Cesium, and anything else reading 3D Tiles 1.1). The model is placed by a transform ' +
-      'measured from the project CRS, so it lands correctly even at polar latitudes.',
-    formats: [{ value: 'tileset', label: 'Cesium 3D Tiles 1.1 — tileset.json + glTF tiles (.zip)' }],
-  },
-  undistorted: {
-    title: 'Export Undistorted Images',
-    hint:
-      "Pinhole images + a PINHOLE sparse model, the handoff COLMAP's image_undistorter produces (for OpenMVS, MVE " +
-      'and MVS-Texturing), and a transforms.json for NeRF / 3D Gaussian Splatting tools. Lens distortion and ' +
-      'film-scan geometry are already folded out of the model, so only the pixels are resampled.',
-    formats: [
-      { value: 'jpeg', label: 'JPEG — compact (recommended for MVS)' },
-      { value: 'png', label: 'PNG — lossless (much larger)' },
-    ],
-  },
-  dem: {
-    title: 'Export DEM',
-    formats: [
-      { value: 'geotiff', label: 'GeoTIFF (.tif) — georeferenced' },
-      {
-        value: 'cog',
-        label: 'Cloud-Optimized GeoTIFF — tiled + overviews',
-        hint:
-          'Internally tiled with halving overviews, so a viewer can fetch a preview or one window with a few range ' +
-          'requests instead of the whole file. Readable anywhere a normal GeoTIFF is.',
-      },
-      { value: 'asc', label: 'ESRI ASCII grid (.asc)' },
-      { value: 'png', label: 'Hillshade PNG + world file' },
-      { value: 'support', label: 'Support layer GeoTIFF (.tif) — % of each cell measured' },
-    ],
-  },
-  measurements: {
-    title: 'Export Measurements',
-    formats: [
-      { value: 'csv', label: 'CSV — one row per measurement, units in columns' },
-      { value: 'geojson', label: 'GeoJSON — lines and polygons with their values' },
-    ],
-  },
-  ortho: {
-    title: 'Export Orthophoto',
-    formats: [
-      { value: 'geotiff', label: 'GeoTIFF (.tif) — georeferenced' },
-      {
-        value: 'cog',
-        label: 'Cloud-Optimized GeoTIFF — tiled + overviews',
-        hint:
-          'Internally tiled with halving overviews and DEFLATE compression: the orthophoto exactly as it is stored, ' +
-          'for web/GIS delivery. Readable anywhere a normal GeoTIFF is.',
-      },
-      { value: 'png', label: 'PNG + world file (.wld)' },
-      { value: 'jpeg', label: 'JPEG + world file' },
-      {
-        value: 'mbtiles',
-        label: 'MBTiles — web map tiles (QGIS, QField, MapLibre)',
-        hint:
-          'Web Mercator tiles in one file, from the zoom that shows the whole area to the one as fine as the ' +
-          'orthophoto: for an offline field map or a web map.',
-      },
-      {
-        value: 'xyz',
-        label: 'XYZ tiles (.zip) — {z}/{x}/{y} folders',
-        hint: 'The same tiles as loose files, for a web server or a static web map.',
-      },
-    ],
-  },
-  poses: {
-    title: 'Export Camera Poses',
-    formats: [
-      { value: 'csv', label: 'CSV — one row per camera' },
-      { value: 'txt', label: 'Text (.txt) — tab-separated' },
-      { value: 'geojson', label: 'GeoJSON — one point per camera, for GIS' },
-    ],
-  },
-  sensors: {
-    title: 'Export Calibration',
-    hint: 'Import ▸ Calibration reads it back: one row per camera group, or per image.',
-    formats: [
-      { value: 'csv', label: 'CSV' },
-      { value: 'txt', label: 'Text (.txt) — tab-separated' },
-    ],
-  },
-  cameraFiducials: {
-    title: 'Export Camera Fiducials',
-    hint: "Each film camera's calibrated marks in millimetres, one row per mark. Import ▸ Camera Fiducials reads it back.",
-    formats: [
-      { value: 'csv', label: 'CSV' },
-      { value: 'txt', label: 'Text (.txt) — tab-separated' },
-    ],
-  },
-  imageFiducials: {
-    title: 'Export Image Fiducials',
-    hint: "Each scan's detected or marked fiducials in pixels, one row per mark. Import ▸ Image Fiducials reads it back.",
-    formats: [
-      { value: 'csv', label: 'CSV' },
-      { value: 'txt', label: 'Text (.txt) — tab-separated' },
-    ],
-  },
-  keypoints: {
-    title: 'Export Keypoints',
-    formats: [
-      {
-        value: 'json',
-        label: 'JSON — one entry per image',
-        hint: 'Position (pixels), scale and response of each keypoint.',
-      },
-      {
-        value: 'csv',
-        label: 'CSV — one row per keypoint',
-        hint: 'image, x, y, scale, response: one row per keypoint, for a spreadsheet or pandas.',
-      },
-    ],
-  },
-  matches: {
-    title: 'Export Matches',
-    hint: 'The pairs whose matches passed geometric verification; a rejected pair has none to list.',
-    formats: [
-      { value: 'json', label: 'JSON — one entry per pair' },
-      { value: 'csv', label: 'CSV — one row per match' },
-    ],
-  },
-  vectors: {
-    title: 'Export Vector Layer',
-    formats: [
-      { value: 'geojson', label: 'GeoJSON (.geojson)' },
-      { value: 'kml', label: 'KML (.kml) — Google Earth, WGS 84' },
-    ],
-  },
-  allmaps: {
-    title: 'Export to Allmaps',
-    hint:
-      'One Georeference Annotation per aligned photo, in one file. Open it in Allmaps Viewer (paste it in, or ' +
-      'give it its address): each photo is loaded from your IIIF image server and warped onto the map by its ' +
-      'control points, which follow the ground and the lens as Photos on the 2D map does.',
-    formats: [{ value: 'annotations', label: 'Georeference Annotations — IIIF JSON for Allmaps' }],
-  },
+// Per kind, its formats in the order they are offered (the cards). Their words are in the
+// catalogue (core/i18n/en/export.js ▸ format.<kind>.<id>): a label, a blurb under it,
+// and a hint for the Format step's line when the format needs more; else the kind's.
+const FORMATS = {
+  cloud: ['ply-binary', 'ply-ascii', 'las', 'laz', 'copc', 'xyz'],
+  mesh: ['ply-binary', 'ply-ascii', 'glb', 'obj', 'stl'],
+  model: ['json', 'transforms'],
+  colmap: ['workspace', 'database', 'txt', 'bin', 'transforms', 'openmvg', 'nvm', 'metashape'],
+  tiles3d: ['tileset'],
+  undistorted: ['jpeg', 'png'],
+  dem: ['geotiff', 'cog', 'asc', 'png', 'support'],
+  measurements: ['csv', 'geojson'],
+  ortho: ['geotiff', 'cog', 'png', 'jpeg', 'mbtiles', 'xyz'],
+  poses: ['csv', 'txt', 'geojson'],
+  sensors: ['csv', 'txt'],
+  cameraFiducials: ['csv', 'txt'],
+  imageFiducials: ['csv', 'txt'],
+  keypoints: ['json', 'csv'],
+  matches: ['json', 'csv'],
+  vectors: ['geojson', 'kml'],
+  allmaps: ['annotations'],
 }
+// A catalogue text that only some formats or kinds have: '' where there is none.
+const optional = (key, params) => (key in CATALOGS.en ? t(key, params) : '')
 
 const imageTooLarge = computed(() => props.kind === 'ortho' && props.orthoCells > MAX_ORTHO_IMAGE_CELLS)
-const cfg = computed(() => {
-  const c = CONFIG[props.kind]
-  if (props.kind === 'vectors') {
+// Why a format is offered greyed ('' when it is not): KML needs a CRS to convert from,
+// and an orthophoto PNG/JPEG is made whole through a canvas.
+function unavailable(value) {
+  if (props.kind === 'vectors' && value === 'kml' && !props.projectCrs) return t('export.unavailable.needsCrs')
+  if (imageTooLarge.value && (value === 'png' || value === 'jpeg'))
+    return t('export.unavailable.tooLarge', { side: Math.sqrt(MAX_ORTHO_IMAGE_CELLS) })
+  return ''
+}
+const cfg = computed(() => ({
+  title: t(`export.title.${props.kind === 'vectors' && props.footprints ? 'footprints' : props.kind}`),
+  hint: optional(`export.hint.${props.kind}`),
+  formats: (FORMATS[props.kind] ?? []).map((value) => {
+    const base = `export.format.${props.kind}.${value}`
     return {
-      ...c,
-      title: props.footprints ? 'Export Footprints' : c.title,
-      formats: c.formats.map((f) =>
-        f.value === 'kml' && !props.projectCrs
-          ? { ...f, label: f.label + ' — needs a project CRS', disabled: true }
-          : f,
-      ),
+      value,
+      label: t(`${base}.label`),
+      blurb: optional(`${base}.blurb`),
+      hint: optional(`${base}.hint`),
+      why: unavailable(value),
     }
-  }
-  if (!imageTooLarge.value) return c
-  const why = ` — too large (at most ${Math.sqrt(MAX_ORTHO_IMAGE_CELLS).toLocaleString()}² px); use a GeoTIFF`
-  return {
-    ...c,
-    formats: c.formats.map((f) =>
-      f.value === 'png' || f.value === 'jpeg' ? { ...f, label: f.label + why, disabled: true } : f,
-    ),
-  }
-})
+  }),
+}))
 
 // `format` is chosen dynamically per kind; the rest are the single source of truth
 // in core/defaults.user.js.
 const settings = ref({
-  format: (props.kind === 'mesh' && props.textured ? 'glb' : null) ?? cfg.value.formats.find((f) => !f.disabled)?.value,
+  format: (props.kind === 'mesh' && props.textured ? 'glb' : null) ?? cfg.value.formats.find((f) => !f.why)?.value,
   includeImages: false,
   includeTexture: true,
   fileName: '',
@@ -321,11 +144,11 @@ const posesCrs = computed(() =>
   !estimatedPoses.value || (props.hasGeoref && settings.value.applyGeoref) ? props.projectCrs : '',
 )
 const posesFrameHint = computed(() => {
-  if (posesCrs.value) return `Positions in ${posesCrs.value}.`
-  if (!estimatedPoses.value) return 'Positions as imported (the project has no CRS).'
+  if (posesCrs.value) return t('export.poses.inCrs', { crs: posesCrs.value })
+  if (!estimatedPoses.value) return t('export.poses.asImported')
   if (hasFrame.value && settings.value.applyGeoref)
-    return props.hasScale ? 'Positions in metres, no CRS.' : 'Positions in model units, in your orientation.'
-  return 'Positions in the model frame (model units, no CRS).'
+    return t(props.hasScale ? 'export.poses.metres' : 'export.poses.oriented')
+  return t('export.poses.modelFrame')
 })
 // GeoJSON can be written in WGS 84 when the coordinates are in a CRS.
 const wgs84Offered = computed(
@@ -333,7 +156,7 @@ const wgs84Offered = computed(
 )
 const formatHint = computed(() => {
   const f = cfg.value.formats.find((x) => x.value === settings.value.format)
-  return f?.hint ?? cfg.value.hint ?? ''
+  return f?.hint || cfg.value.hint
 })
 const tilesMesh = computed(() => props.tilesSubject?.kind === 'mesh')
 // One tile cannot hold a streamed cloud or one past the buffer wall.
@@ -433,17 +256,15 @@ const orthoNodataApplies = computed(
     (props.kind === 'ortho' && settings.value.format === 'jpeg'),
 )
 
-// The formats as cards: a label "Name — what it holds" (or "Name (what)") gives the
-// card's name and its line.
-function formatCard(f) {
-  const dash = f.label.indexOf(' — ')
-  if (dash > 0)
-    return { id: f.value, label: f.label.slice(0, dash), blurb: f.label.slice(dash + 3), disabled: f.disabled }
-  const paren = f.label.match(/^(.+?) \(([^()]+)\)$/)
-  if (paren) return { id: f.value, label: paren[1], blurb: paren[2], disabled: f.disabled }
-  return { id: f.value, label: f.label, disabled: f.disabled }
-}
-const formatCards = computed(() => cfg.value.formats.map(formatCard))
+// The formats as cards: the name, what the file holds under it, or why it is greyed.
+const formatCards = computed(() =>
+  cfg.value.formats.map((f) => ({
+    id: f.value,
+    label: f.label,
+    blurb: f.why || f.blurb || undefined,
+    disabled: !!f.why,
+  })),
+)
 
 // The steps, as the export applies them: ① the format, ② the kind's own settings (when
 // this format has any), ③ a DEM's or orthophoto's coordinate system (GeoTIFF), then the
@@ -479,34 +300,23 @@ const optionsShown = computed(() => {
 })
 // Allmaps: why the IIIF address cannot name the photos yet ('' when it can), and the
 // address the first aligned photo gets.
-const IIIF_PROBLEMS = {
-  empty: 'Type the IIIF address of the photos first',
-  notUrl: 'The IIIF address must start with https:// (or http://)',
-  noPlaceholder: 'Put {name} or {stem} in the IIIF address, so each photo gets its own',
-}
-const iiifProblem = computed(() =>
-  props.kind === 'allmaps'
-    ? (IIIF_PROBLEMS[iiifTemplateProblem(settings.value.iiifTemplate, props.sources.estimated ?? 0)] ?? '')
-    : '',
-)
+const iiifProblem = computed(() => {
+  if (props.kind !== 'allmaps') return ''
+  const problem = iiifTemplateProblem(settings.value.iiifTemplate, props.sources.estimated ?? 0)
+  return problem ? t(`export.allmaps.problem.${problem}`) : ''
+})
 const iiifExample = computed(() =>
   props.sources.example
-    ? `${props.sources.example} → ${iiifImageUri(settings.value.iiifTemplate, props.sources.example)}`
+    ? t('export.allmaps.example', {
+        name: props.sources.example,
+        uri: iiifImageUri(settings.value.iiifTemplate, props.sources.example),
+      })
     : '',
 )
 // The Export button's reason when it cannot run.
 const runBlocked = computed(() => iiifProblem.value)
 
-const OPTION_TITLES = {
-  allmaps: 'IIIF images',
-  tiles3d: 'Tiles',
-  undistorted: 'Images',
-  dem: 'Cells',
-  ortho: 'Pixels',
-  measurements: 'Coordinates',
-  vectors: 'Coordinates',
-}
-const optionsTitle = computed(() => OPTION_TITLES[props.kind] ?? 'Content')
+const optionsTitle = computed(() => optional(`export.step.options.${props.kind}`) || t('export.step.options.other'))
 const crsShown = computed(() => isRaster.value && isTiff.value)
 const stepNo = computed(() => {
   let n = 1
@@ -522,86 +332,103 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
        comes from (Source), ① the Format as cards with what its file holds, ② the kind's
        own settings, ③ a raster's coordinate system, then the File name. -->
   <ModalShell :title="cfg.title" @close="emit('close')">
-    <SettingsGroup v-if="hasSource" title="Source">
+    <SettingsGroup v-if="hasSource" :title="t('export.source.label')">
       <p v-if="subject" class="subject">
-        Exporting <strong>{{ subject }}</strong>
+        <I18nText k="export.exporting" :params="{ name: subject }" />
       </p>
       <SettingsField v-if="kind === 'poses'" label-for="psrc">
-        <template #label><FieldHelp op="export-camera-poses" param="source">Source</FieldHelp></template>
+        <template #label
+          ><FieldHelp op="export-camera-poses" param="source">{{ t('export.source.label') }}</FieldHelp></template
+        >
         <select id="psrc" v-model="settings.poseSource" class="field-input field-select">
           <option
             value="estimated"
             :disabled="!sources.estimated"
-            :title="sources.estimated ? null : 'Build a sparse model first (Reconstruct ▸ Sparse Model)'"
+            :title="sources.estimated ? null : t('export.source.noSparse')"
           >
-            Estimated by the reconstruction ({{ pluralize(sources.estimated ?? 0, 'camera') }})
+            {{ t('export.source.posesEstimated', { n: sources.estimated ?? 0 }) }}
           </option>
           <option
             value="imported"
             :disabled="!sources.imported"
-            :title="sources.imported ? null : 'No camera poses imported (Import ▸ Camera Poses)'"
+            :title="sources.imported ? null : t('export.source.noImportedPoses')"
           >
-            Imported poses ({{ pluralize(sources.imported ?? 0, 'pose') }})
+            {{ t('export.source.posesImported', { n: sources.imported ?? 0 }) }}
           </option>
         </select>
       </SettingsField>
       <SettingsField v-else-if="kind === 'sensors'" label-for="ssrc">
-        <template #label><FieldHelp op="export-calibration" param="source">Source</FieldHelp></template>
+        <template #label
+          ><FieldHelp op="export-calibration" param="source">{{ t('export.source.label') }}</FieldHelp></template
+        >
         <select id="ssrc" v-model="settings.sensorSource" class="field-input field-select">
           <option
             value="estimated"
             :disabled="!sources.estimated"
-            :title="sources.estimated ? null : 'Build a sparse model first (Reconstruct ▸ Sparse Model)'"
+            :title="sources.estimated ? null : t('export.source.noSparse')"
           >
-            Estimated by the reconstruction, one row per camera group
+            {{ t('export.source.sensorsEstimated') }}
           </option>
           <option
             value="estimatedPerImage"
             :disabled="!sources.estimated"
-            :title="sources.estimated ? null : 'Build a sparse model first (Reconstruct ▸ Sparse Model)'"
+            :title="sources.estimated ? null : t('export.source.noSparse')"
           >
-            Estimated by the reconstruction, one row per image ({{ pluralize(sources.estimated ?? 0, 'camera') }})
+            {{ t('export.source.sensorsEstimatedPerImage', { n: sources.estimated ?? 0 }) }}
           </option>
           <option
             value="entered"
             :disabled="!sources.entered"
-            :title="sources.entered ? null : 'No camera group has a calibration entered'"
+            :title="sources.entered ? null : t('export.source.noEnteredCalibration')"
           >
-            As entered ({{ pluralize(sources.entered ?? 0, 'camera group') }})
+            {{ t('export.source.sensorsEntered', { n: sources.entered ?? 0 }) }}
           </option>
         </select>
       </SettingsField>
     </SettingsGroup>
 
-    <SettingsStep step="1" title="Format" :effect="formatHint">
+    <SettingsStep step="1" :title="t('export.step.format')" :effect="formatHint">
       <template v-if="kind === 'dem' && settings.format === 'support'" #effect>
-        <FieldHelp op="dem" param="supportExport">Support layer</FieldHelp>: for each DEM cell, the percentage that
-        points landed in (0 = filled by interpolation), 255 where the DEM is empty. On the DEM's grid, or its overview
-        for a DEM too large for one plane.
+        <FieldHelp op="dem" param="supportExport">{{ t('export.supportLayer.label') }}</FieldHelp>{{
+          t('export.supportLayer.effect')
+        }}
       </template>
-      <ChoiceCards v-model="settings.format" :options="formatCards" class="format-cards" aria-label="Format" />
+      <ChoiceCards
+        v-model="settings.format"
+        :options="formatCards"
+        class="format-cards"
+        :aria-label="t('export.step.format')"
+      />
     </SettingsStep>
 
     <SettingsStep v-if="optionsShown" :step="stepNo.options" :title="optionsTitle">
       <!-- Point cloud -->
       <template v-if="kind === 'cloud'">
-        <label :title="isLasFormat ? 'LAS always stores RGB when the cloud has colour' : null" class="checkbox-row">
+        <label :title="isLasFormat ? t('export.cloud.lasAlwaysRgb') : null" class="checkbox-row">
           <input
             type="checkbox"
             v-model="settings.includeColor"
             :disabled="isLasFormat"
-            :title="isLasFormat ? 'LAS always stores RGB when the cloud has colour' : null"
+            :title="isLasFormat ? t('export.cloud.lasAlwaysRgb') : null"
             class="checkbox"
           />
-          Include vertex colours{{ isLasFormat ? ' (LAS always stores RGB when the cloud has colour)' : '' }}
+          {{ t(isLasFormat ? 'export.cloud.lasColours' : 'export.cloud.colours') }}
         </label>
         <label v-if="hasFrame" class="checkbox-row"
           ><input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}</label
         >
         <SettingsField
-          label="Voxel downsample cell"
+          :label="t('export.cloud.voxel.label')"
           label-for="dscell"
-          :hint="`World units${hasGeoref ? ' (project CRS when georeferenced)' : hasScale ? ' (metres when scaled)' : ''}; 0 = keep every point.`"
+          :hint="
+            t(
+              hasGeoref
+                ? 'export.cloud.voxel.hintGeoref'
+                : hasScale
+                  ? 'export.cloud.voxel.hintScaled'
+                  : 'export.cloud.voxel.hint',
+            )
+          "
         >
           <input
             id="dscell"
@@ -612,35 +439,28 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
             class="field-input"
           />
         </SettingsField>
-        <p class="field-hint">
-          Point attributes (a computed distance, imported intensity or classification) are written to PLY and LAS. LAZ
-          keeps only the standard LAS fields; XYZ keeps none.
-        </p>
+        <p class="field-hint">{{ t('export.cloud.attributes') }}</p>
       </template>
 
       <!-- Mesh -->
       <template v-else-if="kind === 'mesh'">
         <template v-if="textured">
-          <label :title="textureFormat ? null : 'Only GLB and OBJ carry a texture'" class="checkbox-row">
+          <label :title="textureFormat ? null : t('export.mesh.textureFormats')" class="checkbox-row">
             <input
               type="checkbox"
               v-model="settings.includeTexture"
               :disabled="!textureFormat"
-              :title="textureFormat ? null : 'Only GLB and OBJ carry a texture'"
+              :title="textureFormat ? null : t('export.mesh.textureFormats')"
               class="checkbox"
             />
-            Include the photo texture{{ textureFormat ? '' : ' (GLB or OBJ only)' }}
+            {{ t(textureFormat ? 'export.mesh.texture' : 'export.mesh.textureOnly') }}
           </label>
           <p v-if="textureFormat && settings.includeTexture" class="field-hint">
-            {{
-              settings.format === 'glb'
-                ? 'The atlas pages are embedded in the .glb.'
-                : 'Downloads a .zip with the .obj, its .mtl and one JPEG per atlas page.'
-            }}
+            {{ t(settings.format === 'glb' ? 'export.mesh.glbTexture' : 'export.mesh.objTexture') }}
           </p>
         </template>
         <label
-          :title="settings.format === 'stl' ? 'STL has no colour' : null"
+          :title="settings.format === 'stl' ? t('export.mesh.stlNoColour') : null"
           v-if="!(textured && textureFormat && settings.includeTexture)"
           class="checkbox-row"
         >
@@ -648,10 +468,10 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
             type="checkbox"
             v-model="settings.includeColor"
             :disabled="settings.format === 'stl'"
-            :title="settings.format === 'stl' ? 'STL has no colour' : null"
+            :title="settings.format === 'stl' ? t('export.mesh.stlNoColour') : null"
             class="checkbox"
           />
-          Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}
+          {{ t(settings.format === 'stl' ? 'export.mesh.stlColours' : 'export.mesh.colours') }}
         </label>
         <label v-if="hasFrame" class="checkbox-row">
           <input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}
@@ -661,16 +481,14 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
       <!-- Model JSON -->
       <template v-else-if="kind === 'model'">
         <label v-if="settings.format === 'json'" class="checkbox-row">
-          <input type="checkbox" v-model="settings.includeTracks" class="checkbox" /> Include point tracks (image
-          observations)
+          <input type="checkbox" v-model="settings.includeTracks" class="checkbox" /> {{ t('export.model.tracks') }}
         </label>
       </template>
 
       <!-- COLMAP model -->
       <template v-else-if="kind === 'colmap'">
         <label v-if="settings.format === 'workspace'" class="checkbox-row">
-          <input type="checkbox" v-model="settings.includeImages" class="checkbox" /> Include original source images
-          (larger ZIP)
+          <input type="checkbox" v-model="settings.includeImages" class="checkbox" /> {{ t('export.colmap.images') }}
         </label>
       </template>
 
@@ -679,18 +497,26 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
         <SettingsField
           label-for="tiling"
           :hint="
-            settings.tiling === 'lod'
-              ? tilesMesh
-                ? 'The mesh split into tiles and decimated per level; viewers load detail where the camera is.'
-                : 'One tile per node of the cloud\'s level-of-detail octree; viewers load detail where the camera is.'
-              : 'The whole model in one tile, loaded at once.'
+            t(
+              settings.tiling === 'lod'
+                ? tilesMesh
+                  ? 'export.tiles3d.lodMesh'
+                  : 'export.tiles3d.lodCloud'
+                : 'export.tiles3d.singleHint',
+            )
           "
         >
-          <template #label><FieldHelp op="export-3d-tiles" param="tiling">Tiling</FieldHelp></template>
+          <template #label
+            ><FieldHelp op="export-3d-tiles" param="tiling">{{ t('export.tiles3d.tiling') }}</FieldHelp></template
+          >
           <select id="tiling" v-model="settings.tiling" class="field-input field-select">
-            <option value="lod">Level of detail (hierarchy of tiles)</option>
-            <option value="single" :disabled="!singleTileOk" :title="singleTileOk ? null : 'Too large for one tile'">
-              Single tile{{ singleTileOk ? '' : ' — too large for one tile' }}
+            <option value="lod">{{ t('export.tiles3d.lod') }}</option>
+            <option
+              value="single"
+              :disabled="!singleTileOk"
+              :title="singleTileOk ? null : t('export.tiles3d.tooLarge')"
+            >
+              {{ t(singleTileOk ? 'export.tiles3d.single' : 'export.tiles3d.singleTooLarge') }}
             </option>
           </select>
         </SettingsField>
@@ -701,7 +527,7 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
               param="tileTriangles"
               :value="settings.tileTriangles"
               :default-value="EXPORT_DEFAULTS.tileTriangles"
-              >Triangles per tile</FieldHelp
+              >{{ t('export.tiles3d.triangles') }}</FieldHelp
             >
           </template>
           <input
@@ -714,39 +540,31 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
           />
         </SettingsField>
         <p v-if="textured" class="field-hint">
-          {{
-            settings.tiling === 'lod'
-              ? 'The finest tiles keep the photo texture; the coarser, decimated ones have vertex colours.'
-              : 'The tile is the selected textured mesh, with its photo texture.'
-          }}
+          {{ t(settings.tiling === 'lod' ? 'export.tiles3d.textureLod' : 'export.tiles3d.textureSingle') }}
         </p>
         <label v-if="!textured || settings.tiling === 'lod'" class="checkbox-row"
-          ><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label
+          ><input type="checkbox" v-model="settings.includeColor" class="checkbox" />
+          {{ t('export.tiles3d.colours') }}</label
         >
-        <p v-if="tilesSubject?.streamed" class="field-hint">
-          A streamed cloud is written in its own coordinates and placed in the CRS its file names, else the project CRS.
-        </p>
-        <p v-else-if="!hasGeoref" class="field-hint warn-hint">
-          This project has no georeference, so the tileset will have no position on the globe. Georeference the model
-          first.
-        </p>
+        <p v-if="tilesSubject?.streamed" class="field-hint">{{ t('export.tiles3d.streamed') }}</p>
+        <p v-else-if="!hasGeoref" class="field-hint warn-hint">{{ t('export.tiles3d.noGeoref') }}</p>
       </template>
 
       <!-- Undistorted images -->
       <template v-else-if="kind === 'undistorted'">
         <SettingsField
-          label="Border"
+          :label="t('export.undistorted.border')"
           label-for="umode"
-          hint="Cropping keeps only the region that samples inside the source image."
+          :hint="t('export.undistorted.borderHint')"
         >
           <select id="umode" v-model="settings.undistortMode" class="field-input field-select">
-            <option value="crop">Crop to the valid region</option>
-            <option value="full">Keep the full frame (blank borders)</option>
+            <option value="crop">{{ t('export.undistorted.crop') }}</option>
+            <option value="full">{{ t('export.undistorted.full') }}</option>
           </select>
         </SettingsField>
         <SettingsField
           v-if="settings.format === 'jpeg'"
-          :label="`JPEG quality: ${settings.undistortQuality.toFixed(2)}`"
+          :label="t('export.undistorted.quality', { q: settings.undistortQuality })"
           label-for="uq"
         >
           <input
@@ -760,9 +578,9 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
           />
         </SettingsField>
         <SettingsField
-          label="Maximum dimension"
+          :label="t('export.undistorted.maxDim')"
           label-for="umax"
-          hint="Longest output side in pixels; 0 = native resolution. Lower it for a smaller ZIP."
+          :hint="t('export.undistorted.maxDimHint')"
         >
           <input
             id="umax"
@@ -780,20 +598,20 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
         <!-- The hillshade PNG is a rendered preview, the support layer a percentage: no elevation cells to flag. -->
         <SettingsField
           v-if="settings.format !== 'png' && settings.format !== 'support' && !reprojecting"
-          label="NODATA value"
+          :label="t('export.raster.nodata')"
           label-for="nodata"
-          hint="Written for empty cells (holes with no measurement)."
+          :hint="t('export.raster.nodataHint')"
         >
           <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input" />
         </SettingsField>
         <SettingsField
           v-if="(isTiff || settings.format === 'support') && !reprojecting"
-          label="Compression"
+          :label="t('export.raster.compression')"
           label-for="comp"
         >
           <select id="comp" v-model="settings.compression" class="field-input field-select">
-            <option value="none">None (uncompressed)</option>
-            <option value="deflate">DEFLATE (lossless)</option>
+            <option value="none">{{ t('export.raster.none') }}</option>
+            <option value="deflate">{{ t('export.raster.deflate') }}</option>
           </select>
         </SettingsField>
       </template>
@@ -801,35 +619,39 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
       <!-- Saved measurements -->
       <template v-else-if="kind === 'measurements'">
         <SettingsField v-if="settings.format === 'geojson' && measurementCrs" label-for="mcoords">
-          <template #label><FieldHelp op="dem" param="measurementCoords">Coordinates</FieldHelp></template>
+          <template #label
+            ><FieldHelp op="dem" param="measurementCoords">{{
+              t('export.measurements.coordinates')
+            }}</FieldHelp></template
+          >
           <select id="mcoords" v-model="settings.measurementCoords" class="field-input field-select">
-            <option value="project">Project CRS ({{ measurementCrs }}), heights kept</option>
-            <option value="wgs84">WGS 84 longitude/latitude (RFC 7946), 2D</option>
+            <option value="project">{{ t('export.measurements.project', { crs: measurementCrs }) }}</option>
+            <option value="wgs84">{{ t('export.measurements.wgs84') }}</option>
           </select>
         </SettingsField>
         <p v-if="settings.format === 'geojson' && !measurementCrs" class="field-hint">
-          No measurement here has a coordinate system, so the file is written in the frames they were measured in and
-          marked as not georeferenced.
+          {{ t('export.measurements.noCrs') }}
         </p>
-        <p class="field-hint">
-          Every value has its unit beside it. Measurements whose raster, layer or frame has changed since are included
-          and marked stale.
-        </p>
+        <p class="field-hint">{{ t('export.measurements.units') }}</p>
       </template>
 
       <!-- Ortho -->
       <template v-else-if="kind === 'ortho'">
         <!-- The COG export is the stored file itself, always DEFLATE. -->
-        <SettingsField v-if="isTiff && !isCog && !reprojecting" label="Compression" label-for="ocomp">
+        <SettingsField
+          v-if="isTiff && !isCog && !reprojecting"
+          :label="t('export.raster.compression')"
+          label-for="ocomp"
+        >
           <select id="ocomp" v-model="settings.compression" class="field-input field-select">
-            <option value="none">None (uncompressed)</option>
-            <option value="deflate">DEFLATE (lossless)</option>
+            <option value="none">{{ t('export.raster.none') }}</option>
+            <option value="deflate">{{ t('export.raster.deflate') }}</option>
           </select>
         </SettingsField>
         <!-- Empty pixels: an alpha band, or (unticked, and in a JPEG) a NODATA value. -->
         <label v-if="orthoAlphaApplies" class="checkbox-row">
           <input type="checkbox" v-model="settings.orthoAlpha" class="checkbox" />
-          <FieldHelp op="orthophoto" param="orthoAlpha">Alpha band (transparent empty pixels)</FieldHelp>
+          <FieldHelp op="orthophoto" param="orthoAlpha">{{ t('export.raster.alpha') }}</FieldHelp>
         </label>
         <SettingsField v-if="orthoNodataApplies" label-for="onodata">
           <template #label
@@ -838,7 +660,7 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
               param="orthoNodata"
               :value="settings.orthoNodata"
               :default-value="EXPORT_DEFAULTS.orthoNodata"
-              >NODATA value</FieldHelp
+              >{{ t('export.raster.nodata') }}</FieldHelp
             ></template
           >
           <input
@@ -852,16 +674,20 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
           />
         </SettingsField>
         <SettingsField v-if="isWebTiles" label-for="tfmt">
-          <template #label><FieldHelp op="orthophoto" param="tileFormat">Tile format</FieldHelp></template>
+          <template #label
+            ><FieldHelp op="orthophoto" param="tileFormat">{{ t('export.raster.tileFormat') }}</FieldHelp></template
+          >
           <select id="tfmt" v-model="settings.tileFormat" class="field-input field-select">
-            <option value="png">PNG — transparent edges</option>
-            <option value="jpeg">JPEG — smaller, white edges</option>
-            <option value="webp">WebP — small, transparent (newer viewers)</option>
+            <option value="png">{{ t('export.raster.tilePng') }}</option>
+            <option value="jpeg">{{ t('export.raster.tileJpeg') }}</option>
+            <option value="webp">{{ t('export.raster.tileWebp') }}</option>
           </select>
         </SettingsField>
         <SettingsField
           v-if="settings.format === 'jpeg' || (isWebTiles && settings.tileFormat !== 'png')"
-          :label="`${isWebTiles ? 'Tile' : 'JPEG'} quality: ${settings.jpegQuality.toFixed(2)}`"
+          :label="
+            t(isWebTiles ? 'export.raster.tileQuality' : 'export.raster.jpegQuality', { q: settings.jpegQuality })
+          "
           label-for="jq"
         >
           <input
@@ -880,53 +706,49 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
       <template v-else-if="kind === 'poses'">
         <label class="checkbox-row">
           <input type="checkbox" v-model="settings.poseOrientation" class="checkbox" />
-          <FieldHelp op="export-camera-poses" param="poseOrientation">Orientation (omega, phi, kappa)</FieldHelp>
+          <FieldHelp op="export-camera-poses" param="poseOrientation">{{ t('export.poses.orientation') }}</FieldHelp>
         </label>
-        <label :title="estimatedPoses ? 'Only imported poses carry accuracies' : null" class="checkbox-row">
+        <label :title="estimatedPoses ? t('export.poses.onlyImported') : null" class="checkbox-row">
           <input
             type="checkbox"
             v-model="settings.poseAccuracy"
             :disabled="estimatedPoses"
-            :title="estimatedPoses ? 'Only imported poses carry accuracies' : null"
+            :title="estimatedPoses ? t('export.poses.onlyImported') : null"
             class="checkbox"
           />
-          Accuracies{{ estimatedPoses ? ' (imported poses only)' : '' }}
+          {{ t(estimatedPoses ? 'export.poses.accuraciesImported' : 'export.poses.accuracies') }}
         </label>
         <label v-if="estimatedPoses && hasFrame" class="checkbox-row">
           <input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}
         </label>
         <SettingsField v-if="wgs84Offered" label-for="pcoords">
-          <template #label><FieldHelp op="export-camera-poses" param="geoJsonCoords">Coordinates</FieldHelp></template>
+          <template #label
+            ><FieldHelp op="export-camera-poses" param="geoJsonCoords">{{
+              t('export.poses.coordinates')
+            }}</FieldHelp></template
+          >
           <select id="pcoords" v-model="settings.geoJsonCoords" class="field-input field-select">
-            <option value="project">Project CRS ({{ posesCrs }}), heights kept</option>
-            <option value="wgs84">WGS 84 longitude/latitude (RFC 7946), height as a property</option>
+            <option value="project">{{ t('export.poses.project', { crs: posesCrs }) }}</option>
+            <option value="wgs84">{{ t('export.poses.wgs84') }}</option>
           </select>
         </SettingsField>
         <p class="field-hint">
           {{ posesFrameHint }}
-          {{
-            estimatedPoses
-              ? 'Import ▸ Camera Poses reads the file back as pose priors with the same angles.'
-              : 'The poses as imported, with their accuracies.'
-          }}
+          {{ t(estimatedPoses ? 'export.poses.readBack' : 'export.poses.imported') }}
         </p>
       </template>
 
       <!-- Calibration -->
       <template v-else-if="kind === 'sensors'">
-        <p v-if="settings.sensorSource !== 'entered'" class="field-hint">
-          Focal length and principal point as bundle adjustment ended, in pixels (a film scan's in its fiducial frame);
-          the lens model each group was corrected with, and any radial terms self-calibration fitted on top of it
-          (selfcal_k1…k3).
-        </p>
+        <p v-if="settings.sensorSource !== 'entered'" class="field-hint">{{ t('export.sensors.estimated') }}</p>
       </template>
 
       <!-- Matches -->
       <template v-else-if="kind === 'matches'">
-        <SettingsField label="Content" label-for="mcontent">
+        <SettingsField :label="t('export.matches.content')" label-for="mcontent">
           <select id="mcontent" v-model="settings.matchContent" class="field-input field-select">
-            <option value="matches">Every pair with its matches (keypoint indices)</option>
-            <option value="pairs">The pair list only, with match counts</option>
+            <option value="matches">{{ t('export.matches.matches') }}</option>
+            <option value="pairs">{{ t('export.matches.pairs') }}</option>
           </select>
         </SettingsField>
       </template>
@@ -934,62 +756,54 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
       <!-- Allmaps: where the photos are served from -->
       <template v-else-if="kind === 'allmaps'">
         <SettingsField label-for="iiiftpl" :hint="iiifProblem || iiifExample">
-          <template #label><FieldHelp op="export-allmaps" param="iiifTemplate">Image address</FieldHelp></template>
+          <template #label
+            ><FieldHelp op="export-allmaps" param="iiifTemplate">{{ t('export.allmaps.address') }}</FieldHelp></template
+          >
           <input
             id="iiiftpl"
             v-model="settings.iiifTemplate"
             type="url"
             spellcheck="false"
-            placeholder="https://iiif.example.org/iiif/3/{name}"
+            :placeholder="t('export.allmaps.placeholder')"
             class="field-input wide"
           />
         </SettingsField>
         <SettingsField label-for="iiifver">
-          <template #label><FieldHelp op="export-allmaps" param="iiifVersion">IIIF Image API</FieldHelp></template>
+          <template #label
+            ><FieldHelp op="export-allmaps" param="iiifVersion">{{ t('export.allmaps.api') }}</FieldHelp></template
+          >
           <select id="iiifver" v-model.number="settings.iiifVersion" class="field-input field-select">
-            <option :value="2">Version 2</option>
-            <option :value="3">Version 3</option>
+            <option :value="2">{{ t('export.allmaps.version', { v: 2 }) }}</option>
+            <option :value="3">{{ t('export.allmaps.version', { v: 3 }) }}</option>
           </select>
         </SettingsField>
-        <p class="field-hint">
-          {{ pluralize(sources.estimated ?? 0, 'aligned photo') }}. Each photo's size is read from its info.json on the
-          server: a smaller copy is fine, a cropped or turned one is left out.
-        </p>
+        <p class="field-hint">{{ t('export.allmaps.photos', { n: sources.estimated ?? 0 }) }}</p>
       </template>
 
       <!-- Vector layer (footprints, contours, imported polygons) -->
       <template v-else-if="kind === 'vectors'">
-        <SettingsField v-if="wgs84Offered" label="Coordinates" label-for="vcoords">
+        <SettingsField v-if="wgs84Offered" :label="t('export.vectors.coordinates')" label-for="vcoords">
           <select id="vcoords" v-model="settings.geoJsonCoords" class="field-input field-select">
-            <option value="project">Project CRS ({{ projectCrs }})</option>
-            <option value="wgs84">WGS 84 longitude/latitude (RFC 7946)</option>
+            <option value="project">{{ t('export.vectors.project', { crs: projectCrs }) }}</option>
+            <option value="wgs84">{{ t('export.vectors.wgs84') }}</option>
           </select>
         </SettingsField>
-        <p v-if="!projectCrs" class="field-hint">
-          The project has no CRS, so the layer is written in its own coordinates.
-        </p>
+        <p v-if="!projectCrs" class="field-hint">{{ t('export.vectors.noCrs') }}</p>
       </template>
     </SettingsStep>
 
     <!-- DEM / ortho GeoTIFF in another CRS: warped block by block in the export worker. -->
-    <SettingsStep v-if="crsShown" :step="stepNo.crs" title="Coordinate system">
-      <SettingsField
-        label-for="rcrs"
-        :hint="
-          rasterCrs
-            ? 'Another CRS writes a reprojected copy; the product itself stays as built.'
-            : 'A raster in the local frame has no CRS to reproject from.'
-        "
-      >
-        <template #label><FieldHelp :op="rasterOp" param="rasterCrs">Coordinate system</FieldHelp></template>
+    <SettingsStep v-if="crsShown" :step="stepNo.crs" :title="t('export.step.crs')">
+      <SettingsField label-for="rcrs" :hint="t(rasterCrs ? 'export.raster.crsHint' : 'export.raster.localHint')">
+        <template #label
+          ><FieldHelp :op="rasterOp" param="rasterCrs">{{ t('export.raster.crs') }}</FieldHelp></template
+        >
         <select id="rcrs" v-model="settings.rasterCrs" class="field-input field-select">
-          <option value="product">As built ({{ rasterCrs || 'local frame, no CRS' }})</option>
-          <option
-            value="other"
-            :disabled="!rasterCrs"
-            :title="rasterCrs ? null : 'A raster in the local frame has no CRS to reproject from'"
-          >
-            Another CRS…
+          <option value="product">
+            {{ t('export.raster.asBuilt', { crs: rasterCrs || t('export.raster.localFrame') }) }}
+          </option>
+          <option value="other" :disabled="!rasterCrs" :title="rasterCrs ? null : t('export.raster.localHint')">
+            {{ t('export.raster.anotherCrs') }}
           </option>
         </select>
       </SettingsField>
@@ -997,32 +811,31 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
         <div class="field"><CrsPicker v-model="outputCrs" /></div>
         <SettingsField
           label-for="rresamp"
-          :hint="
-            kind === 'dem'
-              ? 'Bilinear interpolates heights; Nearest keeps every value as measured.'
-              : 'Bilinear is smoother; Nearest keeps every pixel as it was.'
-          "
+          :hint="t(kind === 'dem' ? 'export.raster.resamplingDem' : 'export.raster.resamplingOrtho')"
         >
-          <template #label><FieldHelp :op="rasterOp" param="resampling">Resampling</FieldHelp></template>
+          <template #label
+            ><FieldHelp :op="rasterOp" param="resampling">{{ t('export.raster.resampling') }}</FieldHelp></template
+          >
           <select id="rresamp" v-model="settings.resampling" class="field-input field-select">
-            <option value="bilinear">Bilinear</option>
-            <option value="nearest">Nearest</option>
+            <option value="bilinear">{{ t('export.raster.bilinear') }}</option>
+            <option value="nearest">{{ t('export.raster.nearest') }}</option>
           </select>
         </SettingsField>
         <p class="field-hint">
-          Written as a Cloud-Optimized GeoTIFF (DEFLATE{{ kind === 'dem' ? ', nodata NaN' : '' }}) at the same ground
-          cell size.{{ kind === 'dem' ? ' Heights keep their vertical datum: only the horizontal CRS changes.' : '' }}
+          {{ t(kind === 'dem' ? 'export.raster.reprojectedDem' : 'export.raster.reprojectedOrtho') }}
         </p>
       </template>
     </SettingsStep>
 
-    <SettingsStep :step="stepNo.file" title="File">
+    <SettingsStep :step="stepNo.file" :title="t('export.step.file')">
       <FileNameField v-model="settings.fileName" :default-name="defaultName" />
     </SettingsStep>
 
     <template #footer>
-      <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!!runBlocked" :title="runBlocked || null" @click="run">Export</button>
+      <button class="btn" @click="emit('close')">{{ t('common.cancel') }}</button>
+      <button class="btn btn-primary" :disabled="!!runBlocked" :title="runBlocked || null" @click="run">
+        {{ t('export.run') }}
+      </button>
     </template>
   </ModalShell>
 </template>

@@ -11,6 +11,7 @@ import { productLabel, productLayerId, productMapBlocker } from '../../../core/p
 import { mapLayerIds, moveMapLayer } from '../../../core/products/mapOrder.js'
 import { isFootprintSet, vectorKind, vectorLayerId } from '../../../core/products/vectorLayers.js'
 import { IMAGE_LAYER_ID } from '../../../core/products/imageOverlay.js'
+import { t } from '../../../composables/useI18n.js'
 
 // View ▸ Map ▸ Layers: the layers on the 2D map, as a GIS's layer list. The sidebar
 // is the catalogue of everything the project holds; a layer is put on the map (and so
@@ -47,9 +48,9 @@ const rowsById = computed(() => {
       id: r.id,
       name: r.name,
       icon: r.kind === 'dem' ? 'dem' : 'ortho',
-      kind: r.kind === 'dem' ? 'Reference DEM' : 'Reference orthophoto',
+      kind: t(r.kind === 'dem' ? 'mapLayers.kind.referenceDem' : 'mapLayers.kind.referenceOrtho'),
       opacity: r.opacity ?? 1,
-      blocked: canMapRaster(r) ? '' : 'No coordinate system or preview: the map cannot place it',
+      blocked: canMapRaster(r) ? '' : t('mapLayers.unplaced'),
       remove: () => external.setRasterVisible(r.id, false),
       fade: (opacity) => external.setRasterOpacity(r.id, opacity),
     })
@@ -63,7 +64,7 @@ const rowsById = computed(() => {
         id,
         name: productLabel(kind, product),
         icon: kind,
-        kind: kind === 'dem' ? 'DEM' : 'Orthophoto',
+        kind: t(kind === 'dem' ? 'mapLayers.kind.dem' : 'mapLayers.kind.ortho'),
         opacity: layer.opacity ?? 1,
         blocked: productMapBlocker(product) ?? '',
         remove: () => recon.setProductVisible(product.id, false),
@@ -77,7 +78,7 @@ const rowsById = computed(() => {
       id: vectorLayerId(s.id),
       name: s.name,
       icon: lines ? 'contours' : 'area',
-      kind: lines ? 'Contour lines' : 'Polygons',
+      kind: t(lines ? 'mapLayers.kind.contours' : 'mapLayers.kind.polygons'),
       opacity: s.opacity ?? 1,
       blocked: '',
       remove: () => vectors.setSetVisible(s.id, false),
@@ -87,9 +88,9 @@ const rowsById = computed(() => {
   if (imageLayer.value?.visible) {
     rows.set(IMAGE_LAYER_ID, {
       id: IMAGE_LAYER_ID,
-      name: 'Photos',
+      name: t('mapLayers.photos'),
       icon: 'image',
-      kind: 'Source images on the ground',
+      kind: t('mapLayers.kind.photos'),
       opacity: imageLayer.value.opacity ?? 1,
       blocked: '',
       mode: imageLayer.value.mode,
@@ -140,16 +141,13 @@ function onDragEnd() {
 <template>
   <FloatingToolbox
     id="map-layers"
-    title="Layers"
+    :title="t('mapLayers.title')"
     :width="268"
-    close-title="Close the layers panel"
+    :close-title="t('mapLayers.close')"
     @close="emit('close')"
   >
-    <p v-if="!rows.length" class="layer-note">
-      No layers on the map. Tick a DEM, orthophoto, reference raster, contour or polygon layer in the sidebar to add it
-      here.
-    </p>
-    <ul v-else class="item-list" aria-label="Map layers, top first">
+    <p v-if="!rows.length" class="layer-note">{{ t('mapLayers.empty') }}</p>
+    <ul v-else class="item-list" :aria-label="t('mapLayers.list')">
       <li
         v-for="(row, i) in rows"
         :key="row.id"
@@ -160,7 +158,7 @@ function onDragEnd() {
           'over': overId === row.id && dragId !== row.id,
           'layer-hidden': !row.shown,
         }"
-        :title="row.blocked || `${row.kind} · click for its settings`"
+        :title="row.blocked || t('mapLayers.row', { kind: row.kind })"
         @click="chosenId = row.id"
         @dragover="(e) => onDragOver(e, row.id)"
         @drop.prevent="onDrop(row.id)"
@@ -168,7 +166,7 @@ function onDragEnd() {
         <span
           class="drag-handle"
           draggable="true"
-          title="Drag to restack: the top of the list draws on top"
+          :title="t('mapLayers.drag')"
           aria-hidden="true"
           @dragstart="(e) => onDragStart(e, row.id)"
           @dragend="onDragEnd"
@@ -178,8 +176,8 @@ function onDragEnd() {
           class="map-visibility"
           type="checkbox"
           :checked="row.shown"
-          :aria-label="`Show ${row.name} on the map`"
-          title="Shown on the map; unticked, it stays in the list"
+          :aria-label="t('mapLayers.show.label', { name: row.name })"
+          :title="t('mapLayers.show.title')"
           @click.stop
           @change="recon.setMapLayerHidden(row.id, !$event.target.checked)"
         />
@@ -189,8 +187,8 @@ function onDragEnd() {
           <button
             class="move-btn"
             :disabled="i === 0"
-            :aria-label="`Move ${row.name} up`"
-            title="Up: draw above the layer over it"
+            :aria-label="t('mapLayers.up.label', { name: row.name })"
+            :title="t('mapLayers.up.title')"
             @click.stop="moveTo(row.id, i - 1)"
           >
             ▲
@@ -198,8 +196,8 @@ function onDragEnd() {
           <button
             class="move-btn"
             :disabled="i === rows.length - 1"
-            :aria-label="`Move ${row.name} down`"
-            title="Down: draw below the layer under it"
+            :aria-label="t('mapLayers.down.label', { name: row.name })"
+            :title="t('mapLayers.down.title')"
             @click.stop="moveTo(row.id, i + 1)"
           >
             ▼
@@ -207,8 +205,8 @@ function onDragEnd() {
         </span>
         <button
           class="remove-btn"
-          :aria-label="`Remove ${row.name} from the map`"
-          title="Remove from the map (it stays in the sidebar)"
+          :aria-label="t('mapLayers.remove.label', { name: row.name })"
+          :title="t('mapLayers.remove.title')"
           @click.stop="row.remove()"
         >
           ✕
@@ -217,7 +215,12 @@ function onDragEnd() {
     </ul>
 
     <!-- The selected layer's settings: one strip, so the rows stay one line each. -->
-    <div v-if="selected" class="layer-settings" :aria-label="`Settings of ${selected.name}`" role="group">
+    <div
+      v-if="selected"
+      class="layer-settings"
+      :aria-label="t('mapLayers.settingsOf', { name: selected.name })"
+      role="group"
+    >
       <div class="settings-title">
         <span class="item-name">{{ selected.name }}</span>
         <span class="settings-kind">{{ selected.kind }}</span>
@@ -230,38 +233,38 @@ function onDragEnd() {
           step="0.05"
           class="opacity-slider"
           :value="selected.opacity"
-          :aria-label="`Opacity of ${selected.name}`"
-          title="Opacity on the map"
+          :aria-label="t('mapLayers.opacity.label', { name: selected.name })"
+          :title="t('mapLayers.opacity.title')"
           @input="selected.fade(Number($event.target.value))"
         />
-        <span class="opacity-pct">{{ Math.round(selected.opacity * 100) }}%</span>
+        <span class="opacity-pct">{{ t('mapLayers.opacity.value', { v: selected.opacity }) }}</span>
         <button
           class="link-btn"
           :disabled="!selected.shown"
-          :title="selected.shown ? 'Fit the map to this layer' : 'Tick it to show it first'"
+          :title="t(selected.shown ? 'mapLayers.zoomTo.title' : 'mapLayers.zoomTo.hidden')"
           @click="emit('zoom-to', selected.id)"
         >
-          Zoom to
+          {{ t('mapLayers.zoomTo.label') }}
         </button>
       </div>
       <div v-if="selected.mode" class="settings-row">
-        <label for="map-layers-photos" class="setting-label">Show</label>
+        <label for="map-layers-photos" class="setting-label">{{ t('mapLayers.photosShow.label') }}</label>
         <select
           id="map-layers-photos"
           class="setting-select"
           :value="selected.mode"
           @change="recon.setImageLayer({ mode: $event.target.value })"
         >
-          <option value="all">Every image (thumbnails)</option>
-          <option value="selected">The selected image</option>
+          <option value="all">{{ t('mapLayers.photosShow.all') }}</option>
+          <option value="selected">{{ t('mapLayers.photosShow.selected') }}</option>
         </select>
       </div>
       <p v-if="selected.mode === 'selected' && !selectedImageId" class="settings-hint">
-        Click a camera or footprint (or an image in the sidebar) to show its photo.
+        {{ t('mapLayers.photosShow.hint') }}
       </p>
     </div>
 
-    <p class="layer-note">Footprints, GCPs and cameras always draw above the layers.</p>
+    <p class="layer-note">{{ t('mapLayers.above') }}</p>
   </FloatingToolbox>
 </template>
 
