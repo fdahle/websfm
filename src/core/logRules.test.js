@@ -192,9 +192,8 @@ describe('log lines (CONTRIBUTING.md ▸ The console)', () => {
   it('do not repeat their source at the start of the message', () => {
     const bad = CALLS.flatMap((c) => {
       const head = messageHead(c.args[0]).toLowerCase()
-      return literalsOf(c.args[2])
-        .filter((s) => head.startsWith(`${s.toLowerCase()}: `))
-        .map((s) => `${where(c)} "${s}: …"`)
+      const sources = c.args[2] ? literalsOf(c.args[2]) : [CALLER_TAGS[c.file]?.source].filter(Boolean)
+      return sources.filter((s) => head.startsWith(`${s.toLowerCase()}: `)).map((s) => `${where(c)} "${s}: …"`)
     })
     expect(bad).toEqual([])
   })
@@ -257,7 +256,11 @@ describe('log lines (CONTRIBUTING.md ▸ The console)', () => {
 const LOCAL_WRAPPER = /(const|let)\s+log\s*=\s*\([^)]*\)\s*=>\s*\w+\??\.?\([^)]*'[A-Z]/
 
 // Files whose `log` is a wrapper their caller hands in, which tags the lines.
+// `source`: the one its caller gives, so the rules that read it still apply.
 const CALLER_TAGS = {
-  'src/stores/matching/gpuMatchRun.js': 'matchAll.js passes (msg, level) => log(msg, level, "Matching")',
-  'src/stores/tuningOverrides.js': 'each caller passes a wrapper with its own source',
+  'src/stores/matching/gpuMatchRun.js': {
+    source: 'Matching',
+    why: 'matchAll.js passes (msg, level) => log(msg, level, "Matching")',
+  },
+  'src/stores/tuningOverrides.js': { source: null, why: 'each caller passes a wrapper with its own source' },
 }

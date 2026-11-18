@@ -44,7 +44,7 @@ describe('createGpuMatchRun', () => {
     const log = vi.fn()
     const { client } = fakeClient({ init: { ok: false, reason: 'no WebGPU adapter' } })
     expect(await createGpuMatchRun({ client, log, cacheBudgetBytes: 2 ** 30 })).toBeNull()
-    expect(log.mock.calls[0][0]).toMatch(/unavailable \(no WebGPU adapter\)/)
+    expect(log.mock.calls[0][0]).toMatch(/not available \(no WebGPU adapter\)/)
     expect(log.mock.calls[0][1]).toBe('warn')
   })
 
@@ -133,7 +133,7 @@ describe('createGpuMatchRun', () => {
     const r2 = await run.match(D, D, opts())
     const r3 = await run.match(D, D, opts())
     expect(r2.cpu && r3.cpu).toBe(true)
-    expect(log.mock.calls.filter(([m]) => /GPU error \(device lost\)/.test(m))).toHaveLength(1)
+    expect(log.mock.calls.filter(([m]) => /GPU matching failed on a pair: device lost/.test(m))).toHaveLength(1)
     const rec = await run.finish()
     expect(rec).toMatchObject({ backend: 'gpu→wasm', fallbacks: 2, disabledReason: null, firstError: 'device lost' })
   })

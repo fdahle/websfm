@@ -63,12 +63,15 @@ export async function createGpuMatchRun({
     init = { ok: false, reason: err?.message ?? String(err) }
   }
   if (!init?.ok) {
-    log(`Matching: GPU requested but unavailable (${init?.reason ?? 'unknown'}) — brute-force on WASM (CPU)`, 'warn')
+    log(
+      `The GPU is not available (${init?.reason ?? 'no reason given'}): nearest neighbours are matched on the CPU (WASM)`,
+      'warn',
+    )
     return null
   }
   const g = init.geometry
   log(
-    `Matching: backend = WebGPU (${init.adapter}) — brute-force nearest neighbours on ${g.tileA}×${g.tileB} tiles ` +
+    `GPU matching: backend = WebGPU (${init.adapter}) — brute-force nearest neighbours on ${g.tileA}×${g.tileB} tiles ` +
       `(${g.workgroup} threads, ${g.microTile} per thread, k-chunk ${g.kChunk}), ` +
       `≤${(init.macPerDispatch / 1e9).toFixed(1)} GMAC per dispatch; descriptor cache ${Math.round(init.budgetBytes / MiB)} MB ` +
       `(requested ${Math.round(cacheBudgetBytes / MiB)} MB); ratio test and mutual nearest neighbours in JS. ` +
@@ -90,7 +93,7 @@ export async function createGpuMatchRun({
   const disable = (reason) => {
     if (disabledReason) return
     disabledReason = reason
-    log(`Matching: ${reason} — the rest of this run matches on WASM (CPU)`, 'error')
+    log(`GPU matching failed: ${reason}; the rest of this run matches on the CPU (WASM)`, 'warn')
   }
 
   const checkCancel = () => {
@@ -178,7 +181,10 @@ export async function createGpuMatchRun({
       const msg = err?.message ?? String(err)
       if (!firstError) {
         firstError = msg
-        log(`Matching: GPU error (${msg}) — this pair falls back to WASM; later errors are counted, not logged`, 'warn')
+        log(
+          `GPU matching failed on a pair: ${msg}; the pair is matched on the CPU (WASM), later failures are counted, not logged`,
+          'warn',
+        )
       }
       if (validator) disable(`GPU failed on its first ${kind === 'gate' ? 'subset-gate' : 'full'} match`)
       // A lost device fails every later call too: after a few in a row, stop trying it
