@@ -302,6 +302,10 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **The new-version prompt says what it is doing.** After you press Reload it says it is
+  switching, instead of claiming the new version is already active in another tab, and
+  when the tab has to finish something first it names it (saving the project, an import,
+  a run), so it is clear the reload follows by itself.
 - **The orthophoto no longer redraws when another layer changes.** Moving a layer's
   Opacity slider or turning Photos on or off left the orthophoto and DEM on the map
   instead of taking them off and drawing them again from scratch. The Layers panel no

@@ -36,6 +36,9 @@ export function createAppUpdate({ reload = () => window.location.reload() } = {}
   // This tab's code failed to load a part of itself (a lazy chunk or a worker of the
   // version it started on is gone from the server and the cache): it must reload.
   const updateStale = ref(false)
+  // This tab's Reload started the switch: the new worker taking control is its own
+  // doing, not another tab's, and the prompt says so while the reload is on its way.
+  const updateRequested = ref(false)
   let busy = false
   let reloading = false
   let applyUpdate = null
@@ -50,6 +53,7 @@ export function createAppUpdate({ reload = () => window.location.reload() } = {}
     updateReady,
     updateActive,
     updateStale,
+    updateRequested,
     /** A chunk or worker of this tab's version could not be loaded: reload once idle. */
     onStaleCode() {
       updateStale.value = true
@@ -79,6 +83,7 @@ export function createAppUpdate({ reload = () => window.location.reload() } = {}
     /** Reload pressed: activate the waiting worker (onNeedReload then reloads). */
     reloadIntoUpdate() {
       if (busy) return
+      updateRequested.value = true
       if (updateActive.value) reloadIfIdle()
       else applyUpdate?.(true)
     },
@@ -96,6 +101,7 @@ const app = createAppUpdate()
 export const updateReady = app.updateReady
 export const updateActive = app.updateActive
 export const updateStale = app.updateStale
+export const updateRequested = app.updateRequested
 export const reloadIntoUpdate = app.reloadIntoUpdate
 export const postponeUpdate = app.postponeUpdate
 export const setUpdateBusy = app.setBusy

@@ -34,6 +34,30 @@ describe('createAppUpdate', () => {
     expect(reload).toHaveBeenCalledTimes(1)
   })
 
+  it('knows the switch is this tab’s own, not another tab’s, while its reload waits', () => {
+    const { app, reload } = setup()
+    app.onNeedRefresh()
+    expect(app.updateRequested.value).toBe(false)
+    app.reloadIntoUpdate()
+    expect(app.updateRequested.value).toBe(true)
+    // A save starts before the new worker takes control: the reload waits for it.
+    app.setBusy(true)
+    app.onNeedReload()
+    expect(reload).not.toHaveBeenCalled()
+    expect(app.updateRequested.value).toBe(true)
+    app.setBusy(false)
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('a switch made in another tab is not this tab’s request', () => {
+    const { app } = setup()
+    app.onNeedRefresh()
+    app.setBusy(true)
+    app.onNeedReload()
+    expect(app.updateActive.value).toBe(true)
+    expect(app.updateRequested.value).toBe(false)
+  })
+
   it('does not activate the update from a busy tab', () => {
     const { app, apply } = setup()
     app.onNeedRefresh()

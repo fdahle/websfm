@@ -799,6 +799,16 @@ const workInFlight = computed(
     persistenceFailures.value.length > 0,
 )
 useBeforeUnload(() => workInFlight.value)
+// Which of those holds the tab, as an id UpdatePrompt words ("… once the project is saved").
+const workInFlightReason = computed(() => {
+  if (progressOpen.value) return 'run'
+  if (projectLoading.value) return 'opening'
+  if (pendingImageWork.value > 0) return 'images'
+  if (pendingRasterWork.value > 0) return 'rasters'
+  if (pendingPersistence.value > 0) return 'saving'
+  if (persistenceFailures.value.length > 0) return 'saveFailed'
+  return ''
+})
 
 // A run left alone: wake lock, progress in the tab title, a notification when it ends
 // in a hidden tab, and a toast when a stage logged errors.
@@ -1174,7 +1184,7 @@ provideSidebar(sidebarContext)
     <MobileWarning />
     <BrowserWarning />
     <ToastStack />
-    <UpdatePrompt :busy="workInFlight" />
+    <UpdatePrompt :busy="workInFlight" :busy-reason="workInFlightReason" />
     <Ribbon
       ref="ribbonRef"
       :active-view="activeView"
