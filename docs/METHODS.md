@@ -268,6 +268,25 @@ from the matching-time F with a nominal K, are wrong too often on true pairs (§
 pairs are stopped downstream by the two-gate PnP (§4.3), the track filter (§4.9) and the
 robust BA (§4.5).
 
+**Pairs checked against the finished model** (`core/sfm/pairAgreement.js`). A false pair
+can still win: its matches place a photo, and the model then agrees with the false pair
+and disagrees with that photo's true pairs. After each model, every pair (weak ones too)
+whose two photos are in it is scored with the solved cameras: inliers on one 3D point,
+inliers on two *different* points (split), and the Sampson error under the solved relative
+pose (within 4 detection px; pinhole, so approximate under rolling shutter). A pair
+disagrees when under half its matches are within that, or when its split matches (≥ 5)
+outnumber those on one point; the split count catches a false match shifted along its
+epipolar line, which the error alone passes. A photo is contested when disagreeing pairs
+carry at least half its scored matches (≥ 2 scored pairs). Suspects: an agreeing pair
+between a contested and an uncontested photo *holds* the contested one in place (the
+likely false pair, ranked by the contested photo's disagreeing share); a disagreeing pair
+between two uncontested photos is a false pair the model overruled. "Disagrees with the
+model" alone would point at the true pairs. A merged secondary model adds its pairs'
+scores before the suspects are found. Nothing is excluded automatically: the log names
+the suspects and the user excludes a pair (View ▸ Inspect ▸ Matches). A block of several
+misplaced photos whose pairs among themselves outweigh their links out is not contested;
+then only the overruled pairs at its edge show.
+
 **Retries and multiple models** (`core/sfm/multiModel.js`). A primary model that registers
 less than half the input is retried with up to four alternate initial pairs, keeping the
 largest result, so one locally clean but non-growing seed does not decide every later

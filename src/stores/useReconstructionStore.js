@@ -427,6 +427,9 @@ export const useReconstructionStore = registerProjectStore(
         // (sparseRun.js heldFrameOf); the georeference places the model in it. Never
         // kept from `prev`: any other solve of the cameras must earn its own.
         heldFrame = null,
+        // Its pairs checked against it (core/sfm/pairAgreement.js packPairCheck). Never
+        // kept from `prev`: it describes this solve of the cameras.
+        pairCheck = null,
       } = opts
       const idx = replaceId ? clouds.value.findIndex((c) => c.id === replaceId && c.kind === 'sparse') : -1
       const prev = idx >= 0 ? clouds.value[idx] : null
@@ -447,6 +450,7 @@ export const useReconstructionStore = registerProjectStore(
         points: markRaw(points),
         ...((calibration ?? prev?.calibration) ? { calibration: markRaw(calibration ?? prev.calibration) } : {}),
         ...(heldFrame ? { heldFrame: markRaw(heldFrame) } : {}),
+        ...(pairCheck ? { pairCheck: markRaw(pairCheck) } : {}),
       }
       if (idx >= 0) clouds.value.splice(idx, 1, cloud)
       else clouds.value.push(cloud)

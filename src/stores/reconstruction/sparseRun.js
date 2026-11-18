@@ -841,6 +841,7 @@ export function createSparseRun({
             name: base.name,
             keepStamp: true,
             calibration: calibrationFor(camMap, result.summary),
+            pairCheck: result.pairCheck ?? null,
           })
           const grown = mainSparseCloud.value
           if (grown && base.style !== undefined) grown.style = base.style
@@ -849,6 +850,7 @@ export function createSparseRun({
           upsertSparseCloud(camMap, pts, {
             calibration: calibrationFor(camMap, result.summary),
             heldFrame: heldFrameOf(result.summary?.demHold, survey, upTurn),
+            pairCheck: result.pairCheck ?? null,
           })
           // A secondary component that could not satisfy the conservative shared-camera
           // alignment gates is still a valid reconstruction. Preserve it as a separate
@@ -875,6 +877,7 @@ export function createSparseRun({
               name: model.name || `Secondary sparse ${si + 1}`,
               // Its own lens: a secondary model self-calibrates on its own.
               calibration: calibrationFor(secondaryCameras, model.summary ?? result.summary),
+              pairCheck: model.pairCheck ?? null,
             })
           }
         }

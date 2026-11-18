@@ -6,6 +6,13 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Sparse Model names pairs that may be false matches.** After the run, every pair is
+  checked against the finished model, and a warning names a pair that holds a photo in
+  place while most of that photo's other matches disagree, with what to do (exclude it in
+  View ▸ Inspect ▸ Matches and run again). Each pair's score is saved with the model, for
+  the match list to show next. Measured so far on synthetic blocks only: a clean 18-photo
+  block flags nothing; a false pair planted between two photos that share no ground is
+  flagged and no true pair is; 17.9 M matches over 900 photos take 3.4 s.
 - **Everything you click can be typed in the console.** `run` takes every step a workflow
   can run unattended, with its settings (`run dense minViews=3 mesh preset=high`), and
   the edits you make by hand are commands too (`gcp disable "GCP 12"`, `product main

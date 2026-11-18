@@ -29,6 +29,8 @@ import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
 import { compactTrackRecords } from './resultCodec.js'
 import { createTrackStore, makeImageIds } from './trackStore.js'
+import { scorePairAgreement, PAIR_UNSCORED } from './pairAgreement.js'
+import { resolveScaledPx } from '../scaleContext.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { registrationOutliers, deregisterCamera } from './registrationCheck.js'
 import { estimateFocalsFromPairs } from './focalFromPairs.js'
@@ -793,6 +795,34 @@ export async function reconstructSingleModel(input, hooks = {}) {
         )
     }
 
+    // ── Pairs checked against the finished model (pairAgreement.js) ──────────
+    // Strong and weak pairs alike: a weak bridge can place a photo through PnP. A band
+    // photo placed by the rig was not placed by its matches, so it is not scored. One
+    // pass over the run's matches, here in this worker on purpose: they are all resident
+    // (the store transferred them in), and spreading the pass over the pool would send
+    // them again; 17.9 M matches over 900 photos take 3.4 s (synthetic, Node, 11-18).
+    // sfm.js finds the suspects once every model's scores are in.
+    const rigPlaced = new Set(rigCompleted)
+    const pairCheckStart = performance.now()
+    const pairScores = scorePairAgreement({
+      pairs: [...donePairs, ...weakPairs],
+      cameraOf: (u) => (rigPlaced.has(u) ? null : (cameras.get(u) ?? null)),
+      keypointsOf: (u) => imageByUuid(u)?.kp ?? null,
+      pointsOf: (u) => {
+        const img = ids.img(u)
+        return (kp) => tracks.pointAt(img, kp)
+      },
+      epiTolPx: resolveScaledPx(cfg.pairCheckEpiPx, { factor: cfg.detectScaleFactor }),
+      agreeFrac: cfg.pairCheckAgreeFrac,
+      minSplit: cfg.pairCheckMinSplit,
+      minMatches: cfg.pairCheckMinMatches,
+    }).filter((s) => s.status !== PAIR_UNSCORED)
+    log(
+      `Pair check: ${pluralize(pairScores.length, 'pair')} scored in ${(performance.now() - pairCheckStart).toFixed(0)} ms`,
+      'debug',
+      'Sparse',
+    )
+
     // ── Run record + summary (runRecord.js) ──────────────────────────────────
     logPerCameraResiduals({ tracks, ids, cameras, keypointsAt, imageByUuid, modelResiduals, log })
     const hist = trackHist(tracks)
@@ -891,6 +921,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       'Sparse',
     )
     const output = done('done', summary)
+    output.pairScores = pairScores
     memoryMark('compact result')
     log(`Compact model ready: ${summary.nCameras} cameras, ${summary.nPoints} points`, 'info', 'Sparse')
     return output

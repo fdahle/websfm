@@ -33,6 +33,8 @@ import { wrapPackedMatches } from './matchCodec.js'
 import { keypointSetFrom } from './keypointSet.js'
 import { reconstructSingleModel } from './singleModel.js'
 import { pluralize } from '../textFormat.js'
+import { packPairCheck, mergePairScores, describePairCheck } from './pairAgreement.js'
+import { resolveScaledPx } from '../scaleContext.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
@@ -113,10 +115,35 @@ export async function reconstruct(input, hooks = {}) {
   // 19-camera primary into 122 on B4, and the run's own metrics did NOT flag the bad
   // one — so "was a retry needed?" is part of the result, not an aside in the log.
   const attempts = { retryCap: Math.max(0, cfg.seedRetryMax ?? 0), retriesRun: 0, winner: 0, seeds: [] }
+  const nameByUuid = new Map((input.images || []).map((im) => [im.uuid, im.name ?? im.uuid]))
+  const nameOf = (uuid) => nameByUuid.get(uuid) ?? uuid
+  // Each model the run keeps (the primary, each separate secondary) finishes its pair
+  // check: the suspects, the columns it keeps (`pairCheck`) and the log lines.
+  const finishPairCheck = (model, prefix = '') => {
+    if (!model?.pairScores) return
+    const { pairCheck, counts, suspects } = packPairCheck(model.pairScores, {
+      contestedFrac: cfg.pairCheckContestedFrac,
+      minPairs: cfg.pairCheckMinPairs,
+      epiTolPx: resolveScaledPx(cfg.pairCheckEpiPx, { factor: cfg.detectScaleFactor }),
+    })
+    delete model.pairScores
+    model.pairCheck = pairCheck
+    if (model.summary)
+      model.summary.pairCheck = {
+        ...counts,
+        suspects: suspects
+          .slice(0, 20)
+          .map((s) => ({ idA: s.idA, idB: s.idB, reason: s.reason, photo: s.photo, matches: s.weight })),
+      }
+    const log = hooks.onLog ?? (() => {})
+    for (const [message, level] of describePairCheck(counts, suspects, nameOf)) log(prefix + message, level, 'Sparse')
+  }
   const withRunRecord = (model) => {
     if (model?.summary) {
       model.summary.attempts = { ...attempts, seeds: [...attempts.seeds] }
     }
+    finishPairCheck(model)
+    for (const [i, m] of (model?.secondaryModels ?? []).entries()) finishPairCheck(m, `Piece ${i + 1}: `)
     return model
   }
   // Each sub-run reports an honest local 0..1; the orchestration maps those into
@@ -355,7 +382,9 @@ export async function reconstruct(input, hooks = {}) {
       })
       continue
     }
+    const primaryScores = primary.pairScores
     primary = mergeAligned(primary, aligned)
+    primary.pairScores = mergePairScores(primaryScores, secondary.pairScores)
     primary.summary.unregisteredComponents = (primary.summary.unregisteredComponents || []).filter(
       (c) => !c.imageUuids?.some((u) => job.componentIds.includes(u)),
     )

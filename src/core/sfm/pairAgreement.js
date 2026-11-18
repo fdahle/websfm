@@ -21,7 +21,6 @@
 // repeated along the flight line); the split count catches that one, when both
 // keypoints made it into the model.
 
-import { kpX, kpY } from './keypointSet.js'
 import { asPairList } from './matchCodec.js'
 
 export const PAIR_UNSCORED = 0
@@ -71,8 +70,9 @@ export function fundamentalFromPoses(camA, camB) {
  *   error is then approximate, which is enough to flag a pair.
  * @param {(uuid: string) => object} o.keypointsOf  the photo's keypoint set in the frame
  *   K applies to (undistorted, keypointSet.js)
- * @param {(uuid: string, kp: number) => number} o.pointOf  the model point keypoint `kp`
- *   observes, or −1
+ * @param {(uuid: string) => ((kp: number) => number)} o.pointsOf  the photo's lookup:
+ *   the model point its keypoint `kp` observes, or −1 (asked once per pair, so the
+ *   photo is found once, not per match)
  * @param {number} o.epiTolPx  Sampson error (px, native) within which a match agrees
  * @param {number} o.agreeFrac  share of matches that must agree
  * @param {number} o.minSplit  split matches that, outnumbering inModel, make a conflict
@@ -84,7 +84,7 @@ export function scorePairAgreement({
   pairs,
   cameraOf,
   keypointsOf,
-  pointOf,
+  pointsOf,
   epiTolPx,
   agreeFrac,
   minSplit,
@@ -107,22 +107,27 @@ export function scorePairAgreement({
     if (!camA || !camB) return out
     const setA = keypointsOf(pair.idA),
       setB = keypointsOf(pair.idB)
+    if (!setA || !setB) return out
     const m = asPairList(pair.matches ?? [])
     const F = fundamentalFromPoses(camA, camB)
+    const pointA = pointsOf(pair.idA),
+      pointB = pointsOf(pair.idB)
+    const xyA = setA.xy,
+      xyB = setB.xy
     if (scratch.length < m.length) scratch = new Float64Array(m.length)
     let n = 0,
       within = 0
     for (let i = 0; i < m.length; i++) {
       const ka = m.a(i),
         kb = m.b(i)
-      const xa = kpX(setA, ka),
-        ya = kpY(setA, ka),
-        xb = kpX(setB, kb),
-        yb = kpY(setB, kb)
+      const xa = xyA[2 * ka],
+        ya = xyA[2 * ka + 1],
+        xb = xyB[2 * kb],
+        yb = xyB[2 * kb + 1]
       // A keypoint dropped at ingest (NaN) is not a match the model could hold.
       if (!(Number.isFinite(xa) && Number.isFinite(ya) && Number.isFinite(xb) && Number.isFinite(yb))) continue
-      const pa = pointOf(pair.idA, ka),
-        pb = pointOf(pair.idB, kb)
+      const pa = pointA(ka),
+        pb = pointB(kb)
       if (pa >= 0 && pb >= 0) {
         if (pa === pb) out.inModel++
         else out.split++
@@ -137,8 +142,7 @@ export function scorePairAgreement({
     out.n = n
     if (n < minMatches) return out
     if (F) {
-      const ds = scratch.subarray(0, n).sort()
-      out.epiMedianPx = n % 2 ? ds[n >> 1] : (ds[n / 2 - 1] + ds[n / 2]) / 2
+      out.epiMedianPx = median(scratch, n)
       out.epiAgreeFrac = within / n
     }
     const splitConflict = out.split >= minSplit && out.split > out.inModel
@@ -146,6 +150,38 @@ export function scorePairAgreement({
     else if (out.inModel + out.split >= minSplit) out.status = splitConflict ? PAIR_CONFLICTS : PAIR_AGREES
     return out
   })
+}
+
+// The median of a[0 … n−1], reordering them (quickselect: linear, where a sort per pair
+// was a tenth of the whole check on a 900-photo block).
+export function median(a, n) {
+  const k = n >> 1
+  let lo = 0,
+    hi = n - 1
+  while (lo < hi) {
+    const pivot = a[(lo + hi) >> 1]
+    let i = lo,
+      j = hi
+    while (i <= j) {
+      while (a[i] < pivot) i++
+      while (a[j] > pivot) j--
+      if (i <= j) {
+        const t = a[i]
+        a[i] = a[j]
+        a[j] = t
+        i++
+        j--
+      }
+    }
+    if (k <= j) hi = j
+    else if (k >= i) lo = i
+    else break
+  }
+  if (n % 2) return a[k]
+  // Even: the lower middle is the largest of the values before a[k].
+  let below = -Infinity
+  for (let i = 0; i < k; i++) if (a[i] > below) below = a[i]
+  return (below + a[k]) / 2
 }
 
 // Sampson distance (px) of x_b·F·x_a = 0 (fundamental.js sampsonDistPx, without the
@@ -224,4 +260,176 @@ export function findSuspectPairs(scores, { contestedFrac, minPairs }) {
     x.reason !== y.reason ? (x.reason === 'holds' ? -1 : 1) : y.conflictShare - x.conflictShare || y.weight - x.weight,
   )
   return { photos, suspects }
+}
+
+// The scores of a model merged into the primary join the primary's; a pair both scored
+// keeps the primary's (its frame is the one the merged model keeps).
+export function mergePairScores(primary = [], added = []) {
+  const key = (s) => (s.idA < s.idB ? `${s.idA}--${s.idB}` : `${s.idB}--${s.idA}`)
+  const seen = new Set(primary.map(key))
+  return [...primary, ...added.filter((s) => !seen.has(key(s)))]
+}
+
+export const SUSPECT_NONE = 0
+export const SUSPECT_HOLDS = 1
+export const SUSPECT_CONTRADICTS = 2
+
+/**
+ * The scored pairs as columns, for the main thread and the saved model, with their
+ * suspects found: the record a sparse model keeps (`pairCheck`).
+ *
+ *   uuids          the photos the pairs name; a, b index it (a pair's own order)
+ *   matches, inModel, split   Uint32Array per pair
+ *   epiMedianPx, epiAgreeFrac Float32Array per pair, NaN without a baseline
+ *   status         Uint8Array: PAIR_AGREES | PAIR_CONFLICTS (unscored pairs are left out)
+ *   suspect        Uint8Array: SUSPECT_NONE | SUSPECT_HOLDS | SUSPECT_CONTRADICTS
+ *   held           Int32Array: for a 'holds' pair the photo (index into uuids) it holds, else −1
+ *
+ * → { pairCheck, counts: { scored, agrees, conflicts, contested, holds, contradicts },
+ *     suspects } (`suspects` as findSuspectPairs ranks them)
+ */
+export function packPairCheck(scores, { contestedFrac, minPairs, epiTolPx }) {
+  const { photos, suspects } = findSuspectPairs(scores, { contestedFrac, minPairs })
+  const n = scores.length
+  const uuids = []
+  const at = new Map()
+  const indexOf = (u) => {
+    let i = at.get(u)
+    if (i == null) {
+      at.set(u, (i = uuids.length))
+      uuids.push(u)
+    }
+    return i
+  }
+  const pc = {
+    version: 1,
+    epiTolPx,
+    uuids,
+    a: new Uint32Array(n),
+    b: new Uint32Array(n),
+    matches: new Uint32Array(n),
+    inModel: new Uint32Array(n),
+    split: new Uint32Array(n),
+    epiMedianPx: new Float32Array(n),
+    epiAgreeFrac: new Float32Array(n),
+    status: new Uint8Array(n),
+    suspect: new Uint8Array(n),
+    held: new Int32Array(n).fill(-1),
+  }
+  let agrees = 0
+  scores.forEach((s, i) => {
+    pc.a[i] = indexOf(s.idA)
+    pc.b[i] = indexOf(s.idB)
+    pc.matches[i] = s.n
+    pc.inModel[i] = s.inModel
+    pc.split[i] = s.split
+    pc.epiMedianPx[i] = s.epiMedianPx ?? NaN
+    pc.epiAgreeFrac[i] = s.epiAgreeFrac ?? NaN
+    pc.status[i] = s.status
+    if (s.status === PAIR_AGREES) agrees++
+  })
+  let holds = 0
+  for (const s of suspects) {
+    if (s.reason === 'holds') {
+      holds++
+      pc.suspect[s.index] = SUSPECT_HOLDS
+      pc.held[s.index] = indexOf(s.photo)
+    } else pc.suspect[s.index] = SUSPECT_CONTRADICTS
+  }
+  let contested = 0
+  for (const p of photos.values()) if (p.contested) contested++
+  const counts = { scored: n, agrees, conflicts: n - agrees, contested, holds, contradicts: suspects.length - holds }
+  return { pairCheck: pc, counts, suspects }
+}
+
+const fmt = (n) => n.toLocaleString('en')
+const plural = (n, one, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`
+
+/**
+ * The log lines of a finished pair check, as [message, level] (source Sparse): the
+ * counts at info, the strongest 'holds' suspects at warn with what to do, the
+ * overruled pairs counted at info and each suspect at debug.
+ */
+export function describePairCheck(counts, suspects, nameOf, { warnMax = 3 } = {}) {
+  const lines = []
+  if (!counts.scored) return lines
+  lines.push([
+    `Pair check: ${plural(counts.scored, 'pair')} checked against the model, ${fmt(counts.agrees)} agree, ` +
+      `${fmt(counts.conflicts)} disagree` +
+      (counts.contested
+        ? `; ${plural(counts.contested, 'photo sits', 'photos sit')} where most of ${counts.contested === 1 ? 'its' : 'their'} matches disagree`
+        : ''),
+    'info',
+  ])
+  const holds = suspects.filter((s) => s.reason === 'holds')
+  for (const s of holds.slice(0, warnMax)) {
+    lines.push([
+      `${nameOf(s.idA)} ↔ ${nameOf(s.idB)} (${plural(s.weight, 'match', 'matches')}) may be a false match: it holds ` +
+        `${nameOf(s.photo)} where ${Math.round(100 * s.conflictShare)}% of that photo's matches disagree with the model. ` +
+        'Exclude the pair in View ▸ Inspect ▸ Matches and run Sparse Model again.',
+      'warn',
+    ])
+  }
+  if (holds.length > warnMax)
+    lines.push([
+      `Pair check: ${plural(holds.length - warnMax, 'more pair')} may hold a photo in the wrong place (View ▸ Inspect ▸ Matches)`,
+      'warn',
+    ])
+  if (counts.contradicts)
+    lines.push([
+      `Pair check: ${plural(counts.contradicts, 'pair disagrees', 'pairs disagree')} with the model without moving it ` +
+        (counts.contradicts === 1 ? '(a false match the model overruled)' : '(false matches the model overruled)'),
+      'info',
+    ])
+  for (const s of suspects)
+    lines.push([
+      `Pair check: ${nameOf(s.idA)} ↔ ${nameOf(s.idB)}, ${plural(s.weight, 'match', 'matches')}, ` +
+        (s.reason === 'holds'
+          ? `holds ${nameOf(s.photo)} (${Math.round(100 * s.conflictShare)}% of its matches disagree)`
+          : 'overruled by the model'),
+      'debug',
+    ])
+  return lines
+}
+
+// A pair check as saved with its sparse cloud: a small JSON header and one binary file
+// (cloudSerde.js). The 4-byte columns first, then the bytes, so every view is aligned.
+const PC_U32 = ['a', 'b', 'matches', 'inModel', 'split']
+const PC_I32 = ['held']
+const PC_F32 = ['epiMedianPx', 'epiAgreeFrac']
+const PC_U8 = ['status', 'suspect']
+
+export function pairCheckToBuffer(pc) {
+  const n = pc.status.length
+  const quads = PC_U32.length + PC_I32.length + PC_F32.length
+  const buffer = new ArrayBuffer(4 * quads * n + PC_U8.length * n)
+  let off = 0
+  const put = (Type, key) => {
+    new Type(buffer, off, n).set(pc[key])
+    off += Type.BYTES_PER_ELEMENT * n
+  }
+  for (const k of PC_U32) put(Uint32Array, k)
+  for (const k of PC_I32) put(Int32Array, k)
+  for (const k of PC_F32) put(Float32Array, k)
+  for (const k of PC_U8) put(Uint8Array, k)
+  return { meta: { version: pc.version, epiTolPx: pc.epiTolPx, uuids: [...pc.uuids], count: n }, buffer }
+}
+
+/** The pair check back from its header and file; null when they do not fit together. */
+export function pairCheckFromBuffer(meta, buffer) {
+  const n = meta?.count
+  const quads = PC_U32.length + PC_I32.length + PC_F32.length
+  if (meta?.version !== 1 || !Number.isInteger(n) || !buffer || buffer.byteLength !== 4 * quads * n + PC_U8.length * n)
+    return null
+  const pc = { version: 1, epiTolPx: meta.epiTolPx, uuids: meta.uuids ?? [] }
+  let off = 0
+  const take = (Type, key) => {
+    pc[key] = new Type(buffer, off, n)
+    off += Type.BYTES_PER_ELEMENT * n
+  }
+  for (const k of PC_U32) take(Uint32Array, k)
+  for (const k of PC_I32) take(Int32Array, k)
+  for (const k of PC_F32) take(Float32Array, k)
+  for (const k of PC_U8) take(Uint8Array, k)
+  return pc
 }

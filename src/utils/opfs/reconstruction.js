@@ -66,6 +66,8 @@ const RECON_BIN_KEYS = [
   'vx',
   'vy',
   'attributes',
+  // A sparse cloud's pairs checked against it (core/sfm/pairAgreement.js pairCheckToBuffer).
+  'pairCheck',
 ]
 
 export async function saveReconstruction(projectId, data) {

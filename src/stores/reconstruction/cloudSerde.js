@@ -1,6 +1,7 @@
 import { markRaw } from 'vue'
 import { packAttributes, unpackAttributes, attributeLayout } from '../../core/io/cloudAttributes.js'
 import { makePackedPoints } from '../../core/sfm/resultCodec.js'
+import { pairCheckToBuffer, pairCheckFromBuffer } from '../../core/sfm/pairAgreement.js'
 import { isSharedArray, viewAs } from '../../core/bigArray.js'
 
 // Cloud ↔ on-disk shape. Lifted out of useReconstructionStore so the format has one
@@ -160,6 +161,7 @@ function serializeCloudData(c, opts) {
   const pts = c.points
   const own = (a) => (a.byteOffset !== 0 || a.byteLength !== a.buffer.byteLength ? a.slice() : a)
   const { pos, col, colorMask, viewUuids, vcount, vcam, vkp, vx, vy } = pts.columns()
+  const pairCheck = c.pairCheck ? pairCheckToBuffer(c.pairCheck) : null
   return {
     id: c.id,
     name: c.name,
@@ -172,6 +174,9 @@ function serializeCloudData(c, opts) {
     ...(c.calibration ? { calibration: c.calibration } : {}),
     // The frame a DEM-held reconstruction was solved in (sparseRun.js heldFrameOf).
     ...(c.heldFrame ? { heldFrame: c.heldFrame } : {}),
+    // Its pairs checked against it (core/sfm/pairAgreement.js): the header here, the
+    // columns in the pairCheck file. Absent on clouds solved before the check existed.
+    ...(pairCheck ? { pairCheck: pairCheck.meta } : {}),
     cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
     pointCount: pts.length,
     hasColor: pts.hasColor,
@@ -185,6 +190,7 @@ function serializeCloudData(c, opts) {
       vkp: own(vkp).buffer,
       vx: vx ? own(vx).buffer : null,
       vy: vy ? own(vy).buffer : null,
+      ...(pairCheck ? { pairCheck: pairCheck.buffer } : {}),
     },
   }
 }
@@ -306,6 +312,10 @@ function deserializeCloudData(c, makeCloudId) {
     vcam: vcam ?? new Uint32Array(0),
     vkp: vkp ?? new Uint32Array(0),
   })
+  // An optional extra: a file that does not fit its header drops the check, never the cloud.
+  const pcFile =
+    b.pairCheck && ArrayBuffer.isView(b.pairCheck) ? new Uint8Array(b.pairCheck).slice().buffer : b.pairCheck
+  const pairCheck = c.pairCheck ? pairCheckFromBuffer(c.pairCheck, pcFile) : null
   return {
     id: c.id ?? makeCloudId(),
     name: c.name ?? 'Sparse cloud',
@@ -315,6 +325,7 @@ function deserializeCloudData(c, makeCloudId) {
     ...(c.secondary ? { secondary: true } : {}),
     ...(c.calibration ? { calibration: markRaw(c.calibration) } : {}),
     ...(c.heldFrame ? { heldFrame: markRaw(c.heldFrame) } : {}),
+    ...(pairCheck ? { pairCheck: markRaw(pairCheck) } : {}),
     cameras: markRaw(cameras),
     points: markRaw(points),
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { serializeCloud, deserializeCloud } from './cloudSerde.js'
 import { SparsePoints } from '../../core/sfm/sparsePoints.js'
+import { packPairCheck, PAIR_AGREES, PAIR_CONFLICTS } from '../../core/sfm/pairAgreement.js'
 
 let seq = 0
 const makeCloudId = () => `minted-${seq++}`
@@ -191,6 +192,39 @@ describe('sparse cloud round trip', () => {
     const back = deserializeCloud(JSON.parse(JSON.stringify(serializeCloud(sparseCloud({ heldFrame })))), makeCloudId)
     expect(back.heldFrame).toEqual(heldFrame)
     expect('heldFrame' in roundTrip(sparseCloud())).toBe(false)
+  })
+
+  it('keeps its pair check through a save and a load; a damaged file drops only the check', () => {
+    const S = (idA, idB, status, n) => ({
+      idA,
+      idB,
+      status,
+      n,
+      inModel: n,
+      split: 0,
+      epiMedianPx: 0.4,
+      epiAgreeFrac: 1,
+    })
+    const { pairCheck } = packPairCheck([S('ua', 'ub', PAIR_AGREES, 40), S('ub', 'uc', PAIR_CONFLICTS, 30)], {
+      contestedFrac: 0.5,
+      minPairs: 2,
+      epiTolPx: 4,
+    })
+    // The document goes through JSON; the file comes back as its bytes.
+    const save = (cloud) => {
+      const ser = serializeCloud(cloud)
+      return { ...JSON.parse(JSON.stringify({ ...ser, buffers: null })), buffers: ser.buffers }
+    }
+    const saved = save(sparseCloud({ pairCheck }))
+    const back = deserializeCloud(saved, makeCloudId)
+    expect(back.pairCheck.uuids).toEqual(['ua', 'ub', 'uc'])
+    expect([...back.pairCheck.status]).toEqual([PAIR_AGREES, PAIR_CONFLICTS])
+    expect([...back.pairCheck.matches]).toEqual([40, 30])
+    const damaged = { ...saved, buffers: { ...saved.buffers, pairCheck: saved.buffers.pairCheck.slice(0, 7) } }
+    const kept = deserializeCloud(damaged, makeCloudId)
+    expect('pairCheck' in kept).toBe(false)
+    expect(kept.points.length).toBe(3)
+    expect('pairCheck' in roundTrip(sparseCloud())).toBe(false)
   })
 
   it('drops colour when no point has any', () => {

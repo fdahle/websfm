@@ -3,6 +3,14 @@ import {
   fundamentalFromPoses,
   scorePairAgreement,
   findSuspectPairs,
+  median,
+  mergePairScores,
+  packPairCheck,
+  describePairCheck,
+  pairCheckToBuffer,
+  pairCheckFromBuffer,
+  SUSPECT_HOLDS,
+  SUSPECT_CONTRADICTS,
   PAIR_AGREES,
   PAIR_CONFLICTS,
   PAIR_UNSCORED,
@@ -92,7 +100,7 @@ describe('scorePairAgreement', () => {
       pairs,
       cameraOf: (u) => cameras[u] ?? null,
       keypointsOf: (u) => s.kps[u],
-      pointOf: (_u, k) => (inModel(k) ? k : -1),
+      pointsOf: () => (k) => (inModel(k) ? k : -1),
       ...TUNING,
     })
 
@@ -230,5 +238,140 @@ describe('findSuspectPairs', () => {
     ]
     const holds = findSuspectPairs(scores, opts).suspects.filter((s) => s.reason === 'holds')
     expect(holds.map((s) => s.photo)).toEqual(['P', 'Q'])
+  })
+})
+
+describe('mergePairScores', () => {
+  it('adds the pairs only the merged model scored; a pair both scored keeps the primary score', () => {
+    const p = [{ idA: 'a', idB: 'b', status: PAIR_AGREES, n: 50 }]
+    const s = [
+      { idA: 'b', idB: 'a', status: PAIR_CONFLICTS, n: 50 },
+      { idA: 'b', idB: 'c', status: PAIR_AGREES, n: 60 },
+    ]
+    expect(mergePairScores(p, s).map((x) => [x.idA, x.idB, x.status])).toEqual([
+      ['a', 'b', PAIR_AGREES],
+      ['b', 'c', PAIR_AGREES],
+    ])
+  })
+})
+
+describe('packPairCheck', () => {
+  it('keeps each pair in its columns with its suspect and the photo it holds', () => {
+    const S = (idA, idB, status, n) => ({
+      idA,
+      idB,
+      status,
+      n,
+      inModel: n,
+      split: 0,
+      epiMedianPx: null,
+      epiAgreeFrac: 1,
+    })
+    const scores = [
+      S('X', 'Y', PAIR_AGREES, 40),
+      S('X', 'Z1', PAIR_CONFLICTS, 100),
+      S('X', 'Z2', PAIR_CONFLICTS, 100),
+      S('Y', 'Z1', PAIR_AGREES, 300),
+      S('Z1', 'Z2', PAIR_AGREES, 300),
+      S('Z2', 'Y', PAIR_AGREES, 300),
+      S('Y', 'W', PAIR_CONFLICTS, 20),
+      S('W', 'Z1', PAIR_AGREES, 300),
+      S('W', 'Z2', PAIR_AGREES, 300),
+    ]
+    const { pairCheck: pc, counts } = packPairCheck(scores, { contestedFrac: 0.5, minPairs: 2, epiTolPx: 4 })
+    expect(counts).toEqual({ scored: 9, agrees: 6, conflicts: 3, contested: 1, holds: 1, contradicts: 1 })
+    const name = (i) => [pc.uuids[pc.a[i]], pc.uuids[pc.b[i]]]
+    expect(name(0)).toEqual(['X', 'Y'])
+    expect(pc.suspect[0]).toBe(SUSPECT_HOLDS)
+    expect(pc.uuids[pc.held[0]]).toBe('X')
+    expect(pc.suspect[6]).toBe(SUSPECT_CONTRADICTS)
+    expect(pc.held[6]).toBe(-1)
+    expect(Number.isNaN(pc.epiMedianPx[0])).toBe(true) // none given: NaN, not 0
+    expect([...pc.matches]).toEqual(scores.map((s) => s.n))
+  })
+})
+
+describe('describePairCheck', () => {
+  const holds = (k) => ({ idA: `a${k}`, idB: `b${k}`, reason: 'holds', photo: `a${k}`, conflictShare: 0.8, weight: 40 })
+  const counts = { scored: 1234, agrees: 1200, conflicts: 34, contested: 5, holds: 5, contradicts: 2 }
+  const suspects = [
+    ...[1, 2, 3, 4, 5].map(holds),
+    { idA: 'c', idB: 'd', reason: 'contradicts', photo: null, conflictShare: 0, weight: 20 },
+    { idA: 'e', idB: 'f', reason: 'contradicts', photo: null, conflictShare: 0, weight: 20 },
+  ]
+  const lines = describePairCheck(counts, suspects, (u) => `${u}.jpg`)
+  const at = (level) => lines.filter(([, l]) => l === level).map(([m]) => m)
+
+  it('warns about the strongest pairs that hold a photo, by name, with what to do, and counts the rest', () => {
+    const warns = at('warn')
+    expect(warns).toHaveLength(4)
+    expect(warns[0]).toContain('a1.jpg ↔ b1.jpg (40 matches) may be a false match')
+    expect(warns[0]).toContain('80%')
+    expect(warns[0]).toContain('View ▸ Inspect ▸ Matches')
+    expect(warns[3]).toContain('2 more pairs')
+  })
+
+  it('records the counts at info in English numbers, each suspect at debug', () => {
+    expect(at('info')[0]).toBe(
+      'Pair check: 1,234 pairs checked against the model, 1,200 agree, 34 disagree; 5 photos sit where most of their matches disagree',
+    )
+    expect(at('info')[1]).toContain('2 pairs disagree with the model without moving it')
+    expect(at('debug')).toHaveLength(7)
+  })
+
+  it('says nothing when no pair was scored', () => {
+    expect(describePairCheck({ ...counts, scored: 0 }, [], String)).toEqual([])
+  })
+})
+
+describe('pairCheckToBuffer / pairCheckFromBuffer', () => {
+  const S = (idA, idB, status, n, epi) => ({
+    idA,
+    idB,
+    status,
+    n,
+    inModel: n - 3,
+    split: 3,
+    epiMedianPx: epi,
+    epiAgreeFrac: 0.9,
+  })
+  const scores = [
+    S('X', 'Y', PAIR_AGREES, 40, 0.5),
+    S('X', 'Z', PAIR_CONFLICTS, 100, null),
+    S('Y', 'Z', PAIR_AGREES, 300, 1.25),
+  ]
+  const { pairCheck } = packPairCheck(scores, { contestedFrac: 0.5, minPairs: 2, epiTolPx: 6.5 })
+
+  it('gives back every column and the header as saved', () => {
+    const { meta, buffer } = pairCheckToBuffer(pairCheck)
+    const back = pairCheckFromBuffer(JSON.parse(JSON.stringify(meta)), buffer.slice(0))
+    expect(back.uuids).toEqual(pairCheck.uuids)
+    expect(back.epiTolPx).toBe(6.5)
+    for (const k of ['a', 'b', 'matches', 'inModel', 'split', 'held', 'status', 'suspect', 'epiAgreeFrac'])
+      expect([...back[k]], k).toEqual([...pairCheck[k]])
+    expect([...back.epiMedianPx]).toEqual([0.5, NaN, 1.25])
+  })
+
+  it('refuses a file that does not fit its header', () => {
+    const { meta, buffer } = pairCheckToBuffer(pairCheck)
+    expect(pairCheckFromBuffer({ ...meta, count: 4 }, buffer)).toBeNull()
+    expect(pairCheckFromBuffer({ ...meta, version: 2 }, buffer)).toBeNull()
+    expect(pairCheckFromBuffer(meta, null)).toBeNull()
+  })
+})
+
+describe('median', () => {
+  it('matches the sorted middle for odd and even counts, with repeated values', () => {
+    const r = rng(11)
+    for (const n of [1, 2, 3, 4, 7, 10, 101, 1000]) {
+      for (const levels of [0, 5]) {
+        const vals = Array.from({ length: n }, () => (levels ? Math.floor(r() * levels) : r()))
+        const sorted = [...vals].sort((x, y) => x - y)
+        const want = n % 2 ? sorted[n >> 1] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+        // Only the first n entries count; what follows must be ignored.
+        const a = Float64Array.from([...vals, -99, 99])
+        expect(median(a, n), `n=${n} levels=${levels}`).toBe(want)
+      }
+    }
   })
 })

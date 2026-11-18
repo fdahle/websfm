@@ -89,6 +89,11 @@ their strongest pairs, and observations added by track completion and guided mat
 In the [Quality Report](guide:quality-report), check reprojection error, track lengths,
 calibration, coverage and disconnected parts before building depth maps.
 
+Every pair is also checked against the finished model. A warning names a pair that may
+be a false match: one that holds a photo in place while most of that photo's other
+matches disagree with the model, as repeated façades or a symmetric building can
+cause. Exclude the pair in **View ▸ Inspect ▸ Matches** and run Sparse Model again.
+
 ## Sparse gradual selection
 **Tools ▸ Model ▾ ▸ Gradual selection** removes points by reprojection error (above a
 threshold), track length or triangulation angle (below), previews the counts, and
