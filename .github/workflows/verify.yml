@@ -208,8 +208,10 @@ jobs:
           retention-days: 7
 
   # After the tests pass: a push to main deploys dev.websfm.app (after checks and rust;
-  # the browser job is skipped there), a version tag (v0.5.0, from `npm run release`)
-  # deploys websfm.app after all three (docs/deployment.md ▸ Cloudflare).
+  # the browser job is skipped there), a push to the `experimental` branch the same way
+  # experimental.websfm.app, a version tag (v0.5.0, from `npm run release`) websfm.app
+  # after all three, and then the tag's pinned copy at websfm.app/v/<version>/
+  # (docs/deployment.md ▸ Cloudflare).
   # The R2 files (models, ORT's WebGPU wasm) are not uploaded here: run
   # `deploy-cloudflare.mjs --upload` by hand after a model or ORT change.
   deploy:
@@ -222,15 +224,16 @@ jobs:
       needs.build.result == 'success' && needs.rust.result == 'success' &&
       needs.interop.result == 'success' &&
       ((github.ref == 'refs/heads/main' && needs.browser.result == 'skipped') ||
+       (github.ref == 'refs/heads/experimental' && needs.browser.result == 'skipped') ||
        (startsWith(github.ref, 'refs/tags/v') && needs.browser.result == 'success'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
-      name: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'dev' }}
-      url: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://websfm.app' || 'https://dev.websfm.app' }}
+      name: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || github.ref_name == 'experimental' && 'experimental' || 'dev' }}
+      url: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://websfm.app' || github.ref_name == 'experimental' && 'https://experimental.websfm.app' || 'https://dev.websfm.app' }}
     # One deploy per site at a time; a newer push waits rather than cancels it.
     concurrency:
-      group: deploy-${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'dev' }}
+      group: deploy-${{ startsWith(github.ref, 'refs/tags/v') && 'production' || github.ref_name == 'experimental' && 'experimental' || 'dev' }}
       cancel-in-progress: false
     # contents: write lets a tag's run publish its GitHub release (the last step).
     permissions:
@@ -260,7 +263,13 @@ jobs:
       - name: Deploy
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then node scripts/deploy-cloudflare.mjs
+          elif [[ "$GITHUB_REF" == refs/heads/experimental ]]; then node scripts/deploy-cloudflare.mjs --env experimental
           else node scripts/deploy-cloudflare.mjs --env dev; fi
+      # The release again under /v/<version>/, into R2: the copy that stays when
+      # websfm.app moves on to the next release (worker.js serves it).
+      - name: Pinned copy
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/deploy-cloudflare.mjs --pinned
       # After websfm.app is live: the GitHub release of the tag, its notes the version's
       # CHANGELOG section (scripts/release-notes.mjs), marked as the latest release.
       - name: GitHub release

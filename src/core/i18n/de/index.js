@@ -1,5 +1,6 @@
 // Der deutsche Katalog (Vorschau): ein Teil der englischen Schlüssel mit denselben
 // Argumenten; was fehlt, zeigt die App englisch.
+import about from './about.js'
 import autoMask from './autoMask.js'
 import common from './common.js'
 import consolePanel from './console.js'
@@ -13,6 +14,7 @@ import sidebar from './sidebar.js'
 import sparse from './sparse.js'
 
 export default {
+  about,
   autoMask,
   common,
   console: consolePanel,

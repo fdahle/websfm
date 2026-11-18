@@ -27,7 +27,13 @@ import {
 import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../utils/handleStore.js'
 import { useLog } from '../composables/useLog.js'
 import { version as appVersion } from '../../package.json'
-import { PROJECT_FORMAT_VERSION, projectFormatOf, projectFormatProblem } from '../core/projectFormat.js'
+import {
+  PROJECT_FORMAT_VERSION,
+  projectFormatOf,
+  projectFormatProblem,
+  stampNewestVersion,
+} from '../core/projectFormat.js'
+import { APP_BUILD, APP_VERSION } from '../utils/appBuild.js'
 import { rememberCrsDefs, setFetchedDefListener } from '../core/crs.js'
 
 // The project index: which projects exist, which one is open, and its metadata
@@ -154,7 +160,7 @@ export const useProjectsStore = defineStore('projects', () => {
     // caller remains in the old project instead of selecting a half-created one.
     const newLease = await acquireProjectLease(id)
     try {
-      await opfs.writeProject(id, { ...entry, images: [] })
+      await opfs.writeProject(id, { ...entry, images: [], newestAppVersion: APP_VERSION })
     } catch (error) {
       newLease()
       discardPersistenceFailure(`writeProject:${id}`)
@@ -212,7 +218,7 @@ export const useProjectsStore = defineStore('projects', () => {
     try {
       data = await opfs.readProject(id)
       // A project in a format this version cannot read fails here, with the reason.
-      const problem = data && projectFormatProblem(data)
+      const problem = data && projectFormatProblem(data, APP_BUILD)
       if (problem) throw new Error(problem)
       // An older format is brought up to this one before any store reads it. Its notes
       // wait for the open sequence (takeFormatNotes), which logs them into this
@@ -221,6 +227,14 @@ export const useProjectsStore = defineStore('projects', () => {
         const migrated = await opfs.migrateProjectFormat(id, data)
         data = migrated.data
         formatNotes = { id, notes: migrated.notes }
+      }
+      // This version is now the newest to have opened it: an older one (a pinned copy
+      // at /v/…) then leaves it alone. Not stamping only loses that guard, so a failed
+      // write does not stop the opening.
+      const stamped = data && stampNewestVersion(data, APP_VERSION)
+      if (stamped) {
+        if (await opfs.updateProject(id, (d) => stampNewestVersion(d, APP_VERSION) ?? d).catch(() => false))
+          data = stamped
       }
     } catch (error) {
       newLease?.()
@@ -389,7 +403,7 @@ export const useProjectsStore = defineStore('projects', () => {
     }
     opfs.setProjectRoot(id, dirHandle)
     await saveProjectHandle(id, dirHandle)
-    await opfs.writeProject(id, { ...entry, images: [] })
+    await opfs.writeProject(id, { ...entry, images: [], newestAppVersion: APP_VERSION })
     projects.value.push(entry)
     currentProjectId.value = id
     await saveIndex()
@@ -676,7 +690,7 @@ export const useProjectsStore = defineStore('projects', () => {
     }
 
     const data = await opfs.readProject(id)
-    const problem = data ? projectFormatProblem(data) : 'project file is missing project.json'
+    const problem = data ? projectFormatProblem(data, APP_BUILD) : 'project file is missing project.json'
     if (problem) {
       await discard()
       throw new Error(problem)

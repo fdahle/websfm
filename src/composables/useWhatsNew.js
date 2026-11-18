@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { countNewEntries, latestRelease, parseChangelog } from '../core/help/changelog.js'
+import { isNewerVersion } from '../core/appVersion.js'
 
 // Help ▸ What's New: CHANGELOG.md, and how many of its entries shipped since this
 // browser last opened it (the ribbon's badge). The changelog (~80 KB) is fetched
@@ -41,6 +42,9 @@ export const seenVersion = computed(() => seen.value)
 export function markSeen() {
   const latest = releases.value && latestRelease(releases.value)
   if (!latest) return
+  // The pinned copy of an older release (/v/<version>/) shares this browser's storage:
+  // opening it must not count the newer releases as unseen again.
+  if (seen.value && isNewerVersion(seen.value, latest)) return
   seen.value = latest
   try {
     localStorage.setItem(STORAGE_KEY, latest)

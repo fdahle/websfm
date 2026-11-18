@@ -67,8 +67,9 @@ Rules that are easy to miss:
   to `FORMAT_MIGRATIONS` (`src/core/formatMigrations.js`) with a unit test, and commits
   a new fixture (`node scripts/fixtures/make-project-fixture.mjs <dir>`), all in one
   commit. `PROJECT_FORMAT_MIN` rises only at a release.
-- Pushing deploys: `main` goes to dev.websfm.app, a `v*` tag to websfm.app (CI ▸
-  `deploy`). Don't push, and never push a tag, unless asked.
+- Pushing deploys: `main` goes to dev.websfm.app, the `experimental` branch to
+  experimental.websfm.app, a `v*` tag to websfm.app and its pinned copy at
+  websfm.app/v/<version>/ (CI ▸ `deploy`). Don't push, and never push a tag, unless asked.
 - Write UI text and help for the users: people who know photogrammetry from Metashape,
   COLMAP or ODM, not the maintainers. Say what a setting does and when to change it,
   briefly, in their terms. Never name a test dataset, a bench number or a date in the

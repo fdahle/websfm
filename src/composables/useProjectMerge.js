@@ -10,6 +10,7 @@ import { deserializeCloud } from '../stores/reconstruction/cloudSerde.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { asKeypoints } from '../core/features/keypoints.js'
 import { projectFormatOf, projectFormatProblem, PROJECT_FORMAT_VERSION } from '../core/projectFormat.js'
+import { APP_BUILD } from '../utils/appBuild.js'
 import { pluralize } from '../core/textFormat.js'
 import { PROJECT_IMPORT_TUNING } from '../core/tuning.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
@@ -48,7 +49,7 @@ export function useProjectMerge() {
     } else if (plan.action === 'repick') throw new Error(plan.reason ?? 'its folder is no longer there')
     let data = await opfs.readProject(sourceId)
     if (!data) throw new Error('it could not be read')
-    const problem = projectFormatProblem(data)
+    const problem = projectFormatProblem(data, APP_BUILD)
     if (problem) throw new Error(problem)
     if (projectFormatOf(data) < PROJECT_FORMAT_VERSION) data = (await opfs.migrateProjectFormat(sourceId, data)).data
     return data

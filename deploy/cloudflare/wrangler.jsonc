@@ -1,11 +1,13 @@
-// Cloudflare Workers config for websfm.app (and dev.websfm.app with --env dev).
-// Deploy with `node scripts/deploy-cloudflare.mjs [--env dev] [--upload]`, not with
-// wrangler directly: the script checks the build and writes dist/.assetsignore first.
+// Cloudflare Workers config for websfm.app (dev.websfm.app with --env dev,
+// experimental.websfm.app with --env experimental). Deploy with
+// `node scripts/deploy-cloudflare.mjs [--env dev] [--upload]`, not with wrangler
+// directly: the script checks the build and writes dist/.assetsignore first.
 //
 // Static assets serve dist/, but refuse any file over 25 MiB: the model weights and
 // ORT's WebGPU wasm (ort/<version>/ort-wasm-simd-threaded.jsep.wasm). Those live in
 // the R2 bucket under the same paths, and worker.js serves them on the same origin
-// (no CORS, no VITE_MODEL_BASE_URL). Paths here are relative to this file.
+// (no CORS, no VITE_MODEL_BASE_URL). The pinned copies of each release (/v/0.9.0/) live
+// in R2 too, and worker.js serves them. Paths here are relative to this file.
 {
   "name": "websfm",
   "main": "worker.js",
@@ -20,7 +22,7 @@
     // routes; an SPA fallback answered a stale tab's missing chunk with index.html under
     // the /assets/* immutable header (useAppUpdate.js watchForStaleCode).
     "not_found_handling": "none",
-    "run_worker_first": ["/models/*", "/ort/*"],
+    "run_worker_first": ["/models/*", "/ort/*", "/v/*"],
   },
   "r2_buckets": [{ "binding": "LARGE_FILES", "bucket_name": "websfm-data" }],
   "routes": [{ "pattern": "websfm.app", "custom_domain": true }],
@@ -35,10 +37,24 @@
         "directory": "../../dist",
         "binding": "ASSETS",
         "not_found_handling": "none",
-        "run_worker_first": ["/models/*", "/ort/*"],
+        "run_worker_first": ["/models/*", "/ort/*", "/v/*"],
       },
       "r2_buckets": [{ "binding": "LARGE_FILES", "bucket_name": "websfm-data" }],
       "routes": [{ "pattern": "dev.websfm.app", "custom_domain": true }],
+    },
+    // Worker `websfm-experimental`: whatever the `experimental` branch holds, for trying
+    // things out live; reset the branch to main to undo. Behind Cloudflare Access like dev.
+    "experimental": {
+      "workers_dev": false,
+      "preview_urls": false,
+      "assets": {
+        "directory": "../../dist",
+        "binding": "ASSETS",
+        "not_found_handling": "none",
+        "run_worker_first": ["/models/*", "/ort/*", "/v/*"],
+      },
+      "r2_buckets": [{ "binding": "LARGE_FILES", "bucket_name": "websfm-data" }],
+      "routes": [{ "pattern": "experimental.websfm.app", "custom_domain": true }],
     },
   },
 }

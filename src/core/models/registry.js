@@ -124,8 +124,10 @@ export function isRedistributable(id) {
   return MODELS[id]?.redistributable !== false
 }
 
-// Cache Storage bucket the downloaded weights live in. Bump the version suffix if
-// a model file's contents change under the same name (forces a re-download).
+// Cache Storage bucket the downloaded weights live in. A published model file never
+// changes under its name: the pinned copies of old releases (websfm.app/v/0.9.0/) load
+// the same /models/<file> as the newest version, so new weights get a new `file` name
+// (`deploy-cloudflare.mjs --upload` refuses to replace a file with different bytes).
 export const MODEL_CACHE_NAME = 'websfm-models-v1'
 
 /**

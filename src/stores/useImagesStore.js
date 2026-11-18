@@ -22,6 +22,7 @@ import { normalizeImageGroups } from '../utils/imageGroups.js'
 import { createImageThumbnails } from './images/thumbnails.js'
 import { pluralize } from '../core/textFormat.js'
 import { PROJECT_FORMAT_VERSION } from '../core/projectFormat.js'
+import { APP_VERSION } from '../utils/appBuild.js'
 import { imageIndexCsv } from '../core/io/imageIndex.js'
 import { editCommand } from '../core/help/consoleEdits.js'
 
@@ -220,8 +221,10 @@ export const useImagesStore = defineStore('images', () => {
     if (!proj) return null
     return {
       ...proj,
-      // Written from memory, so in this version's format (core/projectFormat.js).
+      // Written from memory, so in this version's format (core/projectFormat.js). This
+      // version opened it, so it is the newest that did (switchProject stamped it).
       formatVersion: PROJECT_FORMAT_VERSION,
+      newestAppVersion: APP_VERSION,
       lastModified: new Date().toISOString(),
       imageGroups: imageGroups.value.map((g) => ({ id: g.id, name: g.name, collapsed: !!g.collapsed })),
       images: images.value.map((img) => {

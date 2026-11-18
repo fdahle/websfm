@@ -36,6 +36,14 @@ A unit test fails when `FORMAT_MIGRATIONS` has no step for a version between
 `PROJECT_FORMAT_MIN` and `PROJECT_FORMAT_VERSION`, and the browser test fails when no
 fixture of the current version exists.
 
+**Newer versions, the other way round.** An older version never opens a project that
+a newer one has opened, whatever its format: it writes its documents from what it
+knows, so saving would drop what the newer one added. Opening a project stamps
+`newestAppVersion` in `project.json` (only ever raised), and `projectFormatProblem`
+refuses a project whose stamp is newer than the running version. This matters for the
+pinned copies of old releases at `/v/<version>/`, which share the projects of the
+newest one ([deployment.md ▸ Pinned versions](deployment.md#pinned-versions)).
+
 ## What a project folder holds
 
 From format version 3 the folder's top holds only `project.json` and folders
@@ -52,7 +60,7 @@ cannot be recomputed at all.
 
 | Path | Written by | Contents | Recompute |
 | --- | --- | --- | --- |
-| `project.json` | `useImagesStore`, `useProjectsStore` | name, scene type, CRS (and fetched CRS definitions), the image list with each image's metadata and status, image groups, `formatVersion` | user data |
+| `project.json` | `useImagesStore`, `useProjectsStore` | name, scene type, CRS (and fetched CRS definitions), the image list with each image's metadata and status, image groups, `formatVersion`, `newestAppVersion` | user data |
 | `data/sensors.json` | `useSensorsStore` | cameras: size, pixel size, focal length, principal point, distortion, fiducial or reseau calibration | user data |
 | `images/<uuid>` | `useImagesStore` (ingest) | the original photos, as imported | user data |
 | `images/index.csv` | `useImagesStore` (with `project.json`, and on open) | which file under `images/` is which photo: `file,name,original_name` ([`imageIndex.js`](../src/core/io/imageIndex.js)); for people browsing the folder, never read back | cheap |

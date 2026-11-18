@@ -6,6 +6,14 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Keep using one version.** Every release from now on also stays at its own address,
+  which never updates (`websfm.app/v/0.9.0/`): About ▸ Version ▸ Keep using … opens it,
+  and About lists the other versions. websfm.app itself stays the newest version. A
+  **Pinned** badge beside the name marks an old version. All versions share your projects;
+  a project remembers the newest version that opened it, and an older version refuses to
+  open it rather than drop what the newer one added on its next save. The same version runs
+  the same algorithms and defaults; a different GPU, browser or thread count can still
+  change a result slightly.
 - **Sparse Model names pairs that may be false matches.** After the run, every pair is
   checked against the finished model, and a warning names a pair that holds a photo in
   place while most of that photo's other pairs disagree; View ▸ Inspect ▸ Matches shows

@@ -9,13 +9,16 @@ import { ref, watch } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
 import Icon from '../../Icon.vue'
 import BetaBadge from '../../layout/BetaBadge.vue'
+import VersionsPanel from './VersionsPanel.vue'
 import { ACKNOWLEDGMENTS } from '../../../core/help/licenses.js'
 import { REFERENCES, formatReference, referenceUrl } from '../../../core/help/references.js'
 import { getAllGlossaryEntries } from '../../../core/help/glossary.js'
 import { followLink, helpLinkFrom } from '../../../composables/useHelpStack.js'
-import { version as appVersion } from '../../../../package.json'
+import { useI18n } from '../../../composables/useI18n.js'
+import { APP_VERSION } from '../../../utils/appBuild.js'
 
 const emit = defineEmits(['close'])
+const { t } = useI18n()
 const licenseUrl = `${import.meta.env.BASE_URL}LICENSE`
 
 // Every published method WebSfM implements (core/help/references.js), by first author,
@@ -42,7 +45,9 @@ function onReferencesClick(e) {
 }
 
 // Third-party notices: { groups: [{ group, note?, items }], texts: { id: text } }.
-const noticesTxtUrl = `${import.meta.env.BASE_URL}THIRD_PARTY_NOTICES.txt`
+// A file name, the same in every language.
+const noticesTxtName = 'THIRD_PARTY_NOTICES.txt'
+const noticesTxtUrl = `${import.meta.env.BASE_URL}${noticesTxtName}`
 const notices = ref(null)
 const noticesFailed = ref(false)
 async function loadNotices() {
@@ -69,52 +74,47 @@ const tab = ref('about')
 watch(tab, (t) => {
   if (t === 'licenses') loadNotices()
 })
-const tabs = [
-  { id: 'about', label: 'About' },
-  { id: 'credits', label: 'Acknowledgments' },
-  { id: 'references', label: 'References' },
-  { id: 'licenses', label: 'Licenses' },
-]
+const tabs = ['about', 'credits', 'references', 'licenses']
 </script>
 
 <template>
-  <ModalShell title="About" aria-label="About" @close="emit('close')">
+  <ModalShell :title="t('about.title')" :aria-label="t('about.title')" @close="emit('close')">
     <!-- Brand hero -->
     <div class="hero">
       <div class="hero-mark"><Icon name="cube" /></div>
       <div class="hero-text">
         <div class="hero-name">WebSfM <BetaBadge /></div>
-        <div class="hero-tag">Browser-based Structure&nbsp;from&nbsp;Motion · v{{ appVersion }}</div>
+        <div class="hero-tag">{{ t('about.tagline', { version: APP_VERSION }) }}</div>
       </div>
     </div>
 
     <div class="tabs">
-      <button v-for="t in tabs" :key="t.id" class="tab" :class="{ active: tab === t.id }" @click="tab = t.id">
-        {{ t.label }}
+      <button v-for="id in tabs" :key="id" class="tab" :class="{ active: tab === id }" @click="tab = id">
+        {{ t(`about.tab.${id}`) }}
       </button>
     </div>
 
     <!-- Identity -->
     <div v-show="tab === 'about'" class="pane">
-      <p class="lede">
-        A complete photogrammetry pipeline — detection, matching, sparse &amp; dense reconstruction, meshing and
-        orthophotos — that runs entirely in your browser. No server, no upload: your images never leave your machine.
-      </p>
+      <p class="lede">{{ t('about.lede') }}</p>
       <div class="chips">
         <a class="chip" href="https://github.com/fdahle/websfm" target="_blank" rel="noopener">
-          <Icon name="link" /> GitHub
+          <Icon name="link" /> {{ t('about.github') }}
         </a>
         <!-- Also the bottom-right bug button's target, which Settings can hide. -->
         <a class="chip" href="https://github.com/fdahle/websfm/issues/new" target="_blank" rel="noopener">
-          <Icon name="bug" /> Report a bug
+          <Icon name="bug" /> {{ t('about.reportBug') }}
         </a>
-        <a class="chip" :href="licenseUrl" target="_blank" rel="noopener"> <Icon name="file" /> MIT License </a>
+        <a class="chip" :href="licenseUrl" target="_blank" rel="noopener">
+          <Icon name="file" /> {{ t('about.mitLicense') }}
+        </a>
       </div>
+      <VersionsPanel />
     </div>
 
     <!-- Acknowledgments (courtesy) -->
     <div v-show="tab === 'credits'" class="pane">
-      <p class="lede">WebSfM stands on decades of open research and software. Its methods draw on:</p>
+      <p class="lede">{{ t('about.creditsLede') }}</p>
       <ul class="ack-list">
         <li v-for="a in ACKNOWLEDGMENTS" :key="a.name" class="ack-item">
           <a :href="a.url" target="_blank" rel="noopener" class="ack-name">{{ a.name }}</a>
@@ -125,16 +125,13 @@ const tabs = [
 
     <!-- References (the papers behind the methods) -->
     <div v-show="tab === 'references'" class="pane">
-      <p class="lede">
-        The published methods WebSfM implements, each with the glossary entries that explain what it is used for. Each
-        glossary entry lists them under <em>Sources</em>; the Quality Report lists those a project's run used.
-      </p>
+      <p class="lede">{{ t('about.referencesLede') }}</p>
       <ol class="ref-list" @click="onReferencesClick">
         <li v-for="r in references" :key="r.key">
           {{ r.text }}
           <a v-if="r.url" :href="r.url" target="_blank" rel="noopener">{{ r.url.replace(/^https:\/\//, '') }}</a>
           <div v-if="r.usedFor.length" class="ref-use">
-            Used for:
+            {{ t('about.usedFor') }}
             <template v-for="(g, i) in r.usedFor" :key="g.id"
               >{{ i ? ', ' : '' }}<a href="#" class="glossary-link" :data-help-id="g.id">{{ g.title }}</a></template
             >
@@ -146,15 +143,14 @@ const tabs = [
     <!-- Third-party licenses (obligation) -->
     <div v-show="tab === 'licenses'" class="pane">
       <p class="lede">
-        WebSfM is released under the MIT License. It includes the software, models and data below, which others made and
-        which keep their own licenses. All of them in one file:
-        <a :href="noticesTxtUrl" target="_blank" rel="noopener">THIRD_PARTY_NOTICES.txt</a>.
+        {{ t('about.licensesLede') }}
+        <a :href="noticesTxtUrl" target="_blank" rel="noopener">{{ noticesTxtName }}</a>
       </p>
       <p v-if="noticesFailed" class="lic-note">
-        The list could not be loaded. It ships with the app as THIRD_PARTY_NOTICES.txt.
-        <button class="btn btn-sm" @click="loadNotices">Try again</button>
+        {{ t('about.noticesFailed') }}
+        <button class="btn btn-sm" @click="loadNotices">{{ t('about.tryAgain') }}</button>
       </p>
-      <p v-else-if="!notices" class="lic-note">Loading…</p>
+      <p v-else-if="!notices" class="lic-note">{{ t('about.loading') }}</p>
       <div v-for="g in notices?.groups ?? []" :key="g.group" class="lic-group">
         <div class="group-head">{{ g.group }} · {{ g.items.length }}</div>
         <div v-if="g.note" class="lic-note">{{ g.note }}</div>
@@ -171,7 +167,7 @@ const tabs = [
             class="lic-text"
             @toggle="(e) => onTextToggle(`${g.group}/${it.name}@${it.version}`, e.target.open)"
           >
-            <summary>License text{{ it.texts.length > 1 ? `s (${it.texts.length})` : '' }}</summary>
+            <summary>{{ t('about.licenseText', { n: it.texts.length }) }}</summary>
             <template v-if="openTexts.has(`${g.group}/${it.name}@${it.version}`)">
               <template v-for="t in it.texts" :key="t.file">
                 <div v-if="it.texts.length > 1" class="lic-file">{{ t.file }}</div>
@@ -184,7 +180,7 @@ const tabs = [
     </div>
 
     <template #footer>
-      <button class="btn" @click="emit('close')">Close</button>
+      <button class="btn" @click="emit('close')">{{ t('common.close') }}</button>
     </template>
   </ModalShell>
 </template>

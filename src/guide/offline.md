@@ -29,6 +29,14 @@ it in the background. It never switches until you ask: a box at the bottom left 
 
 **Reload** in one tab switches all of them, each once its running task has finished.
 
+## Stay on one version
+To make a result again with exactly the same version, or to finish a project without
+changes underfoot, keep a version: **About ▸ Version ▸ Keep using …** opens it at its
+own address (`websfm.app/v/0.9.0/`), which never updates. Bookmark it. A **Pinned**
+badge beside the name shows you are on it, and About lists the other versions. All
+versions share your projects, but an older version does not open a project a newer
+one has opened, since saving it there could lose what the newer one added.
+
 ## What needs a connection
 - **Learned models** (ALIKED, DISK, LightGlue, and the Smart Select model for
   [masks](guide:masks)) are downloaded on first use, after you agree, together with

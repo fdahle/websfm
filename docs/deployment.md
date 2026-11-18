@@ -62,9 +62,10 @@ Configure the production host as follows:
   can use `Cache-Control: public, max-age=31536000, immutable`. Keep `index.html`,
   `sw.js` and `manifest.webmanifest` on `no-cache` so a release can point browsers
   at its new hashes. ONNX Runtime's files live under `ort/<its version>/`; revalidate
-  unversioned `.mjs`, `.wasm` and `.onnx` files. When replacing model weights under the
-  same name, also bump `MODEL_CACHE_NAME` in `src/core/models/registry.js` to invalidate
-  Cache Storage. Enable Brotli or gzip for HTML, JavaScript and CSS; do not recompress
+  unversioned `.mjs`, `.wasm` and `.onnx` files. Never replace model weights under the
+  same name: give new weights a new `file` name in `src/core/models/registry.js`, so a
+  browser's cached copy and an older version of the app keep loading the file they
+  were made with. Enable Brotli or gzip for HTML, JavaScript and CSS; do not recompress
   `.wasm` or `.onnx` unless the server is configured to do so efficiently.
 
 - **Installable app and offline use.** The build includes a web app manifest and a
@@ -145,12 +146,14 @@ those under their usual paths on the same origin, so the build needs no
 `VITE_MODEL_BASE_URL`. [`public/_headers`](../public/_headers) sets the
 cross-origin isolation and caching headers for the static assets.
 
-Two sites, from one Worker config ([`wrangler.jsonc`](../deploy/cloudflare/wrangler.jsonc)):
+Three sites, from one Worker config ([`wrangler.jsonc`](../deploy/cloudflare/wrangler.jsonc)):
 
 | Site | Shows | Deployed when |
 | --- | --- | --- |
-| websfm.app | released versions | a version tag (`v0.7.0`) is pushed |
+| websfm.app | the newest release | a version tag (`v0.7.0`) is pushed |
+| websfm.app/v/0.7.0/ | that release, for good ([Pinned versions](#pinned-versions)) | the same tag, after websfm.app |
 | dev.websfm.app | the latest `main`, behind a login | `main` is pushed |
+| experimental.websfm.app | the `experimental` branch, behind a login | `experimental` is pushed |
 
 GitHub Actions deploys both (the `deploy` job in
 [`.github/workflows/verify.yml`](../.github/workflows/verify.yml)), after the tests
@@ -166,7 +169,20 @@ git push && git push origin v0.7.0    # main → dev.websfm.app, the tag → web
 The production job refuses a tag that is not the version in `package.json`, and after
 the deploy publishes the tag's GitHub release from its CHANGELOG section. Each run
 shows under the repository's **Actions** tab, and the last deploy of each site under
-**Environments** (`dev`, `production`).
+**Environments** (`dev`, `experimental`, `production`).
+
+### experimental.websfm.app
+
+For trying something out live that should not reach dev.websfm.app yet (a risky
+change, a different default, a rewrite of a stage). It deploys whatever the
+`experimental` branch holds, after the same checks as `main`, and has its own origin,
+so its projects, model cache and service worker are its own: a build that breaks the
+project format cannot touch the projects on dev.websfm.app.
+
+```bash
+git push -f origin HEAD:experimental    # try the current branch live
+git push -f origin main:experimental    # undo: back to main
+```
 
 ### Once: Cloudflare and GitHub
 
@@ -185,8 +201,8 @@ shows under the repository's **Actions** tab, and the last deploy of each site u
    node scripts/deploy-cloudflare.mjs --upload
    ```
 
-   Both sites share the bucket. The first deploy creates the custom domains
-   `websfm.app` and `dev.websfm.app`.
+   All sites share the bucket. The first deploy of each creates its custom domain
+   (`websfm.app`, `dev.websfm.app`, `experimental.websfm.app`).
 
 ### Deploying by hand
 
@@ -197,9 +213,45 @@ npm run fetch:models && npm run fetch:examples && npm run build:release
 node scripts/deploy-cloudflare.mjs --dry-run         # check only
 node scripts/deploy-cloudflare.mjs                   # websfm.app
 node scripts/deploy-cloudflare.mjs --env dev         # dev.websfm.app
+node scripts/deploy-cloudflare.mjs --env experimental   # experimental.websfm.app
+node scripts/deploy-cloudflare.mjs --pinned          # websfm.app/v/<package.json version>/
 ```
 
-### dev.websfm.app behind a login
+### Pinned versions
+
+websfm.app always serves the newest release, and updates itself in the browser. For
+reproducible results, every release is also kept at its own address, which never
+changes: https://websfm.app/v/0.7.0/. A user who wants to stay on a version opens it there
+(About ▸ Version ▸ *Keep using 0.7.0*) and bookmarks it, like keeping an old Metashape
+installed. About lists the versions the site holds.
+
+- **How it is served.** After a tag's deploy, `deploy-cloudflare.mjs --pinned` builds
+  the release again with the base path `/v/<version>/` and uploads it to the R2 bucket
+  under `v/<version>/` (about 175 files, 30 MB). The Worker serves `/v/*` from there
+  ([`worker.js`](../deploy/cloudflare/worker.js)), and `/v/versions.json` lists the
+  versions the bucket holds. Its ORT files go to the bucket's `ort/<ORT version>/`,
+  which all versions share. Its models and example datasets load from the site's
+  `/models/` and `/examples/`.
+- **Models never change under their name**, or an old version would get new weights:
+  new weights get a new file name (`--upload` refuses to replace a model file whose
+  bytes differ from the one websfm.app serves).
+- **Projects are shared.** All versions live on one origin, so they see the same
+  projects. Each project remembers the newest version that opened it
+  (`newestAppVersion` in project.json), and an older version refuses to open it: it
+  would write the project from what it knows and drop what the newer one added
+  ([project-format.md](project-format.md)).
+- **The service worker** of the newest version leaves `/v/` alone
+  (`navigateFallbackDenylist` in `vite.config.js`); each pinned version has its own,
+  scoped to its path, which never sees an update.
+- **No fixes.** A pinned version is frozen: a bug in 0.7.0 is fixed in a later
+  release, not in `/v/0.7.0/`. A future browser change may eventually break an old one.
+- **Not bit-identical.** The same version runs the same algorithms with the same
+  defaults, but the GPU, the browser and the number of threads can still change a
+  result slightly.
+- **Removing a version** (rarely): delete its `v/<version>/` objects from the bucket.
+  Releases up to 0.8.0, made before pinned copies existed, have none.
+
+### dev.websfm.app and experimental.websfm.app behind a login
 
 Cloudflare Access puts a login page in front of the site; only the email addresses
 in its policy get through, with a one-time code sent to them.
@@ -214,10 +266,13 @@ in its policy get through, with a one-time code sent to them.
 4. **Login methods:** keep **One-time PIN**.
 5. Check in a private window: dev.websfm.app shows the Cloudflare login, and
    websfm.app does not.
+6. The same for experimental.websfm.app: add it to the application as a second
+   public hostname (subdomain `experimental`), or as a second application with the
+   same policy.
 
 The Workers have no `*.workers.dev` or preview URL (`wrangler.jsonc`), so the login
-cannot be bypassed. The dev origin has its own projects, model cache and service
-worker: projects from websfm.app do not show there.
+cannot be bypassed. Each origin has its own projects, model cache and service worker:
+projects from websfm.app do not show on dev.websfm.app or experimental.websfm.app.
 
 **Moving from another host.** Projects (OPFS) and downloaded models belong to an
 origin: export each project as a `.websfm` file on the old address and import it on

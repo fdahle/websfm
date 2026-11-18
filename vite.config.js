@@ -142,6 +142,9 @@ export default defineConfig(({ mode }) => {
           // The entry chunk (~2 MB) and the EPSG catalog (~8 MB) exceed the 2 MB default.
           maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
           cleanupOutdatedCaches: true,
+          // The pinned versions below this one (/v/0.9.0/, docs/deployment.md) are other
+          // apps: opening one must not get this version's index.html from the cache.
+          navigateFallbackDenylist: [new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}v/`)],
           runtimeCaching: [
             cacheRule(ORT_RUNTIME),
             ...TILE_CACHES.map((cache) => cacheRule(cache)),
