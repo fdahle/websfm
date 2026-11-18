@@ -288,6 +288,9 @@ Notable changes to WebSfM. The format follows
 - **An orthophoto fades smoothly on the map.** Moving its Opacity slider in View ▸ Map ▸
   Layers now only changes its transparency, as it does for a DEM, instead of redrawing
   the orthophoto on every step.
+- **Ribbon menus stay open while photos are added.** A menu such as Tools ▸ Measure ▾ no
+  longer closes each time the console writes a new line, as it did while a large import
+  decoded its photos.
 - **Mask editing keeps your tool when you open another photo.** The Eraser, Rectangle or
   Smart Select you picked, the brush size and the overlay opacity now carry over from
   photo to photo instead of going back to the Brush at 20 px on each one.

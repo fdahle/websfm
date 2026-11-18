@@ -46,10 +46,15 @@ function onOutside(e) {
   if (btn.value?.contains(e.target) || menuEl.value?.contains(e.target)) return
   close()
 }
-// A resize or a scroll of the page moves the button out from under the menu; the menu's
-// own scrolling (a list taller than the window) must not close it.
+// A resize or a scroll of the page moves the button out from under the menu. Only a
+// scroll of something that holds the button does: the console following a new log
+// line (an import decoding photos) or the menu's own list must not close it.
 function onViewportChange(e) {
-  if (e?.type === 'scroll' && menuEl.value?.contains(e.target)) return
+  if (e?.type === 'scroll') {
+    const t = e.target
+    const movesButton = t === document || t === window || (t?.contains && t.contains(btn.value))
+    if (!movesButton) return
+  }
   close()
 }
 
