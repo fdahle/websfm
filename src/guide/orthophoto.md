@@ -171,7 +171,8 @@ Model Frame** switches between the project CRS and the model's local frame (see
 ## Measure an orthophoto
 With the orthophoto open, **Tools ▸ Measure ▾** offers **Ruler** and **Area** (Profile
 and Volume need a DEM). In a projected CRS, results are ground lengths and areas. Name
-a result and **Save measurement** to keep it.
+a result and **Save measurement** to keep it. On the 2D map, Ruler and Area also work
+with no raster at all, with **Map** as the Layer (see [Build DEM](guide:dem)).
 
 ## Imported reference rasters
 An imported raster first shows a preview, then full-resolution tiles as a tiled copy

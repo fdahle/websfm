@@ -187,6 +187,15 @@ Notable changes to WebSfM. The format follows
   again; the console's `help` shows the same lines. The full list, with each command's
   place in the ribbon and its guide article, is in
   [docs/features.md](docs/features.md), generated from the ribbon so it stays complete.
+- **Measure on the map without a DEM or orthophoto.** On the 2D map, Tools ▸ Measure ▾ ▸
+  Ruler and Area now work over the basemap, the photos or the footprints alone: the
+  measuring window's Layer is **Map**. Lengths and areas are taken on the WGS 84
+  ellipsoid (Vincenty's distances, an equal-area projection for areas), so they are
+  ground values in any project CRS, a map in degrees included, and saved ones follow a
+  change of CRS instead of going stale. Checked against Vincenty's Flinders Peak to
+  Buninyong line (54,972.271 m), the WGS 84 quarter meridian and the closed-form area of
+  latitude/longitude cells (within 1e-6 at 1 km, 1.3e-5 at 110 km). Profile and Volume
+  still need a DEM, and the model frame still needs a raster to measure on.
 
 ### Changed
 - **The console log reads the same everywhere.** Each line's source names the part of

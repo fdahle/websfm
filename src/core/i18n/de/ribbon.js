@@ -66,7 +66,7 @@ export default {
     colour: 'Farbe',
     terrain: 'Gelände',
     export: 'Export',
-    demOrthophotoInFront: 'DEM / Orthofoto im Vordergrund',
+    mapDemOrOrthophotoInFront: 'Karte, DEM oder Orthofoto im Vordergrund',
     cloudsMeshes: 'Punktwolken & Meshes',
     change: 'Veränderung',
   },
@@ -102,7 +102,8 @@ export default {
     crsMap: 'Die Karte zeigt den Modellrahmen, der keine CRS-Positionen hat — Modellrahmen ausschalten',
     imageView: 'Zuerst ein Bild öffnen',
     gcpView: 'Ein Bild öffnen, oder die Karte in einem CRS-Rahmen (nicht im Modellrahmen)',
-    measureHost: 'Ein DEM oder Orthofoto öffnen oder auf der Karte zeigen',
+    measureHost:
+      'Die Karte, ein DEM oder ein Orthofoto öffnen (im Model Frame ein DEM oder Orthofoto auf der Karte zeigen)',
   },
   reason: {
     comingSoon: 'Demnächst',

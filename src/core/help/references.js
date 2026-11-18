@@ -434,6 +434,21 @@ export const REFERENCES = {
     venue: 'American Society for Photogrammetry and Remote Sensing',
     url: 'https://publicdocuments.asprs.org/PositionalAccuracyStd-Ed2-V1',
   },
+  // ── Geodesy (measuring on the map) ──
+  vincenty1975: {
+    authors: ['T. Vincenty'],
+    year: 1975,
+    title: 'Direct and inverse solutions of geodesics on the ellipsoid with application of nested equations',
+    venue: 'Survey Review 23(176), 88–93',
+    doi: '10.1179/sre.1975.23.176.88',
+  },
+  snyder1987: {
+    authors: ['John P. Snyder'],
+    year: 1987,
+    title: 'Map Projections — A Working Manual',
+    venue: 'U.S. Geological Survey Professional Paper 1395',
+    doi: '10.3133/pp1395',
+  },
 }
 
 // An author is "Given names Surname", or "Surname, Given names" when the surname has

@@ -91,9 +91,11 @@ export const NEED_CHECKS = {
     ok: (s) => s.frontView === 'image' || (s.frontView === 'map' && !s.mapModelFrame),
     reason: 'Open an image, or the map in a CRS frame (not Model Frame)',
   },
+  // The map measures by itself in a CRS frame (Ruler, Area); in the model frame only
+  // over a raster (useMapProducts measureTargets).
   measureHost: {
-    ok: (s) => s.frontView === 'raster' || (s.frontView === 'map' && s.mapRasterCount > 0),
-    reason: 'Open a DEM or orthophoto, or show one on the map',
+    ok: (s) => s.frontView === 'raster' || (s.frontView === 'map' && s.mapMeasureTargetCount > 0),
+    reason: 'Open the map, a DEM or an orthophoto (in Model Frame, show a DEM or orthophoto on the map)',
   },
 }
 

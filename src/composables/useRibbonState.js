@@ -98,7 +98,7 @@ export function useRibbonState({
     // The view in front, for the tools that act on one (NEED_CHECKS imageView /
     // gcpView / measureHost), and the scene type the console's aerial-only check reads.
     frontView: frontView.value,
-    mapRasterCount: mapMeasureTargets.value.length,
+    mapMeasureTargetCount: mapMeasureTargets.value.length,
     sceneType: currentSceneType.value,
   }))
 

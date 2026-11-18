@@ -819,7 +819,7 @@ useRunAttention({
 // ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})
 
-// The 2D map's Measure context for the Ribbon (null without a raster on the map):
+// The 2D map's Measure context for the Ribbon (null in the model frame without a raster):
 // the same state shape the raster tab reports, read through the map's handles.
 const mapMeasure = computed(() =>
   mapMeasureTargets.value.length

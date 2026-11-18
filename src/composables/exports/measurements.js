@@ -2,7 +2,12 @@ import { computed } from 'vue'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
-import { isReferenceRaster, measurementStale, productOfSource } from '../../core/products/measurementRecord.js'
+import {
+  MAP_SOURCE,
+  isReferenceRaster,
+  measurementStale,
+  productOfSource,
+} from '../../core/products/measurementRecord.js'
 import {
   describeMeasurement,
   geoJsonMode,
@@ -45,6 +50,7 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
   }
   function sourceName(record) {
     if (is3dMeasurement(record)) return cloudOf(record)?.name ?? record.cloudName ?? 'a removed layer'
+    if (record.source === MAP_SOURCE) return 'the map (WGS 84 ellipsoid)'
     const p = productOf(record)
     return p?.name ?? record.sourceName ?? 'a removed raster'
   }
@@ -53,6 +59,8 @@ export function createMeasurementExports({ currentCrs, effectiveFrameSpec, expor
       const cloud = cloudOf(record)
       return !cloud || (record.cloudStamp != null && cloud.createdAt !== record.cloudStamp)
     }
+    // Measured on the ellipsoid: nothing the project rebuilds can change it.
+    if (record.source === MAP_SOURCE) return false
     const p = productOf(record)
     return measurementStale(record, p, p && !isReferenceRaster(p) ? recon.productFrameStatus(p) : null)
   }

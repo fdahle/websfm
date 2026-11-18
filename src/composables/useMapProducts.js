@@ -16,6 +16,7 @@ import { readDemWindow } from '../workers/computeClient.js'
 import { stackMapLayers } from '../core/products/mapOrder.js'
 import { vectorMapLayers } from '../core/products/vectorLayers.js'
 import { IMAGE_LAYER_ID, imageOverlayItems } from '../core/products/imageOverlay.js'
+import { MAP_TARGET_ID, mapMeasureRecord } from '../core/products/measurementRecord.js'
 
 // What the 2D map shows, in which frame (CLAUDE.md ▸ map raster layers).
 //
@@ -290,20 +291,27 @@ export function useMapProducts() {
   }
 
   // ── Measuring on the map ─────────────────────────────────────────────
-  // Targets are the map's raster layers. Automatic choice: the first DEM, since
-  // only a DEM serves every tool (profile, volume) — else the top layer.
-  const measureTargets = computed(() =>
-    rasterMapLayers.value.map((l) => ({
+  // Targets are the map's raster layers and, on the CRS map, the map itself (Ruler
+  // and Area on the WGS84 ellipsoid, measurementRecord.js mapMeasureRecord). The
+  // model frame has no ellipsoid, so there only its rasters measure. Automatic
+  // choice: the first DEM, since only a DEM serves every tool (profile, volume) —
+  // else the top raster, else the map.
+  // One record per CRS: the measuring window starts afresh when its record changes.
+  const mapRecord = computed(() => (mode.value === 'crs' ? mapMeasureRecord(projects.currentCrs) : null))
+  const measureTargets = computed(() => [
+    ...rasterMapLayers.value.map((l) => ({
       id: l.id,
       name: l.name,
       kind: l.kind === 'dem' ? 'dem' : 'ortho',
     })),
-  )
+    ...(mapRecord.value ? [{ id: MAP_TARGET_ID, name: 'Map', kind: 'map' }] : []),
+  ])
   const measureTargetId = computed(() => {
     const ts = measureTargets.value
     if (!ts.length) return null
     if (measureChoice.value && ts.some((t) => t.id === measureChoice.value)) return measureChoice.value
-    return (ts.find((t) => t.kind === 'dem') ?? ts[ts.length - 1]).id
+    const rasters = ts.filter((t) => t.kind !== 'map')
+    return (rasters.find((t) => t.kind === 'dem') ?? rasters[rasters.length - 1] ?? ts[0]).id
   })
   function setMeasureTarget(id) {
     measureChoice.value = id
@@ -312,6 +320,10 @@ export function useMapProducts() {
   // measurements with, its RasterSource (computed or imported alike — an imported
   // one only once hydrated), and a computed product's frame status.
   const measureTarget = computed(() => {
+    if (measureTargetId.value === MAP_TARGET_ID && mapRecord.value) {
+      const product = mapRecord.value
+      return { layer: { id: MAP_TARGET_ID, crs: product.crs }, product, source: null, kind: 'map', frameStatus: null }
+    }
     const layer = rasterMapLayers.value.find((l) => l.id === measureTargetId.value)
     if (!layer) return null
     const kind = layer.kind === 'dem' ? 'dem' : 'ortho'

@@ -120,13 +120,19 @@ Look for spikes, pits, extrapolated edges and bridges across gaps, and check the
 range. Export a GeoTIFF when the DEM has a CRS.
 
 ## Measure a raster
-With a DEM or orthophoto open, **Tools ▸ Measure ▾** offers **Ruler**, **Area**,
+With a DEM or orthophoto open, or the 2D map, **Tools ▸ Measure ▾** offers **Ruler**, **Area**,
 **Profile** and **Volume** (the last two need heights, so a DEM). Click vertices;
 **Enter** finishes, **Backspace** removes the last point, **Esc** clears. One window
 holds the tool and its result: the value appears under the buttons as soon as there are
 two points. On the 2D map its **Layer** field picks the raster to measure, so you can
 draw over the orthophoto and read heights from the DEM; Profile and Volume start on the
 map's DEM.
+
+The map needs no raster for **Ruler** and **Area**: pick **Map** as the Layer (it is
+the only one when nothing else is on the map) and draw over the basemap, the photos or
+the footprints. Lengths and areas are [geodesic](help:geodesic-distance), taken on the WGS 84 ellipsoid, so they are ground
+values in any project CRS, degrees included, and they never go stale. The model frame
+has no ellipsoid, so there the map measures only over a raster.
 
 Name a result and **Save measurement** to keep it; **Saved measurements** lists them.
 Rebuilding the raster marks older measurements stale. In a projected CRS, lengths,

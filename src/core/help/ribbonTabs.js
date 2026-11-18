@@ -84,12 +84,13 @@ const EXPORT_ORTHO = {
 }
 
 // Tools ▸ Measure ▾. Raster tools run on the raster in front: a DEM/Orthophoto
-// tab, or one of the 2D map's rasters, which the measuring window's Layer field picks
-// (RasterMeasurements.vue); profile and volume take the map's DEM. The menu itself
+// tab, or one of the 2D map's rasters or the map itself (Ruler and Area on the
+// ellipsoid), which the measuring window's Layer field picks (RasterMeasurements.vue);
+// profile and volume take the map's DEM. The menu itself
 // stays the same whatever is loaded.
 export function measureMenu() {
   return [
-    { section: 'DEM / orthophoto in front' },
+    { section: 'Map, DEM or orthophoto in front' },
     {
       id: 'measure-length',
       guide: 'dem',

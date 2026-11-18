@@ -1874,6 +1874,19 @@ them. Reference-candidate review (§6.9) can declare covariance axes, height, ve
 and checkpoint role before import; DEM-derived heights carry the DEM's declared accuracy,
 and no accuracy is inferred from a good image match.
 
+**Measuring on the map itself** (the measuring window's Layer set to Map, no raster under
+the drawing): the points are in the project CRS, which may be degrees, so Ruler and Area
+are taken on the WGS84 ellipsoid instead (`core/products/geodesic.js`). Lengths sum
+Vincenty's inverse solution per segment (Vincenty 1975), with the great circle on the mean
+sphere for a nearly antipodal pair where it does not converge. Areas map each vertex to its
+authalic latitude, onto the sphere of the ellipsoid's surface area, then into an oblique
+Lambert azimuthal equal-area projection centred on the polygon (Snyder 1987, eq. 3-11 to
+3-13 and 24-2/3), where the shoelace sum is the ellipsoidal area; edges are straight in
+that projection, not geodesics, which costs about 1e-5 of the area on a cell 110 km across
+and nothing measurable at drawing size. These values do not depend on the CRS, so a map
+measurement keeps no source stamp and is re-projected, not marked stale, when the project
+CRS changes. The model frame has no ellipsoid: there the map measures only over a raster.
+
 Reference COG conversion keeps full-resolution sample values; nearest-sample overviews are
 for display only, and matching reads the original raster. Shader styles implement the same
 band ranges, gamma and normalised-difference formula as the CPU previews (the index colour
@@ -2047,3 +2060,5 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Woebbecke, D. M., Meyer, G. E., Von Bargen, K. & Mortensen, D. A. (1995). Color indices for weed identification under various soil, residue, and lighting conditions. Transactions of the ASAE 38(1), 259–269. https://doi.org/10.13031/2013.27838
 - Zhang, W., Qi, J., Wan, P., Wang, H., Xie, D., Wang, X. & Yan, G. (2016). An easy-to-use airborne LiDAR data filtering method based on cloth simulation. Remote Sensing 8(6), 501. https://doi.org/10.3390/rs8060501
 - Zhao, X., Wu, X., Chen, W., Chen, P. C. Y., Xu, Q. & Li, Z. (2023). ALIKED: a lighter keypoint and descriptor extraction network via deformable transformation. IEEE Transactions on Instrumentation and Measurement 72. https://arxiv.org/abs/2304.03608
+- Snyder, J. P. (1987). Map Projections — A Working Manual. U.S. Geological Survey Professional Paper 1395. https://doi.org/10.3133/pp1395
+- Vincenty, T. (1975). Direct and inverse solutions of geodesics on the ellipsoid with application of nested equations. Survey Review 23(176), 88–93. https://doi.org/10.1179/sre.1975.23.176.88

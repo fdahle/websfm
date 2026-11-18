@@ -158,7 +158,13 @@ export function describeMeasurement(record, ctx = {}) {
       const area = record.kind === 'area' ? record.area : planimetricArea(world)
       f.area = area == null ? null : round(record.kind === 'area' ? area : area / (k * k))
       f.area_unit = `${unit}²`
-      f.perimeter = world.length > 2 ? round(polylineLength([...world, world[0]]) / k) : null
+      // A map measurement saves its perimeter, taken on the ellipsoid: its points are
+      // in the map's CRS, which may be degrees.
+      f.perimeter = Number.isFinite(record.perimeter)
+        ? round(record.perimeter)
+        : world.length > 2
+          ? round(polylineLength([...world, world[0]]) / k)
+          : null
     } else {
       f.length = round(record.distance)
     }

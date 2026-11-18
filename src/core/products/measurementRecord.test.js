@@ -1,5 +1,8 @@
 import { it, expect } from 'vitest'
 import {
+  MAP_SOURCE,
+  isMapTarget,
+  mapMeasureRecord,
   isReferenceRaster,
   measuredOn,
   measurementSource,
@@ -42,4 +45,17 @@ it('finds a measurement on its own product, and one saved by kind on the main on
   expect(productOfSource('product:dem-2', lookup)).toBe(dem2)
   expect(productOfSource('product:dem', lookup)).toBe(dem1)
   expect(productOfSource('reference:r', lookup)).toBeNull()
+})
+
+it('gives the map one source that no rebuild or CRS change marks stale', () => {
+  const map = mapMeasureRecord('EPSG:4326')
+  expect(isMapTarget(map)).toBe(true)
+  expect(isReferenceRaster(map)).toBe(false)
+  expect(measurementSource('map', map)).toBe(MAP_SOURCE)
+  const saved = { source: MAP_SOURCE, stamp: measurementStamp(map) }
+  expect(measuredOn(saved, 'map', mapMeasureRecord('EPSG:32632'))).toBe(true)
+  // Taken on the ellipsoid: another project CRS leaves it current.
+  expect(measurementStale(saved, mapMeasureRecord('EPSG:32632'))).toBe(false)
+  // …and a raster never claims it.
+  expect(measuredOn(saved, 'dem', { id: 'dem-1', kind: 'dem', gsd: 1 })).toBe(false)
 })

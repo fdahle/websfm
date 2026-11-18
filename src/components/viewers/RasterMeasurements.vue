@@ -6,6 +6,7 @@ import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import {
+  isMapTarget,
   isReferenceRaster,
   measuredOn,
   measurementSource,
@@ -21,7 +22,8 @@ import {
   groundVolume,
   SURFACE_VOLUME_MAX_SAMPLES,
 } from '../../core/products/measure.js'
-import { isGeographic } from '../../core/crs.js'
+import { isGeographic, transform } from '../../core/crs.js'
+import { ellipsoidArea, geodesicLength } from '../../core/products/geodesic.js'
 import { rasterGroundScale, rasterUnits, volumeUnitLabel } from '../../core/products/rasterUnits.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 import { matches } from '../../core/help/shortcuts.js'
@@ -46,6 +48,9 @@ import { fetchTerrariumTile } from '../../utils/terrainTiles.js'
 //         transform changes, which is what re-renders the overlay.
 // All measuring happens in the raster's frame; a host's reprojection only ever
 // touches drawing and input.
+// The 2D map can hand the map itself as `product` (measurementRecord.js
+// mapMeasureRecord): no raster, no descriptor, points in the map's CRS, and Ruler
+// and Area taken on the WGS84 ellipsoid (core/products/geodesic.js).
 
 const props = defineProps({
   product: Object,
@@ -97,15 +102,28 @@ const finished = ref(false)
 const productUnits = computed(() => rasterUnits(props.product))
 const unit = computed(() => selected.value?.unit || productUnits.value.horizontal)
 const verticalUnit = computed(() => selected.value?.verticalUnit || productUnits.value.vertical)
-const unavailable = computed(
-  () =>
-    !props.descriptor ||
-    !props.view ||
-    props.frameStatus?.stale ||
-    props.product?.crsUnresolved ||
-    (props.product?.crs && isGeographic(props.product.crs)),
+const onMap = computed(() => isMapTarget(props.product))
+const unavailable = computed(() =>
+  onMap.value
+    ? !props.view
+    : !props.descriptor ||
+      !props.view ||
+      props.frameStatus?.stale ||
+      props.product?.crsUnresolved ||
+      (props.product?.crs && isGeographic(props.product.crs)),
 )
-const world = computed(() => selected.value?.world ?? vertices.value)
+// On the map, an opened record's points were taken into the current CRS (openMeasurement).
+const world = computed(() => (onMap.value ? vertices.value : (selected.value?.world ?? vertices.value)))
+// A map point as [lon, lat], or null off the globe.
+function lonLatOf(p) {
+  try {
+    const ll = transform([p.x, p.y], props.product.crs, 'EPSG:4326')
+    return Number.isFinite(ll[0]) && Math.abs(ll[1]) <= 90 ? ll : null
+  } catch {
+    return null
+  }
+}
+const lonLats = computed(() => (onMap.value ? world.value.map(lonLatOf).filter(Boolean) : null))
 // A block-built DEM (SAT-3) is measured on a window of its COG around the drawn shape,
 // at the finest level within WINDOW_CELLS — read in the worker once the shape stops
 // changing. Until it arrives (and for any other DEM) the plane is the grid.
@@ -200,14 +218,19 @@ watch(
 // A reopened record reads with the scale it was saved with, so its numbers stay
 // the ones that were saved.
 const recordScale = computed(() => selected.value?.groundScale ?? gridScale.value)
-const distance = computed(() => polylineLength(world.value) / recordScale.value)
+const distance = computed(() =>
+  onMap.value ? geodesicLength(lonLats.value) : polylineLength(world.value) / recordScale.value,
+)
 const area = computed(() => {
+  if (onMap.value) return ellipsoidArea(lonLats.value)
   const a = planimetricArea(world.value)
   return a == null ? a : a / recordScale.value ** 2
 })
-const perimeter = computed(() =>
-  world.value.length > 2 ? polylineLength([...world.value, world.value[0]]) / recordScale.value : 0,
-)
+const perimeter = computed(() => {
+  if (world.value.length <= 2) return 0
+  if (onMap.value) return geodesicLength(lonLats.value, { closed: true })
+  return polylineLength([...world.value, world.value[0]]) / recordScale.value
+})
 const profile = computed(
   () =>
     selected.value?.profile ??
@@ -353,9 +376,11 @@ const scaleRow = computed(() => {
   const k = selected.value ? selected.value.groundScale : gridScale.value
   return k && Math.abs(k - 1) > 1e-6 ? [['Ground values', `grid ÷ k, scale factor k = ${k.toFixed(6)}`]] : []
 })
+// On the map, where the numbers come from (the map's CRS may be degrees).
+const ellipsoidRow = computed(() => (onMap.value ? [['Measured on', 'WGS 84 ellipsoid']] : []))
 const result = computed(() => withScaleRow(baseResult.value))
 function withScaleRow(r) {
-  return r.error ? r : { ...r, rows: [...(r.rows || []), ...scaleRow.value] }
+  return r.error ? r : { ...r, rows: [...(r.rows || []), ...scaleRow.value, ...ellipsoidRow.value] }
 }
 const baseResult = computed(() => {
   const k = shownKind.value
@@ -481,6 +506,10 @@ function pick(x, y) {
   if (tool.value === 'pan' || unavailable.value || stale.value) return false
   if (finished.value) reset()
   const w = props.view.fromScreen(x, y)
+  if (onMap.value) {
+    if (w && lonLatOf(w)) vertices.value.push({ x: w.x, y: w.y })
+    return true
+  }
   const px = w && worldToPixel(props.descriptor, w.x, w.y)
   if (px && px.col >= 0 && px.row >= 0 && px.col < props.descriptor.width && px.row < props.descriptor.height)
     vertices.value.push({ x: w.x, y: w.y })
@@ -496,14 +525,17 @@ function saveMeasurement() {
     stamp: measurementStamp(props.product),
     kind: tool.value,
     // `vertices` (pixel) is what older records hold and what the store validates;
-    // `world` is what reopening reads.
+    // `world` is what reopening reads. The map has no pixels: both are its points.
     vertices: vertices.value.map((p) => {
+      if (onMap.value) return { x: p.x, y: p.y }
       const c = worldToPixel(props.descriptor, p.x, p.y)
       return { x: c.col, y: c.row }
     }),
     world: vertices.value.map((p) => ({ x: p.x, y: p.y })),
     distance: distance.value,
     area: area.value,
+    // On the ellipsoid; the export cannot take it from points in degrees.
+    ...(onMap.value && tool.value === 'area' && { perimeter: perimeter.value }),
     // The frame `world` is in, and what it was measured on, for the export.
     crs: props.product?.crs ?? 'local',
     sourceName: props.product?.name ?? null,
@@ -523,11 +555,25 @@ function openMeasurement(id) {
     reset()
     return
   }
-  const pts = r.world ?? r.vertices.map((p) => pixelToWorld(props.descriptor, p.x, p.y))
+  const pts = onMap.value ? mapPoints(r) : (r.world ?? r.vertices.map((p) => pixelToWorld(props.descriptor, p.x, p.y)))
   tool.value = r.kind
   vertices.value = pts.map((p) => ({ x: p.x, y: p.y }))
   name.value = r.name
   finished.value = true
+}
+// A map record's points in the map's current CRS (they were saved in the CRS of the day).
+function mapPoints(r) {
+  const from = r.crs,
+    to = props.product.crs
+  if (!from || from === to) return r.world
+  try {
+    return r.world.map((p) => {
+      const [x, y] = transform([p.x, p.y], from, to)
+      return { x, y }
+    })
+  } catch {
+    return r.world
+  }
 }
 function deleteMeasurement() {
   saved.remove(selectedId.value)
@@ -548,7 +594,7 @@ function exportSaved() {
   const n = records.value.length
   emit('command', 'export-measurements', {
     ids: records.value.map((r) => r.id),
-    label: `${n} measurement${n === 1 ? '' : 's'} on ${props.product?.name ?? (props.kind === 'ortho' ? 'the orthophoto' : 'the DEM')}`,
+    label: `${n} measurement${n === 1 ? '' : 's'} on ${onMap.value ? 'the map' : (props.product?.name ?? (props.kind === 'ortho' ? 'the orthophoto' : 'the DEM'))}`,
   })
 }
 function exportProfile() {
@@ -637,12 +683,14 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
           >Layer
           <select
             class="mb-input"
-            aria-label="Raster to measure"
+            aria-label="Layer to measure"
             :value="targetId"
             @change="emit('target', $event.target.value, tool)"
           >
             <option v-for="t in layerOptions" :key="t.id" :value="t.id">
-              {{ t.name }} ({{ t.kind === 'dem' ? 'DEM' : 'orthophoto' }})
+              {{
+                t.kind === 'map' ? 'Map (ground, no raster)' : `${t.name} (${t.kind === 'dem' ? 'DEM' : 'orthophoto'})`
+              }}
             </option>
           </select>
         </label>
@@ -790,7 +838,7 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
           <Icon name="x" class="mb-icon" />
         </button>
       </header>
-      <p v-if="!records.length" class="mp-empty">Nothing saved on this raster yet.</p>
+      <p v-if="!records.length" class="mp-empty">Nothing saved on this {{ onMap ? 'map' : 'raster' }} yet.</p>
       <ul v-else class="saved-list">
         <li v-for="r in records" :key="r.id">
           <button class="saved-item" :class="{ current: r.id === selectedId }" @click="openMeasurement(r.id)">

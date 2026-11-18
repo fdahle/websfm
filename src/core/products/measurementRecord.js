@@ -5,7 +5,20 @@
 // project may hold several of each, computed products have ids too.
 export const isReferenceRaster = (p) => !!p?.geoTransform
 
+// The 2D map itself as a measuring target (Ruler and Area with no raster under them):
+// a record in the map's CRS that the measuring window treats as its raster. Lengths
+// and areas are taken on the WGS84 ellipsoid (geodesic.js), so they hold in any CRS:
+// a map measurement never goes stale, and its points are re-projected when the
+// project CRS changes.
+export const MAP_TARGET_ID = 'map'
+export const MAP_SOURCE = 'map'
+export const isMapTarget = (p) => !!p?.mapTarget
+export function mapMeasureRecord(crs) {
+  return { id: MAP_TARGET_ID, mapTarget: true, kind: 'map', name: 'Map', crs, unit: 'm', verticalUnit: 'm' }
+}
+
 export function measurementSource(kind, p) {
+  if (isMapTarget(p)) return MAP_SOURCE
   return isReferenceRaster(p) ? `reference:${p.id}` : `product:${p?.id ?? kind}`
 }
 // Whether a saved record was measured on `p`. One saved before measurements named
@@ -23,6 +36,7 @@ export function productOfSource(source, { productById, mainOf }) {
 }
 export function measurementStamp(p) {
   if (!p) return null
+  if (isMapTarget(p)) return MAP_SOURCE
   return JSON.stringify([
     p.createdAt ?? p.importedAt ?? null,
     p.width,

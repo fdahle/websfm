@@ -147,6 +147,21 @@ describe('describeMeasurement', () => {
       area: 4,
       perimeter: 8,
     })
+    // A map area saves its perimeter, taken on the ellipsoid: its points are degrees.
+    const onMap = describeMeasurement({
+      ...area,
+      source: 'map',
+      crs: 'EPSG:4326',
+      groundScale: 1,
+      perimeter: 4000.5,
+      world: [
+        { x: 10, y: 50 },
+        { x: 10.01, y: 50 },
+        { x: 10.01, y: 50.01 },
+      ],
+    })
+    expect(onMap.fields.perimeter).toBe(4000.5)
+    expect(onMap.frame.crs).toBe('EPSG:4326')
     // An older record without `crs` reads it from its source stamp.
     expect(v.frame.crs).toBe(UTM)
   })

@@ -205,8 +205,12 @@ describe('console ↔ ribbon parity', () => {
     expect(getCommand('volume').dispatch).toBe('measure-volume')
     expect(getCommand('section').dispatch).toBe('cloud-section')
     expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'viewer' })).toBe(
-      'Open a DEM or orthophoto, or show one on the map',
+      'Open the map, a DEM or an orthophoto (in Model Frame, show a DEM or orthophoto on the map)',
     )
     expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'raster' })).toBe('')
+    // The map measures by itself (it lists itself as a target); without any target
+    // (the model frame with no raster) it cannot.
+    expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'map', mapMeasureTargetCount: 1 })).toBe('')
+    expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'map', mapMeasureTargetCount: 0 })).not.toBe('')
   })
 })
