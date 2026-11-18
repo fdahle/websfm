@@ -18,6 +18,7 @@
 //     "gcps": ".../gcp.csv",                             gcp_label, image_file_name, x, y (pixel-edge),
 //                                                         x_map, y_map, elev, *_acc  (in cfg.crs)
 //     "checkEvery": 4,                                   every 4th label (sorted) is a checkpoint; 0 = none
+//     "control": ["101", "117", …],                      these labels control, all others checkpoints
 //     "noGcps": false,                                   true: no GCPs at all (pose-free, unreferenced)
 //     "refDem": ".../CG_reference_dem_zoom.tif",         after the dem stage: score_dem.py
 //     "python": "<interpreter with rasterio>"            default: the hist_env3 conda env
@@ -204,7 +205,17 @@ export async function histSetup(h, imageNames) {
     }
     const labels = [...by.keys()].sort()
     const every = Number(h.checkEvery ?? 4)
-    if (every > 0)
+    if (Array.isArray(h.control)) {
+      // These labels are control, every other one a checkpoint (overrides checkEvery).
+      const keep = new Set(h.control.map(String))
+      const missing = [...keep].filter((l) => !by.has(l))
+      if (missing.length) throw new Error(`hist.control names unknown GCPs: ${missing.join(', ')}`)
+      for (const l of labels)
+        if (!keep.has(l)) {
+          by.get(l).role = 'check'
+          out.checks.push(l)
+        }
+    } else if (every > 0)
       for (let i = 0; i < labels.length; i += every) {
         by.get(labels[i]).role = 'check'
         out.checks.push(labels[i])
