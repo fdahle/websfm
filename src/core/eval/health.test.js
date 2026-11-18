@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { classify, thresholdHint, projectHealth, EVAL_THRESHOLDS } from './health.js'
+import { classify, thresholdHint, thresholdHintMsg, projectHealth, EVAL_THRESHOLDS } from './health.js'
+import { render } from '../i18n/index.js'
 
 describe('classify', () => {
   it('null value → missing', () => {
@@ -30,6 +31,16 @@ describe('thresholdHint', () => {
     expect(thresholdHint({ warn: 1, dir: 'low' }, 'px')).toBe('warn > 1 px')
     expect(thresholdHint({ warn: 90, dir: 'high' }, '%')).toBe('warn < 90 %')
     expect(thresholdHint({ warn: 5, dir: 'low-abs' }, '%')).toBe('warn > ±5 %')
+  })
+  // The Quality Report's translated caption says in English what the digest says.
+  it('as a message, reads in English as the caption does', () => {
+    for (const thr of [
+      { warn: 1.5, dir: 'low' },
+      { warn: 90, dir: 'high' },
+      { warn: 5, dir: 'low-abs' },
+    ])
+      expect(render(thresholdHintMsg(thr, 'px'), 'en')).toBe(thresholdHint(thr, 'px'))
+    expect(thresholdHintMsg(null)).toBeNull()
   })
 })
 

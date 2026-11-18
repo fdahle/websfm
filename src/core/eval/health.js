@@ -9,6 +9,8 @@
 // magic constants (that was the pre-hub complaint). A tile that colours by tone shows
 // its threshold in the hint ("warn > 1.0 px").
 
+import { msg } from '../i18n/msg.js'
+
 // dir semantics:
 //   'high'    → bigger is better; value below warn/bad is warn/bad (coverage, %reg)
 //   'low'     → smaller is better; value at/above warn/bad is warn/bad (reproj px, RMSE)
@@ -62,6 +64,13 @@ export function classify(value, thr) {
   if (v >= thr.bad) return 'bad'
   if (v >= thr.warn) return 'warn'
   return 'ok'
+}
+
+// The same caption as a message (quality.threshold.*), for a translated section.
+export function thresholdHintMsg(thr, unit = '') {
+  if (!thr) return null
+  const id = thr.dir === 'high' ? 'below' : thr.dir === 'low-abs' ? 'aboveAbs' : 'above'
+  return msg(`quality.threshold.${id}`, { warn: thr.warn, unit })
 }
 
 // A short "warn > X" caption from a threshold row, for the hint line.

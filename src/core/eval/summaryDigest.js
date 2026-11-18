@@ -570,8 +570,8 @@ export function digestToMarkdown(digest) {
       L.push(
         `Sparse: cameras ${fmtNum(sparse.cameras)}, points ${fmtNum(sparse.points)}, ` +
           `≥3-view ${fmtNum(sparse.pct3plusViewTracks)}%, ` +
-          `pre-BA P95 ${fmtNum(sparse.preBaP95px)} px, ` +
-          `post-BA median ${fmtNum(sparse.postBaMedianPx)} px`,
+          `P95 before bundle adjustment ${fmtNum(sparse.preBaP95px)} px, ` +
+          `median after bundle adjustment ${fmtNum(sparse.postBaMedianPx)} px`,
       )
     }
     if (depth) {

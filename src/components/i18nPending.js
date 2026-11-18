@@ -59,7 +59,6 @@ export const I18N_PENDING = [
   'src/components/modals/eval/EvalMatchingSection.vue',
   'src/components/modals/eval/EvalOverviewSection.vue',
   'src/components/modals/eval/EvalProductsSection.vue',
-  'src/components/modals/eval/EvalSparseSection.vue',
   'src/components/modals/eval/ImageNameList.vue',
   'src/components/modals/eval/QualityReportModal.vue',
   'src/components/modals/georef/FindGcpsModal.vue',

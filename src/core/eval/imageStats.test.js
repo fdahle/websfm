@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { perImageResiduals, unregisteredReason, imageResidualVectors } from './imageStats.js'
+import { perImageResiduals, unregisteredReason, unregisteredReasonKind, imageResidualVectors } from './imageStats.js'
+import { msg } from '../i18n/msg.js'
+import { render } from '../i18n/index.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
@@ -65,6 +67,15 @@ describe('unregisteredReason', () => {
   it('tolerates missing facts', () => {
     expect(unregisteredReason({})).toBeNull()
     expect(unregisteredReason()).toBeNull()
+  })
+  // The Quality Report words the kind itself (quality.sparse.reason.*); in English it
+  // says what the digest says.
+  it('as a kind, reads in English as the label does', () => {
+    for (const facts of [{ kpCount: 0 }, { kpCount: 500, degree: 0 }, { kpCount: 500, degree: 4, componentIndex: 2 }]) {
+      const r = unregisteredReasonKind(facts)
+      expect(render(msg(`quality.sparse.reason.${r.kind}`, { n: r.component }), 'en')).toBe(unregisteredReason(facts))
+    }
+    expect(unregisteredReasonKind({ kpCount: 500, degree: 4, componentIndex: 0 })).toBeNull()
   })
 })
 

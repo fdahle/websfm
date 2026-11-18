@@ -46,11 +46,22 @@ export function perImageResiduals(cameras, points) {
 // `facts`: { kpCount, degree, componentIndex } (componentIndex 0 = largest component,
 // null when the image has no component). Returns a short label, or null if none of
 // these explains it (registration deferred/failed for a subtler reason).
-export function unregisteredReason({ kpCount, degree, componentIndex } = {}) {
-  if (kpCount != null && kpCount === 0) return 'no features'
-  if (degree != null && degree === 0) return 'no accepted pairs'
-  if (componentIndex != null && componentIndex > 0) return `disconnected (component ${componentIndex + 1})`
+// unregisteredReasonKind: the same rule as { kind, component } or null, for the
+// Quality Report's own words (quality.sparse.reason.<kind>); unregisteredReason: the
+// English label the digest writes.
+export function unregisteredReasonKind({ kpCount, degree, componentIndex } = {}) {
+  if (kpCount != null && kpCount === 0) return { kind: 'noFeatures' }
+  if (degree != null && degree === 0) return { kind: 'noPairs' }
+  if (componentIndex != null && componentIndex > 0) return { kind: 'disconnected', component: componentIndex + 1 }
   return null
+}
+
+export function unregisteredReason(facts = {}) {
+  const r = unregisteredReasonKind(facts)
+  if (!r) return null
+  if (r.kind === 'noFeatures') return 'no features'
+  if (r.kind === 'noPairs') return 'no accepted pairs'
+  return `disconnected (component ${r.component})`
 }
 
 // Per-observation reprojection residual vectors for one image (WS3 residual overlay).

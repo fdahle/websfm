@@ -6,10 +6,11 @@ import ImageNameList from './ImageNameList.vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { useQualityReport } from '../../../composables/useQualityReport.js'
-import { unregisteredReason } from '../../../core/eval/imageStats.js'
-import { EVAL_THRESHOLDS, classify, thresholdHint } from '../../../core/eval/health.js'
+import { unregisteredReasonKind } from '../../../core/eval/imageStats.js'
+import { EVAL_THRESHOLDS, classify, thresholdHintMsg } from '../../../core/eval/health.js'
 import { useModalsStore } from '../../../stores/useModalsStore.js'
 import { EXTEND_DEFAULTS } from '../../../core/defaults.user.js'
+import { useI18n } from '../../../composables/useI18n.js'
 
 // Quality Report ▸ Sparse (WS2.1 + WS2.2): Recon Report and Image Errors merged into
 // one section. Tiles are ALWAYS derived from the cloud (one consistent set — the old
@@ -18,6 +19,7 @@ import { EXTEND_DEFAULTS } from '../../../core/defaults.user.js'
 // count + accepted-edge degree so "why is this image bad" is answerable in one place,
 // and unregistered images carry their first derivable reason.
 const emit = defineEmits(['open-image', 'open-image-residuals'])
+const { t, tx, locale } = useI18n()
 const recon = useReconstructionStore()
 const imagesStore = useImagesStore()
 // reproj / histogram / perImage are the model's memoised stats (core/eval/sparseStats.js):
@@ -29,7 +31,8 @@ const points = computed(() => recon.mainSparseCloud?.points ?? [])
 const byUuid = computed(() => new Map(imagesStore.images.map((im) => [im.uuid, im])))
 const maxBin = computed(() => Math.max(1, ...histogram.value.map((b) => b.count)))
 
-const fmt = (v, d = 2) => (v == null ? '—' : v.toFixed(d))
+// A value with 1 or 2 decimals in the user's language, or a dash.
+const fmt = (v, d = 2) => (v == null ? '—' : t(d === 1 ? 'quality.decimal1' : 'quality.decimal2', { v }))
 // An image named in a list, a link when it is still in the project.
 const byName = computed(() => new Map(imagesStore.images.map((im) => [im.name, im])))
 const imageItem = (name, note = '') => ({ key: name, name, imageId: byName.value.get(name)?.id ?? null, note })
@@ -37,13 +40,13 @@ const imageItem = (name, note = '') => ({ key: name, name, imageId: byName.value
 const extensions = computed(() =>
   (recon.summary?.extensions ?? []).map((e, i) => ({
     key: `${e.date}-${i}`,
-    when: e.date ? new Date(e.date).toLocaleString() : '—',
-    how: e.existingCameras === 'refined' ? 'then every camera refined' : 'model cameras fixed',
+    when: e.date ? new Date(e.date).toLocaleString(locale.value) : '—',
+    how: t(e.existingCameras === 'refined' ? 'quality.sparse.added.refined' : 'quality.sparse.added.fixed'),
     added: e.added ?? [],
     notAdded: e.notAdded ?? [],
     images: [
       ...(e.added ?? []).map((name) => imageItem(name)),
-      ...(e.notAdded ?? []).map((name) => imageItem(name, 'not placed')),
+      ...(e.notAdded ?? []).map((name) => imageItem(name, t('quality.sparse.added.notPlaced'))),
     ],
   })),
 )
@@ -69,18 +72,22 @@ const thr = EVAL_THRESHOLDS.reprojMedianPx
 const tiles = computed(() => {
   const d = reproj.value
   return [
-    { label: 'Registered', value: `${cameras.value.size} / ${imagesStore.images.length}`, hint: 'images' },
-    { label: 'Points', value: points.value.length.toLocaleString() },
     {
-      label: 'Reproj median',
+      label: t('quality.sparse.tile.registered'),
+      value: t('quality.sparse.tile.registeredValue', { n: cameras.value.size, total: imagesStore.images.length }),
+      hint: t('quality.sparse.tile.photos'),
+    },
+    { label: t('quality.sparse.tile.tiePoints'), value: t('quality.sparse.tile.count', { n: points.value.length }) },
+    {
+      label: t('quality.sparse.tile.reprojMedian'),
       value: fmt(d.median),
       unit: 'px',
       tone: classify(d.median, thr) === 'ok' ? 'ok' : classify(d.median, thr),
-      hint: thresholdHint(thr, 'px'),
+      hint: tx(thresholdHintMsg(thr, 'px')),
     },
-    { label: 'Reproj P95', value: fmt(d.p95), unit: 'px' },
-    { label: 'Reproj max', value: fmt(d.max), unit: 'px' },
-    { label: 'Observations', value: (d.n ?? 0).toLocaleString() },
+    { label: t('quality.sparse.tile.reprojP95'), value: fmt(d.p95), unit: 'px' },
+    { label: t('quality.sparse.tile.reprojMax'), value: fmt(d.max), unit: 'px' },
+    { label: t('quality.sparse.tile.observations'), value: t('quality.sparse.tile.count', { n: d.n ?? 0 }) },
   ]
 })
 
@@ -90,10 +97,13 @@ const summaryTiles = computed(() => {
   const s = summary.value
   if (!s) return null
   return [
-    { label: '≥3-view tracks', value: fmt(s.pct3plusViewTracks, 1), unit: '%' },
-    { label: 'Pre-BA P95', value: fmt(s.preBaP95px), unit: 'px' },
-    { label: 'Post-BA median', value: fmt(s.postBaMedianPx), unit: 'px' },
-    { label: 'Run date', value: s.date ? new Date(s.date).toLocaleDateString() : '—' },
+    { label: t('quality.sparse.summary.tracks3'), value: fmt(s.pct3plusViewTracks, 1), unit: '%' },
+    { label: t('quality.sparse.summary.p95Before'), value: fmt(s.preBaP95px), unit: 'px' },
+    { label: t('quality.sparse.summary.medianAfter'), value: fmt(s.postBaMedianPx), unit: 'px' },
+    {
+      label: t('quality.sparse.summary.date'),
+      value: s.date ? new Date(s.date).toLocaleDateString(locale.value) : '—',
+    },
   ]
 })
 
@@ -112,6 +122,8 @@ const rows = computed(() =>
   }),
 )
 
+const reasonText = (r) => (r ? t(`quality.sparse.reason.${r.kind}`, { n: r.component }) : '')
+
 const unregistered = computed(() => {
   const g = graph.value
   return imagesStore.images
@@ -120,24 +132,27 @@ const unregistered = computed(() => {
       key: im.uuid,
       name: im.name,
       imageId: im.id,
-      note: unregisteredReason({
-        kpCount: im.kpCount ?? null,
-        degree: g.degrees.get(im.uuid) ?? 0,
-        componentIndex: g.componentIndex.get(im.uuid) ?? null,
-      }),
+      note: reasonText(
+        unregisteredReasonKind({
+          kpCount: im.kpCount ?? null,
+          degree: g.degrees.get(im.uuid) ?? 0,
+          componentIndex: g.componentIndex.get(im.uuid) ?? null,
+        }),
+      ),
     }))
 })
 
-const columns = [
-  { key: 'name', label: 'Image' },
-  { key: 'kp', label: 'Keypts', align: 'right' },
-  { key: 'deg', label: 'Edges', align: 'right' },
-  { key: 'nObs', label: 'Obs', align: 'right' },
+const count = (v) => (v == null ? '—' : t('quality.sparse.tile.count', { n: v }))
+const columns = computed(() => [
+  { key: 'name', label: t('quality.sparse.table.photo') },
+  { key: 'kp', label: t('quality.sparse.table.keypoints'), align: 'right', format: count },
+  { key: 'deg', label: t('quality.sparse.table.pairs'), align: 'right', format: count },
+  { key: 'nObs', label: t('quality.sparse.table.observations'), align: 'right', format: count },
   // DataTable calls format(value, row): fmt's second argument is its digits, so wrap it.
-  { key: 'rmsPx', label: 'RMS', align: 'right', format: (v) => fmt(v) },
-  { key: 'medianPx', label: 'Median', align: 'right', format: (v) => fmt(v) },
-  { key: 'maxPx', label: 'Max', align: 'right', format: (v) => fmt(v) },
-]
+  { key: 'rmsPx', label: t('quality.sparse.table.rms'), align: 'right', format: (v) => fmt(v) },
+  { key: 'medianPx', label: t('quality.sparse.table.median'), align: 'right', format: (v) => fmt(v) },
+  { key: 'maxPx', label: t('quality.sparse.table.max'), align: 'right', format: (v) => fmt(v) },
+])
 
 function onRow(row) {
   if (row.imageId != null) emit('open-image-residuals', row.imageId)
@@ -145,40 +160,51 @@ function onRow(row) {
 </script>
 
 <template>
-  <div v-if="!points.length" class="eval-loading">No sparse cloud.</div>
+  <div v-if="!points.length" class="eval-loading">{{ t('quality.sparse.noModel') }}</div>
   <template v-else>
     <StatTiles :tiles="tiles" />
 
     <div v-if="summaryTiles" class="run-sum">
-      <div class="run-sum-title">Run summary <span class="run-sum-note">(from the last reconstruction)</span></div>
+      <div class="run-sum-title">
+        {{ t('quality.sparse.summary.title') }}
+        <span class="run-sum-note">{{ t('quality.sparse.summary.note') }}</span>
+      </div>
       <StatTiles :tiles="summaryTiles" />
     </div>
 
     <details v-for="e in extensions" :key="e.key" class="unreg">
       <summary>
-        Images added {{ e.when }} — {{ e.added.length }} added{{
-          e.notAdded.length ? `, ${e.notAdded.length} not placed` : ''
+        {{
+          t('quality.sparse.added.title', {
+            when: e.when,
+            added: e.added.length,
+            notPlaced: e.notAdded.length,
+            how: e.how,
+          })
         }}
-        ({{ e.how }})
       </summary>
       <ImageNameList :items="e.images" @open-image="emit('open-image', $event)" />
       <p v-if="e === extensions.at(-1) && stillOut.length" class="eval-note">
-        <button class="btn" @click="retryAdd">Try again…</button>
-        Opens Sparse Reconstruction to add the {{ stillOut.length }} photo{{ stillOut.length === 1 ? '' : 's' }} again
-        with looser registration gates ({{ EXTEND_DEFAULTS.retryGates.minMatchesForRegistration }} correspondences,
-        {{ EXTEND_DEFAULTS.retryGates.reprjThreshold }} px).
+        <button class="btn" @click="retryAdd">{{ t('quality.sparse.added.retry') }}</button>
+        {{
+          t('quality.sparse.added.retryNote', {
+            n: stillOut.length,
+            matches: EXTEND_DEFAULTS.retryGates.minMatchesForRegistration,
+            px: EXTEND_DEFAULTS.retryGates.reprjThreshold,
+          })
+        }}
       </p>
     </details>
 
     <div class="hist">
-      <div class="hist-title">Track-length distribution</div>
+      <div class="hist-title">{{ t('quality.sparse.tracks.title') }}</div>
       <div v-for="b in histogram" :key="b.views" class="hist-row">
         <span class="hist-label">{{ b.views }}</span>
         <div class="hist-track"><div class="hist-bar" :style="{ width: (b.count / maxBin) * 100 + '%' }"></div></div>
-        <span class="hist-count">{{ b.count.toLocaleString() }}</span>
-        <span class="hist-pct">{{ b.pct.toFixed(1) }}%</span>
+        <span class="hist-count">{{ count(b.count) }}</span>
+        <span class="hist-pct">{{ fmt(b.pct, 1) }}%</span>
       </div>
-      <div class="hist-foot">views per point (tie points, ≥2 views)</div>
+      <div class="hist-foot">{{ t('quality.sparse.tracks.foot') }}</div>
     </div>
 
     <DataTable
@@ -186,13 +212,13 @@ function onRow(row) {
       :rows="rows"
       sort-key="rmsPx"
       sort-dir="desc"
-      empty-text="No registered images."
+      :empty-text="t('quality.sparse.table.empty')"
       @row-click="onRow"
     />
-    <p class="eval-note">Click a row to open that image with the residual overlay. Sorted worst-first by RMS.</p>
+    <p class="eval-note">{{ t('quality.sparse.table.note') }}</p>
 
     <details v-if="unregistered.length" class="unreg">
-      <summary>Not registered ({{ unregistered.length }})</summary>
+      <summary>{{ t('quality.sparse.notRegistered', { n: unregistered.length }) }}</summary>
       <ImageNameList :items="unregistered" @open-image="emit('open-image', $event)" />
     </details>
   </template>

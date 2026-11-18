@@ -177,6 +177,10 @@ Notable changes to websfm. The format follows
   errors named no step at all), and the lines shown by default say bundle adjustment,
   calibration and tie point instead of BA, intrinsics and sparse point; solver internals
   moved to Detail. 529 warning, error and flagged lines were read by hand.
+- **Quality Report ▸ Sparse in plain words.** Its tiles and table say tie points,
+  reprojection and "before / after bundle adjustment" in full (it said Pre-BA, Post-BA,
+  Keypts and Obs), and it follows the app's language, with numbers and dates as that
+  language writes them. Compare runs and the report export use the same words.
 - **Edit Mask is on the Picture tab, Edit GCPs in Reconstruct ▸ Georeferencing.** Open a
   photo and Edit Mask sits beside its Mask toggle; Edit GCPs and Find GCPs share one
   button's space before Georeference. Tools ▸ Images ▾ now holds only the tools that work
