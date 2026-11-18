@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createProductRuns } from './productRuns.js'
+import { generateDem as workerGenerateDem } from '../../workers/computeClient.js'
 
 vi.mock('../../workers/computeClient.js', () => ({
   generateDem: vi.fn(),
   generateOrtho: vi.fn(),
   releaseIdleWorkers: vi.fn(() => true),
+  isAbort: (err) => err?.name === 'AbortError',
 }))
 
 // orthoSurfacePayload for the plane and mesh surfaces: the fit sample from whatever
 // cloud demSource offers, including a streamed one (pos: null, read from its octree).
-function setup({ source = null, mesh = null, extract = null } = {}) {
+function setup({ source = null, mesh = null, extract = null, overrides = {} } = {}) {
   const log = vi.fn()
   const runs = createProductRuns({
     activeRegion: () => null,
@@ -39,6 +41,7 @@ function setup({ source = null, mesh = null, extract = null } = {}) {
     sparseCameras: { value: new Map() },
     withPreviewUrl: (r) => r,
     extractCloudPoints: extract,
+    ...overrides,
   })
   return { runs, log }
 }
@@ -182,3 +185,32 @@ function runsDeps(cloud) {
     extractCloudPoints: null,
   }
 }
+
+// The closing line names the raster as built: a tiled DEM's record holds a preview
+// overview in width/height/gsd and its full size in fullWidth/fullHeight/fullGsd.
+describe('the DEM closing line', () => {
+  it('gives the full raster size, not the overview', async () => {
+    workerGenerateDem.mockResolvedValueOnce({
+      width: 1055,
+      height: 2499,
+      gsd: 0.0093,
+      fullWidth: 2111,
+      fullHeight: 4998,
+      fullGsd: 0.00465,
+      unit: 'model',
+    })
+    const { runs, log } = setup({
+      source: { cloud: { ...flatCloud(30), kind: 'dense' }, kind: 'dense', count: 30, name: 'Dense cloud' },
+      overrides: {
+        effectiveFrameSpec: vi.fn(async () => local),
+        putRasterProduct: (r) => ({ ...r, name: 'DEM' }),
+      },
+    })
+    await runs.generateDem({})
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/^DEM "DEM": 2,111 × 4,998 cells at 0\.00465 model units in [\d.]+ s$/),
+      'success',
+      'Products',
+    )
+  })
+})

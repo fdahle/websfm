@@ -96,11 +96,16 @@ export function createProductRuns({
   // settings.points 'ground' builds a DTM from the ground class (LAS 2) of a
   // classified cloud instead, and 'classes' a DEM of the chosen classes (a canopy DSM).
   // A raster run's closing line (CONTRIBUTING.md ▸ The console): its size, cell and time.
+  // A tiled raster keeps a preview overview in width/height/gsd; its full size is
+  // fullWidth/fullHeight/fullGsd.
   function rasterClosing(what, record, t0) {
     const unit = record.unit === 'model' ? 'model units' : (record.unit ?? '')
+    const width = record.fullWidth ?? record.width
+    const height = record.fullHeight ?? record.height
+    const gsd = record.fullGsd ?? record.gsd
     log(
-      `${what} "${record.name}": ${record.width.toLocaleString('en')} × ${record.height.toLocaleString('en')} cells` +
-        `${record.gsd ? ` at ${record.gsd.toPrecision(3)} ${unit}` : ''} in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
+      `${what} "${record.name}": ${width.toLocaleString('en')} × ${height.toLocaleString('en')} cells` +
+        `${gsd ? ` at ${gsd.toPrecision(3)} ${unit}` : ''} in ${((performance.now() - t0) / 1000).toFixed(1)} s`,
       'success',
       'Products',
     )
