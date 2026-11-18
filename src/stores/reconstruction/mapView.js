@@ -53,10 +53,11 @@ export function createMapView({ dem, ortho, save }) {
     save()
   }
   // The Photos layer (View ▸ Map ▸ Photos, core/products/imageOverlay.js):
-  // { visible, opacity, mode: 'selected' | 'all' }, null until first put on the map.
+  // { visible, opacity, mode: 'all' | 'selected' }, null until first put on the map. It
+  // starts with every photo: put on the map, it shows where all of them lie.
   const imageLayer = ref(null)
   function setImageLayer(patch) {
-    const next = normalizeImageLayer({ visible: false, opacity: 1, mode: 'selected', ...imageLayer.value, ...patch })
+    const next = normalizeImageLayer({ visible: false, opacity: 1, mode: 'all', ...imageLayer.value, ...patch })
     // Put back on the map, it is listed ticked, as any layer added from the sidebar.
     if (next.visible && !imageLayer.value?.visible) setMapLayerHidden(IMAGE_LAYER_ID, false)
     imageLayer.value = next

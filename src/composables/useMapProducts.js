@@ -247,6 +247,19 @@ export function useMapProducts() {
           'reference rasters and vector layers are hidden.',
       )
     }
+    // Photos on the CRS map from a model with no georeference: the aligned cameras cannot
+    // place them, so they fall back to footprints (flat, turned as the poses say, north
+    // up when the poses have no angles), or are not drawn at all.
+    if (mode.value === 'crs' && photosLayer.value && hasModel.value && !crsFrame.value) {
+      out.push(
+        footprintsStore.footprintPolygons.length
+          ? 'Photos: the sparse model is not georeferenced, so the photos are stretched into their footprints, ' +
+              'flat and turned only as far as the camera poses give angles. Reconstruct ▸ Georeference places ' +
+              'them by their aligned cameras.'
+          : 'Photos: the sparse model is not georeferenced, so its photos cannot be placed on this map. ' +
+              'Run Reconstruct ▸ Georeference, or show them in Model Frame.',
+      )
+    }
     return out
   })
 

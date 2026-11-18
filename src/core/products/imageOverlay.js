@@ -148,6 +148,6 @@ export function normalizeImageLayer(raw) {
   return {
     visible: raw.visible === true,
     opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1,
-    mode: IMAGE_LAYER_MODES.includes(raw.mode) ? raw.mode : 'selected',
+    mode: IMAGE_LAYER_MODES.includes(raw.mode) ? raw.mode : 'all',
   }
 }

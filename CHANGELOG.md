@@ -219,9 +219,12 @@ Notable changes to WebSfM. The format follows
   without footprints, on the CRS map once the model is georeferenced and in Model Frame;
   a photo outside the sparse model is still stretched into its footprint. Before, every
   photo was a flat stretch between the four corners of its footprint, which needed
-  imported poses and ignored the lens and everything between the corners. The grid is
-  cast only for the photos drawn, on the main thread: about 0.3 ms a photo and 70 ms
-  for the tie-point surface of 300,000 points (synthetic timing, one core).
+  imported poses and ignored the lens and everything between the corners. The layer now
+  starts with every photo (Layers can show the selected one alone), and when the model is
+  not georeferenced the map says the photos are placed by their footprints and how to
+  change that. The grid is cast only for the photos drawn, on the main thread: about
+  0.3 ms a photo and 70 ms for the tie-point surface of 300,000 points (synthetic timing,
+  one core).
 - **The console log reads the same everywhere.** Each line's source names the part of
   WebSfM it comes from, as the ribbon does (Sparse, Georeferencing, Fiducials, System …),
   each step ends in one green line with its result and time, and the per-photo and
@@ -299,6 +302,10 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **The orthophoto no longer redraws when another layer changes.** Moving a layer's
+  Opacity slider or turning Photos on or off left the orthophoto and DEM on the map
+  instead of taking them off and drawing them again from scratch. The Layers panel no
+  longer repeats the basemap choice the ribbon's Basemap menu makes.
 - **The Image Table keeps its column names on top.** Scrolling the Metadata tab no longer
   draws the thumbnails over the header row, and the Metadata, Intrinsics and Extrinsics
   tabs now look like the ribbon's tabs.

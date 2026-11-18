@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mapLayerIds, stackMapLayers, moveMapLayer, normalizeMapOrder } from './mapOrder.js'
+import { mapLayerIds, stackMapLayers, moveMapLayer, normalizeMapOrder, reconcileList } from './mapOrder.js'
 
 // Default order, bottom first: two reference rasters, then the DEM, then the ortho.
 const defaults = ['rema', 'cop30', 'product:dem', 'product:ortho']
@@ -40,5 +40,42 @@ describe('normalizeMapOrder', () => {
   it('keeps distinct strings only', () => {
     expect(normalizeMapOrder(['a', 'a', 3, '', 'b'])).toEqual(['a', 'b'])
     expect(normalizeMapOrder(null)).toEqual([])
+  })
+})
+
+describe('reconcileList', () => {
+  // A collection that records every item it takes out.
+  function list(items) {
+    const a = [...items]
+    const removed = []
+    return {
+      removed,
+      getLength: () => a.length,
+      item: (i) => a[i],
+      getArray: () => a,
+      insertAt: (i, x) => a.splice(i, 0, x),
+      removeAt: (i) => removed.push(a.splice(i, 1)[0]),
+    }
+  }
+
+  it('adds a layer on top without taking the others off the map', () => {
+    const l = list(['dem', 'ortho'])
+    reconcileList(l, ['dem', 'ortho', 'photos'])
+    expect(l.getArray()).toEqual(['dem', 'ortho', 'photos'])
+    expect(l.removed).toEqual([])
+  })
+
+  it('takes away only what left, and keeps the rest in place', () => {
+    const l = list(['dem', 'ortho', 'photos'])
+    reconcileList(l, ['dem', 'ortho'])
+    expect(l.getArray()).toEqual(['dem', 'ortho'])
+    expect(l.removed).toEqual(['photos'])
+  })
+
+  it('restacks a moved layer, leaving one already in its place alone', () => {
+    const l = list(['dem', 'ortho', 'photos'])
+    reconcileList(l, ['dem', 'photos', 'ortho'])
+    expect(l.getArray()).toEqual(['dem', 'photos', 'ortho'])
+    expect(l.removed).not.toContain('dem')
   })
 })

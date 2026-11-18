@@ -256,3 +256,18 @@ describe('heightSurface', () => {
     expect(heightSurface(new Float64Array([1, 1, 1, 1, 1, 2, 1, 1, 3]))).toBeNull()
   })
 })
+
+describe('gridMesh with a step', () => {
+  it('keeps the frame’s corners and every step-th node, for a thumbnail', () => {
+    const cam = nadir([0, 0, 50])
+    const g = photoGroundGrid({ ...base, cam, heightAt: () => 0, cells: 12 })
+    const coarse = gridMesh(g, { step: 3 })
+    expect(coarse).toHaveLength(32)
+    const corners = coarse.flatMap((t) => t.src).filter(([u, v]) => (u === 0 || u === 1) && (v === 0 || v === 1))
+    expect(new Set(corners.map(String)).size).toBe(4)
+    // A step that does not divide the grid still ends on its last node.
+    const odd = gridMesh(g, { step: 5 })
+    expect(odd).toHaveLength(2 * 3 * 3)
+    expect(odd.some((t) => t.src.some(([u]) => u === 1))).toBe(true)
+  })
+})

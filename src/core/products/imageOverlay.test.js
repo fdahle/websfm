@@ -134,7 +134,7 @@ describe('normalizeImageLayer', () => {
     expect(normalizeImageLayer({ visible: 'yes', opacity: 7, mode: 'some' })).toEqual({
       visible: false,
       opacity: 1,
-      mode: 'selected',
+      mode: 'all',
     })
   })
 })

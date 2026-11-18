@@ -7,8 +7,6 @@ import { useExternalStore } from '../../../stores/useExternalStore.js'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
-import { useMapSettings } from '../../../composables/useMapSettings.js'
-import { BASEMAPS } from '../../../core/basemaps.js'
 import { productLabel, productLayerId, productMapBlocker } from '../../../core/products/productLayers.js'
 import { mapLayerIds, moveMapLayer } from '../../../core/products/mapOrder.js'
 import { isFootprintSet, vectorKind, vectorLayerId } from '../../../core/products/vectorLayers.js'
@@ -26,8 +24,8 @@ import { IMAGE_LAYER_ID } from '../../../core/products/imageOverlay.js'
 //     or move it with ▲ ▼;
 //   • the selected row's settings (opacity, Zoom to) sit in one strip below the list,
 //     so the rows stay one line each;
-//   • the basemap is the fixed last row, where it draws.
-// The markers (footprints, GCPs, cameras) always draw above the stack.
+// The markers (footprints, GCPs, cameras) always draw above the stack, the basemap
+// (chosen in the ribbon, View ▸ Map ▸ Basemap) under it.
 const emit = defineEmits(['close', 'zoom-to'])
 const external = useExternalStore()
 const { rasters } = storeToRefs(external)
@@ -36,7 +34,6 @@ const { rasterProducts, productLayers, mapOrder, mapHidden, imageLayer } = store
 const { selectedId: selectedImageId } = storeToRefs(useImagesStore())
 const vectors = useFootprintsStore()
 const { sets: vectorSets } = storeToRefs(vectors)
-const { basemap, setBasemap } = useMapSettings()
 
 const canMapRaster = (r) => !!r.previewDataUrl && !!r.crs && !r.crsUnresolved
 
@@ -92,7 +89,7 @@ const rowsById = computed(() => {
       id: IMAGE_LAYER_ID,
       name: 'Photos',
       icon: 'image',
-      kind: 'Source images in their footprints',
+      kind: 'Source images on the ground',
       opacity: imageLayer.value.opacity ?? 1,
       blocked: '',
       mode: imageLayer.value.mode,
@@ -248,15 +245,15 @@ function onDragEnd() {
         </button>
       </div>
       <div v-if="selected.mode" class="settings-row">
-        <label for="map-layers-photos" class="basemap-label">Show</label>
+        <label for="map-layers-photos" class="setting-label">Show</label>
         <select
           id="map-layers-photos"
-          class="basemap-select"
+          class="setting-select"
           :value="selected.mode"
           @change="recon.setImageLayer({ mode: $event.target.value })"
         >
-          <option value="selected">The selected image</option>
           <option value="all">Every image (thumbnails)</option>
+          <option value="selected">The selected image</option>
         </select>
       </div>
       <p v-if="selected.mode === 'selected' && !selectedImageId" class="settings-hint">
@@ -264,14 +261,6 @@ function onDragEnd() {
       </p>
     </div>
 
-    <!-- The basemap draws under every layer, so it is the list's fixed last row. -->
-    <div class="basemap-row">
-      <span class="layer-icon" aria-hidden="true"><Icon name="layers" /></span>
-      <label for="map-layers-basemap" class="basemap-label">Basemap</label>
-      <select id="map-layers-basemap" class="basemap-select" :value="basemap" @change="setBasemap($event.target.value)">
-        <option v-for="b in BASEMAPS" :key="b.value" :value="b.value">{{ b.label }}</option>
-      </select>
-    </div>
     <p class="layer-note">Footprints, GCPs and cameras always draw above the layers.</p>
   </FloatingToolbox>
 </template>
@@ -382,18 +371,10 @@ function onDragEnd() {
   font-size: 11px;
   color: var(--text-dim);
 }
-.basemap-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--panel-border);
-  font-size: 12px;
-}
-.basemap-label {
+.setting-label {
   color: var(--text-dim);
 }
-.basemap-select {
+.setting-select {
   flex: 1;
   min-width: 0;
   font: inherit;

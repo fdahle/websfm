@@ -41,3 +41,20 @@ export function normalizeMapOrder(raw) {
   if (!Array.isArray(raw)) return []
   return [...new Set(raw.filter((id) => typeof id === 'string' && id))]
 }
+
+/**
+ * Bring `list` (an OpenLayers Collection, or anything with getLength, item, getArray,
+ * insertAt and removeAt) to hold exactly `target`, in its order, moving only the items
+ * that are out of place: one that leaves a map layer group draws again from scratch.
+ * Items not in `target` are removed; one already in its place is never touched.
+ */
+export function reconcileList(list, target) {
+  const keep = new Set(target)
+  for (let i = list.getLength() - 1; i >= 0; i--) if (!keep.has(list.item(i))) list.removeAt(i)
+  for (let i = 0; i < target.length; i++) {
+    if (list.item(i) === target[i]) continue
+    const at = list.getArray().indexOf(target[i])
+    if (at > i) list.removeAt(at)
+    list.insertAt(i, target[i])
+  }
+}

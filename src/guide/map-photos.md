@@ -10,8 +10,8 @@ It shows coverage, gaps and how well neighbouring photos fit, before you build
 anything. It is not an [orthophoto](guide:orthophoto): photos overlap without
 blending, and all but the selected photo are drawn from small previews.
 
-In **View ▸ Map ▸ Layers**, the Photos row sets its opacity and whether it shows the
-selected photo or every photo.
+It starts with every photo. In **View ▸ Map ▸ Layers**, the Photos row sets its opacity,
+and can show only the selected photo instead.
 
 ## How a photo is placed
 - **A photo in the [sparse model](guide:sparse-reconstruction)** is cast from its
@@ -25,8 +25,10 @@ selected photo or every photo.
   matching.
 
 On the map in the project CRS, a photo from the sparse model needs a
-[georeferenced](guide:georeferencing) model. With **Model Frame** on, the photos are
-drawn in the model's own frame.
+[georeferenced](guide:georeferencing) model (**Reconstruct ▸ Georeference**). Until it
+is, the photos are stretched into their footprints, and the map says so: a footprint
+from GPS positions without camera angles faces north, so the photos look turned. With
+**Model Frame** on, the photos are drawn in the model's own frame.
 
 Where the ground is steep or the tie points are few, a photo can still be off by a
 little; an orthophoto, built on a DEM, is the exact product.

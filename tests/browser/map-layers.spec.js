@@ -271,11 +271,14 @@ test('View ▸ Map ▸ Photos draws the source images into their footprints, as 
     })
   await photos.click()
   await expect(photos).toHaveClass(/active/)
-  // Only the selected image by default, and none is selected.
-  await expect.poll(drawn).toBe(null)
+  // Every photo at first.
+  await expect.poll(drawn).toEqual([500000, 5000000, 500140, 5000040])
   await page.locator('.ribbon').getByRole('button', { name: 'Layers', exact: true }).click()
   const list = page.getByRole('list', { name: 'Map layers, top first' })
   await expect(list.locator('.item-name')).toHaveText(['Photos'])
+  // Only the selected one, and none is selected.
+  await page.getByLabel('Show', { exact: true }).selectOption('selected')
+  await expect.poll(drawn).toBe(null)
   await expect(page.getByText('Click a camera or footprint')).toBeVisible()
   await page.evaluate(async () => {
     ;(await import('/src/stores/useImagesStore.js')).useImagesStore().selectedId = 'img-2'

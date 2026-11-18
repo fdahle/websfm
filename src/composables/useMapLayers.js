@@ -31,6 +31,7 @@ import { get as getOlProjection, transformExtent } from 'ol/proj'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { createGpuRasterLayer, gpuRasterStyle, disposeRasterLayer } from '../components/viewers/raster/gpuRaster.js'
 import { orthoAdjustFilter } from '../utils/orthoFilter.js'
+import { reconcileList } from '../core/products/mapOrder.js'
 import { ensureProjection } from '../core/crs.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
 import { makeFootprintFeature } from '../components/viewers/map/mapFeatures.js'
@@ -226,11 +227,12 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
       layers.delete(id)
     }
 
-    // Rewrite the collection in list order — the Layers panel's order IS the draw
-    // order, so a layer moved in the list restacks on the map.
-    const ordered = want.map((r) => layers.get(r.id)).filter(Boolean)
-    group.getLayers().clear()
-    for (const layer of ordered) group.getLayers().push(layer)
+    // Bring the collection into list order (the Layers panel's order IS the draw order,
+    // so a layer moved in the list restacks on the map), touching only what changed. A
+    // layer taken out of the collection leaves the map and draws again from scratch
+    // when put back: clearing and refilling it on every sync redrew the orthophoto on
+    // each opacity step and each Photos toggle.
+    reconcileList(group.getLayers(), want.map((r) => layers.get(r.id)).filter(Boolean))
   }
 
   /**

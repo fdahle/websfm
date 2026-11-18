@@ -110,6 +110,31 @@ test('a computed DEM in the project CRS goes on the map, fits, and probes cell v
   const mb = await map.boundingBox()
   const status = page.locator('.map-viewer .status-bar')
   await page.waitForTimeout(500) // Fit View animates for 300 ms
+
+  // An opacity step and the Photos layer coming and going redraw nothing else: the
+  // DEM's layer never leaves the map, where it would draw again from scratch.
+  await page.locator('.map-viewer').evaluate((el) => {
+    const group = el.__vueParentComponent.setupState.ctx.map
+      .getLayers()
+      .getArray()
+      .find((l) => l.getLayers)
+    window.__stackRemovals = []
+    group.getLayers().on('remove', (e) => window.__stackRemovals.push(e.element.get('overlay') ? 'photos' : 'raster'))
+  })
+  const setLayers = (opacity, photos) =>
+    page.evaluate(
+      async ([o, p]) => {
+        const recon = (await import('/src/stores/useReconstructionStore.js')).useReconstructionStore()
+        recon.setProductOpacity(recon.dem.id, o)
+        recon.setImageLayer({ visible: p })
+      },
+      [opacity, photos],
+    )
+  await setLayers(0.6, true)
+  await page.waitForTimeout(300)
+  await setLayers(1, false)
+  await expect.poll(() => page.evaluate(() => window.__stackRemovals)).toEqual(['photos'])
+
   // Centre of the DEM = the hole; well inside the left half = a measured 42 m cell.
   await page.mouse.move(mb.x + mb.width / 2, mb.y + mb.height / 2)
   await expect(status).toContainText('DEM')

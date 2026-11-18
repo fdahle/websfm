@@ -21,6 +21,9 @@ const FULL_SIZE = 1024
 // Mesh cells a side: the display image is seen up close, a thumbnail in a block.
 const MESH_FULL = 8
 const MESH_THUMB = 4
+// A ground grid's thumbnail mesh uses every this many nodes: 32 triangles a photo at
+// 12 cells, so every photo on the map draws as fast as footprints did.
+const GRID_THUMB_STEP = 3
 // Each triangle's clip is grown by this many pixels, so neighbours overlap and no
 // antialiased seam shows between them.
 const SEAM_PX = 0.75
@@ -43,7 +46,9 @@ export function createImageOverlay({ opacity = 1, request = () => {} } = {}) {
     const key = item.key
     let m = meshes.get(item.imageId)
     if (!m || m.key !== key || m.full !== item.full) {
-      const mesh = item.grid ? gridMesh(item.grid) : warpMesh(item.quad, item.full ? MESH_FULL : MESH_THUMB)
+      const mesh = item.grid
+        ? gridMesh(item.grid, { step: item.full ? 1 : GRID_THUMB_STEP })
+        : warpMesh(item.quad, item.full ? MESH_FULL : MESH_THUMB)
       m = { key, full: item.full, mesh }
       m.extent = pointsExtent(m.mesh.flatMap((t) => t.dst))
       meshes.set(item.imageId, m)

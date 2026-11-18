@@ -334,19 +334,25 @@ export function photoGridBuilder({ cameras, pos, toMap, frameModel = null, cells
 
 /**
  * A ground grid as the Photos layer's triangles, { src: [[u, v] × 3] (0–1), dst:
- * [[x, y] × 3] }, two a cell; a cell with a node that did not land is left out.
+ * [[x, y] × 3] }, two a cell; a cell with a node that did not land is left out. With
+ * `step` > 1 only every step-th node is used (and the last), a coarser mesh for a
+ * thumbnail: every photo on the map at 12 cells a side is 288 canvas draws each, at
+ * step 3 it is 32, as a footprint's mesh.
  */
-export function gridMesh({ cells, src, dst }) {
+export function gridMesh({ cells, src, dst }, { step = 1 } = {}) {
+  const at = []
+  for (let i = 0; i < cells; i += Math.max(1, step)) at.push(i)
+  at.push(cells)
   const out = []
   const n = cells + 1
   const uv = (k) => [src[2 * k], src[2 * k + 1]]
   const xy = (k) => [dst[2 * k], dst[2 * k + 1]]
-  for (let j = 0; j < cells; j++) {
-    for (let i = 0; i < cells; i++) {
-      const a = j * n + i,
-        b = a + 1,
-        c = a + n + 1,
-        d = a + n
+  for (let jj = 0; jj < at.length - 1; jj++) {
+    for (let ii = 0; ii < at.length - 1; ii++) {
+      const a = at[jj] * n + at[ii],
+        b = at[jj] * n + at[ii + 1],
+        c = at[jj + 1] * n + at[ii + 1],
+        d = at[jj + 1] * n + at[ii]
       if ([a, b, c, d].some((k) => Number.isNaN(dst[2 * k]))) continue
       out.push({ src: [uv(a), uv(b), uv(c)], dst: [xy(a), xy(b), xy(c)] })
       out.push({ src: [uv(a), uv(c), uv(d)], dst: [xy(a), xy(c), xy(d)] })
