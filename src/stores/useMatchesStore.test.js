@@ -212,6 +212,23 @@ it('keeps matches as a flat Uint32Array and rewrites only the flags when a pair 
   expect([...last.flags]).toEqual([1])
 })
 
+it('keeps a pair excluded when it is matched again or its matches are imported over it', async () => {
+  vi.spyOn(opfs, 'saveMatchDocument').mockResolvedValue({ files: {} })
+  vi.spyOn(opfs, 'loadDescriptors').mockResolvedValue(new Float32Array(128))
+  vi.spyOn(workers, 'matchDescriptors').mockResolvedValue({ matches: [] })
+  const store = useMatchesStore()
+  await store.importMatches([{ uuidA: 'a', uuidB: 'b', matches: [[0, 0]] }])
+  await store.importMatches([{ uuidA: 'a', uuidB: 'c', matches: [[0, 0]] }])
+  store.setPairEnabled('a--b', false)
+  await store.matchPair(image('a'), image('b'), { subsetGate: false })
+  expect(store.getMatch('a', 'b').enabled).toBe(false)
+  await store.importMatches([{ uuidA: 'b', uuidB: 'a', matches: [[1, 1]] }], { replace: true })
+  expect(store.getMatch('a', 'b').enabled).toBe(false)
+  // A pair the user never excluded starts and stays included.
+  await store.matchPair(image('a'), image('c'), { subsetGate: false })
+  expect(store.getMatch('a', 'c').enabled).toBe(true)
+})
+
 it("opens on the index alone and reads each pair's matches from its byte range on demand", async () => {
   const disk = commit(
     new Map([

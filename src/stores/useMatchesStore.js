@@ -509,7 +509,8 @@ export const useMatchesStore = registerProjectStore(
           nMatches: 0,
           src: null,
           status: 'done',
-          enabled: true,
+          // A replaced pair the user excluded stays excluded (see pairMatch.js).
+          enabled: matchStore.value.get(pid)?.enabled !== false,
           // A pair the gate kept as a registration bridge only (pairGate.js), or one never verified.
           weak: src.weak ?? src.verified === false,
           source: src.source ?? 'external',

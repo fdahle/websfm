@@ -242,6 +242,9 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **An excluded pair stays excluded.** A pair you exclude from reconstruction in the
+  match list (or with `pair disable`) is no longer switched back on when Detect and Match
+  Features matches it again or matches are imported over it.
 - **A model made mostly of oblique photos comes out level.** Where a film flight's sparse
   model holds more obliques than verticals, the aerial orientation, the products' frame and
   the 3D view take up from the vertical photos, found by comparing each look with the

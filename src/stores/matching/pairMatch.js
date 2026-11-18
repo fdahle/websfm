@@ -107,7 +107,9 @@ export function createPairMatcher({
       nMatches: 0,
       src: null,
       status: 'running',
-      enabled: true,
+      // An exclusion is the user's verdict on the two photos, not on one result: a
+      // re-match keeps it (setPairEnabled).
+      enabled: matchStore.value.get(pid)?.enabled !== false,
       weak: false,
     }
     entry.timing = {
