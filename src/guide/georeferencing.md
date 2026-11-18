@@ -47,8 +47,10 @@ Georeference refuses and asks for GCPs or a second strip.
 
 ## Ground control points
 A GCP needs 3D coordinates and marks in at least two registered images; use at least
-three, spread over the area and its height range. Keep some as checkpoints for an
-honest accuracy test.
+three, spread over the area and its height range. With four or more as control,
+**Adjust with GCPs** also refines the focal length and lens, which a nadir block cannot
+fix by itself; with three it keeps them, and heights can be off by the focal's error.
+Keep some as checkpoints for an honest accuracy test.
 
 **Import ▸ GCP File** reads a table of point names and coordinates, optionally with
 image marks (image name, pixel x/y). Check the columns it guessed before importing. To

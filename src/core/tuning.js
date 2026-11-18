@@ -204,9 +204,13 @@ export const SFM_TUNING = {
   cameraPriorRefineIntrinsics: 'auto',
   // Same for the GCP-anchored BA (bundleSession.js), once at least
   // gcpRefineIntrinsicsMinGcps control points qualify: over a nadir block only control
-  // at different heights pins the focal (Casa Grande 1978 film, HANDOVER ▸ B-hist).
+  // pins the focal (Casa Grande 1978 film, HANDOVER ▸ B-hist). Four suffice, three do
+  // not (three fit the similarity exactly): checkpoint V with 4 control GCPs, fixed K
+  // → refined, Casa Grande 1978 24.8 → 1.14 m, Iceland 26.4 → 6.5 m, DJI Mavic Air 2
+  // 52 → 47 cm; with 3, Casa Grande 28 → 18 m, Iceland 331 m either way
+  // (gcpw-night / gcpw-3ctl-2026-11-18).
   gcpRefineIntrinsics: 'auto',
-  gcpRefineIntrinsicsMinGcps: 5,
+  gcpRefineIntrinsicsMinGcps: 4,
   // ── F13: held to a reference DEM (bundleSession.js runDemAnchoredBundleAdjust) ──
   // Rounds of the DEM-held solve, the anchors rebuilt between them (a point that moves
   // sideways meets the DEM elsewhere): the synthetic doming block settles in two

@@ -1066,7 +1066,12 @@ frame). Each anchored GCP is an extra 3D point with its real marks, pulled towar
 position mapped into the SfM frame by the current similarity. The anchor touches only that
 point's 3×3 Schur block, so it is free to add. `runGcpAnchoredBundleAdjust` runs
 *triangulate → Horn fit → inverse-transform targets → anchored BA* twice, against a poor
-seed fit. The **final** georeference for products is a fresh post-hoc fit (§6.3);
+seed fit. With at least four control GCPs (`gcpRefineIntrinsicsMinGcps`) the anchored solve
+also refines the intrinsics the last self-calibration pass refined: over a nadir block only
+control pins the focal, and a fixed wrong focal leaves its height error in place (Casa Grande
+1978 with 4 control GCPs: checkpoints V 24.8 m fixed, 1.14 m refined). Three GCPs fit the
+similarity exactly and leave nothing to pin it (28 → 18 m), so three keep K fixed. The
+**final** georeference for products is a fresh post-hoc fit (§6.3);
 anchoring only has to be good enough to correct the shape.
 
 The constraint builders (`core/sfm/surveyConstraints.js`) also serve §4.11.

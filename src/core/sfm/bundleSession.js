@@ -881,7 +881,7 @@ export function createBundleSession(ctx) {
         cfg.gcpRefineIntrinsics === 'auto'
           ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics)
           : (cfg.gcpRefineIntrinsics ?? 'none')
-      if (gcpMode && gcpMode !== 'none' && anchors.length >= (cfg.gcpRefineIntrinsicsMinGcps ?? 5)) {
+      if (gcpMode && gcpMode !== 'none' && anchors.length >= (cfg.gcpRefineIntrinsicsMinGcps ?? 4)) {
         const r = await runBundleAdjust(
           `GCP-anchored bundle adjustment (round ${round + 1}, calibration '${gcpMode}')`,
           baIterations,

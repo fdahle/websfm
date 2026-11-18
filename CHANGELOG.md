@@ -274,12 +274,21 @@ Notable changes to WebSfM. The format follows
   camera with a mechanical or global shutter solves to a readout near 0, and a project
   that already ran Sparse Model keeps its last settings. On a DJI Mavic
   Air 2 block (104 photos, 5 RTK GCPs, each left out in turn as the checkpoint), the
-  horizontal checkpoint error fell from 21.5 to 3.8 cm. With 4 GCPs the vertical error
-  rose from 42 to 52 cm, because the GCP-anchored adjustment barely bends the block
-  (it keeps the focal fixed below 5 GCPs and weighs each mark at 1 px against the tie
-  points); with the GCP marks weighted harder, On was equal or better vertically too
-  (26.8 vs 27.8 cm). Metashape on the same splits: Off 21.4 / 33.2 cm, Regularized
-  21.9 / 16.1 cm (camera references off, as the EXIF heights are above sea level).
+  horizontal checkpoint error fell from 21.5 to 3.8 cm; the vertical was 42 cm Off and
+  52 cm On, and 47 cm On with the focal refined from the 4 GCPs (below). Metashape on
+  the same splits: Off 21.4 / 33.2 cm, Regularized 21.9 / 16.1 cm (camera references off,
+  as the EXIF heights are above sea level).
+- **Four GCPs refine the focal length.** Adjust with GCPs now refines the focal length and
+  lens with four control GCPs (it needed five), so a nadir block with four GCPs no longer
+  keeps a wrong self-calibrated focal and the height error it brings. Checkpoint vertical
+  RMS with 4 control GCPs, focal fixed → refined: Casa Grande 1978 24.8 → 1.14 m (all 33
+  GCPs as control: 1.03 m), Iceland 26.4 → 6.5 m, DJI Mavic Air 2 (5 splits) 52 → 47 cm.
+  Three GCPs do not pin the focal (Casa Grande 28 → 18 m, Iceland 331 m either way), so
+  three still keep it fixed. Weighting the GCP marks harder (0.25 or 0.1 px against 1 px)
+  helped only with the focal free and only on the drone block (47 → 21 cm at 0.1 px); with
+  all GCPs as control it was neutral at 0.25 px and worse at 0.1 px (Casa Grande 1.03 →
+  1.32 m), so the mark accuracy stays 1 px. Taking the GCP marks out of the robust loss
+  changed no result by more than a few millimetres, so it was left out.
 - **Quality Report ▸ Sparse in plain words.** Its tiles and table say tie points,
   reprojection and "before / after bundle adjustment" in full (it said Pre-BA, Post-BA,
   Keypts and Obs), and it follows the app's language, with numbers and dates as that
