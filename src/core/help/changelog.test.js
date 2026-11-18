@@ -10,6 +10,8 @@ import {
   latestRelease,
   countNewEntries,
   cutRelease,
+  stampCitation,
+  citationRelease,
   entryCount,
   UNRELEASED,
 } from './changelog.js'
@@ -120,6 +122,31 @@ describe('cutRelease', () => {
   it('refuses an empty Unreleased or a version already released', () => {
     expect(() => cutRelease(cutRelease(SAMPLE, '0.3.0', 'd'), '0.4.0', 'd')).toThrow(/Nothing to release/)
     expect(() => cutRelease(SAMPLE, '0.2.0', 'd')).toThrow(/already/)
+  })
+})
+
+describe('stampCitation', () => {
+  const CFF = `cff-version: 1.2.0\ntitle: 'WebSfM'\nauthors:\n  - family-names: Dahle\nversion: 0.4.0\ndate-released: '2026-10-21'\nlicense: MIT\n`
+
+  it('sets the version and the date, and nothing else', () => {
+    const out = stampCitation(CFF, '0.9.0', '2026-12-01')
+    expect(citationRelease(out)).toEqual({ version: '0.9.0', date: '2026-12-01' })
+    // cff-version is the format's version, not the software's.
+    expect(out).toContain('cff-version: 1.2.0\n')
+    expect(out.split('\n').filter((l, i) => l !== CFF.split('\n')[i])).toHaveLength(2)
+  })
+  it('refuses a file without the two lines', () => {
+    expect(() => stampCitation('title: x\nversion: 1.0.0\n', '1.1.0', 'd')).toThrow(/date-released/)
+  })
+})
+
+describe('CITATION.cff', () => {
+  it('names the newest release in the changelog, with its date', () => {
+    const newest = parseChangelog(readFileSync('CHANGELOG.md', 'utf8')).find((r) => r.version !== UNRELEASED)
+    expect(citationRelease(readFileSync('CITATION.cff', 'utf8'))).toEqual({
+      version: newest.version,
+      date: newest.date,
+    })
   })
 })
 

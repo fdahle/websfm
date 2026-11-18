@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: Dahle
     given-names: Felix
-version: 0.4.0
-date-released: '2026-10-21'
+version: 0.8.0
+date-released: '2026-11-12'
 license: MIT
 repository-code: 'https://github.com/fdahle/websfm'
 url: 'https://websfm.app'

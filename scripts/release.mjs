@@ -1,6 +1,6 @@
 // Cut a release: move CHANGELOG.md's [Unreleased] entries under a new version with
-// today's date, set that version in package.json (and package-lock.json), commit
-// those files and tag the commit `v<version>`. Nothing is pushed. Run it for every
+// today's date, set that version in package.json (and package-lock.json) and in
+// CITATION.cff, commit those files and tag the commit `v<version>`. Nothing is pushed. Run it for every
 // release of websfm.app (docs/development.md ▸ Releases), so the version
 // in About and the dates in Help ▸ What's New match what is live. Pushing the tag
 // deploys websfm.app (.github/workflows/verify.yml ▸ deploy).
@@ -13,14 +13,14 @@
 // a user-visible change among them without a changelog entry should get one first.
 import { execFileSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
-import { bumpVersion, cutRelease } from '../src/core/help/changelog.js'
+import { bumpVersion, cutRelease, stampCitation } from '../src/core/help/changelog.js'
 
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
 const kind = args.find((a) => !a.startsWith('--')) ?? 'minor'
 
 const root = new URL('../', import.meta.url)
-const FILES = ['CHANGELOG.md', 'package.json', 'package-lock.json']
+const FILES = ['CHANGELOG.md', 'package.json', 'package-lock.json', 'CITATION.cff']
 const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trimEnd()
 
 function fail(message) {
@@ -41,6 +41,8 @@ if (git('tag', '--list', tag)) fail(`tag ${tag} already exists`)
 
 const changelogUrl = new URL('CHANGELOG.md', root)
 const changelog = cutRelease(await readFile(changelogUrl, 'utf8'), version, date)
+const citationUrl = new URL('CITATION.cff', root)
+const citation = stampCitation(await readFile(citationUrl, 'utf8'), version, date)
 
 let since = ''
 try {
@@ -62,6 +64,7 @@ if (dryRun) {
 }
 
 await writeFile(changelogUrl, changelog)
+await writeFile(citationUrl, citation)
 pkg.version = version
 await writeFile(pkgUrl, `${JSON.stringify(pkg, null, 2)}\n`)
 const lockUrl = new URL('package-lock.json', root)

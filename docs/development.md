@@ -195,11 +195,12 @@ deploy.
 
 It lists the `feat` / `fix` / `perf` commits since the last tag (add an entry for any
 user-visible one it is missing first), moves `[Unreleased]` under the new version with
-today's date, sets the version in `package.json`, commits and tags `v<version>`.
+today's date, sets the version in `package.json` and `CITATION.cff`, commits and tags
+`v<version>`.
 Once websfm.app is live, the same CI run publishes the tag's GitHub release, with the
 version's CHANGELOG section as its notes (`scripts/release-notes.mjs`). Users who return
 after a deploy see a count of the new entries on **What's New**. A
-test checks that `package.json` names the newest release in the changelog.
+test checks that `package.json` and `CITATION.cff` name the newest release in the changelog.
 
 Releases up to 0.4.0 were split after the fact, by the date each entry entered the
 changelog; 0.2.0 holds everything from 0.1.0-beta.1 until the changelog began on

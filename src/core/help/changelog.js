@@ -174,3 +174,25 @@ export function cutRelease(md, version, date) {
     ...lines.slice(end),
   ].join('\n')
 }
+
+// CITATION.cff naming the release: its top-level `version:` and `date-released:`
+// lines, so a citation names the version that is live. Throws when either is missing.
+export function stampCitation(cff, version, date) {
+  let found = 0
+  const out = cff
+    .split('\n')
+    .map((l) => {
+      if (/^version:/.test(l)) return ((found |= 1), `version: ${version}`)
+      if (/^date-released:/.test(l)) return ((found |= 2), `date-released: '${date}'`)
+      return l
+    })
+    .join('\n')
+  if (found !== 3) throw new Error('CITATION.cff needs a "version:" and a "date-released:" line')
+  return out
+}
+
+// The version and date CITATION.cff names (null where the line is missing).
+export function citationRelease(cff) {
+  const field = (name) => cff.match(new RegExp(`^${name}:\\s*['"]?([^'"\\n]+?)['"]?\\s*$`, 'm'))?.[1] ?? null
+  return { version: field('version'), date: field('date-released') }
+}
