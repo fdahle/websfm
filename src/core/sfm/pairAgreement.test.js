@@ -9,6 +9,7 @@ import {
   describePairCheck,
   pairCheckToBuffer,
   pairCheckFromBuffer,
+  pairCheckVerdicts,
   SUSPECT_HOLDS,
   SUSPECT_CONTRADICTS,
   PAIR_AGREES,
@@ -373,5 +374,40 @@ describe('median', () => {
         expect(median(a, n), `n=${n} levels=${levels}`).toBe(want)
       }
     }
+  })
+})
+
+describe('pairCheckVerdicts', () => {
+  it('gives each pair its verdict under the store key, with the share of the photo it holds', () => {
+    const S = (idA, idB, status, n) => ({
+      idA,
+      idB,
+      status,
+      n,
+      inModel: n,
+      split: 0,
+      epiMedianPx: 0.5,
+      epiAgreeFrac: 1,
+    })
+    const scores = [
+      S('X', 'Y', PAIR_AGREES, 40),
+      S('Z1', 'X', PAIR_CONFLICTS, 100),
+      S('X', 'Z2', PAIR_CONFLICTS, 100),
+      S('Y', 'Z1', PAIR_AGREES, 300),
+      S('Z1', 'Z2', PAIR_AGREES, 300),
+      S('Z2', 'Y', PAIR_AGREES, 300),
+      S('Y', 'W', PAIR_CONFLICTS, 20),
+      S('W', 'Z1', PAIR_AGREES, 300),
+      S('W', 'Z2', PAIR_AGREES, 300),
+    ]
+    const { pairCheck } = packPairCheck(scores, { contestedFrac: 0.5, minPairs: 2, epiTolPx: 4 })
+    const v = pairCheckVerdicts(pairCheck)
+    expect(v.size).toBe(9)
+    expect(v.get('X--Y')).toMatchObject({ verdict: 'holds', held: 'X', matches: 40 })
+    expect(v.get('X--Y').heldShare).toBeCloseTo(200 / 240)
+    expect(v.get('X--Z1').verdict).toBe('disagrees') // stored key: uuids sorted
+    expect(v.get('W--Y').verdict).toBe('overruled')
+    expect(v.get('Y--Z1')).toMatchObject({ verdict: 'agrees', held: null, heldShare: null })
+    expect(pairCheckVerdicts(null).size).toBe(0)
   })
 })

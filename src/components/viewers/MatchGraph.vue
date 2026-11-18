@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from '../../composables/useI18n.js'
 
 // Connected-Papers-style match graph: one node per image that appears in a verified
 // pair, one edge per verified pair (thickness ∝ inlier count). Hand-rolled force
@@ -16,7 +17,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 // recomputes the default arrangement, discarding any manual drags.
 const props = defineProps({
   // From App.vue matchSummaries: { pairId, idAUuid, idBUuid, nameA, nameB,
-  //   inlierCount, enabled }.
+  //   inlierCount, enabled, check: { verdict } | null } (the model check, pairAgreement.js).
   matchSummaries: { type: Array, default: () => [] },
   alignedUuids: { type: Object, default: () => new Set() },
   hasSparse: { type: Boolean, default: false },
@@ -27,6 +28,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['select', 'toggle-pair'])
+const { t } = useI18n()
 
 const canvasEl = ref(null)
 const wrapEl = ref(null)
@@ -39,7 +41,7 @@ const hasPositions = computed(() => Object.keys(props.nodePositions || {}).lengt
 
 let ctx = null
 let nodes = [] // { uuid, name, x, y, vx, vy, aligned, deg, pinned }
-let edges = [] // { a, b, pairId, inlierCount, enabled, w }
+let edges = [] // { a, b, pairId, inlierCount, enabled, verdict, w }
 let nodeByUuid = new Map()
 let topoKey = '' // signature of the pair set; a change forces a full re-layout
 let raf = null
@@ -104,6 +106,7 @@ function build() {
       pairId: m.pairId,
       inlierCount: m.inlierCount,
       enabled: m.enabled !== false,
+      verdict: m.check?.verdict ?? null,
       w: 0.8 + 3.2 * (m.inlierCount / maxInliers), // 0.8–4 px
     })
   }
@@ -204,7 +207,10 @@ function patch() {
   const byPair = new Map(props.matchSummaries.map((m) => [m.pairId, m]))
   for (const e of edges) {
     const m = byPair.get(e.pairId)
-    if (m) e.enabled = m.enabled !== false
+    if (m) {
+      e.enabled = m.enabled !== false
+      e.verdict = m.check?.verdict ?? null
+    }
   }
   for (const p of nodes) p.aligned = props.alignedUuids.has(p.uuid)
 }
@@ -480,7 +486,15 @@ function draw() {
       ctx.strokeStyle = sel ? 'rgba(240,80,80,0.9)' : 'rgba(150,150,150,0.4)'
       ctx.setLineDash([4, 4])
     } else {
-      ctx.strokeStyle = sel ? '#f0a500' : 'rgba(120,180,120,0.45)'
+      // A pair that may be false (it holds a misplaced photo) in solid orange; the other
+      // disagreeing ones in a muted red; the rest green.
+      ctx.strokeStyle = sel
+        ? '#f0a500'
+        : e.verdict === 'holds'
+          ? 'rgba(235,140,40,0.95)'
+          : e.verdict === 'disagrees' || e.verdict === 'overruled'
+            ? 'rgba(210,120,100,0.6)'
+            : 'rgba(120,180,120,0.45)'
       ctx.setLineDash([])
     }
     ctx.stroke()
@@ -590,7 +604,11 @@ function onMove(e) {
     const a = nodes[edge.a],
       b = nodes[edge.b]
     hoverText.value = {
-      text: `${a.name} ↔ ${b.name} · ${edge.inlierCount} matches${edge.enabled ? '' : ' · excluded'}`,
+      text: [
+        t('matchList.graph.hover', { a: a.name, b: b.name, n: edge.inlierCount }),
+        ...(edge.enabled ? [] : [t('matchList.graph.hoverExcluded')]),
+        ...(edge.verdict ? [t(`matchList.verdict.${edge.verdict}`)] : []),
+      ].join(' · '),
       x,
       y,
     }
@@ -733,25 +751,51 @@ watch(hasPositions, (has) => {
 
     <!-- Toolbar: layout mode, reset, zoom -->
     <div class="graph-toolbar">
-      <div v-if="hasPositions" class="mode-toggle" title="Force = spring layout · Geographic = camera positions">
-        <button class="mode-btn" :class="{ active: layoutMode === 'force' }" @click="setMode('force')">Force</button>
-        <button class="mode-btn" :class="{ active: layoutMode === 'geo' }" @click="setMode('geo')">Geographic</button>
+      <div v-if="hasPositions" class="mode-toggle" :title="t('matchList.graph.modeTip')">
+        <button class="mode-btn" :class="{ active: layoutMode === 'force' }" @click="setMode('force')">
+          {{ t('matchList.graph.force') }}
+        </button>
+        <button class="mode-btn" :class="{ active: layoutMode === 'geo' }" @click="setMode('geo')">
+          {{ t('matchList.graph.geographic') }}
+        </button>
       </div>
-      <button class="tool-btn" title="Reset layout (discard manual moves)" @click="resetLayout">Reset layout</button>
+      <button class="tool-btn" :title="t('matchList.graph.resetTip')" @click="resetLayout">
+        {{ t('matchList.graph.reset') }}
+      </button>
       <div class="zoom-group">
-        <button class="tool-btn icon" title="Zoom in" @click="zoomButton(1.25)">+</button>
-        <button class="tool-btn icon" title="Zoom out" @click="zoomButton(0.8)">−</button>
-        <button class="tool-btn icon" title="Fit to view" @click="fitView">⤢</button>
+        <button
+          class="tool-btn icon"
+          :title="t('matchList.graph.zoomIn')"
+          :aria-label="t('matchList.graph.zoomIn')"
+          @click="zoomButton(1.25)"
+        >
+          +
+        </button>
+        <button
+          class="tool-btn icon"
+          :title="t('matchList.graph.zoomOut')"
+          :aria-label="t('matchList.graph.zoomOut')"
+          @click="zoomButton(0.8)"
+        >
+          −
+        </button>
+        <button
+          class="tool-btn icon"
+          :title="t('matchList.graph.fit')"
+          :aria-label="t('matchList.graph.fit')"
+          @click="fitView"
+        >
+          ⤢
+        </button>
       </div>
     </div>
 
-    <div v-if="!matchSummaries.length" class="graph-empty">No verified pairs to graph.</div>
+    <div v-if="!matchSummaries.length" class="graph-empty">{{ t('matchList.graph.empty') }}</div>
     <div v-if="hoverText" class="graph-hover" :style="{ left: hoverText.x + 12 + 'px', top: hoverText.y + 12 + 'px' }">
       {{ hoverText.text }}
     </div>
     <div class="graph-hint">
-      Click edge to preview · double-click to exclude/restore · drag node to move · drag background to pan · scroll to
-      zoom
+      {{ t('matchList.graph.hint') }}
     </div>
   </div>
 </template>

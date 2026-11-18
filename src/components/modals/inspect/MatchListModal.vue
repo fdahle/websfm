@@ -8,6 +8,8 @@ import { useTableSort, compareRaw } from '../../../composables/useTableSort.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { useMatchesStore } from '../../../stores/useMatchesStore.js'
 import { useLog } from '../../../composables/useLog.js'
+import { useI18n } from '../../../composables/useI18n.js'
+import { VERDICT_RANK } from '../../../core/sfm/pairAgreement.js'
 
 const props = defineProps({
   matchSummaries: { type: Array, default: () => [] },
@@ -28,6 +30,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'set-pair-enabled'])
+const { t } = useI18n()
 
 // List ⇄ Graph toggle.
 const viewMode = ref('list') // 'list' | 'graph'
@@ -45,11 +48,31 @@ function trimExt(name) {
 
 const selectedPairId = ref(null)
 
+// The main model's check of each pair (core/sfm/pairAgreement.js pairCheckVerdicts, on
+// the summary as `check`): absent on a model solved before the check, or imported.
+const hasCheck = computed(() => props.matchSummaries.some((m) => m.check))
+const flagged = (m) => !!m.check && m.check.verdict !== 'agrees'
+// The long line for a pair's verdict: the preview bar and the row's hover.
+function verdictText(check) {
+  if (!check) return ''
+  const v = check.verdict
+  if (v === 'holds')
+    return t('matchList.verdictLong.holds', { photo: trimExt(check.heldName ?? ''), share: check.heldShare })
+  if (v === 'agrees')
+    return check.epiAgreeFrac != null
+      ? t('matchList.verdictLong.agrees', { share: check.epiAgreeFrac })
+      : t('matchList.verdictLong.agreesPoints', { n: check.inModel })
+  return t(`matchList.verdictLong.${v}`)
+}
+const colCount = computed(() => 3 + (props.hasSparse ? 1 : 0) + (hasCheck.value ? 1 : 0))
+
 // ── Filtering + sorting ───────────────────────────────────────────────────────
 // Filter by *participating* image, not by column: which of a pair's two images
 // lands in A vs B is arbitrary (pairId is the uuid-sorted join), so an A-only
 // filter silently hides roughly half the pairs the chosen image appears in.
 const filterImage = ref('')
+// '' (all pairs) | 'flagged' (any verdict but agrees)
+const filterCheck = ref('')
 
 // Distinct image names appearing on *either* side of a pair, for the dropdown.
 const imageOptions = computed(() => {
@@ -75,22 +98,27 @@ const trimmedNames = computed(() => {
 
 const filteredSummaries = computed(() => {
   const q = filterImage.value
-  if (!q) return props.matchSummaries
+  const onlyFlagged = filterCheck.value === 'flagged'
+  if (!q && !onlyFlagged) return props.matchSummaries
   const names = trimmedNames.value
   return props.matchSummaries.filter((m) => {
+    if (onlyFlagged && !flagged(m)) return false
+    if (!q) return true
     const n = names.get(m.pairId)
     return n.a === q || n.b === q
   })
 })
 
-// Sorted by Image A on open; 'nameA' | 'nameB' | 'inlierCount' | 'usedCount'. Names
-// sort on their lower-cased trimmed key with plain `<` (compareRaw) — no collation,
-// which matters at 10⁵ pairs. The name map is read once per sort (in the rows
-// getter), not reactively per comparison.
+// Sorted by Image A on open; 'nameA' | 'nameB' | 'inlierCount' | 'usedCount' | 'check'.
+// Names sort on their lower-cased trimmed key with plain `<` (compareRaw) — no
+// collation, which matters at 10⁵ pairs. The name map is read once per sort (in the
+// rows getter), not reactively per comparison. 'check' sorts by VERDICT_RANK (may be
+// false, disagrees, overruled, agrees, unchecked).
 let sortNames = new Map()
 function sortValue(m, key) {
   if (key === 'nameA') return sortNames.get(m.pairId).aKey
   if (key === 'nameB') return sortNames.get(m.pairId).bKey
+  if (key === 'check') return VERDICT_RANK[m.check?.verdict] ?? 0
   return m[key]
 }
 const {
@@ -195,8 +223,8 @@ const selectedUsedKeys = computed(() =>
 
 <template>
   <ModalShell
-    title="Matches"
-    aria-label="Match List"
+    :title="t('matchList.title')"
+    :aria-label="t('matchList.ariaLabel')"
     width="min(96vw, 1440px)"
     height="min(88vh, 1000px)"
     flush
@@ -204,13 +232,17 @@ const selectedUsedKeys = computed(() =>
   >
     <template #header>
       <div class="match-head">
-        <span class="match-title">Matches</span>
-        <span v-if="matchSummaries.length" class="modal-count"
-          >{{ matchSummaries.length }} pair{{ matchSummaries.length !== 1 ? 's' : '' }}</span
-        >
+        <span class="match-title">{{ t('matchList.title') }}</span>
+        <span v-if="matchSummaries.length" class="modal-count">{{
+          t('matchList.count', { n: matchSummaries.length })
+        }}</span>
         <div class="view-toggle">
-          <button class="view-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">List</button>
-          <button class="view-btn" :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'">Graph</button>
+          <button class="view-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">
+            {{ t('matchList.view.list') }}
+          </button>
+          <button class="view-btn" :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'">
+            {{ t('matchList.view.graph') }}
+          </button>
         </div>
       </div>
     </template>
@@ -229,48 +261,59 @@ const selectedUsedKeys = computed(() =>
         />
       </div>
       <div v-else class="list-panel" :style="{ width: listWidth + 'px' }">
-        <div v-if="!matchSummaries.length" class="empty">No matches yet — run Match Features first.</div>
+        <div v-if="!matchSummaries.length" class="empty">{{ t('matchList.empty') }}</div>
         <template v-else>
           <div class="filter-bar">
-            <select
-              v-model="filterImage"
-              class="filter-input"
-              title="Show only pairs containing this image (either side)"
-            >
-              <option value="">All images</option>
+            <select v-model="filterImage" class="filter-input" :title="t('matchList.filter.imageTip')">
+              <option value="">{{ t('matchList.filter.allImages') }}</option>
               <option v-for="name in imageOptions" :key="name" :value="name">{{ name }}</option>
             </select>
-            <button v-if="filterImage" class="filter-clear" title="Clear filter" @click="filterImage = ''">×</button>
+            <button
+              v-if="filterImage"
+              class="filter-clear"
+              :title="t('matchList.filter.clear')"
+              :aria-label="t('matchList.filter.clear')"
+              @click="filterImage = ''"
+            >
+              ×
+            </button>
+            <select v-if="hasCheck" v-model="filterCheck" class="filter-input" :title="t('matchList.filter.checkTip')">
+              <option value="">{{ t('matchList.filter.allPairs') }}</option>
+              <option value="flagged">{{ t('matchList.filter.flagged') }}</option>
+            </select>
           </div>
           <div class="table-scroll">
             <table v-col-resize class="match-table">
               <thead>
                 <tr>
                   <th class="sortable" @click="sortBy('nameA')">
-                    Image A<span class="arrow">{{ sortArrow('nameA') }}</span>
+                    {{ t('matchList.col.imageA') }}<span class="arrow">{{ sortArrow('nameA') }}</span>
                   </th>
                   <th class="sortable" @click="sortBy('nameB')">
-                    Image B<span class="arrow">{{ sortArrow('nameB') }}</span>
+                    {{ t('matchList.col.imageB') }}<span class="arrow">{{ sortArrow('nameB') }}</span>
                   </th>
                   <th class="sortable num-col" @click="sortBy('inlierCount')">
-                    Matches<span class="arrow">{{ sortArrow('inlierCount') }}</span>
+                    {{ t('matchList.col.matches') }}<span class="arrow">{{ sortArrow('inlierCount') }}</span>
                   </th>
                   <th
                     v-if="hasSparse"
                     class="sortable num-col"
+                    :title="t('matchList.col.usedTip')"
                     @click="sortBy('usedCount')"
-                    title="Matches that became tie-points in the sparse model"
                   >
-                    Used<span class="arrow">{{ sortArrow('usedCount') }}</span>
+                    {{ t('matchList.col.used') }}<span class="arrow">{{ sortArrow('usedCount') }}</span>
+                  </th>
+                  <th v-if="hasCheck" class="sortable" :title="t('matchList.col.checkTip')" @click="sortBy('check')">
+                    {{ t('matchList.col.check') }}<span class="arrow">{{ sortArrow('check') }}</span>
                   </th>
                 </tr>
               </thead>
               <tbody ref="matchBodyRef">
                 <tr v-if="!displayedSummaries.length">
-                  <td :colspan="hasSparse ? 4 : 3" class="empty-row">No pairs match “{{ filterImage }}”.</td>
+                  <td :colspan="colCount" class="empty-row">{{ t('matchList.filter.noRows') }}</td>
                 </tr>
                 <tr v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }">
-                  <td :colspan="hasSparse ? 4 : 3"></td>
+                  <td :colspan="colCount"></td>
                 </tr>
                 <tr
                   v-for="m in visibleSummaries"
@@ -282,19 +325,22 @@ const selectedUsedKeys = computed(() =>
                     unused: hasSparse && !m.usedCount,
                     excluded: !m.enabled,
                   }"
-                  :title="m.enabled ? '' : 'Excluded from reconstruction'"
+                  :title="m.enabled ? verdictText(m.check) : t('matchList.excluded')"
                   @click="selectMatch(m.pairId)"
                 >
                   <td class="name-cell">
-                    <span v-if="!m.enabled" class="excluded-tag" title="Excluded from reconstruction">⦸</span>
+                    <span v-if="!m.enabled" class="excluded-tag" :title="t('matchList.excluded')">⦸</span>
                     {{ trimExt(m.nameA) }}
                   </td>
                   <td class="name-cell">{{ trimExt(m.nameB) }}</td>
                   <td class="num-col">{{ m.inlierCount }}</td>
                   <td v-if="hasSparse" class="num-col" :class="{ dim: !m.usedCount }">{{ m.usedCount }}</td>
+                  <td v-if="hasCheck" class="check-cell" :class="m.check ? `verdict-${m.check.verdict}` : ''">
+                    {{ m.check ? t(`matchList.verdict.${m.check.verdict}`) : '' }}
+                  </td>
                 </tr>
                 <tr v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }">
-                  <td :colspan="hasSparse ? 4 : 3"></td>
+                  <td :colspan="colCount"></td>
                 </tr>
               </tbody>
             </table>
@@ -303,23 +349,29 @@ const selectedUsedKeys = computed(() =>
       </div>
 
       <!-- Drag handle to resize the list panel (list view only). -->
-      <div v-if="viewMode === 'list'" class="resizer" title="Drag to resize" @mousedown="startResize" />
+      <div v-if="viewMode === 'list'" class="resizer" :title="t('matchList.resize')" @mousedown="startResize" />
 
       <!-- Right: match viewer preview -->
       <div class="preview-panel">
         <div v-if="selectedSummary" class="preview-bar">
-          <span class="preview-name">{{ trimExt(selectedSummary.nameA) }} ↔ {{ trimExt(selectedSummary.nameB) }}</span>
+          <div class="preview-text">
+            <span class="preview-name"
+              >{{ trimExt(selectedSummary.nameA) }} ↔ {{ trimExt(selectedSummary.nameB) }}</span
+            >
+            <span
+              v-if="selectedSummary.check"
+              class="preview-check"
+              :class="`verdict-${selectedSummary.check.verdict}`"
+              >{{ verdictText(selectedSummary.check) }}</span
+            >
+          </div>
           <button
             class="exclude-btn"
             :class="{ on: !selectedSummary.enabled }"
-            :title="
-              !selectedSummary.enabled
-                ? 'Include this pair in reconstruction'
-                : 'Exclude this pair from reconstruction (obviously-wrong match)'
-            "
+            :title="!selectedSummary.enabled ? t('matchList.exclude.restoreTip') : t('matchList.exclude.excludeTip')"
             @click="togglePair(selectedSummary.pairId)"
           >
-            {{ !selectedSummary.enabled ? 'Excluded — click to restore' : 'Exclude from reconstruction' }}
+            {{ !selectedSummary.enabled ? t('matchList.exclude.restore') : t('matchList.exclude.exclude') }}
           </button>
         </div>
         <div class="preview-body">
@@ -333,7 +385,7 @@ const selectedUsedKeys = computed(() =>
             :used-keys="selectedUsedKeys"
           />
           <div v-else class="preview-placeholder">
-            <span>Select a pair to preview matches</span>
+            <span>{{ t('matchList.placeholder') }}</span>
           </div>
         </div>
       </div>
@@ -661,5 +713,36 @@ const selectedUsedKeys = computed(() =>
   font-size: 13px;
   color: var(--text-dim);
   font-style: italic;
+}
+
+/* The model check (core/sfm/pairAgreement.js): a pair that may be false stands out; the
+   other disagreeing verdicts are quieter, since "overruled" is sometimes a true pair. */
+.check-cell {
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.verdict-holds {
+  color: #e0902c;
+  font-weight: 600;
+}
+.verdict-disagrees,
+.verdict-overruled {
+  color: #c98a6a;
+}
+
+.preview-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.preview-check {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.preview-check.verdict-holds {
+  font-weight: 400;
 }
 </style>

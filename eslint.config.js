@@ -103,6 +103,9 @@ export default [
             '+',
             '⚠',
             '⑂',
+            '↔',
+            '⦸',
+            '⤢',
             'WebSfM',
           ],
           attributes: {

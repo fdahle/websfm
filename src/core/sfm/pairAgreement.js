@@ -433,3 +433,59 @@ export function pairCheckFromBuffer(meta, buffer) {
   for (const k of PC_U8) take(Uint8Array, k)
   return pc
 }
+
+// What the match list shows for a pair, most telling first (its sort order).
+export const VERDICT_RANK = { holds: 4, disagrees: 3, overruled: 2, agrees: 1 }
+
+/**
+ * Each checked pair's verdict, keyed as the matches store keys a pair (the two uuids
+ * sorted, joined by `--`):
+ *   holds      agrees, and holds a photo where most of its matches disagree: may be false
+ *   overruled  disagrees between two photos that sit well: a false pair the model overruled
+ *   disagrees  disagrees, with a photo that sits where most of its matches disagree
+ *   agrees
+ * → Map pid → { verdict, held (uuid | null), matches, inModel, split, epiAgreeFrac
+ *   (null without a baseline), epiMedianPx, heldShare (the held photo's disagreeing
+ *   share of matches, holds only) }
+ */
+export function pairCheckVerdicts(pc) {
+  const out = new Map()
+  if (!pc?.status) return out
+  const n = pc.status.length
+  // The held photo's share of disagreeing matches, from the columns themselves.
+  const agree = new Map(),
+    total = new Map()
+  const add = (m, u, v) => m.set(u, (m.get(u) ?? 0) + v)
+  for (let i = 0; i < n; i++) {
+    for (const u of [pc.a[i], pc.b[i]]) {
+      add(total, u, pc.matches[i])
+      if (pc.status[i] === PAIR_AGREES) add(agree, u, pc.matches[i])
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const ua = pc.uuids[pc.a[i]],
+      ub = pc.uuids[pc.b[i]]
+    const pid = ua < ub ? `${ua}--${ub}` : `${ub}--${ua}`
+    const verdict =
+      pc.suspect[i] === SUSPECT_HOLDS
+        ? 'holds'
+        : pc.suspect[i] === SUSPECT_CONTRADICTS
+          ? 'overruled'
+          : pc.status[i] === PAIR_CONFLICTS
+            ? 'disagrees'
+            : 'agrees'
+    const h = pc.held[i]
+    const finite = (v) => (Number.isFinite(v) ? v : null)
+    out.set(pid, {
+      verdict,
+      held: h >= 0 ? pc.uuids[h] : null,
+      heldShare: h >= 0 ? 1 - (agree.get(h) ?? 0) / total.get(h) : null,
+      matches: pc.matches[i],
+      inModel: pc.inModel[i],
+      split: pc.split[i],
+      epiAgreeFrac: finite(pc.epiAgreeFrac[i]),
+      epiMedianPx: finite(pc.epiMedianPx[i]),
+    })
+  }
+  return out
+}

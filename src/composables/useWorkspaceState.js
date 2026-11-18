@@ -10,6 +10,7 @@ import { resolveK } from '../core/sfm/reconstruction.js'
 import { matchPairStats, usedKeysForPair, usedPairCounts } from '../core/eval/usedMatches.js'
 import { suggestSensorSplits } from '../core/sensors/splitSuggestions.js'
 import { filmScanGuess } from '../core/sensors/filmGuess.js'
+import { pairCheckVerdicts } from '../core/sfm/pairAgreement.js'
 
 // State derived from the project stores alone, lifted out of App.vue: what the
 // workspace is ready for (the ribbon, console and workflow guards), the match
@@ -147,9 +148,17 @@ export function useWorkspaceState() {
   const usedCountsByPair = computed(() => usedPairCounts(mainSparseCloud.value?.points))
   const usedKeysOf = (pairId) => usedKeysForPair(mainSparseCloud.value?.points, pairId)
 
+  // Each pair's verdict from the main model's pair check (core/sfm/pairAgreement.js),
+  // null when the model has none (solved before the check, or imported).
+  const pairVerdicts = computed(() => {
+    const pc = mainSparseCloud.value?.pairCheck
+    return pc ? pairCheckVerdicts(pc) : null
+  })
+
   const matchSummaries = computed(() => {
     const result = []
     const byUuid = new Map(images.value.map((img) => [img.uuid, img]))
+    const verdicts = pairVerdicts.value
     for (const [pid, entry] of matchStore.value) {
       if (entry.status !== 'done' || entry.inlierCount === 0) continue
       const imgA = byUuid.get(entry.idA)
@@ -167,10 +176,14 @@ export function useWorkspaceState() {
         rawCount: entry.rawCount,
         usedCount: usedCountsByPair.value.get(pid) ?? 0,
         enabled: entry.enabled !== false,
+        // { verdict, heldName, heldShare, epiAgreeFrac, … } or null (not checked)
+        check: checkOf(verdicts?.get(pid), byUuid),
       })
     }
     return result
   })
+
+  const checkOf = (v, byUuid) => (v ? { ...v, heldName: v.held ? (byUuid.get(v.held)?.name ?? null) : null } : null)
 
   // Imported camera positions keyed by image uuid, in the project working CRS — feeds
   // the match graph's optional geographic layout (place nodes where the photos were

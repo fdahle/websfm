@@ -5,6 +5,7 @@ import common from './common.js'
 import consolePanel from './console.js'
 import dialog from './dialog.js'
 import filterCloud from './filterCloud.js'
+import matchList from './matchList.js'
 import quality from './quality.js'
 import readText from './readText.js'
 import ribbon from './ribbon.js'
@@ -17,6 +18,7 @@ export default {
   console: consolePanel,
   dialog,
   filterCloud,
+  matchList,
   quality,
   readText,
   ribbon,

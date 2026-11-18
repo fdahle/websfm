@@ -32,13 +32,17 @@ Three properties matter when reading it:
 
 **Verified does not mean true.** Repetitive structure — a snowfield, a regular
 façade, ocean texture — can produce a pair that passes every count and inlier
-test while relating two images that do not overlap at all. Such a pair cannot
-register a camera on its own: registration needs 2D–3D correspondences that agree
+test while relating two images that do not overlap at all. Such a pair rarely
+registers a camera on its own: registration needs 2D–3D correspondences that agree
 with points the rest of the graph already built, and the track filter and robust
-bundle adjustment reject observations that disagree with the model.
+bundle adjustment reject observations that disagree with the model. When one does
+win, Sparse Model's check of every pair against the finished model names it.
 [Cycle consistency](help:cycle-consistency) is the classic graph-level check, but it
 is only as reliable as the pairwise rotations it composes.
 
 Pairs can also be **disabled by hand** from the match list or the graph view — a
 reversible exclusion for a pair that is visibly wrong. Disabled pairs stop
-contributing everywhere the reconstruction reads the graph.
+contributing everywhere the reconstruction reads the graph. The match list's
+**Model** column shows the check: *may be false* for a pair that holds a photo where
+most of that photo's matches disagree (the one to exclude), *overruled* for a likely
+false pair the model already ignored, *disagrees* for a pair whose photo sits wrong.
