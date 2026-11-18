@@ -610,15 +610,15 @@ function judgeReference(
   }
 }
 
-// Info, like Stage A's per-image line: this pass can run for minutes, and at the
-// default log level it was otherwise silent from start to summary.
+// Debug, one line per map (CONTRIBUTING.md ▸ The console): the run's progress bar
+// shows the pass moving, and its summary line is at info.
 function logReference(onLog, s, label, mi, nMaps, nCand, cfg, tMap) {
   onLog(
     `Depth filter: ${label || '?'} (${mi + 1}/${nMaps}) — kept ${s.keptPct.toFixed(1)}%; ` +
       `dropped ${s.lowNcc} of low correlation, ${s.inconsistent} inconsistent` +
       `${cfg.angleOn ? `, ${s.lowParallax} low-parallax` : ''} px; ${nCand} candidate views, ` +
       `${((Date.now() - tMap) / 1000).toFixed(1)}s`,
-    'info',
+    'debug',
     'Dense',
   )
 }

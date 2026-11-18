@@ -627,7 +627,7 @@ export async function registerImages(ctx) {
       ) {
         reportRegister(`Bundle adjustment (${cameras.size} cameras)…`)
         await runBundleAdjust(
-          `interim BA (${cameras.size} cameras)`,
+          `interim bundle adjustment (${cameras.size} cameras)`,
           interimBaIterations,
           distortionRefine(cameras.size),
         )

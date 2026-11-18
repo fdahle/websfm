@@ -24,6 +24,16 @@ export function pluralize(n, singular, pluralForm = `${singular}s`) {
 }
 
 /**
+ * The text with its first letter in capitals, for a log line that leads with a label
+ * kept lower case elsewhere (a bundle adjustment's stage name in the run record).
+ *
+ * @param {string} text
+ */
+export function capitalize(text) {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text
+}
+
+/**
  * The noun alone, agreeing with a count that is rendered separately — for the
  * "7/12 pairs" shape, where the number is a ratio rather than the count itself.
  *   `${a}/${b} ${nounFor(b, 'pair')}`

@@ -1832,7 +1832,7 @@ describe('reconstruct — focal pre-solve', () => {
     expect(pre.length).toBeGreaterThan(0)
     for (const a of pre) expect(a.sensors.map((x) => x.sensorId)).toEqual(['guess'])
     // The calibrated K was restored, so the poses are re-settled around it.
-    expect(logs.some((m) => /^focal pre-solve re-settle .* RMS/.test(m))).toBe(true)
+    expect(logs.some((m) => /^Focal pre-solve re-settle .* RMS/.test(m))).toBe(true)
   }, 120_000)
 })
 

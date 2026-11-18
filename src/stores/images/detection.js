@@ -364,8 +364,10 @@ export function createDetection({
     }
     const seconds = (performance.now() - started) / 1000
     log(
-      `${batchTag} ${stop() ? 'cancelled' : 'batch complete'} — ${done}/${total} processed in ${seconds.toFixed(2)} s` +
-        ` (${concurrency} concurrent)`,
+      stop()
+        ? `${batchTag} cancelled: ${done.toLocaleString('en')} of ${total.toLocaleString('en')} images done, kept to continue`
+        : `${batchTag}: features on ${done.toLocaleString('en')} of ${total.toLocaleString('en')} images in ` +
+            `${seconds.toFixed(1)} s (${concurrency} workers)`,
       stop() ? 'info' : 'success',
       'Detection',
     )

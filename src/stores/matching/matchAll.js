@@ -44,6 +44,9 @@ import { useImagesStore } from '../useImagesStore.js'
 import { useModelsStore } from '../useModelsStore.js'
 import { nounFor, pluralize } from '../../core/textFormat.js'
 
+// A count in a log line, in English as the line is (CONTRIBUTING.md ▸ The console).
+const en = (n) => n.toLocaleString('en')
+
 export function createMatchAll({
   log,
   matchPair,
@@ -555,6 +558,7 @@ export function createMatchAll({
   // `resume`: the journal a dead tab's run left (core/runJournal.js, the Continue prompt on
   // open). The pairs it lists are kept as saved; only the rest are matched.
   async function matchAll(images, settings = {}, onProgress, shouldCancel, { resume = null } = {}) {
+    const tRun = performance.now()
     const requested = journalSettings(structuredClone(toRaw(settings)))
     bumpGeneration()
     // Same merge as matchPair so this function's own settings reads (and its
@@ -1246,12 +1250,13 @@ export function createMatchAll({
     }
     const meanRatio = stats.ratios.length ? stats.ratios.reduce((s, r) => s + r, 0) / stats.ratios.length : 0
     log(
-      `Matching complete: ${pluralize(pairs.length, 'pair')} — ${stats.matched} accepted` +
-        `${stats.weak ? `, ${stats.weak} weak (PnP bridges)` : ''}` +
-        `, ${stats.rejected} rejected, ${stats.skipped} skipped` +
-        `${stats.gated ? `, ${stats.gated} gated (subset pre-test)` : ''}` +
-        `${settings.filterStationary ? `; ${pluralize(stats.stationary, 'stationary putative')} dropped` : ''}` +
-        `; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}` +
+      `${en(pairs.length)} pairs matched in ${((performance.now() - tRun) / 1000).toFixed(1)} s: ` +
+        `${en(stats.matched)} accepted` +
+        `${stats.weak ? `, ${en(stats.weak)} weak (PnP bridges)` : ''}` +
+        `, ${en(stats.rejected)} rejected, ${en(stats.skipped)} skipped` +
+        `${stats.gated ? `, ${en(stats.gated)} gated (subset pre-test)` : ''}` +
+        `${settings.filterStationary ? `; ${en(stats.stationary)} stationary putatives dropped` : ''}` +
+        `; ${en(stats.inliers)} inliers in all, mean inlier ratio ${meanRatio.toFixed(2)}` +
         `${
           stats.matched
             ? `, ${stats.degenerate}/${pluralize(stats.matched, 'accepted pair')} H/F-degenerate ` +

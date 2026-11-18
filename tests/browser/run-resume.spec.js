@@ -156,7 +156,7 @@ for (const [method, phase, quality] of [
       const { useLogStore } = await import('/src/stores/useLogStore.js')
       return (await useLogStore().readAll()).map((e) => e.message ?? e.msg ?? String(e))
     })
-    expect(logged.some((m) => /Dense: continuing the stopped run/.test(m))).toBe(true)
+    expect(logged.some((m) => /^Continuing the stopped run/.test(m))).toBe(true)
     expect(errors).toEqual([])
     await context.close()
   })
@@ -316,7 +316,7 @@ test('a detection run killed partway continues where it stopped', async ({ brows
     const { useLogStore } = await import('/src/stores/useLogStore.js')
     return (await useLogStore().readAll()).map((e) => e.message ?? e.msg ?? String(e))
   })
-  expect(logged.some((m) => /Detection: continuing the stopped run/.test(m))).toBe(true)
+  expect(logged.some((m) => /^Continuing the stopped run/.test(m))).toBe(true)
   expect(errors).toEqual([])
   await context.close()
 })
@@ -358,7 +358,7 @@ test('a depth run keeps the maps whose camera and settings did not change', asyn
   expect(Object.keys(first)).toHaveLength(5)
 
   await run()
-  expect(await lastDense()).toMatch(/^Dense: all 5 depth maps kept/)
+  expect(await lastDense()).toMatch(/^All 5 depth maps kept/)
   expect(await savedMaps(page, id)).toEqual(first)
   // The dialog says so before Run, from the same rule (with the run's own settings).
   await page.evaluate(async () => {
@@ -381,7 +381,7 @@ test('a depth run keeps the maps whose camera and settings did not change', asyn
     return uuid
   })
   await run()
-  expect(await lastDense()).toMatch(/^Dense: 4 depth maps of 5 kept .*computing 1 map/)
+  expect(await lastDense()).toMatch(/^4 depth maps of 5 kept .*computing 1 map/)
   const third = await savedMaps(page, id)
   expect(Object.keys(third).sort()).toEqual(Object.keys(first).sort())
   expect(third[moved]).toBeTruthy()

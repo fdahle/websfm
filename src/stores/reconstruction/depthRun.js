@@ -126,6 +126,7 @@ export function createDepthRun({
   }
 
   async function computeDepthMaps(settings = {}, onProgress, { resume = null } = {}) {
+    const tRun = performance.now()
     const cloud = mainSparseCloud.value
     if (!cloud || cloud.cameras.size < 2) {
       log('Build a sparse model with 2 or more cameras first', 'warn', 'Dense')
@@ -589,7 +590,12 @@ export function createDepthRun({
       }
       depthSummary.value = stageSummary
       if (previews && isPersisting()) imagesStore.save()
-      log(`${pluralize(run ? run.metas.length : maps.length, 'depth map')} computed`, 'success', 'Dense')
+      log(
+        `${pluralize(run ? run.metas.length : maps.length, 'depth map')} computed in ` +
+          `${((performance.now() - tRun) / 1000).toFixed(1)} s`,
+        'success',
+        'Dense',
+      )
       reconStatus.value = 'done'
       // In memory only: save before densify can transfer the buffers away (a no-op
       // when the project cannot save, which is why this path exists).

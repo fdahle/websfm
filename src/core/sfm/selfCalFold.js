@@ -24,7 +24,7 @@
 import { undistortPixel, undistortKeypoint, distortionOf, coeffsForModel } from './distortion.js'
 import { mapPositions } from './keypointSet.js'
 import { undistortBrownPixels } from './reconstruction.js'
-import { pluralize } from '../textFormat.js'
+import { capitalize, pluralize } from '../textFormat.js'
 
 const kChanged = (a, b) => a.fx !== b.fx || a.fy !== b.fy || a.cx !== b.cx || a.cy !== b.cy
 const LENS_TERMS = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2']
@@ -260,7 +260,7 @@ export function createSelfCalFold({
     }
     if (rebuiltImgs > 0) {
       log(
-        `${label} re-derived ${pluralize(rebuiltImgs, 'image')}' keypoints from the recorded pixels ` +
+        `${capitalize(label)} re-derived ${pluralize(rebuiltImgs, 'image')}' keypoints from the recorded pixels ` +
           `with the refined lens and K (mean change ${(rebuiltShift / Math.max(1, rebuiltN)).toFixed(2)}px)`,
         'info',
         'Sparse',

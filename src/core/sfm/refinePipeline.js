@@ -32,7 +32,7 @@ import { adaptiveReprojThreshold, CLEANUP_THRESHOLD_DEFAULTS } from './cleanupTh
 import { guidedExtendTracks, auditGuidedAdditions } from './guidedExtension.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { trackHist } from './modelStats.js'
-import { pluralize } from '../textFormat.js'
+import { capitalize, pluralize } from '../textFormat.js'
 
 // Runs the bundle-adjustment + track-filtering stages. Returns the records they fill
 // for the run summary: `guidedRecord` (projection-guided track extension,
@@ -78,7 +78,7 @@ export async function refineModel(ctx) {
     const resid = modelResiduals()
     const nr = resid.length || 1
     log(
-      `${label} — ${((100 * resid.filter((r) => r > 5).length) / nr).toFixed(1)}% of observations over 5 px, ` +
+      `${capitalize(label)} — ${((100 * resid.filter((r) => r > 5).length) / nr).toFixed(1)}% of observations over 5 px, ` +
         `${((100 * resid.filter((r) => r > 20).length) / nr).toFixed(1)}% over 20px`,
       'info',
       'Sparse',
@@ -117,14 +117,14 @@ export async function refineModel(ctx) {
     const total = res.added
     if (total) {
       log(
-        `${label} track completion +${pluralize(total, 'observation')} (` +
+        `${capitalize(label)} track completion +${pluralize(total, 'observation')} (` +
           `${pluralize(res.rounds, 'round')}, ≤${filterMaxReprojPx.toFixed(1)}px) — ${pluralize(res.lifted, 'point')} lifted to ≥3 views; ` +
           `track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ${after.t2}/${after.t3}/${after.t4}`,
         'info',
         'Sparse',
       )
     } else {
-      log(`${label} track completion found nothing to add`, 'debug', 'Sparse')
+      log(`${capitalize(label)} track completion found nothing to add`, 'debug', 'Sparse')
     }
     return total
   }
@@ -228,7 +228,7 @@ export async function refineModel(ctx) {
         keypointsAt,
         maxReprojPx: filterMaxReprojPx,
       })
-      const completed = completeTracksFinal('post-BA')
+      const completed = completeTracksFinal('after bundle adjustment')
       if (added || merged || completed) {
         const after = trackHist(tracks)
         log(
@@ -440,7 +440,7 @@ export async function refineModel(ctx) {
             .filter((t) => t !== 'k4')
             .join(',')
           log(
-            `${label} again without k4 — the self-cal guard refused the k4 fit; k4 keeps its value for this run`,
+            `${capitalize(label)} again without k4 — the self-cal guard refused the k4 fit; k4 keeps its value for this run`,
             'info',
             'Sparse',
           )

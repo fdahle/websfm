@@ -40,7 +40,7 @@ import {
 } from './baObservations.js'
 import { fmtStats } from './modelStats.js'
 import { attachRollingShutter, captureSeconds } from './rollingShutter.js'
-import { pluralize } from '../textFormat.js'
+import { capitalize, pluralize } from '../textFormat.js'
 import { demAnchors } from './demAnchors.js'
 import { demHoldSampler } from './demHoldGrid.js'
 import { frameFromSimilarity } from '../products/georef.js'
@@ -146,7 +146,7 @@ export function createBundleSession(ctx) {
     T.threads = Math.max(T.threads, result.threads ?? 1)
     const pcg = s.pcgConverged + s.pcgPartial + s.pcgFallback + s.pcgNotPd
     log(
-      `${label} solver — n ${s.n}, ${pluralize(s.solves, 'solve')}: ` +
+      `${capitalize(label)} solver — n ${s.n}, ${pluralize(s.solves, 'solve')}: ` +
         (pcg
           ? `PCG${s.implicit ? ' on the implicit reduced system (past the memory budget)' : ''} ` +
             `${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / ` +
@@ -322,7 +322,7 @@ export function createBundleSession(ctx) {
     lastSolve = null
     if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && iters > 0)) {
       log(
-        `${label} skipped (cameras=${cameras.size}, ` + `points=${tracks.liveCount()}, iters=${iters})`,
+        `${capitalize(label)} skipped (cameras=${cameras.size}, ` + `points=${tracks.liveCount()}, iters=${iters})`,
         'debug',
         'Sparse',
       )
@@ -346,7 +346,7 @@ export function createBundleSession(ctx) {
       })
       uuidList = [...uuidList.filter((u) => !isFixed(u)), ...uuidList.filter((u) => isFixed(u) && seen.has(u))]
       if (!freeImg.size || ptIds.length < 10) {
-        log(`${label} skipped (no free camera with points)`, 'debug', 'Sparse')
+        log(`${capitalize(label)} skipped (no free camera with points)`, 'debug', 'Sparse')
         return
       }
     }
@@ -377,7 +377,7 @@ export function createBundleSession(ctx) {
     // bounded-increase rule, not "cost must fall".
     const constrained = !!(cameraPriors || gcp)
     log(
-      `${label} — ${camList.length} cameras, ${ptIds.length} points, ` +
+      `${capitalize(label)} — ${camList.length} cameras, ${ptIds.length} points, ` +
         `${observations.n} observations, ${iters} iters`,
       'info',
       'Sparse',
@@ -424,7 +424,7 @@ export function createBundleSession(ctx) {
           )
         const total = [...byCam.values()].reduce((s, r) => s + r.n, 0)
         log(
-          `${label} pre-solve gross residuals (>${gross.toFixed(0)}px): ${pluralize(total, 'observation')} on ${pluralize(byCam.size, 'camera')}; ` +
+          `${capitalize(label)} pre-solve gross residuals (>${gross.toFixed(0)}px): ${pluralize(total, 'observation')} on ${pluralize(byCam.size, 'camera')}; ` +
             `top: ${top.join('; ')}`,
           'debug',
           'Sparse',
@@ -461,7 +461,7 @@ export function createBundleSession(ctx) {
     if (held) {
       decentring = 'kept'
       log(
-        `${label} decentring p1, p2 kept without a trial: ${held.surveyGrade} of ${held.total} camera ` +
+        `${capitalize(label)} decentring p1, p2 kept without a trial: ${held.surveyGrade} of ${held.total} camera ` +
           `positions within ${cfg.selfCalDecentringHeldSigma} m hold the block`,
         'info',
         'Sparse',
@@ -473,7 +473,7 @@ export function createBundleSession(ctx) {
         const gain = 1 - result.costAfter / without.costAfter
         decentring = gain >= cfg.selfCalDecentringMinGain ? 'kept' : 'dropped'
         log(
-          `${label} decentring p1, p2 ${decentring}: RMS ${result.costAfter.toFixed(3)}px with, ` +
+          `${capitalize(label)} decentring p1, p2 ${decentring}: RMS ${result.costAfter.toFixed(3)}px with, ` +
             `${without.costAfter.toFixed(3)}px without (${(100 * gain).toFixed(1)}% better; kept from ` +
             `${(100 * cfg.selfCalDecentringMinGain).toFixed(0)}%)`,
           'info',
@@ -486,12 +486,12 @@ export function createBundleSession(ctx) {
       }
     }
     if (!result) {
-      log(`${label} returned no result (skipped)`, 'warn', 'Sparse')
+      log(`${capitalize(label)} returned no result (skipped)`, 'warn', 'Sparse')
       return
     }
     if (constrained && result.costAfter > result.costBefore + 0.01 && !cameraPriorReprojectionAccepts(result)) {
       log(
-        `${label} not kept: reprojection RMS ${result.costBefore.toFixed(2)}px → ` +
+        `${capitalize(label)} not kept: reprojection RMS ${result.costBefore.toFixed(2)}px → ` +
           `${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`,
         'warn',
         'Sparse',
@@ -520,7 +520,7 @@ export function createBundleSession(ctx) {
       })
       if (delta < 0.01) {
         log(
-          `${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); ` +
+          `${capitalize(label)} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); ` +
             'the earlier estimate stays',
           'debug',
           'Sparse',
@@ -530,7 +530,7 @@ export function createBundleSession(ctx) {
       }
       if (!robust.improved) {
         log(
-          `${label} not kept: RMS ${result.costBefore.toFixed(2)}px → ` +
+          `${capitalize(label)} not kept: RMS ${result.costBefore.toFixed(2)}px → ` +
             `${result.costAfter.toFixed(2)}px and robust cost ${robust.before.toFixed(2)} → ` +
             `${robust.after.toFixed(2)}px (Huber δ ${robust.delta.toFixed(1)}px) would worsen the model; ` +
             'the earlier estimate stays',
@@ -540,7 +540,7 @@ export function createBundleSession(ctx) {
         return
       }
       log(
-        `${label} accepted — plain RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px rose, ` +
+        `${capitalize(label)} accepted — plain RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px rose, ` +
           `but the robust cost it minimises fell ${robust.before.toFixed(2)} → ${robust.after.toFixed(2)}px ` +
           `(Huber δ ${robust.delta.toFixed(1)}px): outliers were down-weighted, not the fit worsened`,
         'info',
@@ -612,7 +612,7 @@ export function createBundleSession(ctx) {
       selfCalRecord.adjustments.push({ label, mode: refineMode, accepted: !rejected, sensors: proposals })
       if (rejected) {
         log(
-          `${label}: the lens fit is not kept (${rejected.reason}); ` +
+          `${capitalize(label)}: the lens fit is not kept (${rejected.reason}); ` +
             'cameras, points, calibration and keypoints are unchanged',
           'warn',
           'Sparse',
@@ -674,7 +674,7 @@ export function createBundleSession(ctx) {
         const sigma = result.lensSigma?.[ci]?.fx
         const pm = sigma > 0 ? ` ± ${sigma.toFixed(1)}` : ''
         log(
-          `${label} self-calibration — ${who}: ` +
+          `${capitalize(label)} self-calibration — ${who}: ` +
             `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)}${pm} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
           g >= 0 ? 'info' : 'debug',
           'Sparse',
@@ -684,7 +684,7 @@ export function createBundleSession(ctx) {
           // one that moved it without a σ leaves none rather than an earlier solve's.
           const rec = intrinsicsRecord.get(imageByUuid(uuidList[ci])?.sensorId ?? `image:${uuidList[ci]}`)
           if (rec) rec.fxSigma = sigma > 0 ? sigma : null
-          if (sigma > 0) log(`${label}: ${focalSigmaNote(fx1, sigma)}`, 'info', 'Sparse')
+          if (sigma > 0) log(`${capitalize(label)}: ${focalSigmaNote(fx1, sigma)}`, 'info', 'Sparse')
         }
       }
     }
@@ -695,7 +695,7 @@ export function createBundleSession(ctx) {
 
     if (result.costBefore != null && result.costAfter != null) {
       log(
-        `${label} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px ` +
+        `${capitalize(label)} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px ` +
           `(${result.costAfter <= result.costBefore ? '−' : '+'}${Math.abs(result.costBefore - result.costAfter).toFixed(2)}px)`,
         'info',
         'Sparse',
@@ -718,9 +718,9 @@ export function createBundleSession(ctx) {
             trace.length >= iters
             ? `plateaued, but ran all ${trace.length} iterations (no stopping rule fired)`
             : `converged in ${trace.length} iter`
-      log(`${label} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`, 'debug', 'Sparse')
+      log(`${capitalize(label)} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`, 'debug', 'Sparse')
     }
-    log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Sparse')
+    log(`${capitalize(label)} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Sparse')
     // Converged: LM stopped on its own rule before the iteration cap.
     lastSolve = { mode: refineMode, converged: trace.length > 0 && trace.length < iters }
     return result

@@ -34,6 +34,7 @@ export function createMeshTexture({
 }) {
   // { sourceId, settings, name } → the new cloud, or null (refused, failed, empty).
   async function textureMesh({ sourceId, settings = {}, name } = {}, onProgress) {
+    const tRun = performance.now()
     const source = clouds.value.find((c) => c.id === sourceId && c.kind === 'mesh')
     if (!source?.count) {
       log('Texture: choose a mesh to texture', 'warn', 'Products')
@@ -127,7 +128,12 @@ export function createMeshTexture({
       cloud.textureSummary = { ...res.summary, sourceId: source.id, sourceName: source.name, settings }
       // Show the result in place of its source; the source stays one toggle away.
       source.visible = false
-      log(`Texture: added "${cloud.name}"`, 'success', 'Products')
+      log(
+        `Textured mesh "${cloud.name}": ${res.mesh.count.toLocaleString('en')} triangles, ` +
+          `${pluralize(res.texture.pages.length, 'texture page')} in ${((performance.now() - tRun) / 1000).toFixed(1)} s`,
+        'success',
+        'Products',
+      )
       reconStatus.value = 'done'
       await save()
       return cloud

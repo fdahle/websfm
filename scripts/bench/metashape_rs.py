@@ -6,7 +6,7 @@ block, mavic-rs5-HV-0*.json).
         [--models off,on] [--out result.json]
 
 For each model (off: Shutter.Model.Disabled, on: Shutter.Model.Regularized, which
-Agisoft recommends for drones) the photos are aligned once at Metashape's API defaults
+Agisoft recommends for drones, full: Shutter.Model.Full) the photos are aligned once at Metashape's API defaults
 (High accuracy, 40,000 key points, 4,000 tie points, generic and reference
 preselection), with the photos' EXIF positions as camera references (default accuracy),
 as WebSfM's run used them (posePriors). Then, for each split file in --splits
@@ -32,7 +32,11 @@ from pathlib import Path
 import Metashape
 
 PHOTO_EXT = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
-MODELS = {"off": Metashape.Shutter.Model.Disabled, "on": Metashape.Shutter.Model.Regularized}
+MODELS = {
+    "off": Metashape.Shutter.Model.Disabled,
+    "on": Metashape.Shutter.Model.Regularized,
+    "full": Metashape.Shutter.Model.Full,
+}
 
 
 def read_gcps(path):
