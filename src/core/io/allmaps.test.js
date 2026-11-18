@@ -4,8 +4,11 @@ import {
   georeferenceAnnotation,
   gridOutline,
   iiifImageUri,
+  iiifInfoSize,
+  iiifSizeMatch,
   iiifTemplateProblem,
   normalizeIiifImages,
+  resolveIiifImages,
 } from './allmaps.js'
 
 // A ground grid of `cells` a side over a 400 × 300 photo: node (i, j) at photo pixel
@@ -144,5 +147,62 @@ describe('normalizeIiifImages', () => {
     })
     expect(normalizeIiifImages({ template: '  ' })).toBeNull()
     expect(normalizeIiifImages(undefined)).toBeNull()
+  })
+})
+
+describe('the IIIF image as the server describes it', () => {
+  it('reads the size and API version from a version 2 or 3 info.json', () => {
+    expect(
+      iiifInfoSize({ '@context': 'http://iiif.io/api/image/2/context.json', 'width': 2400, 'height': 1800 }),
+    ).toEqual({ width: 2400, height: 1800, version: 2 })
+    expect(
+      iiifInfoSize({
+        '@context': 'http://iiif.io/api/image/3/context.json',
+        'type': 'ImageService3',
+        'width': 1200,
+        'height': 900,
+      }),
+    ).toEqual({ width: 1200, height: 900, version: 3 })
+    expect(iiifInfoSize({ width: 10 })).toBeNull()
+  })
+
+  it('tells the same photo, a scaled copy, and another shape apart', () => {
+    const photo = { width: 2400, height: 1800 }
+    expect(iiifSizeMatch(photo, { width: 2400, height: 1800 })).toBe('same')
+    expect(iiifSizeMatch(photo, { width: 1200, height: 900 })).toBe('scaled')
+    expect(iiifSizeMatch(photo, { width: 1201, height: 900 })).toBe('scaled')
+    // Turned a quarter, or cropped to a square: no scaling makes it fit.
+    expect(iiifSizeMatch(photo, { width: 1800, height: 2400 })).toBe('mismatch')
+    expect(iiifSizeMatch(photo, { width: 1800, height: 1800 })).toBe('mismatch')
+  })
+
+  it('reads every photo’s info.json, a few at a time, and keeps going past one that fails', async () => {
+    const served = {
+      'https://x.org/a': { '@context': 'http://iiif.io/api/image/3/context.json', 'width': 1200, 'height': 900 },
+      'https://x.org/b': { '@context': 'http://iiif.io/api/image/2/context.json', 'width': 2400, 'height': 1800 },
+    }
+    let inFlight = 0,
+      most = 0
+    const fetchInfo = async (uri) => {
+      most = Math.max(most, ++inFlight)
+      await new Promise((r) => setTimeout(r, 5))
+      inFlight--
+      if (!served[uri]) throw new Error('404')
+      return served[uri]
+    }
+    const photos = ['a', 'b', 'c', 'd'].map((k) => ({ uri: `https://x.org/${k}`, width: 2400, height: 1800 }))
+    const out = await resolveIiifImages(photos, fetchInfo, { concurrency: 2 })
+    expect(out.map((r) => r.status)).toEqual(['scaled', 'same', 'unreachable', 'unreachable'])
+    expect(out[0]).toMatchObject({ width: 1200, height: 900, version: 3 })
+    expect(out[2]).toMatchObject({ width: 2400, height: 1800, version: null, error: '404' })
+    expect(most).toBe(2)
+  })
+
+  it('scales the control points and the mask with a scaled copy', () => {
+    // The grid holds photo positions as 0–1, so the served size is all that changes.
+    const a = georeferenceAnnotation({ grid: grid(2), width: 200, height: 150, uri: 'https://x.org/a', toLonLat })
+    expect(a.target.source).toMatchObject({ width: 200, height: 150 })
+    expect(a.body.features.find((f) => f.properties.resourceCoords[0] === 200)).toBeTruthy()
+    expect(a.target.selector.value).toContain('200,150')
   })
 })

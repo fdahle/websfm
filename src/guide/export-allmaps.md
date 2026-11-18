@@ -20,8 +20,12 @@ lens, and a film scan is cropped to its fiducial frame. It needs a
 [georeferenced](guide:georeferencing) sparse model.
 
 The file holds no pixels. Allmaps reads them from the IIIF server, which must serve
-each photo whole, at the size it was imported into WebSfM at: the control points are
-pixel positions in that photo.
+each photo whole: the control points are pixel positions in it. The export reads each
+photo's `info.json` from the server to check: a copy at another size (a smaller
+derivative) gets its control points scaled to it, and a photo served in another shape
+(cropped, or turned) is left out, with a line in the log. When the server cannot be
+reached, or does not let other sites read it (CORS), the photos are written for the
+size they were imported at.
 
 ## Image address
 <!-- param: iiifTemplate  default: none -->
@@ -34,5 +38,5 @@ The project keeps the address and the API version of its last export for the nex
 ## IIIF Image API
 <!-- param: iiifVersion  default: 2 -->
 The version of the IIIF Image API your server speaks, written into each annotation as
-its image service type. Its `info.json` says which: a `@context` ending in
-`image/2/context.json` is version 2, `image/3/context.json` version 3.
+its image service type. The export takes it from each photo's `info.json`; this setting
+is for the photos whose `info.json` it cannot read.

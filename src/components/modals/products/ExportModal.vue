@@ -952,8 +952,8 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
           </select>
         </SettingsField>
         <p class="field-hint">
-          The IIIF server must hold each photo whole, at the size it was imported at:
-          {{ pluralize(sources.estimated ?? 0, 'aligned photo') }} in the file.
+          {{ pluralize(sources.estimated ?? 0, 'aligned photo') }}. Each photo's size is read from its info.json on the
+          server: a smaller copy is fine, a cropped or turned one is left out.
         </p>
       </template>
 

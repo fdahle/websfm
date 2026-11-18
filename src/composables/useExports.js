@@ -27,8 +27,8 @@ import { pluralize } from '../core/textFormat.js'
 import { fileSafe, exportFileName } from '../core/exportNames.js'
 import { georefFrameOf } from '../core/products/frameSpec.js'
 import { photoGridBuilder } from '../core/products/photoGrid.js'
-import { annotationPage, georeferenceAnnotation, iiifImageUri } from '../core/io/allmaps.js'
-import { PHOTO_GRID_TUNING } from '../core/tuning.js'
+import { annotationPage, georeferenceAnnotation, iiifImageUri, resolveIiifImages } from '../core/io/allmaps.js'
+import { PHOTO_GRID_TUNING, EXPORT_TUNING } from '../core/tuning.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -231,6 +231,42 @@ export function useExports({
   // its control points the photo's ground grid in the georeferenced model, the same one
   // the map's Photos layer draws (core/products/photoGrid.js). On the main thread: a
   // grid is ~0.3 ms a photo.
+  // What reading the photos' info.json found, in the log: scaled copies (info), photos of
+  // another shape left out and servers not reached (warn), a version other than the
+  // dialog's (info). One line each, with a count and an example.
+  function reportIiifImages(placed, served, iiifVersion) {
+    const of = (status) => placed.map((p, i) => ({ p, s: served[i] })).filter(({ s }) => s.status === status)
+    const ex = ({ p, s }) =>
+      `${p.img.name} ${p.img.meta.width} × ${p.img.meta.height} px, served ${s.width} × ${s.height} px`
+    const scaled = of('scaled'),
+      mismatch = of('mismatch'),
+      unreachable = of('unreachable')
+    if (scaled.length)
+      log(
+        `Allmaps: ${pluralize(scaled.length, 'photo')} served at another size, control points scaled to it (${ex(scaled[0])})`,
+        'info',
+        'Export',
+      )
+    if (mismatch.length)
+      log(
+        `${pluralize(mismatch.length, 'photo')} left out: the IIIF image is another shape than the photo, a crop or a ` +
+          `turned scan, which no scaling fits (${ex(mismatch[0])})`,
+        'warn',
+        'Export',
+      )
+    if (unreachable.length)
+      log(
+        `Could not read the IIIF image information of ${pluralize(unreachable.length, 'photo')} ` +
+          `(${unreachable[0].p.uri}/info.json: ${unreachable[0].s.error}); written for the size they were imported at. ` +
+          'Check the image address, and that the server allows other sites to read it (CORS)',
+        'warn',
+        'Export',
+      )
+    const versions = [...new Set(served.map((s) => s.version).filter((v) => v && v !== iiifVersion))]
+    if (versions.length)
+      log(`Allmaps: the server speaks IIIF Image API ${versions.join(' and ')}, written as such`, 'info', 'Export')
+  }
+
   async function doExportAllmaps({ fileName, iiifTemplate, iiifVersion }) {
     const t0 = performance.now()
     const frame = georefFrameOf(recon.currentFrameSignature)
@@ -254,22 +290,15 @@ export function useExports({
       'info',
       'Export',
     )
-    const annotations = []
+    // The ground grids first, then each photo's IIIF image as the server describes it:
+    // its size (a scaled copy scales the control points) and its API version.
+    const placed = []
     const noGrid = []
     for (const img of aligned) {
       const grid = gridFor(img)
-      const annotation = grid
-        ? georeferenceAnnotation({
-            grid,
-            width: img.meta.width,
-            height: img.meta.height,
-            uri: iiifImageUri(iiifTemplate, img.name),
-            version: iiifVersion,
-            toLonLat,
-          })
-        : null
-      if (annotation) annotations.push(annotation)
-      else noGrid.push(img.name)
+      if (grid && img.meta?.width > 0 && img.meta?.height > 0) {
+        placed.push({ img, grid, uri: iiifImageUri(iiifTemplate, img.name) })
+      } else noGrid.push(img.name)
     }
     if (noGrid.length) {
       log(
@@ -280,6 +309,29 @@ export function useExports({
         'Export',
       )
     }
+    const served = await resolveIiifImages(
+      placed.map((p) => ({ uri: p.uri, width: p.img.meta.width, height: p.img.meta.height })),
+      async (uri) => {
+        const res = await fetch(`${uri}/info.json`, { signal: AbortSignal.timeout(EXPORT_TUNING.iiifInfoTimeoutMs) })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      },
+    )
+    reportIiifImages(placed, served, iiifVersion)
+    const annotations = []
+    placed.forEach((p, i) => {
+      const s = served[i]
+      if (s.status === 'mismatch') return
+      const annotation = georeferenceAnnotation({
+        grid: p.grid,
+        width: s.width,
+        height: s.height,
+        uri: p.uri,
+        version: s.version ?? iiifVersion,
+        toLonLat,
+      })
+      if (annotation) annotations.push(annotation)
+    })
     if (!annotations.length) throw new Error('no aligned photo could be placed on the ground')
     const name = `${exportFileName(fileName, `${projectBase()}-allmaps`)}.json`
     downloadBlob(name, JSON.stringify(annotationPage(annotations)), 'application/json')

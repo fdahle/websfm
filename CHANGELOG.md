@@ -19,7 +19,13 @@ Notable changes to WebSfM. The format follows
   through them lands within 0.011 m (median), 0.17 m (95th percentile) and 0.75 m (at the
   frame's edge) of WebSfM's own ray cast at 2,232 pixels between the grid's nodes: a
   synthetic 4,000 × 3,000 px photo tilted 15° with barrel distortion (k1 −0.12) over
-  30 m hills, at 0.10 m ground pixel size.
+  30 m hills, at 0.10 m ground pixel size. The export reads each photo's `info.json` from
+  the server: a copy served at another size (a smaller derivative) gets its control points
+  scaled to it, one served in another shape (cropped or turned) is left out, and the Image
+  API version is taken from it; the log says what it found. End to end: four example
+  photos served as static IIIF tiles at half size were warped by Allmaps' own renderer
+  (`@allmaps/maplibre` 1.0.0-beta.44) from the exported file, and neighbouring photos meet
+  without a step at the paths crossing their seams.
 - **Keep using one version.** Every release from now on also stays at its own address,
   which never updates (`websfm.app/v/0.9.0/`): About ▸ Version ▸ Keep using … opens it,
   and About lists the other versions. websfm.app itself stays the newest version. A

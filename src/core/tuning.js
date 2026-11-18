@@ -797,6 +797,9 @@ export const TURNTABLE_TUNING = {
 // (core/io/exportSize.js), instead of a download of the finished file.
 export const EXPORT_TUNING = {
   savePickerMinMiB: 256,
+  // Export ▸ Allmaps reads each photo's IIIF info.json for its served size; a server
+  // that has not answered in this long counts as not reached (the photo keeps its size).
+  iiifInfoTimeoutMs: 15_000,
 }
 
 // Tools ▸ Images ▸ Image quality (core/features/imageQuality.js). The sharpness score is

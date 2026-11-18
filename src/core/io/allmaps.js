@@ -150,3 +150,77 @@ export function georeferenceAnnotation({ grid, width, height, uri, version = 2, 
 export function annotationPage(annotations) {
   return { 'type': 'AnnotationPage', '@context': 'http://www.w3.org/ns/anno.jsonld', 'items': annotations }
 }
+
+// Two sizes are the same picture shape when their aspect ratios differ by less than this
+// (a server's whole-pixel rounding of a scaled copy is far below it).
+const SHAPE_TOL = 0.01
+
+/**
+ * A IIIF Image API info.json as { width, height, version }: the image's full size and
+ * the API version (2 or 3, from its @context or type), or null when it is not one.
+ */
+export function iiifInfoSize(info) {
+  const width = Number(info?.width),
+    height = Number(info?.height)
+  if (!(width > 0) || !(height > 0)) return null
+  const context = [info['@context']].flat().join(' ')
+  const version =
+    info.type === 'ImageService3' || /image\/3\//.test(context)
+      ? 3
+      : info['@type'] === 'iiif:Image' || /image\/2\//.test(context)
+        ? 2
+        : null
+  return { width, height, version }
+}
+
+/**
+ * How the IIIF server's image compares with the photo imported into WebSfM: 'same' size,
+ * 'scaled' (the same picture at another size: the control points scale with it), or
+ * 'mismatch' (another shape: a crop, or a turned scan, which no scaling fixes).
+ */
+export function iiifSizeMatch(photo, served) {
+  if (served.width === photo.width && served.height === photo.height) return 'same'
+  const a = photo.width / photo.height,
+    b = served.width / served.height
+  return Math.abs(a / b - 1) < SHAPE_TOL ? 'scaled' : 'mismatch'
+}
+
+/**
+ * Each photo's IIIF image as the server describes it, read through `fetchInfo(uri)`
+ * (→ the parsed info.json, or a throw), `concurrency` at a time.
+ *   photos  [{ uri, width, height }] (the photo's size as imported)
+ * → [{ status: 'same' | 'scaled' | 'mismatch' | 'unreachable', width, height, version,
+ *     error }] in the same order: the size and API version to write for 'same' and
+ *     'scaled', the imported size and a null version (the dialog's) for the rest.
+ */
+export async function resolveIiifImages(photos, fetchInfo, { concurrency = 6 } = {}) {
+  const out = new Array(photos.length)
+  let next = 0
+  async function worker() {
+    while (next < photos.length) {
+      const i = next++
+      const p = photos[i]
+      try {
+        const info = iiifInfoSize(await fetchInfo(p.uri))
+        if (!info) throw new Error('not a IIIF image information file')
+        out[i] = {
+          status: iiifSizeMatch(p, info),
+          width: info.width,
+          height: info.height,
+          version: info.version,
+          error: null,
+        }
+      } catch (err) {
+        out[i] = {
+          status: 'unreachable',
+          width: p.width,
+          height: p.height,
+          version: null,
+          error: String(err?.message ?? err),
+        }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, photos.length) }, worker))
+  return out
+}
