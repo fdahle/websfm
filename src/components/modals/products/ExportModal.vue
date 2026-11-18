@@ -61,6 +61,11 @@ const props = defineProps({
   projectCrs: { type: String, default: '' },
   // A vector layer export: the image footprints (titled so), not another layer.
   footprints: { type: Boolean, default: false },
+  // A cloud, mesh, 3D Tiles, DEM or orthophoto export: every one it could write
+  // (useExports exportChoices: { id, name, kind, count, textured, main }), offered in the
+  // Source select, and the id of the one it writes.
+  choices: { type: Array, default: () => [] },
+  target: { type: String, default: '' },
 })
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
@@ -70,7 +75,7 @@ const frameLabel = computed(() => {
   if (props.hasScale) return t('export.frame.scale')
   return t('export.frame.orient')
 })
-const emit = defineEmits(['close', 'run'])
+const emit = defineEmits(['close', 'run', 'target'])
 
 // Per kind, its formats in the order they are offered (the cards). Their words are in the
 // catalogue (core/i18n/en/export.js ▸ format.<kind>.<id>): a label, a blurb under it,
@@ -324,7 +329,40 @@ const stepNo = computed(() => {
   const crs = crsShown.value ? ++n : 0
   return { options, crs, file: n + 1 }
 })
-const hasSource = computed(() => !!props.subject || props.kind === 'poses' || props.kind === 'sensors')
+const hasSource = computed(
+  () => hasChoices.value || !!props.subject || props.kind === 'poses' || props.kind === 'sensors',
+)
+// A Source select (in place of the subject line) for the kinds with several to choose from.
+const hasChoices = computed(() => props.choices.length > 0)
+// The option text: its name, what it is and its size, and whether it is the main one.
+function choiceLabel(c) {
+  const main = c.main ? 'yes' : 'no'
+  if (c.kind === 'mesh')
+    return t('export.source.mesh', { name: c.name, n: c.count, textured: c.textured ? 'yes' : 'no', main })
+  if (c.kind === 'dem' || c.kind === 'ortho') return t('export.source.raster', { name: c.name, main })
+  return t('export.source.cloud', { name: c.name, kind: c.kind, n: c.count, main })
+}
+// Another source can change what the dialog offers: a textured mesh starts on GLB, a
+// 3D Tiles subject on its own tiling, a raster's reprojection on its own CRS.
+watch(
+  () => props.textured,
+  (textured) => {
+    if (props.kind === 'mesh' && textured && !textureFormat.value) settings.value.format = 'glb'
+  },
+)
+watch(
+  () => `${props.tilesSubject?.kind}:${props.tilesSubject?.count}`,
+  () => {
+    if (props.kind === 'tiles3d') settings.value.tiling = EXPORT_DEFAULTS.tiling ?? defaultTiling(props.tilesSubject)
+  },
+)
+watch(
+  () => props.rasterCrs,
+  (crs) => {
+    outputCrs.value = crs || 'EPSG:4326'
+    if (!crs) settings.value.rasterCrs = 'product'
+  },
+)
 </script>
 
 <template>
@@ -333,7 +371,17 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
        own settings, ③ a raster's coordinate system, then the File name. -->
   <ModalShell :title="cfg.title" @close="emit('close')">
     <SettingsGroup v-if="hasSource" :title="t('export.source.label')">
-      <p v-if="subject" class="subject">
+      <!-- Under the group's own Source title: no second label. -->
+      <select
+        v-if="hasChoices"
+        :value="target"
+        :aria-label="t('export.source.label')"
+        class="field-input field-select source-select"
+        @change="(e) => emit('target', e.target.value)"
+      >
+        <option v-for="c in choices" :key="c.id" :value="c.id">{{ choiceLabel(c) }}</option>
+      </select>
+      <p v-else-if="subject" class="subject">
         <I18nText k="export.exporting" :params="{ name: subject }" />
       </p>
       <SettingsField v-if="kind === 'poses'" label-for="psrc">
@@ -844,6 +892,10 @@ const hasSource = computed(() => !!props.subject || props.kind === 'poses' || pr
 <style scoped>
 .warn-hint {
   color: var(--warn, #b45309);
+}
+.source-select {
+  align-self: flex-start;
+  max-width: 100%;
 }
 .subject {
   margin: 0;

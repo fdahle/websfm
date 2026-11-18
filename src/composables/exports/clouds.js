@@ -379,14 +379,13 @@ export function createCloudExports({
   }
 
   // settings { includeColor, tiling: 'lod' | 'single' | null (by size, defaultTiling),
-  // tileTriangles }. The subject is tilesSubject's: the selected mesh, else a cloud.
-  async function doExportTiles3d({
-    includeColor = true,
-    tiling = null,
-    tileTriangles = EXPORT_DEFAULTS.tileTriangles,
-    fileName,
-  } = {}) {
-    const subject = tilesSubject(selectedCloud.value, clouds.value)
+  // tileTriangles }. The subject is the dialog's Source (`target`), else tilesSubject's:
+  // the selected mesh, else a cloud.
+  async function doExportTiles3d(
+    { includeColor = true, tiling = null, tileTriangles = EXPORT_DEFAULTS.tileTriangles, fileName } = {},
+    target = null,
+  ) {
+    const subject = tilesSubject(target ?? selectedCloud.value, clouds.value)
     if (!subject) return
     const name = exportFileName(fileName, defaultExportName('tiles3d', { base: projectBase() }))
     const resolved = await effectiveFrameSpec?.()

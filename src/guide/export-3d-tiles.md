@@ -5,8 +5,9 @@ summary: Put a point cloud or a mesh on a globe in CesiumJS and other 3D Tiles v
 category: Products and export
 order: 107
 ---
-**Export ▸ 3D Tiles** writes the selected mesh, or else the selected point cloud, as
-[3D Tiles](help:3d-tiles) 1.1: a `tileset.json` and glTF tiles, in one .zip. Unzip it
+**Export ▸ 3D Tiles** writes the mesh or point cloud you pick under **Source** (it
+starts on the selected one, else a textured mesh, the main mesh or the main dense
+cloud) as [3D Tiles](help:3d-tiles) 1.1: a `tileset.json` and glTF tiles, in one .zip. Unzip it
 on a web server and point a viewer at the `tileset.json`, for example CesiumJS:
 `Cesium.Cesium3DTileset.fromUrl('…/tileset.json')`.
 

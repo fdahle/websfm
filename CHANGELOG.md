@@ -218,6 +218,13 @@ Notable changes to WebSfM. The format follows
   still need a DEM, and the model frame still needs a raster to measure on.
 
 ### Changed
+- **Every export says what it writes, and lets you pick it.** Export ▸ Point Cloud, Mesh,
+  3D Tiles, DEM and Orthophoto have a Source list of every cloud, mesh or product of that
+  kind, with its size and which is the main one. It starts on the one you have selected,
+  else a textured mesh, the main mesh or the main dense cloud, so a project with a dense
+  cloud no longer exports its sparse model by default, and a textured mesh made with Tools
+  ▸ Mesh ▸ Texture is no longer passed over for the mesh it came from. Model JSON, SfM
+  Project, Undistorted Images and Allmaps name the main sparse model when there are several.
 - **Every dialog has the same title bar.** The Inspect tables (Image Table, Camera Poses,
   Control & Markers, Matches) and the image and product information now show their title
   like every other dialog, with counts in a line under it and their controls beside the

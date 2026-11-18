@@ -120,6 +120,72 @@ export function useExports({
   watch(exportKind, (kind) => {
     if (!kind) exportTarget.value = null
   })
+
+  // The exports that write one of several things (a cloud, a mesh, a DEM, an
+  // orthophoto) offer them all in the dialog's Source select. Each is
+  // { id, name, kind, count, textured, main }, the main one of its kind marked.
+  const isPointCloud = (c) =>
+    c && c.kind !== 'mesh' && (c.kind === 'dense' ? c.count > 0 : (c.points?.length ?? c.count) > 0)
+  const isMesh = (c) => c?.kind === 'mesh' && c.count > 0
+  const mainIds = () =>
+    new Set([recon.mainSparseCloud?.id, recon.mainDenseCloud?.id, recon.mainMeshCloud?.id].filter(Boolean))
+  const choiceOf = (c, main) => ({
+    id: c.id,
+    name: c.name,
+    kind: c.kind,
+    count: c.kind === 'sparse' ? (c.points?.length ?? c.count ?? 0) : (c.count ?? 0),
+    textured: !!(c.uv && c.texture),
+    main: main.has(c.id),
+  })
+  function choicesFor(kind) {
+    if (kind === 'cloud' || kind === 'mesh' || kind === 'tiles3d') {
+      const main = mainIds()
+      const fits = kind === 'cloud' ? isPointCloud : kind === 'mesh' ? isMesh : (c) => isMesh(c) || isPointCloud(c)
+      // Meshes first for 3D Tiles (the usual deliverable), then dense before sparse.
+      const rank = { mesh: 0, dense: 1, sparse: 2 }
+      return clouds.value
+        .filter(fits)
+        .map((c) => choiceOf(c, main))
+        .sort((a, b) => (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3))
+    }
+    if (kind === 'dem' || kind === 'ortho') {
+      const mainId = (kind === 'dem' ? dem.value : ortho.value)?.id
+      return recon.rasterProducts
+        .filter((p) => p.kind === kind)
+        .map((p) => ({ id: p.id, name: p.name, kind, count: 0, textured: false, main: p.id === mainId }))
+    }
+    return []
+  }
+  const exportChoices = computed(() => choicesFor(exportKind.value))
+  // A ribbon export opens on the one the user has selected, when it fits, else a
+  // textured mesh (the main one, else the newest), the main mesh, the main dense
+  // cloud, then the main sparse model, as the kind allows.
+  function defaultTarget(kind) {
+    const choices = choicesFor(kind)
+    if (!choices.length) return null
+    if (kind === 'dem' || kind === 'ortho') return choices.find((c) => c.main)?.id ?? choices[0].id
+    // A selected sparse model gives way to a dense cloud or mesh: a project opens with
+    // its sparse model selected, which says nothing about what to export.
+    const selected = choices.find((c) => c.id === recon.selectedCloudId)
+    if (selected && (selected.kind !== 'sparse' || !choices.some((c) => c.kind !== 'sparse'))) return selected.id
+    const order = [
+      ...choices.filter((c) => c.kind === 'mesh' && c.textured && c.main),
+      ...choices.filter((c) => c.kind === 'mesh' && c.textured).reverse(), // the newest
+      ...choices.filter((c) => c.kind === 'mesh' && c.main),
+      ...choices.filter((c) => c.kind === 'dense' && c.main),
+      ...choices.filter((c) => c.kind === 'sparse' && c.main),
+      ...choices,
+    ]
+    return order[0].id
+  }
+  watch(exportKind, (kind) => {
+    if (kind && exportTarget.value == null && ['cloud', 'mesh', 'tiles3d', 'dem', 'ortho'].includes(kind))
+      exportTarget.value = defaultTarget(kind)
+  })
+  // The dialog's Source select.
+  function setExportTarget(id) {
+    if (exportChoices.value.some((c) => c.id === id)) exportTarget.value = id
+  }
   const exportTargetCloud = computed(() => clouds.value.find((c) => c.id === exportTarget.value) ?? null)
   // For 'dem' / 'ortho': the product a sidebar Download… (or its tab's Export) opened
   // the dialog for; null for the ribbon's, which exports the main one.
@@ -360,7 +426,7 @@ export function useExports({
       else if (kind === 'model') await doExportModel(settings)
       else if (kind === 'colmap') await doExportColmap(settings)
       else if (kind === 'undistorted') await doExportUndistorted(settings)
-      else if (kind === 'tiles3d') await doExportTiles3d(settings)
+      else if (kind === 'tiles3d') await doExportTiles3d(settings, target)
       else if (kind === 'dem') await doExportDem(settings, product)
       else if (kind === 'ortho') await doExportOrtho(settings, product)
       else if (kind === 'measurements') await doExportMeasurements({ ...settings, ids: measurementIds })
@@ -462,6 +528,9 @@ export function useExports({
     exportTargetCloud,
     exportTargetProduct,
     exportTargetVectorSet,
+    exportChoices,
+    exportTarget,
+    setExportTarget,
     exportMeasurementScope,
     openMeasurementExport,
     measurementExportCrs,

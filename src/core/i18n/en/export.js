@@ -215,6 +215,13 @@ export default {
   exporting: 'Exporting <strong>{name}</strong>',
   source: {
     label: 'Source',
+    cloud:
+      '{name} · {kind, select, dense {dense cloud} sparse {sparse model} other {point cloud}}, ' +
+      '{n, plural, one {# point} other {# points}}{main, select, yes { · main} other {}}',
+    mesh:
+      '{name} · {n, plural, one {# triangle} other {# triangles}}{textured, select, yes {, textured} other {}}' +
+      '{main, select, yes { · main} other {}}',
+    raster: '{name}{main, select, yes { · main} other {}}',
     noSparse: 'Build a sparse model first (Reconstruct ▸ Sparse Model)',
     posesEstimated: 'Estimated by the reconstruction ({n, plural, one {# camera} other {# cameras}})',
     posesImported: 'Imported poses ({n, plural, one {# pose} other {# poses}})',

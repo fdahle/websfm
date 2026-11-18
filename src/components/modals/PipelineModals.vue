@@ -260,6 +260,8 @@ const {
   exportTargetCloud,
   exportTargetProduct,
   exportTargetVectorSet,
+  exportChoices,
+  setExportTarget,
   exportTerrain,
   footprintImageCount,
   georeferenceAfterReconstruct,
@@ -310,23 +312,28 @@ const exportRaster = computed(() =>
 )
 // A tool dialog starts on the cloud/mesh the user has selected, when it fits.
 const toolInitialId = computed(() => reconstructionStore.selectedCloudId)
-// The mesh a mesh or 3D Tiles export writes: the sidebar's target, else the selected
-// mesh, else (mesh export only) the first mesh — as exports/clouds.js picks it.
+// The mesh a mesh or 3D Tiles export writes: the dialog's Source (useExports picks
+// the default and the Source select changes it), else the selected mesh.
 const exportMeshCloud = computed(() => {
   const target = exportTargetCloud.value,
     sel = reconstructionStore.selectedCloud
   if (target) return target.kind === 'mesh' ? target : null
-  if (sel?.kind === 'mesh') return sel
-  return exportKind.value === 'mesh'
-    ? (reconstructionStore.clouds.find((c) => c.kind === 'mesh' && c.count > 0) ?? null)
-    : null
+  return sel?.kind === 'mesh' ? sel : null
 })
 // What a 3D Tiles export writes, with its size (exports/clouds.js picks it the same way).
 const exportTilesSubject = computed(() => {
   if (exportKind.value !== 'tiles3d') return null
-  const s = tilesSubject(reconstructionStore.selectedCloud, reconstructionStore.clouds)
+  const s = tilesSubject(exportTargetCloud.value ?? reconstructionStore.selectedCloud, reconstructionStore.clouds)
   return s ? { kind: s.kind, count: s.count, streamed: s.streamed, textured: s.textured } : null
 })
+// The exports of the sparse model (Model JSON, SfM Project, Undistorted Images, Allmaps)
+// write the main one: named in the dialog when the project has more than one.
+const exportSparseSubject = computed(() =>
+  ['model', 'colmap', 'undistorted', 'allmaps'].includes(exportKind.value) &&
+  reconstructionStore.clouds.filter((c) => c.kind === 'sparse').length > 1
+    ? (reconstructionStore.mainSparseCloud?.name ?? null)
+    : null,
+)
 const measurementsStore = useMeasurementsStore()
 // Camera poses / calibration: how many cameras each source of the export has.
 const exportSources = computed(() => {
@@ -465,6 +472,7 @@ const exportingFootprints = computed(
         exportTargetProduct?.name ??
         (exportingFootprints ? null : exportTargetVectorSet?.name) ??
         exportMeasurementScope?.label ??
+        exportSparseSubject ??
         ''
       "
       :textured="!!exportMeshCloud?.texture"
@@ -479,6 +487,9 @@ const exportingFootprints = computed(
       :sources="exportSources"
       :project-crs="currentCrs && currentCrs !== 'local' ? currentCrs : ''"
       :footprints="exportingFootprints"
+      :choices="exportChoices"
+      :target="exportTargetCloud?.id ?? exportTargetProduct?.id ?? ''"
+      @target="setExportTarget"
       @close="exportKind = null"
       @run="onExportRun"
     />

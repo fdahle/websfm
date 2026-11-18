@@ -211,6 +211,13 @@ export default {
   exporting: '<strong>{name}</strong> wird exportiert',
   source: {
     label: 'Quelle',
+    cloud:
+      '{name} · {kind, select, dense {dichte Punktwolke} sparse {Sparse-Modell} other {Punktwolke}}, ' +
+      '{n, plural, one {# Punkt} other {# Punkte}}{main, select, yes { · Haupt} other {}}',
+    mesh:
+      '{name} · {n, plural, one {# Dreieck} other {# Dreiecke}}{textured, select, yes {, texturiert} other {}}' +
+      '{main, select, yes { · Haupt} other {}}',
+    raster: '{name}{main, select, yes { · Haupt} other {}}',
     noSparse: 'Zuerst ein Sparse-Modell erstellen (Rekonstruktion ▸ Sparse-Modell)',
     posesEstimated: 'Von der Rekonstruktion geschätzt ({n, plural, one {# Kamera} other {# Kameras}})',
     posesImported: 'Importierte Posen ({n, plural, one {# Pose} other {# Posen}})',
