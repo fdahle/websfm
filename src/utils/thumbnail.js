@@ -56,7 +56,9 @@ export async function renderThumbnail(source, { maxDim = THUMB_MAX_DIM, quality 
   try {
     const { width, height } = thumbnailSize(bmp.width, bmp.height, maxDim)
     const canvas = new OffscreenCanvas(width, height)
-    const ctx = canvas.getContext('2d')
+    // CPU-backed: it exists to be encoded, and with a GPU canvas (Vulkan, NVIDIA on
+    // Linux) convertToBlob read back an all-black JPEG (utils/canvasReadback.test.js).
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(bmp, 0, 0, width, height)
     const out = await canvas.convertToBlob({ type: 'image/jpeg', quality })

@@ -313,6 +313,13 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Thumbnails, video frames and masks no longer come out black on some GPUs.** With
+  Chrome drawing canvases on the GPU through Vulkan (seen on Linux with NVIDIA), every
+  image WebSfM made from a canvas read back black: list thumbnails, the frames of an
+  imported video, saved masks, Evaluate's product images and the image viewer's pixel
+  probe. These canvases are now kept in memory instead. Measured in Chrome with Vulkan:
+  an Aukerman thumbnail averaged 0, 0, 0 before and 116, 143, 69 (the photo's grass)
+  after; a unit test fails on a canvas that is read back from the GPU.
 - **The new-version prompt says what it is doing.** After you press Reload it says it is
   switching, instead of claiming the new version is already active in another tab, and
   when the tab has to finish something first it names it (saving the project, an import,

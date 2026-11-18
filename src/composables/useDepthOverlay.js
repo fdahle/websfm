@@ -76,7 +76,7 @@ export function useDepthOverlay({ frame, image, drawOverlay, emit }) {
       const bmp = await createImageBitmap(file)
       if (!rev.isCurrent(t) || depthCanvas.value !== canvas) return
       const tmp = new OffscreenCanvas(canvas.width, canvas.height)
-      const tmpCtx = tmp.getContext('2d')
+      const tmpCtx = tmp.getContext('2d', { willReadFrequently: true })
       tmpCtx.drawImage(bmp, 0, 0, tmp.width, tmp.height)
       const id = tmpCtx.getImageData(0, 0, tmp.width, tmp.height)
       const d = id.data

@@ -575,7 +575,7 @@ function setupOffscreenCanvas() {
   if (!img || !img.naturalWidth) return
   try {
     const c = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
-    offscreenCtx = c.getContext('2d')
+    offscreenCtx = c.getContext('2d', { willReadFrequently: true })
     offscreenCtx.drawImage(img, 0, 0)
   } catch {
     offscreenCtx = null

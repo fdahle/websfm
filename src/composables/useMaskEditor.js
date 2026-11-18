@@ -154,7 +154,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
         bmp.close?.()
         return false
       }
-      const ctx = maskOffscreen.getContext('2d')
+      const ctx = maskOffscreen.getContext('2d', { willReadFrequently: true })
       ctx.clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
       ctx.drawImage(bmp, 0, 0, maskOffscreen.width, maskOffscreen.height)
       bmp.close?.()
@@ -188,7 +188,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     const r = brushRadius.value / scale.value
     if (!circleIntersectsImage(imgX, imgY, r)) return false
     markMaskEdited()
-    const ctx = maskOffscreen.getContext('2d')
+    const ctx = maskOffscreen.getContext('2d', { willReadFrequently: true })
 
     if (tool.value === 'brush') {
       ctx.globalCompositeOperation = 'source-over'
@@ -217,7 +217,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
       px = Math.min(maskOffscreen.width - 1, Math.floor((px * maskOffscreen.width) / f.width))
       py = Math.min(maskOffscreen.height - 1, Math.floor((py * maskOffscreen.height) / f.height))
     }
-    return maskOffscreen.getContext('2d').getImageData(px, py, 1, 1).data[3] > 127
+    return maskOffscreen.getContext('2d', { willReadFrequently: true }).getImageData(px, py, 1, 1).data[3] > 127
   }
 
   // ── Undo / redo ──────────────────────────────────────────────────────────────
@@ -267,7 +267,9 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     } else if (maskOffscreen) {
       markMaskEdited()
       canvasSource = null
-      maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+      maskOffscreen
+        .getContext('2d', { willReadFrequently: true })
+        .clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
       hasMask.value = false
       drawOverlay()
     }
@@ -293,7 +295,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   // empty it (erase/rect-erase/import) — a draw is trivially non-empty.
   function maskCanvasEmpty() {
     if (!maskOffscreen) return true
-    const ctx = maskOffscreen.getContext('2d')
+    const ctx = maskOffscreen.getContext('2d', { willReadFrequently: true })
     const id = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
     return !anyExcluded(id.data)
   }
@@ -373,7 +375,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     }
     snapshotForUndo()
     markMaskEdited()
-    const ctx = maskOffscreen.getContext('2d')
+    const ctx = maskOffscreen.getContext('2d', { willReadFrequently: true })
     if (erase) {
       ctx.globalCompositeOperation = 'destination-out'
       ctx.fillRect(x, y, w, h)
@@ -392,7 +394,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   async function invertMask() {
     if (!maskOffscreen || !wholeMaskOk()) return
     markMaskEdited()
-    const ctx = maskOffscreen.getContext('2d')
+    const ctx = maskOffscreen.getContext('2d', { willReadFrequently: true })
     const id = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
     const excluded = invertMaskPixels(id.data)
     ctx.putImageData(id, 0, 0)
@@ -412,7 +414,9 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     snapshotForUndo()
     markMaskEdited()
     canvasSource = null
-    maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+    maskOffscreen
+      .getContext('2d', { willReadFrequently: true })
+      .clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
     hasMask.value = false
     persistMask(null)
     drawOverlay()
@@ -430,7 +434,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
     if (!red) return
     snapshotForUndo()
     markMaskEdited()
-    const ctx = maskOffscreen.getContext('2d')
+    const ctx = maskOffscreen.getContext('2d', { willReadFrequently: true })
     ctx.globalCompositeOperation = 'source-over'
     ctx.drawImage(red, 0, 0)
     hasMask.value = true
@@ -570,7 +574,9 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
         }
         markMaskEdited()
         canvasSource = null
-        maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+        maskOffscreen
+          .getContext('2d', { willReadFrequently: true })
+          .clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
         hasMask.value = false
         drawOverlay()
       }

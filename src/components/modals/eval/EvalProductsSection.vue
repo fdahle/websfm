@@ -100,7 +100,7 @@ const mapUrl = computed(() => {
   const canvas = document.createElement('canvas')
   canvas.width = r.width
   canvas.height = r.height
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (!ctx) return null
   ctx.putImageData(new ImageData(differenceRgba(r, range.value, rdBuColor), r.width, r.height), 0, 0)
   return canvas.toDataURL('image/png')

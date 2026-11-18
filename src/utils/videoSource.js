@@ -185,7 +185,7 @@ function makeSource({ video, name, duration, width, height, fps, close }) {
       full.width = w
       full.height = h
     }
-    const ctx = full.getContext('2d')
+    const ctx = full.getContext('2d', { willReadFrequently: true })
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(video, 0, 0, w, h)
     const type = format === 'png' ? 'image/png' : 'image/jpeg'
@@ -194,7 +194,7 @@ function makeSource({ video, name, duration, width, height, fps, close }) {
     const thumbCanvas = document.createElement('canvas')
     thumbCanvas.width = ts.width
     thumbCanvas.height = ts.height
-    const tctx = thumbCanvas.getContext('2d')
+    const tctx = thumbCanvas.getContext('2d', { willReadFrequently: true })
     tctx.imageSmoothingQuality = 'high'
     tctx.drawImage(full, 0, 0, ts.width, ts.height)
     const thumb = await toBlob(thumbCanvas, 'image/jpeg', THUMB_QUALITY)

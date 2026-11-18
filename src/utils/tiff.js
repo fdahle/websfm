@@ -389,7 +389,7 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
     const tw = Math.max(1, Math.round(width * scale))
     const th = Math.max(1, Math.round(height * scale))
     const thumbCanvas = new OffscreenCanvas(tw, th)
-    thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, tw, th)
+    thumbCanvas.getContext('2d', { willReadFrequently: true }).drawImage(canvas, 0, 0, tw, th)
     onThumbnail(await thumbCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 }), tw, th)
   }
 

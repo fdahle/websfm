@@ -20,3 +20,6 @@ reaching the GPU*). The traps below each cost a run before they were written dow
   mid-run and the failures are false. Rerun a failure on a settled tree.
 - Store runs take run units, not dialog units: build settings with `core/runSettings.js`
   (`{ ...ORTHO_DEFAULTS }` passed straight to a run gives an empty orthophoto).
+- Headed Chrome with `--enable-features=Vulkan` (the bench's GPU flag) reads a GPU-backed
+  canvas back all black: a profile built before 2026-11-18 has black thumbnails (rebuild it).
+  Any canvas the app encodes or reads must be CPU-backed (`utils/canvasReadback.test.js`).
