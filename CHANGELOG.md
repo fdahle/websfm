@@ -313,6 +313,11 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Exported meshes show their colours in other programs.** A GLB without a texture had no
+  material, so viewers drew it with glTF's default, which is fully metallic and turned the
+  vertex colours near black. It now has an unlit material for vertex colours (a plain grey,
+  lit one without them), and the colours are written as glTF expects them, as linear
+  light in 16 bits: sRGB 128 is stored as 0.216, as IEC 61966-2-1 gives.
 - **Thumbnails, video frames and masks no longer come out black on some GPUs.** With
   Chrome drawing canvases on the GPU through Vulkan (seen on Linux with NVIDIA), every
   image WebSfM made from a canvas read back black: list thumbnails, the frames of an

@@ -102,10 +102,38 @@ describe('meshToGlb', () => {
     expect(idxAcc.componentType).toBe(5125)
   })
 
-  it('omits COLOR_0 when the mesh has no colour', () => {
+  it('omits COLOR_0 when the mesh has no colour, and gives it a lit, non-metal material', () => {
     const glb = meshToGlb({ ...mesh, col: null })
     const json = parseGlb(glb)
-    expect(json.meshes[0].primitives[0].attributes.COLOR_0).toBeUndefined()
+    const prim = json.meshes[0].primitives[0]
+    expect(prim.attributes.COLOR_0).toBeUndefined()
+    // glTF's default material (no material) is fully metallic: dark in every viewer.
+    const mat = json.materials[prim.material]
+    expect(mat.pbrMetallicRoughness.metallicFactor).toBe(0)
+    expect(mat.extensions?.KHR_materials_unlit).toBeUndefined()
+  })
+
+  it('writes vertex colours as linear light under an unlit, non-metal material', () => {
+    // sRGB 128/255 decodes to ((0.50196 + 0.055) / 1.055)^2.4 = 0.21586 linear (IEC 61966-2-1).
+    const glb = meshToGlb({ ...mesh, col: Uint8Array.from([255, 0, 128, 0, 255, 0, 0, 0, 255]) })
+    const json = parseGlb(glb)
+    const prim = json.meshes[0].primitives[0]
+    const mat = json.materials[prim.material]
+    expect(mat.pbrMetallicRoughness.metallicFactor).toBe(0)
+    expect(mat.extensions.KHR_materials_unlit).toEqual({})
+    expect(json.extensionsUsed).toContain('KHR_materials_unlit')
+    const acc = json.accessors[prim.attributes.COLOR_0]
+    expect(acc.componentType).toBe(5123) // UNSIGNED_SHORT
+    expect(acc.normalized).toBe(true)
+    const view = json.bufferViews[acc.bufferView]
+    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength)
+    const jsonLen = dv.getUint32(12, true)
+    const bin = 20 + jsonLen + 8 + view.byteOffset
+    const c0 = [0, 1, 2, 3].map((k) => dv.getUint16(bin + 2 * k, true) / 65535)
+    expect(c0[0]).toBe(1)
+    expect(c0[1]).toBe(0)
+    expect(c0[2]).toBeCloseTo(0.21586, 4)
+    expect(c0[3]).toBe(1)
   })
 })
 
@@ -455,7 +483,9 @@ describe('part writers — chunking never changes the bytes', () => {
       expect(parts.length).toBeGreaterThan(10)
       // Binary parts are whole records within the limit; text parts close as soon as
       // they reach it, overshooting by at most one line.
-      for (const p of parts) expect(p.length).toBeLessThan(512 + 400)
+      // A GLB's first part is its header and JSON chunk, written whole: not a record.
+      const body = name === 'mesh GLB' ? parts.slice(1) : parts
+      for (const p of body) expect(p.length).toBeLessThan(512 + 400)
       expect(joinParts(parts)).toEqual(joinParts(write({})))
     })
   }

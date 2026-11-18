@@ -8,6 +8,7 @@ import { MAX_FLOAT64_XYZ_POINTS } from '../bufferLimit.js'
 import { writeGeoTiff, writeCogDeflate, geoKeysForEpsg } from './geotiff.js'
 import { bigSet } from '../bigCollections.js'
 import { applySimilarity } from './georef.js'
+import { srgbToLinear } from './colourGains.js'
 import { createVoxelAccumulator } from '../dense/voxelAccumulator.js'
 import { PART_BYTES, PART_CHARS, lineParts, recordParts, lazyArray } from '../io/parts.js'
 
@@ -694,8 +695,15 @@ export function* meshToStlParts(mesh, { shift = null, partBytes = PART_BYTES } =
 
 // ── Mesh → GLB (binary glTF 2.0) ─────────────────────────────────────────────
 // A dependency-free single-buffer GLB: one mesh with POSITION (f32 VEC3) + optional
-// COLOR_0 (u8 VEC4 normalized) + indices (u32 SCALAR). Correct 4-byte alignment;
+// COLOR_0 (u16 VEC4 normalized) + indices (u32 SCALAR). Correct 4-byte alignment;
 // POSITION carries min/max (required by the spec, and many viewers frame on it).
+//
+// glTF reads COLOR_0 as linear light, so the sRGB vertex colours are decoded first,
+// in 16 bits (8-bit linear bands the shadows). Every primitive has a material: with no
+// material a viewer must use glTF's default, which is fully metallic and shows the
+// vertex colours near black. A coloured mesh is unlit (KHR_materials_unlit: the
+// colours come from the photos, which already hold the light); a colourless one is a
+// light grey, rough, non-metal surface, lit so its shape shows.
 //
 // A textured mesh (`texture` = { pages: [{ bytes, type }], groups: [{ page, start,
 // count }] } with `mesh.uv`, core/products/texture/) adds TEXCOORD_0 and one primitive
@@ -764,7 +772,7 @@ export function* meshToGlbParts(
     return off
   }
   const posOff = section(nV * 12)
-  const colOff = hasCol ? section(nV * 4) : 0
+  const colOff = hasCol ? section(nV * 8) : 0
   const uvOff = textured ? section(nV * 8) : 0
   const idxOff = section(nIdx * 4)
   // A page with a `uri` instead of `bytes` stays a file beside the .glb (3D Tiles tiles
@@ -776,8 +784,8 @@ export function* meshToGlbParts(
   const attributes = { POSITION: 0 }
   if (hasCol) {
     attributes.COLOR_0 = accessors.length
-    accessors.push({ bufferView: bufferViews.length, componentType: 5121, normalized: true, count: nV, type: 'VEC4' })
-    bufferViews.push({ buffer: 0, byteOffset: colOff, byteLength: nV * 4, target: 34962 })
+    accessors.push({ bufferView: bufferViews.length, componentType: 5123, normalized: true, count: nV, type: 'VEC4' })
+    bufferViews.push({ buffer: 0, byteOffset: colOff, byteLength: nV * 8, target: 34962 })
   }
   if (textured) {
     attributes.TEXCOORD_0 = accessors.length
@@ -801,7 +809,19 @@ export function* meshToGlbParts(
     buffers: [{ byteLength: binLen }],
   }
   if (!textured) {
-    gltf.meshes[0].primitives.push({ attributes, indices: accessors.length, mode: 4 })
+    const pbr = hasCol
+      ? { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 }
+      : { baseColorFactor: [0.8, 0.8, 0.8, 1], metallicFactor: 0, roughnessFactor: 1 }
+    gltf.materials = [
+      {
+        name: hasCol ? 'vertex-colours' : 'surface',
+        doubleSided: true,
+        pbrMetallicRoughness: pbr,
+        ...(hasCol ? { extensions: { KHR_materials_unlit: {} } } : {}),
+      },
+    ]
+    if (hasCol) gltf.extensionsUsed = ['KHR_materials_unlit']
+    gltf.meshes[0].primitives.push({ attributes, indices: accessors.length, material: 0, mode: 4 })
     accessors.push({ bufferView: idxView, componentType: 5125, count: nIdx, type: 'SCALAR' })
   } else {
     gltf.extensionsUsed = ['KHR_materials_unlit']
@@ -868,18 +888,20 @@ export function* meshToGlbParts(
   )
   yield* pad(nV * 12)
   if (hasCol) {
+    // sRGB byte → linear u16, one table for the 256 values.
+    const LIN = new Uint16Array(256)
+    for (let v = 0; v < 256; v++) LIN[v] = Math.round(65535 * srgbToLinear(v))
     yield* recordParts(
       nV,
-      4,
-      (bv, o, i, bin) => {
-        bin[o] = byte(mesh.col[i * 3])
-        bin[o + 1] = byte(mesh.col[i * 3 + 1])
-        bin[o + 2] = byte(mesh.col[i * 3 + 2])
-        bin[o + 3] = 255
+      8,
+      (bv, o, i) => {
+        bv.setUint16(o, LIN[byte(mesh.col[i * 3])], true)
+        bv.setUint16(o + 2, LIN[byte(mesh.col[i * 3 + 1])], true)
+        bv.setUint16(o + 4, LIN[byte(mesh.col[i * 3 + 2])], true)
+        bv.setUint16(o + 6, 65535, true)
       },
       partBytes,
     )
-    yield* pad(nV * 4)
   }
   if (textured) {
     yield* recordParts(
