@@ -46,3 +46,16 @@ export function describeFrame(frame, spec) {
     source: frame.source,
   }
 }
+
+// The georeferenced frame the sync frame signature carries (reconstruction/frames.js
+// currentFrameSignature: a georeference fitted for the current CRS, its spec in
+// `frameKey`), or null when the model is not georeferenced. Nothing is fitted for it.
+export function georefFrameOf(signature) {
+  if (signature?.source !== 'georef' || !signature.frameKey) return null
+  try {
+    const spec = JSON.parse(signature.frameKey)
+    return spec?.kind === 'similarity' ? frameFromSpec(spec) : null
+  } catch {
+    return null
+  }
+}

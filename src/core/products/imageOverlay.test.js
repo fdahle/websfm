@@ -102,6 +102,25 @@ describe('imageOverlayItems', () => {
     expect(imageOverlayItems(footprints, images, { selectedId: 'b' }).map((i) => i.imageId)).toEqual(['b'])
     expect(imageOverlayItems(footprints, images)).toEqual([])
   })
+
+  it('draws an aligned image on its ground grid, the rest into their footprints', () => {
+    const grid = { key: 'g1', cells: 1, src: new Float64Array(8), dst: new Float64Array(8) }
+    const withC = [...images, { id: 'c', url: null, thumb: { url: 'blob:c-thumb' } }, { id: 'd', url: null }]
+    const asked = []
+    const gridFor = (img) => (asked.push(img.id), img.id === 'b' || img.id === 'c' ? grid : null)
+    const all = imageOverlayItems(footprints, withC, { mode: 'all', gridFor })
+    expect(all.map((i) => [i.imageId, i.grid ? 'grid' : 'quad', i.key])).toEqual([
+      ['a', 'quad', quad.flat().join(',')],
+      ['b', 'grid', 'g1'],
+      // No footprint: the grid alone places it.
+      ['c', 'grid', 'g1'],
+    ])
+    expect(asked).toEqual(['a', 'b', 'c', 'd'])
+    // Only the drawn image is asked for its grid.
+    asked.length = 0
+    imageOverlayItems(footprints, withC, { selectedId: 'c', gridFor })
+    expect(asked).toEqual(['c'])
+  })
 })
 
 describe('normalizeImageLayer', () => {

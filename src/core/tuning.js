@@ -693,6 +693,21 @@ export const RASTER_TUNING = {
   orthoAutoMaxSide: 16384,
 }
 
+// The 2D map's Photos layer and photo ground grids (core/products/photoGrid.js).
+//   gridCells     cells a side of the grid each aligned photo is cast on the ground with:
+//                 its mesh follows relief and lens at this spacing, 12 → 169 rays a photo
+//   heightCellPts sparse points the height surface wants per cell on average; its cell
+//                 is √(area / points × this), so a median of several decides each cell
+//   heightMinPts  fewer points than this leave a cell to be filled from its neighbours,
+//                 so a lone stray point never sets a height
+//   heightMaxSide longest side of the height surface in cells
+export const PHOTO_GRID_TUNING = {
+  gridCells: 12,
+  heightCellPts: 8,
+  heightMinPts: 3,
+  heightMaxSide: 512,
+}
+
 export const TEXTURE_TUNING = {
   // Visibility z-buffer: the mesh is rasterised per view onto a grid of at most this
   // many pixels on the long side. Visibility needs occlusion, not texel detail.

@@ -198,6 +198,16 @@ Notable changes to WebSfM. The format follows
   still need a DEM, and the model frame still needs a raster to measure on.
 
 ### Changed
+- **Photos on the map follow the ground.** View ▸ Map ▸ Photos now places each photo of
+  the sparse model by its aligned camera: a 13 × 13 grid of rays per photo is cast onto a
+  surface of the tie points, so a photo follows the relief and its lens distortion is
+  corrected, and a film scan shows only what is inside its fiducial frame. It works
+  without footprints, on the CRS map once the model is georeferenced and in Model Frame;
+  a photo outside the sparse model is still stretched into its footprint. Before, every
+  photo was a flat stretch between the four corners of its footprint, which needed
+  imported poses and ignored the lens and everything between the corners. The grid is
+  cast only for the photos drawn, on the main thread: about 0.3 ms a photo and 70 ms
+  for the tie-point surface of 300,000 points (synthetic timing, one core).
 - **The console log reads the same everywhere.** Each line's source names the part of
   WebSfM it comes from, as the ribbon does (Sparse, Georeferencing, Fiducials, System …),
   each step ends in one green line with its result and time, and the per-photo and

@@ -63,6 +63,11 @@ export const NEED_CHECKS = {
     ok: (s) => s.footprintCount > 0,
     reason: 'Compute footprints first (Tools ▸ Model ▸ Footprints from poses)',
   },
+  // View ▸ Map ▸ Photos places a photo by the aligned model, or by its footprint.
+  footprintsOrSparse: {
+    ok: (s) => s.footprintCount > 0 || s.sparseReady,
+    reason: 'Build the sparse model, or compute footprints first (Tools ▸ Model ▸ Footprints from poses)',
+  },
   gcps: {
     ok: (s) => s.gcpCount > 0,
     reason: 'No GCPs yet — import a GCP file, or right-click the map or an image to add one',

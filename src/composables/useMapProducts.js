@@ -8,7 +8,7 @@ import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { placeProductLayer, productLabel } from '../core/products/productLayers.js'
 import { MODEL_MAP_CRS, modelMapCameras, modelMapExtent } from '../core/products/modelMap.js'
-import { frameFromSpec } from '../core/products/frameSpec.js'
+import { frameFromSpec, georefFrameOf } from '../core/products/frameSpec.js'
 import { createProductRasterSource } from '../core/io/rasterSource.js'
 import { transform } from '../core/crs.js'
 import { demRef } from '../core/products/demWindow.js'
@@ -16,6 +16,7 @@ import { readDemWindow } from '../workers/computeClient.js'
 import { stackMapLayers } from '../core/products/mapOrder.js'
 import { vectorMapLayers } from '../core/products/vectorLayers.js'
 import { IMAGE_LAYER_ID, imageOverlayItems } from '../core/products/imageOverlay.js'
+import { photoGridBuilder } from '../core/products/photoGrid.js'
 import { MAP_TARGET_ID, mapMeasureRecord } from '../core/products/measurementRecord.js'
 
 // What the 2D map shows, in which frame (CLAUDE.md ▸ map raster layers).
@@ -95,6 +96,41 @@ export function useMapProducts() {
     { immediate: true },
   )
 
+  // The georeferenced model in the project CRS, for the Photos layer's ground grids:
+  // the georeference already fitted for the current CRS, as the frame signature
+  // carries it (nothing is fitted for this), else null.
+  const crsFrame = computed(() => georefFrameOf(recon.currentFrameSignature))
+
+  // Each aligned photo's ground grid in a map frame (core/products/photoGrid.js
+  // photoGridBuilder), made when the Photos layer first draws it and kept per frame,
+  // cloud and lens. On the main thread, measured: ~0.3 ms a photo and ~70 ms for the
+  // surface of 300,000 tie points, and only the photos drawn are cast.
+  const gridCaches = new WeakMap() // frame → { cloud, frameModel, gridFor }
+  let gridSerial = 0
+  function photoGridsIn(frame) {
+    const cloud = recon.mainSparseCloud
+    if (!frame || !cloud?.cameras?.size) return null
+    const frameModel = recon.frameModelFor
+    let cache = gridCaches.get(frame)
+    if (!cache || cache.cloud !== cloud || cache.frameModel !== frameModel) {
+      const build = photoGridBuilder({
+        cameras: cloud.cameras,
+        pos: cloud.points?.pos,
+        toMap: frame.fromSfm,
+        frameModel,
+      })
+      // A key per grid, so the layer knows when a photo's mesh changed.
+      const gridFor = (img) => {
+        const grid = build(img)
+        if (grid && !grid.key) grid.key = `grid${++gridSerial}`
+        return grid
+      }
+      cache = { cloud, frameModel, gridFor }
+      gridCaches.set(frame, cache)
+    }
+    return cache.gridFor
+  }
+
   // Registered camera centres in the model frame (the model map's only vectors).
   const modelCameras = computed(() => {
     const f = modelFrame.value?.frame
@@ -154,22 +190,26 @@ export function useMapProducts() {
       .filter(shown),
   )
 
-  // View ▸ Map ▸ Photos: the source images drawn into their footprints
-  // (core/products/imageOverlay.js), as one entry of the stack. `items` is a function
-  // so the map's deep watch never walks the quads; `rev` changes with what is drawn.
+  // View ▸ Map ▸ Photos: the source images drawn on their ground grids from the aligned
+  // model, or into their footprints (core/products/imageOverlay.js), as one entry of
+  // the stack. The CRS map places them through the georeference, the model map in its
+  // own frame (footprints, being CRS data, only on the CRS map). `items` is a function
+  // so the map's deep watch never walks the meshes; `rev` changes with what is drawn.
   const photosLayer = computed(() => {
     const state = recon.imageLayer
     if (!state?.visible || hidden.value.has(IMAGE_LAYER_ID)) return null
-    const items = imageOverlayItems(footprintsStore.footprintPolygons, imagesStore.images, {
+    const crs = mode.value === 'crs'
+    const items = imageOverlayItems(crs ? footprintsStore.footprintPolygons : [], imagesStore.images, {
       mode: state.mode,
       selectedId: imagesStore.selectedId,
+      gridFor: photoGridsIn(crs ? crsFrame.value : modelFrame.value?.frame),
     })
     return {
       id: IMAGE_LAYER_ID,
       images: true,
       name: 'Photos',
       opacity: state.opacity ?? 1,
-      rev: items.map((i) => `${i.imageId}:${i.url}:${i.quad.flat().join(',')}`).join('|'),
+      rev: items.map((i) => `${i.imageId}:${i.url}:${i.key}`).join('|'),
       items: () => items,
       request: (id) => {
         const img = imagesStore.images.find((i) => i.id === id)
@@ -189,7 +229,7 @@ export function useMapProducts() {
             ...(photosLayer.value ? [photosLayer.value] : []),
             ...vectorMapLayers(footprintsStore.sets).filter(shown),
           ]
-        : productMapLayers.value,
+        : [...productMapLayers.value, ...(photosLayer.value ? [photosLayer.value] : [])],
       recon.mapOrder,
     ),
   )

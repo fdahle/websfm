@@ -276,7 +276,7 @@ test('View ▸ Map ▸ Photos draws the source images into their footprints, as 
   await page.locator('.ribbon').getByRole('button', { name: 'Layers', exact: true }).click()
   const list = page.getByRole('list', { name: 'Map layers, top first' })
   await expect(list.locator('.item-name')).toHaveText(['Photos'])
-  await expect(page.getByText('Click a footprint')).toBeVisible()
+  await expect(page.getByText('Click a camera or footprint')).toBeVisible()
   await page.evaluate(async () => {
     ;(await import('/src/stores/useImagesStore.js')).useImagesStore().selectedId = 'img-2'
   })

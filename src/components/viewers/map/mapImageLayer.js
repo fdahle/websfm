@@ -1,5 +1,6 @@
-// The Photos layer of the 2D map (View ▸ Map ▸ Photos): source images drawn into
-// their footprints, warped by the homography of core/products/imageOverlay.js. One
+// The Photos layer of the 2D map (View ▸ Map ▸ Photos): source images drawn on their
+// ground grids from the aligned model (core/products/photoGrid.js), or into their
+// footprints by the homography of core/products/imageOverlay.js. One
 // OpenLayers canvas layer for all of them: on each render it draws the photos in view
 // straight onto a canvas of the view's size, triangle by triangle, so nothing is
 // warped ahead of time and only what is on screen costs anything.
@@ -12,6 +13,7 @@ import ImageLayer from 'ol/layer/Image'
 import ImageCanvasSource from 'ol/source/ImageCanvas'
 import { intersects } from 'ol/extent'
 import { pointsExtent, triangleTransform, warpMesh } from '../../../core/products/imageOverlay.js'
+import { gridMesh } from '../../../core/products/photoGrid.js'
 
 // Longest side the selected image is drawn from: sharp at any useful zoom, and 128
 // draws of it stay fast.
@@ -38,10 +40,11 @@ export function createImageOverlay({ opacity = 1, request = () => {} } = {}) {
   const layer = new ImageLayer({ source, opacity })
 
   function meshOf(item) {
-    const key = item.quad.flat().join(',')
+    const key = item.key
     let m = meshes.get(item.imageId)
     if (!m || m.key !== key || m.full !== item.full) {
-      m = { key, full: item.full, mesh: warpMesh(item.quad, item.full ? MESH_FULL : MESH_THUMB) }
+      const mesh = item.grid ? gridMesh(item.grid) : warpMesh(item.quad, item.full ? MESH_FULL : MESH_THUMB)
+      m = { key, full: item.full, mesh }
       m.extent = pointsExtent(m.mesh.flatMap((t) => t.dst))
       meshes.set(item.imageId, m)
     }

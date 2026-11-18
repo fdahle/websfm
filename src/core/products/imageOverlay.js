@@ -1,5 +1,8 @@
-// Source images drawn on the 2D map, each into its footprint (View ▸ Map ▸ Images).
-// Pure geometry; components/viewers/map/mapImageLayer.js draws with it.
+// Source images drawn on the 2D map (View ▸ Map ▸ Photos). Pure geometry;
+// components/viewers/map/mapImageLayer.js draws with it. A photo the aligned model
+// places is drawn on its ground grid (photoGrid.js), which follows the relief and the
+// lens; this module's homography is for a photo placed only by a footprint computed
+// from imported poses.
 //
 // A computed footprint is the four image corners cast onto the ground, in the order
 // top-left, top-right, bottom-right, bottom-left (core/footprint.js). The plane
@@ -103,24 +106,31 @@ export function pointsExtent(points) {
 export const IMAGE_LAYER_MODES = ['selected', 'all']
 
 /**
- * What the Images layer draws: one item per image with a footprint, or only the
- * selected one (`mode` 'selected'). `footprints` is the computed footprint set's
- * polygons, `images` the image records. The selected image is drawn from its display
- * image when it is loaded, every other from its ≤256 px thumbnail (`thumb`), which may
- * still have to be requested (`url` null).
- * → [{ imageId, quad, url, full }]
+ * What the Photos layer draws: one item per image it can place, or only the selected
+ * one (`mode` 'selected'). An image the aligned model places is drawn on its ground
+ * grid (`gridFor(image)`, photoGrid.js: a grid with a `key`, or null); any other
+ * into its footprint, `footprints` being the computed footprint set's polygons. The
+ * selected image is drawn from its display image when it is loaded, every other from
+ * its ≤256 px thumbnail (`thumb`), which may still have to be requested (`url` null).
+ * `gridFor` is asked only for the images drawn. `key` changes with the placement.
+ * → [{ imageId, quad | grid, key, url, full }]
  */
-export function imageOverlayItems(footprints, images, { mode = 'selected', selectedId = null } = {}) {
-  const byId = new Map(images.map((img) => [img.id, img]))
-  const out = []
+export function imageOverlayItems(footprints, images, { mode = 'selected', selectedId = null, gridFor = null } = {}) {
+  const ringById = new Map()
   for (const fp of footprints) {
     const ring = fp.rings?.[0]
-    const img = fp.imageId ? byId.get(fp.imageId) : null
-    if (!img || !ring || ring.length < 4) continue
+    if (fp.imageId && ring?.length >= 4 && !ringById.has(fp.imageId)) ringById.set(fp.imageId, ring)
+  }
+  const out = []
+  for (const img of images) {
     const selected = img.id === selectedId
     if (mode === 'selected' && !selected) continue
+    const grid = gridFor?.(img) ?? null
+    const ring = grid ? null : ringById.get(img.id)
+    if (!grid && !ring) continue
     const full = selected && !!img.url
-    out.push({ imageId: img.id, quad: ring.slice(0, 4), url: full ? img.url : (img.thumb?.url ?? null), full })
+    const place = grid ? { grid, key: grid.key } : { quad: ring.slice(0, 4), key: ring.slice(0, 4).flat().join(',') }
+    out.push({ imageId: img.id, ...place, url: full ? img.url : (img.thumb?.url ?? null), full })
   }
   return out
 }

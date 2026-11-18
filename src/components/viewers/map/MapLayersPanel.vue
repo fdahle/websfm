@@ -260,7 +260,7 @@ function onDragEnd() {
         </select>
       </div>
       <p v-if="selected.mode === 'selected' && !selectedImageId" class="settings-hint">
-        Click a footprint (or an image in the sidebar) to show its photo.
+        Click a camera or footprint (or an image in the sidebar) to show its photo.
       </p>
     </div>
 

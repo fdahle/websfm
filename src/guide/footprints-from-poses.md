@@ -13,8 +13,10 @@ so it is for imported poses or EXIF GPS, and it runs before any reconstruction.
 
 The footprints are drawn on the 2D map, which opens on them, so misplaced ones show at
 once. **View ▸ Map ▸ Footprints** toggles them; right-click one (or **Export ▸
-Footprints**) to download them as GeoJSON. **View ▸ Map ▸ Photos** stretches the photos
-into their footprints: a quick check of positions and angles, not an orthophoto.
+Footprints**) to download them as GeoJSON. [View ▸ Map ▸ Photos](guide:map-photos)
+stretches the photos into their footprints: a quick check of positions and angles, not
+an orthophoto. Once the photos are in the sparse model, it places them by their
+aligned cameras instead.
 [Preselect by footprint overlap](guide:match-features) uses footprints to choose pairs.
 
 ## Ground

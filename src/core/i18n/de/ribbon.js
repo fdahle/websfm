@@ -92,6 +92,8 @@ export default {
     posesOrSparse: 'Zuerst Kameraposen importieren oder das Sparse-Modell erstellen',
     measurements: 'Zuerst eine Messung speichern (Werkzeuge ▸ Messen)',
     footprints: 'Zuerst Footprints berechnen (Werkzeuge ▸ Modell ▸ Footprints aus Posen)',
+    footprintsOrSparse:
+      'Zuerst das Sparse-Modell erstellen oder Footprints berechnen (Werkzeuge ▸ Modell ▸ Footprints aus Posen)',
     gcps: 'Noch keine GCPs — eine GCP-Datei importieren, oder per Rechtsklick auf die Karte oder ein Bild einen setzen',
     selection: 'Zuerst ein Bild auswählen',
     sensors: 'Keine Sensoren vorhanden',
