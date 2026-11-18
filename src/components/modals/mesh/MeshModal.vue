@@ -37,6 +37,8 @@ const props = defineProps({
   // (sourceId) → Auto depth's inputs { count, spacing, extent } | null (the store's
   // meshDepthInputs), so the effect line names the depth the run will pick.
   depthBasisOf: { type: Function, default: null },
+  // The registered photos the Texture step bakes from (0: it is not used).
+  cameraCount: { type: Number, default: 0 },
 })
 const emit = defineEmits(['close', 'run'])
 
@@ -65,6 +67,7 @@ const effects = computed(() => {
   const project = {
     source: source.value && { name: source.value.name, count: source.value.count },
     basis: basis.value,
+    cameras: props.cameraCount,
   }
   return withShorts(meshEffects(settings.value, project), meshShorts(settings.value, project))
 })
@@ -100,12 +103,23 @@ const numbers = computed(() =>
 )
 
 // The machine's whole memory limit (Settings ▸ Compute): how many tiles solve at once.
-const { memBudgetRamBytes } = useComputeSettings()
+// The Texture step also takes the WebGPU depth pass and the memory gate its page count obeys.
+const { memBudgetRamBytes, useGpu, memBudgetBytes } = useComputeSettings()
+// The texture resolution, as Texture Mesh's quality cards (TEXTURE_PRESET_META) name it.
+const TEXTURE_QUALITY = [
+  { id: 'high', label: 'Full' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'low', label: 'Draft' },
+]
 
 function run() {
   dialog.remember()
   emit('run', {
-    ...meshRunSettings(settings.value, { ramBudgetBytes: memBudgetRamBytes.value }),
+    ...meshRunSettings(settings.value, {
+      ramBudgetBytes: memBudgetRamBytes.value,
+      useGpu: useGpu.value,
+      memBudgetBytes: memBudgetBytes.value,
+    }),
     sourceId: sourceId.value,
   })
 }
@@ -362,9 +376,41 @@ provideStepLayout('mesh')
       </SettingsField>
     </SettingsStep>
 
+    <SettingsStep
+      step="6"
+      title="Texture"
+      :effect="effects.texture"
+      :inactive="!settings.texture || !cameraCount"
+      :more="settings.texture ? 1 : 0"
+    >
+      <SettingsField hint="Bake a photo texture onto the new mesh from the registered photos.">
+        <template #label
+          ><FieldHelp op="mesh" param="texture" :value="settings.texture" :default-value="MESH_DEFAULTS.texture"
+            >Texture from the photos</FieldHelp
+          ></template
+        >
+        <label class="checkbox-row" :title="cameraCount ? null : 'Needs a sparse model with registered photos'"
+          ><input
+            v-model="settings.texture"
+            type="checkbox"
+            class="checkbox"
+            :disabled="!cameraCount"
+            :title="cameraCount ? null : 'Needs a sparse model with registered photos'"
+          />
+          Enabled</label
+        >
+      </SettingsField>
+      <template #tuning>
+        <SettingsField v-if="settings.texture" hint="How fine the texture is: native photo pixels, half or a quarter.">
+          <template #label><FieldHelp op="mesh" param="textureQuality">Texture resolution</FieldHelp></template>
+          <SegmentedControl v-model="settings.textureQuality" :options="TEXTURE_QUALITY" />
+        </SettingsField>
+      </template>
+    </SettingsStep>
+
     <OutputStep
       v-model="settings.replaceMain"
-      step="6"
+      step="7"
       op="mesh"
       kind="mesh"
       :plan="output"

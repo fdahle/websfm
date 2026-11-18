@@ -9,6 +9,7 @@ import { meshDepthBasis, tileTask } from '../../core/products/mesh.js'
 import { regionContains } from '../../core/products/region.js'
 import {
   POOL_SIZE,
+  isAbort,
   releaseIdleWorkers,
   recycleWorker,
   meshify as workerMeshify,
@@ -28,10 +29,12 @@ export function createMeshRun({
   clouds,
   denseSummary,
   log,
+  mainSparseCloud = null,
   meshSource,
   meshSources,
   reconStatus,
   save,
+  textureForMesh = null,
   upsertMeshCloud,
 }) {
   // Build Mesh ▸ Auto depth's inputs for the dialog (core/products/mesh.js meshDepthBasis):
@@ -78,7 +81,9 @@ export function createMeshRun({
   async function generateMesh(settings = {}, onProgress) {
     const tRun = performance.now()
     // replaceMain: Mesh ▸ Replace the main mesh (where the mesh goes, not how it is built).
-    const { sourceId, replaceMain, ...meshSettings } = settings
+    // texture: Texture Mesh's run settings (Build Mesh ▸ Texture), or null for vertex
+    // colours alone.
+    const { sourceId, replaceMain, texture = null, ...meshSettings } = settings
     const pick = sourceId != null ? meshSources.value.find((s) => s.id === sourceId) : meshSource.value
     const dense = pick ? clouds.value.find((c) => c.id === pick.id) : null
     if (!dense?.count) {
@@ -153,16 +158,27 @@ export function createMeshRun({
         reconStatus.value = 'done'
         return
       }
-      const built = upsertMeshCloud(mesh, {
+      // Build Mesh ▸ Texture: the photo texture baked onto this mesh before it is kept, so
+      // the run makes one textured mesh. Without one (no registered photo, or the bake
+      // failed) the mesh keeps its vertex colours.
+      const photos = mainSparseCloud?.value?.cameras?.size ?? 0
+      if (texture && !photos)
+        log('Mesh: no texture, as no photo is registered (no sparse model): vertex colours only', 'info', 'Products')
+      const baked = texture && photos && textureForMesh ? await textureMeshRun(mesh, texture, onProgress) : null
+      const built = upsertMeshCloud(baked ? { ...baked.mesh, summary: mesh.summary } : mesh, {
         sourceId: dense.id,
         sourceName: dense.name ?? null,
         settings: meshSettings,
         replace: !!replaceMain,
+        ...(baked
+          ? { uv: baked.mesh.uv, texture: baked.texture, textureSummary: { ...baked.summary, settings: texture } }
+          : {}),
       })
       reconStatus.value = 'done'
       log(
-        `Mesh "${built.name}": ${mesh.count.toLocaleString('en')} triangles from "${dense.name}" in ` +
-          `${((performance.now() - tRun) / 1000).toFixed(1)} s`,
+        `Mesh "${built.name}": ${mesh.count.toLocaleString('en')} triangles from "${dense.name}"` +
+          (baked ? `, textured on ${pluralize(baked.texture.pages.length, 'page')}` : '') +
+          ` in ${((performance.now() - tRun) / 1000).toFixed(1)} s`,
         'success',
         'Products',
       )
@@ -187,6 +203,38 @@ export function createMeshRun({
             if (!isSharedArray(a)) pagePoolBytes += a.byteLength
           }
     return { pageBytes, pagePoolBytes }
+  }
+
+  // The texture step of Build Mesh: the mesh's photo texture, or null when it keeps its
+  // vertex colours (logged: no registered photo, or the bake failed). A cancel goes on up.
+  async function textureMeshRun(mesh, texture, onProgress) {
+    log(
+      `Mesh: texturing from the photos (up to ${pluralize(texture.maxPages, 'page')} of ${texture.pageSize} px, ` +
+        `at most ${texture.maxScale === 1 ? 'the native photo pixels' : `${texture.maxScale} × the photo pixels`})`,
+      'info',
+      'Products',
+    )
+    const n = mesh.nVerts
+    try {
+      return await textureForMesh(
+        {
+          pos: mesh.pos.slice(0, n * 3),
+          idx: mesh.idx.slice(),
+          col: mesh.col ? mesh.col.slice(0, n * 3) : null,
+        },
+        texture,
+        (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+      )
+    } catch (err) {
+      if (isAbort(err)) throw err
+      log(
+        `Mesh: texturing failed: ${err?.message ?? err}. The mesh keeps its vertex colours; ` +
+          'run Tools ▸ Mesh ▸ Texture to try again',
+        'warn',
+        'Products',
+      )
+      return null
+    }
   }
 
   // Build Mesh with its tiles over the pool (workers/ops/mesh.js meshPrepare / meshTile /

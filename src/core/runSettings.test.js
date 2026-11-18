@@ -42,6 +42,18 @@ describe('a workflow block runs as its dialog would', () => {
   })
 })
 
+describe('Build Mesh ▸ Texture', () => {
+  it('runs as Texture Mesh would at the chosen texture card, or not at all', () => {
+    expect(meshRunSettings({ texture: true, textureQuality: 'medium' }, runtime).texture).toEqual(
+      textureRunSettings({ maxScale: 0.5, maxPages: 4 }, runtime),
+    )
+    expect(meshRunSettings({ texture: true }, runtime).texture).toEqual(textureRunSettings(TEXTURE_DEFAULTS, runtime))
+    expect(meshRunSettings({ texture: false }, runtime).texture).toBeNull()
+    // The card names stay out of what the mesh worker gets.
+    expect(meshRunSettings({}, runtime)).not.toHaveProperty('textureQuality')
+  })
+})
+
 describe('unit conversion', () => {
   it('turns percentages into fractions and 0 into "no limit"', () => {
     expect(depthRunSettings({ filterRelTol: 10 }).filterRelTol).toBeCloseTo(0.1, 12)

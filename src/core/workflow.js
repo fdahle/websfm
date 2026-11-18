@@ -185,6 +185,9 @@ export const WORKFLOW_BLOCKS = [
     { key: 'trim', label: 'Surface trimming', type: 'select', options: ['off', 'gentle', 'strong'] },
     { key: 'fillHoles', label: 'Fill small holes', type: 'boolean' },
     { key: 'removeFloaters', label: 'Remove floating pieces', type: 'boolean' },
+    // Off by itself when a Texture Mesh block follows in the run (useWorkflowWiring.js).
+    { key: 'texture', label: 'Texture from the photos', type: 'boolean' },
+    { key: 'textureQuality', label: 'Texture resolution', type: 'select', options: ['high', 'medium', 'low'] },
     { key: 'replaceMain', label: 'Replace the main mesh', type: 'boolean' },
   ]),
 

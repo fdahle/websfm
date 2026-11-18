@@ -8,7 +8,7 @@ import { createSparseRun } from './reconstruction/sparseRun.js'
 import { createProductRuns } from './reconstruction/productRuns.js'
 import { createReflectanceRun } from './reconstruction/reflectanceRun.js'
 import { createCloudEdits } from './reconstruction/cloudEdits.js'
-import { createMeshTexture } from './reconstruction/meshTexture.js'
+import { createMeshTexture, rawTexture } from './reconstruction/meshTexture.js'
 import { createCloudLod } from './reconstruction/cloudLod.js'
 import { createDense } from './reconstruction/dense.js'
 import { createProducts } from './reconstruction/products.js'
@@ -611,7 +611,15 @@ export const useReconstructionStore = registerProjectStore(
           nVerts,
           pos: markRaw(pos),
           idx: markRaw(triIdx),
-          col: markRaw(col),
+          col: col ? markRaw(col) : null, // markRaw(null) throws (Vue 3.5)
+          // Build Mesh ▸ Texture: per-vertex UVs + atlas pages, as Texture Mesh makes them.
+          ...(run.uv && run.texture
+            ? {
+                uv: markRaw(run.uv),
+                texture: rawTexture(run.texture),
+                ...(run.textureSummary ? { textureSummary: run.textureSummary } : {}),
+              }
+            : {}),
           // The run record (core/products/mesh.js `summary` + what was asked and of which
           // cloud). Persisted; absent on older meshes ⇒ unknown.
           ...(summary
@@ -631,6 +639,9 @@ export const useReconstructionStore = registerProjectStore(
     }
 
     // Depth maps, fusion and meshing (reconstruction/dense.js).
+    // Build Mesh ▸ Texture bakes with Texture Mesh's run (createMeshTexture, below, once
+    // the mesh tools exist); called only when a mesh run reaches it.
+    const textureForMesh = (...args) => textureGeometry(...args)
     const { computeDepthMaps, depthCameraKeys, densify, generateMesh, meshDepthInputs } = createDense({
       beginStreamedDepthMaps,
       clipToRegion,
@@ -656,6 +667,7 @@ export const useReconstructionStore = registerProjectStore(
       summary,
       upsertDenseCloud,
       upsertMeshCloud,
+      textureForMesh,
       withRegion,
       activeRegion,
     })
@@ -784,7 +796,7 @@ export const useReconstructionStore = registerProjectStore(
       })
 
     // Mesh texture (reconstruction/meshTexture.js).
-    const { textureMesh } = createMeshTexture({
+    const { textureMesh, textureGeometry } = createMeshTexture({
       addDerivedMesh,
       clouds,
       frameModelFor,

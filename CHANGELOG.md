@@ -218,6 +218,16 @@ Notable changes to WebSfM. The format follows
   still need a DEM, and the model frame still needs a raster to measure on.
 
 ### Changed
+- **Build Mesh textures the mesh from the photos.** A new Texture step, on by default,
+  bakes the photo texture onto the mesh the run makes, so one run gives a textured mesh
+  instead of a vertex-coloured one and a second copy from Tools ▸ Mesh ▸ Texture. It runs
+  Texture Mesh's own bake at the chosen Texture resolution (Full, Medium or Draft, as that
+  dialog's cards); the vertex colours stay for viewers that ignore the texture. Turn it off
+  for a quick look at the shape, or to decimate and texture with the tool. Without
+  registered photos the mesh keeps its vertex colours, and a workflow whose Texture Mesh
+  block follows Build Mesh leaves the texturing to that block. It is a setting because it
+  costs time: on the 347-photo aerial block the texture took 3.5 min against 140 s for the
+  mesh (0.8.0 ▸ Mesh size follows the block).
 - **Every export says what it writes, and lets you pick it.** Export ▸ Point Cloud, Mesh,
   3D Tiles, DEM and Orthophoto have a Source list of every cloud, mesh or product of that
   kind, with its size and which is the main one. It starts on the one you have selected,

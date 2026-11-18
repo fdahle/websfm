@@ -567,6 +567,7 @@ const exportingFootprints = computed(
       :default-source-id="meshSource?.id ?? null"
       :output="reconstructionStore.outputPlan('mesh')"
       :depth-basis-of="reconstructionStore.meshDepthInputs"
+      :camera-count="enabledCameras.cameras"
       @close="meshOpen = false"
       @run="onMeshRun"
     />

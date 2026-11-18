@@ -251,6 +251,8 @@ export function useWorkflowRunner({
 
         setStatus(block.id, 'running')
         onLog(`${spec.label} started`, 'info', 'Workflow')
+        // The blocks still to run, so a stage can leave to a later one what it would do.
+        context.later = blocks.filter((b, k) => k > index && active[k]).map((b) => b.type)
         const result = await runAutomated(block.type, { ...block.settings }, context)
         if (stopRequested || result?.cancelled) {
           setStatus(block.id, 'stopped')

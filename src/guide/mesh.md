@@ -7,7 +7,8 @@ order: 100
 ---
 Meshing turns a dense cloud into connected triangles with screened Poisson. On its own,
 Poisson closes the surface past the data and wraps noise in small shells, so Build Mesh
-also trims to what the points support, closes small holes and drops floating pieces.
+also trims to what the points support, closes small holes and drops floating pieces,
+then textures the mesh from the photos.
 
 ## Before you run
 The source must be a dense cloud with normals. **Source** takes the cloud selected in
@@ -80,8 +81,22 @@ piece. Raise it for larger clutter; lower it when a thin real object disappears.
 ## Transfer colour from the dense cloud
 <!-- param: colorize default: on -->
 Colours each vertex from the nearest dense point: fine for viewing, blurred where
-vertices are sparse. For the photos' full detail, [texture the mesh](guide:texture-mesh).
-Turn it off for geometry-only uses such as STL.
+vertices are sparse. A textured mesh keeps them too, for viewers that ignore the
+texture and for faces no photo sees. Turn it off for geometry-only uses such as STL.
+
+## Texture from the photos
+<!-- param: texture default: On -->
+Bakes a photo texture onto the new mesh, so it shows the photos' detail rather than
+blurred vertex colours: the same run as [Texture Mesh](guide:texture-mesh), on the
+mesh this run makes. It takes longer than the mesh itself. Turn it off for a quick look
+at the shape, or to decimate first and texture with **Tools ▸ Mesh ▸ Texture**. Needs
+registered photos.
+
+## Texture resolution
+<!-- param: textureQuality default: Full -->
+The finest texture as a share of the photo pixels: **Full** (native, up to 8 atlas
+pages), **Medium** (half, up to 4) or **Draft** (a quarter, up to 2). Lower is faster
+and lighter to export; Texture Mesh has the finer settings.
 
 ## Replace the main mesh
 <!-- param: replaceMain default: Off -->
@@ -91,9 +106,10 @@ imported meshes are never replaced. Products built on the old mesh are kept and 
 outdated.
 
 ## Export choice
-GLB and OBJ keep a texture ([Texture Mesh](guide:texture-mesh)); OBJ vertex colour
-works only where the application supports it; STL is geometry only. Check the target
-application's axes and units.
+**Export ▸ Mesh** offers every mesh in its **Source**. GLB and OBJ keep the texture;
+PLY and GLB keep the vertex colours (OBJ vertex colour works only where the
+application supports it); STL is geometry only. Check the target application's axes
+and units.
 
 A georeferenced mesh keeps its map coordinates exactly: PLY writes them in double
 precision, GLB stores a rounded offset as its node translation, and STL, which has no

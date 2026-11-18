@@ -23,6 +23,28 @@ describe('meshEffects', () => {
   })
 })
 
+describe('the texture step', () => {
+  it('bakes from the registered photos at the chosen card, or says why not', () => {
+    const on = meshEffects(MESH_DEFAULTS, { source, cameras: 212 })
+    expect(on.texture).toMatch(/^The 212 registered photos are projected onto the mesh/)
+    expect(on.texture).toContain('native photo pixels on at most 8 atlas pages')
+    expect(meshEffects({ ...MESH_DEFAULTS, textureQuality: 'low' }, { source, cameras: 212 }).texture).toContain(
+      'a quarter of the photo pixels on at most 2 atlas pages',
+    )
+    expect(meshEffects(MESH_DEFAULTS, { source, cameras: 0 }).texture).toMatch(/^Not used: no photo is registered/)
+    expect(meshEffects({ ...MESH_DEFAULTS, texture: false }, { source, cameras: 212 }).texture).toMatch(/^Off/)
+    expect(meshShorts(MESH_DEFAULTS, { source, cameras: 212 }).texture).toBe('Full · 212 photos')
+    expect(meshShorts({ ...MESH_DEFAULTS, texture: false }, { source, cameras: 212 }).texture).toBe('off')
+    expect(meshShorts(MESH_DEFAULTS, { source }).texture).toBe('no photos')
+  })
+  it("keeps the texture's short fact within SHORT_MAX", () => {
+    for (const q of ['low', 'medium', 'high'])
+      expect(
+        meshShorts({ ...MESH_DEFAULTS, textureQuality: q }, { source, cameras: 123_456 }).texture.length,
+      ).toBeLessThanOrEqual(SHORT_MAX)
+  })
+})
+
 describe('mesh depth in the effect line', () => {
   // 4096 / (8 · 1) = 512 = 2^9 wanted; the triangle limit decides from there.
   const basis = { count: 4096 ** 2, spacing: 1, extent: 4096 }

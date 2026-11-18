@@ -140,7 +140,8 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     else if (type === 'dense') result = await runDensify(settings)
     else if (type === 'gen-dem') result = await runGenerateDem(settings)
     else if (type === 'gen-ortho') result = await runGenerateOrtho(settings)
-    else if (type === 'gen-mesh') result = await runGenerateMesh(meshFromChain(settings, context))
+    else if (type === 'gen-mesh')
+      result = await runGenerateMesh(meshFromChain(textureLater(settings, context), context))
     else if (type === 'texture-mesh') result = await runTextureBlock(settings, context)
     else throw new Error(`Workflow block is not automated: ${type}`)
 
@@ -160,6 +161,14 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     if (type === 'dense') context.cloudId = workflowOutputToken('dense')?.id ?? null
     if (type === 'gen-mesh') context.meshId = workflowOutputToken('gen-mesh')?.id ?? null
     return { ok: true, cancelled: false }
+  }
+
+  // Build Mesh leaves the texture to a Texture Mesh block later in the run, which
+  // textures (and may decimate first) the mesh it makes.
+  function textureLater(settings, context) {
+    if (!settings.texture || !context.later?.includes('texture-mesh')) return settings
+    log('Build Mesh: the Texture Mesh block later in this workflow textures the mesh', 'info', 'Workflow')
+    return { ...settings, texture: null }
   }
 
   // The chain a run's tool blocks work along: the cloud / mesh the previous block of

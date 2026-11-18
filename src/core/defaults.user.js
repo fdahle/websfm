@@ -615,6 +615,11 @@ export const MESH_DEFAULTS = {
   minPiecePct: 1, // … below this % of the best-supported piece's support
   distanceTrim: 0, // proximity trim radius in input-sample cells; 0 = off
   colorize: true, // transfer dense-cloud colour onto the mesh vertices
+  // Texture the new mesh from the registered photos (Texture Mesh's run, at the texture
+  // card `textureQuality`: TEXTURE_PRESETS). Without a registered photo the mesh keeps
+  // its vertex colours.
+  texture: true,
+  textureQuality: 'high', // 'low' | 'medium' | 'high' (Draft · Medium · Full)
   tiles: 'auto', // 'auto' | 'off' — solve in tiles when one solve would not fit (meshTiles.js)
   // Output: add the new product beside the others as the main one (false), or put it
   // in place of the main one (true). Off, so a rebuild never loses a result by default.

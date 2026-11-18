@@ -9,6 +9,8 @@ order: 105
 pixels of one photo that sees it well, stored in a [texture atlas](help:texture-atlas)
 on a new mesh. Unlike vertex colour, a texture keeps the photos' detail however large
 the triangles are. [Disabled](guide:getting-started) photos are never used.
+[Build Mesh](guide:mesh) textures its mesh this way already; use this tool for an
+imported, edited or decimated mesh, or for the finer settings below.
 
 ## Before you run
 You need a mesh in the project's frame (built, edited or imported) and the sparse

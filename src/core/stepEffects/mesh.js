@@ -1,9 +1,24 @@
 // What each step of Build Mesh does to this project (MeshModal.vue): the one-line
 // effects under its numbered steps, in the order core/products/mesh.js runs them —
-// solve, trim, refill small holes, drop floating pieces, colour.
+// solve, trim, refill small holes, drop floating pieces, colour — then the texture
+// baked from the photos (Texture Mesh's run, stores/reconstruction/meshRun.js).
 import { plural, fmtCount } from './format.js'
 import { autoMeshDepth, predictMeshTriangles } from '../products/mesh.js'
 import { MESH_TUNING } from '../tuning.js'
+import { TEXTURE_DEFAULTS, TEXTURE_PRESETS, TEXTURE_PRESET_META } from '../defaults.user.js'
+
+// The texture card's name and what it bakes at (TEXTURE_PRESETS over the defaults).
+function textureCard(id) {
+  const t = { ...TEXTURE_DEFAULTS, ...(TEXTURE_PRESETS[id] ?? {}) }
+  const label = TEXTURE_PRESET_META.find((m) => m.id === id)?.label ?? 'Full'
+  const scale =
+    t.maxScale === 1
+      ? 'native photo pixels'
+      : t.maxScale === 0.5
+        ? 'half the photo pixels'
+        : 'a quarter of the photo pixels'
+  return { label, scale, pages: t.maxPages }
+}
 
 // A triangle count as people say it: 650 k, 1.2 M.
 export function fmtTriangles(n) {
@@ -37,9 +52,9 @@ const TRIM = {
     'Surface no points support is removed, and thinly observed surface too; this can open holes where coverage is sparse',
 }
 
-// source: { name, count } of the dense cloud meshed, or null.
-// source: { name, count } of the dense cloud meshed, or null; basis: meshDepthPlan's.
-export function meshEffects(s, { source = null, basis = null } = {}) {
+// source: { name, count } of the dense cloud meshed, or null; basis: meshDepthPlan's;
+// cameras: the registered photos the texture is baked from.
+export function meshEffects(s, { source = null, basis = null, cameras = 0 } = {}) {
   const plan = meshDepthPlan(s, basis)
   const what = [
     plan.leafSpacings ? `leaves of ${Number(plan.leafSpacings.toPrecision(2))} point spacings` : '',
@@ -83,13 +98,23 @@ export function meshEffects(s, { source = null, basis = null } = {}) {
     : 'Off: every disconnected piece is kept.'
 
   const colour = s.colorize
-    ? 'Each vertex takes the colour of the nearest dense point.'
-    : 'Off: the mesh has no colour (Texture can add a photo texture later).'
-  return { solve, trim, holes, floaters, colour }
+    ? 'Each vertex takes the colour of the nearest dense point' +
+      (s.texture && cameras ? ': what viewers without the texture show, and faces no photo sees.' : '.')
+    : 'Off: the vertices have no colour' + (s.texture && cameras ? '; faces no photo sees are gray.' : '.')
+
+  const card = textureCard(s.textureQuality)
+  const texture = !s.texture
+    ? 'Off: the mesh keeps its vertex colours. Tools ▸ Mesh ▸ Texture can add a photo texture later.'
+    : !cameras
+      ? 'Not used: no photo is registered (no sparse model), so the mesh keeps its vertex colours.'
+      : `The ${plural(cameras, 'registered photo')} are projected onto the mesh, each face taking the best view, ` +
+        `at up to ${card.scale} on at most ${plural(card.pages, 'atlas page')}. Takes longer than the mesh ` +
+        'itself; Tools ▸ Mesh ▸ Texture has the finer settings.'
+  return { solve, trim, holes, floaters, colour, texture }
 }
 
 // The steps' short facts for Build Mesh's step chain (≤ SHORT_MAX characters).
-export function meshShorts(s, { source = null, basis = null } = {}) {
+export function meshShorts(s, { source = null, basis = null, cameras = 0 } = {}) {
   const plan = meshDepthPlan(s, basis)
   const solve = !source
     ? 'no dense cloud'
@@ -103,5 +128,10 @@ export function meshShorts(s, { source = null, basis = null } = {}) {
     holes: s.trim === 'off' ? 'nothing trimmed' : s.fillHoles ? 'small holes closed' : 'off',
     floaters: s.removeFloaters ? `< ${s.minPiecePct} % pieces out` : 'off',
     colour: s.colorize ? 'from the cloud' : 'off',
+    texture: !s.texture
+      ? 'off'
+      : !cameras
+        ? 'no photos'
+        : `${textureCard(s.textureQuality).label} · ${plural(cameras, 'photo')}`,
   }
 }

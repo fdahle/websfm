@@ -40,6 +40,50 @@ export function createMeshTexture({
       log('Texture: choose a mesh to texture', 'warn', 'Products')
       return null
     }
+    const prev = reconStatus.value
+    reconStatus.value = 'running'
+    try {
+      const res = await textureGeometry(
+        { pos: source.pos.slice(), idx: source.idx.slice(), col: source.col?.slice() ?? null },
+        settings,
+        onProgress,
+      )
+      if (!res) {
+        reconStatus.value = prev
+        return null
+      }
+      const cloud = addDerivedMesh(
+        { ...res.mesh, uv: res.mesh.uv, texture: res.texture },
+        {
+          name: name || `${source.name} (textured)`,
+          imported: !!source.imported,
+          from: [source],
+        },
+      )
+      cloud.textureSummary = { ...res.summary, sourceId: source.id, sourceName: source.name, settings }
+      // Show the result in place of its source; the source stays one toggle away.
+      source.visible = false
+      log(
+        `Textured mesh "${cloud.name}": ${res.mesh.count.toLocaleString('en')} triangles, ` +
+          `${pluralize(res.texture.pages.length, 'texture page')} in ${((performance.now() - tRun) / 1000).toFixed(1)} s`,
+        'success',
+        'Products',
+      )
+      reconStatus.value = 'done'
+      await save()
+      return cloud
+    } catch (err) {
+      log(`Texture failed: ${err?.message ?? err}`, 'error', 'Products')
+      reconStatus.value = 'error'
+      return null
+    }
+  }
+
+  // The photo texture of a mesh's geometry ({ pos, idx, col? }, copies the run may hand
+  // over to the workers), from the registered photos of the main sparse model: the run's
+  // { mesh (with uv, its vertices split along the seams), texture, summary }, or null
+  // (logged) when no photo can texture it. Texture Mesh and Build Mesh ▸ Texture share it.
+  async function textureGeometry({ pos, idx, col = null }, settings = {}, onProgress) {
     const cameras = mainSparseCloud.value?.cameras
     if (!cameras?.size) {
       log('Texture: needs a sparse model with registered cameras', 'error', 'Products')
@@ -109,39 +153,9 @@ export function createMeshTexture({
       log('Texture: no registered photo is available', 'error', 'Products')
       return null
     }
-    const pos = source.pos.slice(),
-      idx = source.idx.slice(),
-      col = source.col?.slice() ?? null
     const transfer = [pos.buffer, idx.buffer]
     if (col) transfer.push(col.buffer)
-    reconStatus.value = 'running'
-    try {
-      const res = await runTexture({ mesh: { pos, idx, col }, views, settings }, transfer, onProgress)
-      const cloud = addDerivedMesh(
-        { ...res.mesh, uv: res.mesh.uv, texture: res.texture },
-        {
-          name: name || `${source.name} (textured)`,
-          imported: !!source.imported,
-          from: [source],
-        },
-      )
-      cloud.textureSummary = { ...res.summary, sourceId: source.id, sourceName: source.name, settings }
-      // Show the result in place of its source; the source stays one toggle away.
-      source.visible = false
-      log(
-        `Textured mesh "${cloud.name}": ${res.mesh.count.toLocaleString('en')} triangles, ` +
-          `${pluralize(res.texture.pages.length, 'texture page')} in ${((performance.now() - tRun) / 1000).toFixed(1)} s`,
-        'success',
-        'Products',
-      )
-      reconStatus.value = 'done'
-      await save()
-      return cloud
-    } catch (err) {
-      log(`Texture failed: ${err?.message ?? err}`, 'error', 'Products')
-      reconStatus.value = 'error'
-      return null
-    }
+    return runTexture({ mesh: { pos, idx, col }, views, settings }, transfer, onProgress)
   }
 
   // The run on the pool (workers/ops/texture.js): worker 0 holds it (begin, layout, the
@@ -269,7 +283,7 @@ export function createMeshTexture({
     }
   }
 
-  return { textureMesh }
+  return { textureMesh, textureGeometry }
 }
 
 // A bake share's weight per photo, besides its texels: about what decoding one costs.

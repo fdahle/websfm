@@ -35,6 +35,7 @@ export function createDense({
   summary,
   upsertDenseCloud,
   upsertMeshCloud,
+  textureForMesh,
   withRegion,
   activeRegion,
 }) {
@@ -74,10 +75,12 @@ export function createDense({
     clouds,
     denseSummary,
     log,
+    mainSparseCloud,
     meshSource,
     meshSources,
     reconStatus,
     save,
+    textureForMesh,
     upsertMeshCloud,
   })
   const { densify, densifyParallel } = createFusionRun({

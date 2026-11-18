@@ -15,6 +15,7 @@ import {
   MESH_DEFAULTS,
   MESH_PRESETS,
   TEXTURE_DEFAULTS,
+  TEXTURE_PRESETS,
 } from './defaults.user.js'
 
 const ram = (runtime) => (runtime.ramBudgetBytes > 0 ? { ramBudgetBytes: runtime.ramBudgetBytes } : {})
@@ -78,8 +79,15 @@ export function orthoRunSettings(ui = {}, runtime = {}) {
 }
 
 /** Build Mesh. A named preset (a workflow block's) sets its fields over the others. */
+// Its Texture step becomes Texture Mesh's run settings at the chosen texture card, or
+// null for vertex colours alone.
 export function meshRunSettings(ui = {}, runtime = {}) {
-  return { ...MESH_DEFAULTS, ...ui, ...(MESH_PRESETS[ui.preset] || {}), ...ram(runtime) }
+  const { texture, textureQuality, ...mesh } = { ...MESH_DEFAULTS, ...ui, ...(MESH_PRESETS[ui.preset] || {}) }
+  return {
+    ...mesh,
+    ...ram(runtime),
+    texture: texture ? textureRunSettings(TEXTURE_PRESETS[textureQuality] ?? {}, runtime) : null,
+  }
 }
 
 /** Texture Mesh. */
