@@ -212,6 +212,11 @@ Notable changes to WebSfM. The format follows
   still need a DEM, and the model frame still needs a raster to measure on.
 
 ### Changed
+- **The log says why a georeference was dropped.** A georeference is kept only while what
+  it was fitted on stays the same; when it is dropped, the console now says what changed
+  (the camera positions, the GCPs, the photos, the cameras, the sparse model or the CRS,
+  with how many records) and to run Reconstruct ▸ Georeference again. A rebuilt sparse
+  model logs it as information, anything else as a warning; Detail lists the records.
 - **Photos on the map follow the ground.** View ▸ Map ▸ Photos now places each photo of
   the sparse model by its aligned camera: a 13 × 13 grid of rays per photo is cast onto a
   surface of the tie points, so a photo follows the relief and its lens distortion is

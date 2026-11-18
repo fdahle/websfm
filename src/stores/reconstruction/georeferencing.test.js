@@ -26,6 +26,7 @@ it.each(['pose', 'control', 'model', 'camera', 'stale fit'])(
       ]),
     )
     const georef = ref(null)
+    const log = vi.fn()
     const api = scope.run(() =>
       createGeoreferencing({
         sparseCameras: cameras,
@@ -37,7 +38,7 @@ it.each(['pose', 'control', 'model', 'camera', 'stale fit'])(
         currentCrs: () => 'EPSG:3031',
         modelStamp: () => model.value,
         save: vi.fn(),
-        log: vi.fn(),
+        log,
       }),
     )
     // Grid scale 2 at the pole of EPSG:3031, where the point scale factor is
@@ -54,6 +55,17 @@ it.each(['pose', 'control', 'model', 'camera', 'stale fit'])(
     // A fit for other evidence put in place (an older one restored), the evidence unchanged.
     if (field === 'stale fit') georef.value = { ...fitted, evidenceKey: 'other evidence' }
     expect(georef.value).toBeNull()
+    // The log says why: what changed, and at info only for a rebuilt model.
+    const [message, level] = log.mock.calls.find(([m]) => m.startsWith('Georeference dropped,'))
+    const why = {
+      'pose': 'the camera positions (1 edited)',
+      'control': 'the GCPs (1 added)',
+      'model': 'the sparse model',
+      'camera': 'the cameras (1 edited)',
+      'stale fit': 'the saved evidence',
+    }[field]
+    expect(message).toContain(`since it was fitted: ${why}.`)
+    expect(level).toBe(field === 'model' ? 'info' : 'warn')
     expect(api.poseResidualReport()).toEqual([])
     scope.stop()
   },

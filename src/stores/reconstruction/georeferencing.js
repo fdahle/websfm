@@ -25,7 +25,7 @@ import {
   subCovariance,
 } from '../../core/gcpAccuracy.js'
 import { isGroundControl } from '../../core/io/gcp.js'
-import { georefEvidenceKey } from '../../core/sfm/georefEvidence.js'
+import { georefEvidenceKey, evidenceChanges, evidenceChangeText } from '../../core/sfm/georefEvidence.js'
 import { suggestProjectedCrs, formatLatLon } from '../../core/crsSuggest.js'
 
 // One spelling of "may this point constrain the solve" (core/io/gcp.js), shared
@@ -154,10 +154,34 @@ export function createGeoreferencing({
   watch(
     [() => (georef.value ? evidenceKey.value : null), () => georef.value, () => restoring.value],
     () => {
-      if (!restoring.value && georef.value && !validGeoref.value) georef.value = null
+      if (!restoring.value && georef.value && !validGeoref.value) {
+        reportDroppedGeoref(georef.value.evidenceKey, evidenceKey.value)
+        georef.value = null
+      }
     },
     { flush: 'sync' },
   )
+
+  // A georeference is dropped when what it was fitted on changes. Say what changed: a
+  // rebuilt or edited sparse model is expected (info); anything else may surprise the
+  // user, so it warns, with which records moved at debug for a bug report.
+  function reportDroppedGeoref(savedKey, nowKey) {
+    const changes = evidenceChanges(savedKey, nowKey)
+    if (!changes.length) return
+    const modelChanged = changes.some((c) => c.part === 'model')
+    log(
+      `Georeference dropped, because these changed since it was fitted: ${evidenceChangeText(changes)}. ` +
+        (modelChanged
+          ? 'Run Reconstruct ▸ Georeference to fit it to this sparse model.'
+          : 'Run Reconstruct ▸ Georeference to fit it again.'),
+      modelChanged ? 'info' : 'warn',
+      'Georeferencing',
+    )
+    const examples = changes.flatMap((c) =>
+      c.examples.map((e) => `${c.part} ${e.key}: ${e.fields.length ? e.fields.join(', ') : 'replaced'}`),
+    )
+    if (examples.length) log(`Georeference dropped: changed records: ${examples.join('; ')}`, 'debug', 'Georeferencing')
+  }
 
   // 3D-3D correspondences for the SfM→CRS fit: registered sparse camera centres
   // ↔ imported camera poses (both keyed to images; poses are in the project CRS).

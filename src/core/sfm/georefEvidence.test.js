@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { georefEvidenceKey, currentEvidenceKey } from './georefEvidence.js'
+import { georefEvidenceKey, currentEvidenceKey, evidenceChanges, evidenceChangeText } from './georefEvidence.js'
 
 const evidence = (o = {}) => ({
   crs: 'EPSG:32636',
@@ -50,5 +50,41 @@ describe('the evidence a georeference was fitted on', () => {
     expect(currentEvidenceKey(undefined)).toBe(undefined)
     expect(currentEvidenceKey(null)).toBe(null)
     expect(currentEvidenceKey('{broken')).toBe('{broken')
+  })
+})
+
+describe('what changed since a georeference was fitted', () => {
+  const key = (o) => georefEvidenceKey(evidence(o))
+
+  it('names the part and the records that moved, and which of their fields', () => {
+    const now = key({
+      poses: [
+        { ...evidence().poses[0], z: 230 },
+        { id: 'p2', imageId: 2, x: 1, y: 2, z: 3 },
+      ],
+    })
+    const changes = evidenceChanges(key(), now)
+    expect(changes).toEqual([
+      {
+        part: 'poses',
+        name: 'the camera positions',
+        added: 1,
+        removed: 0,
+        changed: 1,
+        examples: [{ key: 'p1', fields: ['z'] }],
+      },
+    ])
+    expect(evidenceChangeText(changes)).toBe('the camera positions (1 added, 1 edited)')
+  })
+
+  it('tells a photo removed from a rebuilt model, in words for the log', () => {
+    const changes = evidenceChanges(key(), key({ model: 'm2', images: [] }))
+    expect(changes.map((c) => c.part)).toEqual(['model', 'images'])
+    expect(evidenceChangeText(changes)).toBe('the sparse model and the photos (1 removed)')
+  })
+
+  it('finds nothing in a key saved before names were left out, when nothing else changed', () => {
+    const old = JSON.stringify(evidence())
+    expect(evidenceChanges(old, key())).toEqual([])
   })
 })
