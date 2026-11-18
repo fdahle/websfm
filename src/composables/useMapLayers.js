@@ -94,6 +94,7 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
         if (file) {
           const layer = await createGpuRasterLayer(r, file)
           layer.set('fileKey', r.fileKey ?? r.id)
+          layer.set('styleKey', JSON.stringify(gpuRasterStyle(r)))
           layer.once('postrender', () => {
             r.gpuReady = true
           })
@@ -187,7 +188,15 @@ export function useMapLayers(ctx, { layers: wanted, modelCode, selectedId = () =
           // A GPU layer restyles in place while it draws the same file; a rebuilt
           // product (new fileKey), or one that must now draw its preview, is rebuilt.
           if ((!r.product || r.cog) && existing.get('fileKey') === (r.fileKey ?? r.id)) {
-            existing.setStyle(gpuRasterStyle(r))
+            // Only a changed style is set: setStyle compiles a new shader program (OL
+            // keeps no cache of them), so calling it on every opacity step redrew the
+            // orthophoto from scratch while the slider moved.
+            const style = gpuRasterStyle(r)
+            const key = JSON.stringify(style)
+            if (existing.get('styleKey') !== key) {
+              existing.setStyle(style)
+              existing.set('styleKey', key)
+            }
             continue
           }
         } else if (

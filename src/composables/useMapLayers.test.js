@@ -14,7 +14,7 @@ const gpuBuilt = []
 // Set to a promise to park the next GPU layer build until it resolves.
 const gpuGate = { wait: null, entered: null }
 vi.mock('../components/viewers/raster/gpuRaster.js', () => ({
-  gpuRasterStyle: (r) => ({ styleOf: r.id }),
+  gpuRasterStyle: (r) => ({ styleOf: r.id, adjust: r.adjust ?? null }),
   disposeRasterLayer: (layer) => {
     if (layer) disposed.push(layer)
   },
@@ -110,15 +110,23 @@ describe('useMapLayers', () => {
     expect(s.ids()).toEqual(['data:a-restyled'])
   })
 
-  it('restyles a GPU layer in place while it draws the same file; a new fileKey rebuilds it', async () => {
+  it('restyles a GPU layer in place only when its style changes; a new fileKey rebuilds it', async () => {
     const ortho = { ...preview('o'), product: true, cog: {}, fileKey: 'k1' }
     const s = setup([ortho])
     await s.sync()
     expect(gpuBuilt).toHaveLength(1)
     const layer = gpuBuilt[0]
     expect(layer.get('fileKey')).toBe('k1')
+    // An opacity step keeps the style: setStyle recompiles the layer's shaders.
+    ortho.opacity = 0.3
     await s.sync()
-    expect(layer.setStyle).toHaveBeenCalledWith({ styleOf: 'o' })
+    expect(layer.getOpacity()).toBe(0.3)
+    expect(layer.setStyle).not.toHaveBeenCalled()
+    ortho.adjust = { brightness: 0.2 }
+    await s.sync()
+    expect(layer.setStyle).toHaveBeenCalledWith({ styleOf: 'o', adjust: { brightness: 0.2 } })
+    await s.sync()
+    expect(layer.setStyle).toHaveBeenCalledTimes(1)
     expect(gpuBuilt).toHaveLength(1)
     ortho.fileKey = 'k2'
     await s.sync()
