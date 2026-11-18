@@ -63,13 +63,13 @@ short strip of wide-angle frames, Auto can bend the block towards its ends. If
 checkpoint errors grow towards the edges under Auto but not under None, keep None.
 
 ## Rolling shutter
-<!-- param: rollingShutter default: Off -->
+<!-- param: rollingShutter default: Estimate the readout time -->
 For drones without a mechanical shutter (most DJI Mini, Air and Mavic models): their
 sensor reads the rows one after another while the drone moves, which bends the block
 with little sign in the residuals and shows as check-point errors. **Estimate the
-readout time** solves it per camera group, the motion taken from the photos' capture
-times. Leave it off for a mechanical or global shutter, and for photos without a
-capture time. Experimental: compare the check points with it off.
+readout time** (the default) solves it per camera group, the motion taken from the
+photos' capture times; photos without a capture time are solved as global shutter. Turn
+it **Off** for a mechanical or global shutter, or if the check points get worse with it.
 
 ## Multispectral rig
 <!-- param: cameraRig default: One pose per capture -->

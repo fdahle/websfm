@@ -177,6 +177,17 @@ Notable changes to websfm. The format follows
   errors named no step at all), and the lines shown by default say bundle adjustment,
   calibration and tie point instead of BA, intrinsics and sparse point; solver internals
   moved to Detail. 529 warning, error and flagged lines were read by hand.
+- **Rolling shutter is on by default.** Sparse Model ▸ Rolling shutter now estimates the
+  readout time unless you turn it off; it acts only on photos with a capture time, so a
+  camera with a mechanical or global shutter solves to a readout near 0, and a project
+  that already ran Sparse Model keeps its last settings. On a DJI Mavic
+  Air 2 block (104 photos, 5 RTK GCPs, each left out in turn as the checkpoint), the
+  horizontal checkpoint error fell from 21.5 to 3.8 cm. With 4 GCPs the vertical error
+  rose from 42 to 52 cm, because the GCP-anchored adjustment barely bends the block
+  (it keeps the focal fixed below 5 GCPs and weighs each mark at 1 px against the tie
+  points); with the GCP marks weighted harder, On was equal or better vertically too
+  (26.8 vs 27.8 cm). Metashape on the same splits: Off 21.4 / 33.2 cm, Regularized
+  21.9 / 16.1 cm (camera references off, as the EXIF heights are above sea level).
 - **Quality Report ▸ Sparse in plain words.** Its tiles and table say tie points,
   reprojection and "before / after bundle adjustment" in full (it said Pre-BA, Post-BA,
   Keypts and Obs), and it follows the app's language, with numbers and dates as that

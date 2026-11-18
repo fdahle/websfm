@@ -11,7 +11,7 @@ const LEAD = 'Experimental: not yet checked on enough real data.'
 export const EXPERIMENTAL = {
   rollingShutter: {
     feature: 'Rolling shutter',
-    unchecked: 'whether estimating the readout time improves accuracy on a DJI block with independent checkpoints',
+    unchecked: 'drones other than the DJI Mavic Air 2, and blocks held by camera GPS alone',
   },
   cameraRig: {
     feature: 'Multispectral rig',

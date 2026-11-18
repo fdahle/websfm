@@ -247,9 +247,11 @@ export const RECONSTRUCT_DEFAULTS = {
   refineIntrinsics: 'auto',
   // 'off' | 'on': estimate each camera group's rolling-shutter readout time in bundle
   // adjustment, the cameras' motion taken from their capture times (core/sfm/
-  // rollingShutter.js). Off until a real drone block with check points measures the gain
-  // (plan-after-0.7 ▸ RSH); a global-shutter camera gains nothing from it.
-  rollingShutter: 'off',
+  // rollingShutter.js). On: a DJI Mavic Air 2 block with 5 RTK GCPs left out in turn
+  // (CHANGELOG ▸ Rolling shutter on) gained 4.5× in horizontal checkpoint error. It acts
+  // only on photos with capture times and neighbours in time; a global-shutter camera
+  // solves to a readout near 0.
+  rollingShutter: 'on',
   // 'on' | 'off': a multispectral camera's photos of one trigger share one pose, each
   // band at its lens offset (core/sfm/rigModel.js). Acts only on band photos (MicaSense);
   // the lenses are rigidly mounted, so a pose per band photo only adds unknowns.

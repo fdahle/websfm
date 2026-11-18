@@ -93,7 +93,7 @@ describe('step chain facts', () => {
       register: '347 images · 4 px',
       ba: '≤ 30 iterations',
       calibration: 'auto',
-      rollingShutter: 'off',
+      rollingShutter: 'readout estimated',
       cameraRig: '556 captures',
     })
     expect(SHORTS.dense.sample).toBe('every pixel')
