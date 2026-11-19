@@ -18,7 +18,7 @@ camera poses and the scene geometry, reusing the cached
 [depth maps](help:depth-map) as a z-buffer so that only the surface actually
 visible in each direction contributes colour.
 
-<!-- TODO(image): assets/orthophoto-vs-perspective.svg - a terrain profile with a building, showing the perspective camera's rays making the building lean and displacing a hilltop, next to the parallel top-down rays of the ortho projection, with one occluded facade greyed out to motivate the z-buffer. -->
+![Left, a perspective camera over a hill and a building: rays to the roof corners and the hilltop, carried down to the ground, land away from where they stand, so the building leans out, and the ground behind the building is hidden from this photo. Right, the orthophoto's parallel rays straight down put every point over its own place.](assets/orthophoto-vs-perspective.svg)
 
 Most ground is seen by several photos, so an orthophoto is also a **mosaic**: each
 area has to come from one of them. WebSfM prefers the photo that looks most nearly
@@ -35,7 +35,7 @@ the exposure in each photo's EXIF.
 detail over a pixel or two and brightness over a wide band. Both work in linear
 light, the physical intensity before display gamma.
 
-<!-- TODO(image): assets/ortho-seamlines.svg - nadir points of a 3×3 photo block over the ground, the region each photo is given (Voronoi-like cells), one seam bending around a building, with the blending band either side of it. -->
+![Nine nadir points of a 3 × 3 photo block, each with the region of ground its photo colours, the regions bordered by seamlines with a blending band either side; at one building the straight border through the roof is replaced by a seam that bends round it.](assets/ortho-seamlines.svg)
 
 Where a surface is hidden from every camera, no colour can be recovered — the
 orthophoto's holes are an honest map of what the block did not see, and are best

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 360" font-family="sans-serif" font-size="13">
+  <rect width="700" height="360" fill="#1b1f27"/>
+  <rect x="20" y="50" width="160" height="180" fill="#5aa9e6" opacity="0.1"/>
+  <rect x="180" y="50" width="160" height="180" fill="#e6b84f" opacity="0.1"/>
+  <rect x="20" y="50" width="320" height="180" fill="none" stroke="#6b7280" stroke-width="1"/>
+  <text x="60" y="68" fill="#5aa9e6" font-size="11">photo A</text>
+  <text x="300" y="68" fill="#e6b84f" font-size="11" text-anchor="end">photo B</text>
+  <clipPath id="sl0l"><rect x="20" y="50" width="160.0" height="180"/></clipPath>
+  <clipPath id="sl0r"><rect x="180.0" y="50" width="160.0" height="180"/></clipPath>
+  <g clip-path="url(#sl0l)">
+  <rect x="150" y="120" width="60" height="46" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <rect x="162" y="108" width="60" height="46" fill="#9ca3af" stroke="#c9d1d9" stroke-width="1.2"/>
+  </g>
+  <g clip-path="url(#sl0r)">
+  <rect x="150" y="120" width="60" height="46" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <rect x="138" y="115" width="60" height="46" fill="#9ca3af" stroke="#c9d1d9" stroke-width="1.2"/>
+  </g>
+  <line x1="180" y1="50" x2="180" y2="230" stroke="#ef6f6c" stroke-width="2.2"/>
+  <text x="186" y="222" fill="#ef6f6c" font-size="11">the roof breaks at the seam</text>
+  <text x="180" y="34" fill="#c9d1d9" font-size="12" text-anchor="middle">nearest nadir: straight through the roof</text>
+  <rect x="365" y="50" width="160" height="180" fill="#5aa9e6" opacity="0.1"/>
+  <rect x="525" y="50" width="160" height="180" fill="#e6b84f" opacity="0.1"/>
+  <rect x="365" y="50" width="320" height="180" fill="none" stroke="#6b7280" stroke-width="1"/>
+  <text x="405" y="68" fill="#5aa9e6" font-size="11">photo A</text>
+  <text x="645" y="68" fill="#e6b84f" font-size="11" text-anchor="end">photo B</text>
+  <rect x="495" y="120" width="60" height="46" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <rect x="483" y="115" width="60" height="46" fill="#9ca3af" stroke="#c9d1d9" stroke-width="1.2"/>
+  <path d="M 525 50 L 525 86 Q 455 90 455 143 Q 455 192 525 200 L 525 230" fill="none" stroke="#7ee787" stroke-width="2.2"/>
+  <text x="525" y="222" fill="#7ee787" font-size="11" text-anchor="middle">the whole building from B</text>
+  <text x="525" y="34" fill="#c9d1d9" font-size="12" text-anchor="middle">graph cut: round the building</text>
+  <image x="20" y="270" width="320" height="40" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAKCAYAAAAEqljUAAAA40lEQVR42u3QP+tHQBwH8O+zMsvfgVH5M7FKiUEJWSxilTIqq5RSLJJSFovn8/7lnsbvhnd3w33ed/f69X2PZVmwbRuO4yC57xvv++K6LpzniWmaMAwD2rZFkiSo6xpFUZCEYYg4jlFVFbquwziOpO+b/bqe5yHZ952s67pinmc0TYOyLCEIAliWhSiK4HkeHMeRvaZpCIIArusiz3NyNk1Tcvc36/s+oiiC53kwTROWZUFRFDAMA1mWIUkSVFWFYRjQdR2O48C2bWRZRv7wvf3r/VEACkABKAAFoAAUgAL8V4A/K9V0d7JmbroAAAAASUVORK5CYII="/>
+  <rect x="20" y="270" width="320" height="40" fill="none" stroke="#6b7280" stroke-width="1"/>
+  <line x1="180" y1="266" x2="180" y2="314" stroke="#e6b84f" stroke-width="1.4" stroke-dasharray="3 3"/>
+  <text x="180" y="260" fill="#9ca3af" font-size="11" text-anchor="middle">before colour balance: an exposure step</text>
+  <image x="365" y="270" width="320" height="40" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAKCAYAAAAEqljUAAAA10lEQVR42u2Qy8pGUBSGv3tUBjIhJIchOQ1EmUgOKeWUpJSSidze+7fXbfx78LbXZD3r3c8vz3MMw4BpmrDvO+W6Lrzvi/M8cRwH2rZFURQIwxCyLMN1Xei6ThEEAZIkwXEcJEmCuq6Jx3YZ63keyrZt9I7jiL7v4fs+LMsihqIoMAwDmqZBVVWaPc9D13Uoy5J2WadlWXDfN77vQ9M0dKeqKkRRhDiOYds2RFGEaZrEYD1Z5yAIkGUZ0jTFuq6Y55n+xbg/LoAL4AK4AC6AC+ACuID/KuAPF69z/8ZjJugAAAAASUVORK5CYII="/>
+  <rect x="365" y="270" width="320" height="40" fill="none" stroke="#6b7280" stroke-width="1"/>
+  <line x1="525" y1="266" x2="525" y2="314" stroke="#e6b84f" stroke-width="1.4" stroke-dasharray="3 3"/>
+  <text x="525" y="260" fill="#9ca3af" font-size="11" text-anchor="middle">after: one gain per photo, no step</text>
+  <text x="350" y="344" fill="#9ca3af" font-size="11" text-anchor="middle">seams are placed where the photos agree, then their brightness is balanced</text>
+</svg>

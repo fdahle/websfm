@@ -17,7 +17,7 @@ chart neighbouring vertices change as little as possible. Deep inside a large ch
 correction fades towards the value its seams agree on, so the photo's own detail is
 kept.
 
-<!-- TODO(image): assets/seam-levelling.svg - two charts meeting at a seam, a brightness step before, the smooth ramps added on each side after. -->
+![Brightness along a line across a seam between chart A and chart B: before, a step at the seam; the correction added, a smooth ramp up on chart A's side and down on chart B's, fading away from the seam; after, the same detail with no step.](assets/seam-levelling.svg)
 
 Two choices keep it from doing harm. WebSfM levels **brightness only**: correcting
 red, green and blue separately turned a vine chart purple where its seams met brick.

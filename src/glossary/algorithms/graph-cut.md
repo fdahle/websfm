@@ -19,7 +19,7 @@ cheapest cut, the **minimum cut**, equals the maximum flow that can pass from on
 terminal to the other (Ford and Fulkerson). WebSfM computes it with the
 Boykov–Kolmogorov algorithm, which is fast on image grids.
 
-<!-- TODO(image): assets/graph-cut.svg - a 4×4 pixel grid as nodes, two terminal nodes above and below, edge widths showing their costs, and the cheapest cut drawn as a curve that separates the grid along its weakest edges. -->
+![A 4 × 4 grid of pixel nodes between two terminals, A above and B below. Grey edges join neighbours, thicker where disagreeing costs more; gold and blue edges join each pixel to the terminals by its preference. A red staircase line, the minimum cut, follows the weakest grey edges and splits the pixels into an A group and a B group.](assets/graph-cut.svg)
 
 With more than two labels, **alpha-expansion** (Boykov, Veksler and Zabih, 2001)
 repeats two-label cuts: for each label in turn, one cut decides which pixels switch to

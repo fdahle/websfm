@@ -2247,13 +2247,317 @@ def clouddist():
     b += text(350, 326, 'signed distance: blue below the reference, white on it, red above', GREY, 11, 'middle')
     svg('cloud-distance.svg', W, H, b)
 
+def voronoi(sites, box):
+    # Each site's cell: the box clipped by the half-planes nearer to it than to the others.
+    x0, y0, x1, y1 = box
+    cells = []
+    for i, p in enumerate(sites):
+        poly_ = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        for j, q in enumerate(sites):
+            if i == j: continue
+            m = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2); n = (q[0] - p[0], q[1] - p[1])
+            inside = lambda a: (a[0] - m[0]) * n[0] + (a[1] - m[1]) * n[1] <= 0
+            out = []
+            for a, c in zip(poly_, poly_[1:] + poly_[:1]):
+                ia, ic = inside(a), inside(c)
+                if ia: out.append(a)
+                if ia != ic:
+                    da = (a[0] - m[0]) * n[0] + (a[1] - m[1]) * n[1]; dc = (c[0] - m[0]) * n[0] + (c[1] - m[1]) * n[1]
+                    t = da / (da - dc); out.append((a[0] + t * (c[0] - a[0]), a[1] + t * (c[1] - a[1])))
+            poly_ = out
+        cells.append(poly_)
+    return cells
+
+# ── orthophoto-vs-perspective.svg ────────────────────────────────────────────
+def orthopersp():
+    W, H = 700, 330
+    b = ''
+    G = 240
+    hill = lambda x: 55 * math.exp(-((x - 70) / 38) ** 2)
+    B0, B1, BH = 215, 265, 85
+    def scene(ox):
+        nonlocal b
+        b += poly([(ox + x, G - hill(x)) for x in range(0, 320, 4)], GREY, w=2)
+        b += rect(ox + B0, G - BH, B1 - B0, BH, GREY, fill=RAISED, sw=1.6)
+    # left: perspective
+    ox = 20; C = (ox + 150, 50)
+    scene(ox)
+    # the ground hidden behind the building from this camera
+    far_top = (ox + B1, G - BH)
+    t = (G - C[1]) / (far_top[1] - C[1]); shadow_end = C[0] + t * (far_top[0] - C[0])
+    b += poly([(ox + B1, G), (shadow_end, G), (ox + B1, G - BH)], DIM, fill=DIM, w=1, op=0.6, closed=True)
+    b += text(ox + B1 + 18, G - BH - 6, 'hidden from', GREY, 11) + text(ox + B1 + 18, G - BH + 8, 'this photo', GREY, 11)
+    for P, c in (((ox + B0, G - BH), RED), ((ox + B1, G - BH), RED), ((ox + 70, G - hill(70)), GOLD)):
+        t = (G - C[1]) / (P[1] - C[1]); gx = C[0] + t * (P[0] - C[0])
+        b += line(*C, *P, BLUE, 1.2) + line(*P, gx, G, BLUE, 1, '3 3')
+        b += line(P[0], G + 14, P[0], G + 22, GREEN, 2) + line(gx, G + 14, gx, G + 22, c, 2)
+        b += arrow(P[0], G + 18, gx + (3 if gx > P[0] else -3), G + 18, c, 1.2, 5)
+    b += cam2d(*C, math.pi / 2, size=16)
+    b += text(ox + 150, 30, 'photo: perspective', FG, 13, 'middle')
+    b += text(ox + 150, 290, 'the roof and the hilltop land away from where', GREY, 11, 'middle') + text(ox + 150, 304, 'they stand (red): the building leans out', GREY, 11, 'middle')
+    # right: orthographic
+    ox = 365
+    scene(ox)
+    for x in list(range(20, 320, 22)):
+        top = G - (BH if B0 <= x <= B1 else hill(x))
+        b += line(ox + x, 50, ox + x, top, BLUE, 1, op=0.7)
+    for P in ((ox + B0, G - BH), (ox + B1, G - BH), (ox + 70, G - hill(70))):
+        b += line(P[0], G + 14, P[0], G + 22, GREEN, 2)
+    b += text(ox + 160, 30, 'orthophoto: straight down everywhere', FG, 13, 'middle')
+    b += text(ox + 160, 290, 'every point over its own place (green):', GREY, 11, 'middle') + text(ox + 160, 304, 'one scale, measurable like a map', GREY, 11, 'middle')
+    b += text(350, 324, 'the depth maps act as a z-buffer: ground hidden in one photo is coloured from another', GREY, 11, 'middle')
+    svg('orthophoto-vs-perspective.svg', W, H, b)
+
+# ── ortho-seamlines.svg ──────────────────────────────────────────────────────
+def orthoseams():
+    W, H = 700, 350
+    rnd = random.Random(14)
+    box = (40, 40, 400, 320)
+    sites = [(95 + 125 * i + rnd.gauss(0, 10), 85 + 95 * j + rnd.gauss(0, 8)) for j in range(3) for i in range(3)]
+    cells = voronoi(sites, box)
+    b = rect(box[0], box[1], box[2] - box[0], box[3] - box[1], DIM, fill=RAISED, sw=1)
+    # a building on the border of cells 4 and 5
+    p, q = sites[4], sites[5]
+    m = ((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
+    bx, by, bw, bh = m[0] - 16, m[1] - 18, 30, 34
+    for k, cell in enumerate(cells):
+        b += poly(cell, DIM, fill=[BLUE, GOLD, GREEN][k % 3], w=1, op=0.12, closed=True)
+    # every border, the blending band either side of it
+    edges = set()
+    for cell in cells:
+        for a, c in zip(cell, cell[1:] + cell[:1]):
+            on_box = (abs(a[0] - c[0]) < 1e-6 and a[0] in (box[0], box[2])) or (abs(a[1] - c[1]) < 1e-6 and a[1] in (box[1], box[3]))
+            if not on_box: edges.add(tuple(sorted(((round(a[0], 1), round(a[1], 1)), (round(c[0], 1), round(c[1], 1))))))
+    bent = None
+    for (a, c) in edges:
+        mid = ((a[0] + c[0]) / 2, (a[1] + c[1]) / 2)
+        if math.dist(mid, m) < 30 and bent is None: bent = (a, c); continue
+        b += line(*a, *c, GOLD, 12, op=0.18) + line(*a, *c, GOLD, 1.6)
+    a, c = bent
+    # the seam bends round the building, through open ground
+    left = bx - 10
+    pth = f'M {f2(a[0])} {f2(a[1])} L {f2(a[0] + (c[0] - a[0]) * 0.25)} {f2(by - 12)} Q {f2(left)} {f2(by - 6)} {f2(left)} {f2(by + bh / 2)} Q {f2(left)} {f2(by + bh + 6)} {f2(a[0] + (c[0] - a[0]) * 0.75)} {f2(by + bh + 12)} L {f2(c[0])} {f2(c[1])}'
+    b += path(pth, GOLD, w=12, op=0.18) + path(pth, GOLD, w=2.2)
+    b += line(*a, *c, RED, 1.2, '4 3')
+    b += rect(bx, by, bw, bh, FG, fill=GREY, sw=1.2)
+    for k, s_ in enumerate(sites): b += cross(*s_, BLUE, 5, 2)
+    # a key on the right
+    kx = 440
+    b += cross(kx + 8, 72, BLUE, 6, 2) + text(kx + 24, 70, 'nadir point: where a photo', FG, 12) + text(kx + 24, 85, 'looks straight down', FG, 12)
+    b += rect(kx, 106, 16, 16, DIM, fill=BLUE, op=0.25) + text(kx + 24, 119, 'the ground that photo colours', FG, 12)
+    b += line(kx, 152, kx + 16, 152, GOLD, 2) + text(kx + 24, 157, 'seamline', GOLD, 12)
+    b += line(kx, 186, kx + 16, 186, GOLD, 12, op=0.25) + text(kx + 24, 191, 'blending band either side', GOLD, 12)
+    b += line(kx, 220, kx + 16, 220, RED, 1.2, '4 3') + text(kx + 24, 225, 'the straight seam through the roof,', RED, 12)
+    b += text(kx + 24, 241, 'bent round it by the graph cut', RED, 12)
+    b += text(220, 340, 'a 3 × 3 block of photos split into the regions each one colours', GREY, 11, 'middle')
+    svg('ortho-seamlines.svg', W, H, b)
+
+# ── seamlines.svg ────────────────────────────────────────────────────────────
+def seamlines():
+    W, H = 700, 360
+    b = ''
+    # two photos meeting at a seam; a building sits on the midline and leans differently in each
+    for pi, (lab, bent) in enumerate((('nearest nadir: straight through the roof', False), ('graph cut: round the building', True))):
+        ox, oy, w, h = 20 + pi * 345, 50, 320, 180
+        mx = ox + w / 2
+        b += rect(ox, oy, w / 2, h, fill=BLUE, op=0.10) + rect(mx, oy, w / 2, h, fill=GOLD, op=0.10)
+        b += rect(ox, oy, w, h, DIM, sw=1)
+        b += text(ox + 40, oy + 18, 'photo A', BLUE, 11) + text(ox + w - 40, oy + 18, 'photo B', GOLD, 11, 'end')
+        bx, by, bw, bh = mx - 30, oy + 70, 60, 46
+        # each photo sees the roof displaced away from its own nadir, and a little differently
+        def building(dx, dy):
+            return rect(bx, by, bw, bh, DIM, fill=RAISED, sw=1) + rect(bx + dx, by + dy, bw, bh, FG, fill=GREY, sw=1.2)
+        A_, B_ = building(12, -12), building(-12, -5)
+        cl, cr = f'sl{pi}l', f'sl{pi}r'
+        if not bent:
+            b += f'  <clipPath id="{cl}"><rect x="{ox}" y="{oy}" width="{w / 2}" height="{h}"/></clipPath>\n  <clipPath id="{cr}"><rect x="{mx}" y="{oy}" width="{w / 2}" height="{h}"/></clipPath>\n'
+            b += f'  <g clip-path="url(#{cl})">\n' + A_ + '  </g>\n' + f'  <g clip-path="url(#{cr})">\n' + B_ + '  </g>\n'
+            b += line(mx, oy, mx, oy + h, RED, 2.2)
+            b += text(mx + 6, oy + h - 8, 'the roof breaks at the seam', RED, 11)
+        else:
+            b += B_
+            pth = f'M {f2(mx)} {oy} L {f2(mx)} {f2(by - 34)} Q {f2(bx - 40)} {f2(by - 30)} {f2(bx - 40)} {f2(by + bh / 2)} Q {f2(bx - 40)} {f2(by + bh + 26)} {f2(mx)} {f2(by + bh + 34)} L {f2(mx)} {f2(oy + h)}'
+            b += path(pth, GREEN, w=2.2)
+            b += text(ox + w / 2, oy + h - 8, 'the whole building from B', GREEN, 11, 'middle')
+        b += text(ox + w / 2, 34, lab, FG, 12, 'middle')
+    # colour balance across the seam
+    sy = 270
+    for k, (lab, gains) in enumerate((('before colour balance: an exposure step', (0.62, 0.42)), ('after: one gain per photo, no step', (0.52, 0.52)))):
+        x0 = 20 + k * 345
+        rnd = random.Random(7)
+        row = []
+        for i in range(64):
+            g = gains[0] if i < 32 else gains[1]
+            v = g + 0.12 * math.sin(i / 3.1) + rnd.gauss(0, 0.03)
+            row.append(v)
+        img = [row for _ in range(10)]
+        b += image(x0, sy, 320, 40, gray_px(img, 0.1, 0.9), smooth=False) + rect(x0, sy, 320, 40, DIM, sw=1)
+        b += line(x0 + 160, sy - 4, x0 + 160, sy + 44, GOLD, 1.4, '3 3')
+        b += text(x0 + 160, sy - 10, lab, GREY, 11, 'middle')
+    b += text(350, 344, 'seams are placed where the photos agree, then their brightness is balanced', GREY, 11, 'middle')
+    svg('seamlines.svg', W, H, b)
+
+# ── multiband-blending.svg ───────────────────────────────────────────────────
+def multiband():
+    W, H = 700, 380
+    w, h = 72, 40
+    sc = scene_img(w, h, 27)
+    A = [[0.75 * v - 0.02 for v in row] for row in sc]
+    Bm = [[0.9 * v + 0.2 for v in row] for row in sc]        # the same ground, exposed brighter
+    step = [[1.0 if i < w / 2 else 0.0 for i in range(w)] for _ in range(h)]
+    def bands(I):
+        g1, g2 = gauss(I, 1.2), gauss(I, 4.0)
+        return [[[a - c for a, c in zip(r1, r2)] for r1, r2 in zip(I, g1)], [[a - c for a, c in zip(r1, r2)] for r1, r2 in zip(g1, g2)], g2]
+    bA, bB = bands(A), bands(Bm)
+    sig = [0.4, 2.5, 10.0]
+    masks = [gauss(step, s) for s in sig]
+    blended = [[[m * a + (1 - m) * c for m, a, c in zip(rm, ra, rc)] for rm, ra, rc in zip(masks[k], bA[k], bB[k])] for k in range(3)]
+    result = [[sum(blended[k][j][i] for k in range(3)) for i in range(w)] for j in range(h)]
+    naive = [[A[j][i] if i < w / 2 else Bm[j][i] for i in range(w)] for j in range(h)]
+    S = 2.4; iw, ih = w * S, h * S
+    b = ''
+    b += text(20 + iw / 2, 40, 'cut at the seam: a step', FG, 12, 'middle')
+    b += image(20, 50, iw, ih, gray_px(naive, 0, 1.1)) + rect(20, 50, iw, ih, DIM, sw=1)
+    b += line(20 + iw / 2, 46, 20 + iw / 2, 54 + ih, GOLD, 1.2, '3 3')
+    names = ['fine detail', 'medium', 'coarse: brightness']
+    for k in range(3):
+        y = 160 + k * 72
+        m = max(abs(v) for row in blended[k] for v in row) if k < 2 else None
+        b += image(250, y, iw * 0.6, ih * 0.6, gray_px(masks[k], 0, 1)) + rect(250, y, iw * 0.6, ih * 0.6, DIM, sw=1)
+        px = map_px(blended[k], lambda v: ramp((max(-1, min(1, v / m)) + 1) / 2, GRAYS)) if k < 2 else gray_px(blended[k], 0, 1.1)
+        b += image(390, y, iw * 0.6, ih * 0.6, px) + rect(390, y, iw * 0.6, ih * 0.6, DIM, sw=1)
+        b += text(240, y + ih * 0.3 + 4, names[k], GREY, 11, 'end')
+    b += text(250 + iw * 0.3, 148, 'its mask', GREY, 11, 'middle') + text(390 + iw * 0.3, 148, 'band, blended', GREY, 11, 'middle')
+    b += text(250 + iw * 0.3, 92, 'narrow for fine detail,', GREY, 11, 'middle') + text(250 + iw * 0.3, 106, 'wide for brightness', GREY, 11, 'middle')
+    rx = 520
+    b += text(rx + iw * 0.35, 40, 'bands added back', FG, 12, 'middle')
+    b += image(rx, 50, iw * 0.7, ih * 0.7, gray_px(result, 0, 1.1)) + rect(rx, 50, iw * 0.7, ih * 0.7, DIM, sw=1)
+    b += text(rx + iw * 0.35, 130, 'no step, no ghosting', GREEN, 12, 'middle')
+    for k in range(3):
+        y = 160 + k * 72 + ih * 0.3
+        b += line(390 + iw * 0.6 + 6, y, rx + iw * 0.35, 128 + 14, DIM, 1, '3 3')
+    b += text(350, 372, 'each band mixes the two photos (left: A, right: B) over its own width, then the bands are summed', GREY, 11, 'middle')
+    svg('multiband-blending.svg', W, H, b)
+
+# ── seam-levelling.svg ───────────────────────────────────────────────────────
+def seamlevel():
+    W, H = 700, 340
+    rnd = random.Random(9)
+    xs = [i for i in range(0, 301, 3)]
+    seam = 150
+    tex = [0.06 * math.sin(x / 7) + 0.03 * math.sin(x / 2.3) + rnd.gauss(0, 0.01) for x in xs]
+    base = [(0.42 if x < seam else 0.62) for x in xs]
+    step = 0.62 - 0.42
+    # the correction: half the step at the seam, fading away from it
+    corr = [(step / 2) * math.exp(-abs(x - seam) / 55) * (1 if x < seam else -1) for x in xs]
+    b = ''
+    def plot(ox, oy, vals, c, lab, lo=0.2, hi=0.85, h=90, zero=False):
+        nonlocal b
+        b += line(ox, oy + h, ox + 300, oy + h, DIM, 1)
+        b += line(ox + seam, oy - 4, ox + seam, oy + h + 4, GOLD, 1.2, '3 3')
+        pts = [(ox + x, oy + h - h * (v - lo) / (hi - lo)) for x, v in zip(xs, vals)]
+        left = [p for x, p in zip(xs, pts) if x < seam]; right = [p for x, p in zip(xs, pts) if x >= seam]
+        b += poly(left, c, w=1.8) + poly(right, c, w=1.8)
+        b += text(ox + 150, oy - 12, lab, FG, 12, 'middle')
+    plot(30, 60, [b_ + t for b_, t in zip(base, tex)], GREY, 'before: a step at the seam')
+    plot(370, 60, [b_ + t + c for b_, t, c in zip(base, tex, corr)], GREEN, 'after: the same detail, no step')
+    # the corrections themselves
+    ox, oy = 200, 230
+    b += line(ox, oy + 40, ox + 300, oy + 40, DIM, 1) + line(ox + seam, oy - 4, ox + seam, oy + 84, GOLD, 1.2, '3 3')
+    pts = [(ox + x, oy + 40 - 300 * c) for x, c in zip(xs, corr)]
+    b += poly([p for x, p in zip(xs, pts) if x < seam], BLUE, w=2) + poly([p for x, p in zip(xs, pts) if x >= seam], RED, w=2)
+    b += text(ox + 150, oy - 14, 'the added correction: a smooth ramp on each side', FG, 12, 'middle')
+    b += text(ox + 40, oy + 22, 'chart A: up', BLUE, 11) + text(ox + 260, oy + 72, 'chart B: down', RED, 11, 'end')
+    b += text(30 + 75, 176, 'chart A', GREY, 11, 'middle') + text(30 + 225, 176, 'chart B', GREY, 11, 'middle')
+    b += text(350, 330, 'brightness along a line across the seam; deep inside a chart the correction fades', GREY, 11, 'middle')
+    svg('seam-levelling.svg', W, H, b)
+
+# ── graph-cut.svg ────────────────────────────────────────────────────────────
+def graphcut():
+    W, H = 700, 400
+    n = 4
+    # each pixel's preference for label A (cost of B) and B (cost of A)
+    prefA = [[0.95, 0.9, 0.85, 0.6], [0.9, 0.85, 0.55, 0.2], [0.85, 0.3, 0.15, 0.1], [0.4, 0.15, 0.1, 0.05]]
+    # disagreement costs between neighbours: low along a diagonal valley
+    def ncost(a, c):
+        (i, j), (k, l) = a, c
+        mid = ((i + k) / 2, (j + l) / 2)
+        return 0.12 + 1.1 * min(1, abs(mid[0] + mid[1] - 2.5) / 1.2)
+    nodes = [(i, j) for j in range(n) for i in range(n)]
+    idx = {p: k + 2 for k, p in enumerate(nodes)}; Sx, Tx = 0, 1
+    cap = {}
+    def add(u, v, c): cap[(u, v)] = cap.get((u, v), 0) + c
+    for (i, j) in nodes:
+        add(Sx, idx[(i, j)], prefA[j][i]); add(idx[(i, j)], Tx, 1 - prefA[j][i])
+        for di, dj in ((1, 0), (0, 1)):
+            q = (i + di, j + dj)
+            if q in idx: c = ncost((i, j), q); add(idx[(i, j)], idx[q], c); add(idx[q], idx[(i, j)], c)
+    # Edmonds–Karp max flow
+    flow = {k: 0 for k in cap}
+    adj = {}
+    for (u, v) in cap: adj.setdefault(u, set()).add(v); adj.setdefault(v, set()).add(u)
+    res = lambda u, v: cap.get((u, v), 0) - flow.get((u, v), 0) + flow.get((v, u), 0) * 0
+    def resid(u, v): return cap.get((u, v), 0) - flow.get((u, v), 0) + flow.get((v, u), 0)
+    total = 0
+    while True:
+        par = {Sx: None}; qu = [Sx]
+        while qu and Tx not in par:
+            u = qu.pop(0)
+            for v in adj[u]:
+                if v not in par and resid(u, v) > 1e-9: par[v] = u; qu.append(v)
+        if Tx not in par: break
+        path_ = []; v = Tx
+        while par[v] is not None: path_.append((par[v], v)); v = par[v]
+        f = min(resid(u, v) for u, v in path_)
+        for u, v in path_:
+            back = min(f, flow.get((v, u), 0)); flow[(v, u)] = flow.get((v, u), 0) - back
+            flow[(u, v)] = flow.get((u, v), 0) + f - back
+        total += f
+    side = set(par)                        # reachable from S: label A
+    b = ''
+    ox, oy, c = 230, 110, 62
+    P = lambda i, j: (ox + i * c, oy + j * c)
+    Spt, Tpt = (ox + 1.5 * c, 50), (ox + 1.5 * c, oy + 3 * c + 70)
+    for (i, j) in nodes:
+        p = P(i, j)
+        b += line(*p, *Spt, GOLD, 0.6 + 4 * prefA[j][i], op=0.35) + line(*p, *Tpt, BLUE, 0.6 + 4 * (1 - prefA[j][i]), op=0.35)
+    for (i, j) in nodes:
+        for di, dj in ((1, 0), (0, 1)):
+            q = (i + di, j + dj)
+            if q in idx: b += line(*P(i, j), *P(*q), GREY, 0.8 + 6 * ncost((i, j), q))
+    # the cut: the dual segments of every severed neighbour edge
+    segs = []
+    for (i, j) in nodes:
+        for di, dj in ((1, 0), (0, 1)):
+            q = (i + di, j + dj)
+            if q in idx and ((idx[(i, j)] in side) != (idx[q] in side)):
+                mx, my = P(i + di / 2, j + dj / 2)
+                if di: segs.append(((mx, my - c / 2), (mx, my + c / 2)))
+                else: segs.append(((mx - c / 2, my), (mx + c / 2, my)))
+    for a, d in segs: b += line(*a, *d, RED, 3)
+    for (i, j) in nodes:
+        a_side = idx[(i, j)] in side
+        b += circ(*P(i, j), 11, GOLD if a_side else BLUE) + circ(*P(i, j), 11, BG, fill=False, w=2)
+    b += circ(*Spt, 15, GOLD) + text(Spt[0], Spt[1] + 5, 'A', BG, 14, 'middle')
+    b += circ(*Tpt, 15, BLUE) + text(Tpt[0], Tpt[1] + 5, 'B', BG, 14, 'middle')
+    b += text(Spt[0] + 24, Spt[1] + 4, 'terminal: label A', GOLD, 12) + text(Tpt[0] + 24, Tpt[1] + 4, 'terminal: label B', BLUE, 12)
+    lx = 20
+    b += text(lx, 130, 'grey edges: what two', GREY, 11) + text(lx, 145, 'neighbours disagreeing costs', GREY, 11)
+    b += text(lx, 175, 'gold and blue edges: each', GREY, 11) + text(lx, 190, 'pixel’s preference', GREY, 11)
+    b += text(lx, 220, 'thicker: costs more', GREY, 11)
+    b += text(lx, 260, 'red: the minimum cut,', RED, 12) + text(lx, 276, 'along the weakest edges', RED, 12)
+    b += text(lx, 300, f'its cost = the max flow, {total:.2f}', RED, 11)
+    b += text(350, 392, 'the cut splits the pixels: those left with A take label A, the rest B', GREY, 11, 'middle')
+    svg('graph-cut.svg', W, H, b)
+
 FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning,
            volume, gauge, lowe, track, cog, mgraph, pose,
            kpmatch, fmatrix, homog, cheir, pnp, incsfm,
            bundle, selfcal, cycle, presel, mdensity, sensors,
            siftscale, siftdesc, sharp, imask, fiducial, depthmap,
            photocost, geocons, pmatch, mvs, sparsedense,
-           georef, gcpmark, scalebar, crspolar, demcoreg, clouddist]
+           georef, gcpmark, scalebar, crspolar, demcoreg, clouddist,
+           orthopersp, orthoseams, seamlines, multiband, seamlevel, graphcut]
 only = set(sys.argv[2:])
 for f in FIGURES:
     if not only or f.__name__ in only: f()

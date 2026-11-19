@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 330" font-family="sans-serif" font-size="13">
+  <rect width="700" height="330" fill="#1b1f27"/>
+  <polyline points="20,238.2 24,237.3 28,236.2 32,234.6 36,232.7 40,230.3 44,227.3 48,223.8 52,219.8 56,215.3 60,210.5 64,205.6 68,200.7 72,196.1 76,192 80,188.7 84,186.4 88,185.2 92,185.2 96,186.4 100,188.7 104,192 108,196.1 112,200.7 116,205.6 120,210.5 124,215.3 128,219.8 132,223.8 136,227.3 140,230.3 144,232.7 148,234.6 152,236.2 156,237.3 160,238.2 164,238.8 168,239.2 172,239.5 176,239.7 180,239.8 184,239.9 188,239.9 192,240 196,240 200,240 204,240 208,240 212,240 216,240 220,240 224,240 228,240 232,240 236,240 240,240 244,240 248,240 252,240 256,240 260,240 264,240 268,240 272,240 276,240 280,240 284,240 288,240 292,240 296,240 300,240 304,240 308,240 312,240 316,240 320,240 324,240 328,240 332,240 336,240" fill="none" stroke="#9ca3af" stroke-width="2"/>
+  <rect x="235" y="155" width="50" height="85" fill="#2a303b" stroke="#9ca3af" stroke-width="1.6"/>
+  <polygon points="285,240 378.1,240 285,155" fill="#6b7280" stroke="#6b7280" stroke-width="1" opacity="0.6"/>
+  <text x="303" y="149" fill="#9ca3af" font-size="11">hidden from</text>
+  <text x="303" y="163" fill="#9ca3af" font-size="11">this photo</text>
+  <line x1="170" y1="50" x2="235" y2="155" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="235" y1="155" x2="287.6" y2="240" stroke="#5aa9e6" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="235" y1="254" x2="235" y2="262" stroke="#7ee787" stroke-width="2"/>
+  <line x1="287.6" y1="254" x2="287.6" y2="262" stroke="#ef6f6c" stroke-width="2"/>
+  <line x1="235" y1="258" x2="285.6" y2="258" stroke="#ef6f6c" stroke-width="1.2"/>
+  <polygon points="285.6,255.8 290.6,258 285.6,260.2" fill="#ef6f6c" stroke="#ef6f6c" stroke-width="1"/>
+  <line x1="170" y1="50" x2="285" y2="155" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="285" y1="155" x2="378.1" y2="240" stroke="#5aa9e6" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="285" y1="254" x2="285" y2="262" stroke="#7ee787" stroke-width="2"/>
+  <line x1="378.1" y1="254" x2="378.1" y2="262" stroke="#ef6f6c" stroke-width="2"/>
+  <line x1="285" y1="258" x2="376.1" y2="258" stroke="#ef6f6c" stroke-width="1.2"/>
+  <polygon points="376.1,255.8 381.1,258 376.1,260.2" fill="#ef6f6c" stroke="#ef6f6c" stroke-width="1"/>
+  <line x1="170" y1="50" x2="90" y2="185" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="90" y1="185" x2="57.4" y2="240" stroke="#5aa9e6" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="90" y1="254" x2="90" y2="262" stroke="#7ee787" stroke-width="2"/>
+  <line x1="57.4" y1="254" x2="57.4" y2="262" stroke="#e6b84f" stroke-width="2"/>
+  <line x1="90" y1="258" x2="59.4" y2="258" stroke="#e6b84f" stroke-width="1.2"/>
+  <polygon points="59.4,260.2 54.4,258 59.4,255.8" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <polygon points="176.5,64.6 170,50 163.5,64.6" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="176.5,64.6 170,50 163.5,64.6" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="170" cy="50" r="4.5" fill="#5aa9e6"/>
+  <text x="170" y="30" fill="#c9d1d9" font-size="13" text-anchor="middle">photo: perspective</text>
+  <text x="170" y="290" fill="#9ca3af" font-size="11" text-anchor="middle">the roof and the hilltop land away from where</text>
+  <text x="170" y="304" fill="#9ca3af" font-size="11" text-anchor="middle">they stand (red): the building leans out</text>
+  <polyline points="365,238.2 369,237.3 373,236.2 377,234.6 381,232.7 385,230.3 389,227.3 393,223.8 397,219.8 401,215.3 405,210.5 409,205.6 413,200.7 417,196.1 421,192 425,188.7 429,186.4 433,185.2 437,185.2 441,186.4 445,188.7 449,192 453,196.1 457,200.7 461,205.6 465,210.5 469,215.3 473,219.8 477,223.8 481,227.3 485,230.3 489,232.7 493,234.6 497,236.2 501,237.3 505,238.2 509,238.8 513,239.2 517,239.5 521,239.7 525,239.8 529,239.9 533,239.9 537,240 541,240 545,240 549,240 553,240 557,240 561,240 565,240 569,240 573,240 577,240 581,240 585,240 589,240 593,240 597,240 601,240 605,240 609,240 613,240 617,240 621,240 625,240 629,240 633,240 637,240 641,240 645,240 649,240 653,240 657,240 661,240 665,240 669,240 673,240 677,240 681,240" fill="none" stroke="#9ca3af" stroke-width="2"/>
+  <rect x="580" y="155" width="50" height="85" fill="#2a303b" stroke="#9ca3af" stroke-width="1.6"/>
+  <line x1="385" y1="50" x2="385" y2="230.3" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="407" y1="50" x2="407" y2="208" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="429" y1="50" x2="429" y2="186.4" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="451" y1="50" x2="451" y2="193.9" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="473" y1="50" x2="473" y2="219.8" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="495" y1="50" x2="495" y2="235.5" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="517" y1="50" x2="517" y2="239.5" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="539" y1="50" x2="539" y2="240" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="561" y1="50" x2="561" y2="240" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="583" y1="50" x2="583" y2="155" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="605" y1="50" x2="605" y2="155" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="627" y1="50" x2="627" y2="155" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="649" y1="50" x2="649" y2="240" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="671" y1="50" x2="671" y2="240" stroke="#5aa9e6" stroke-width="1" opacity="0.7"/>
+  <line x1="580" y1="254" x2="580" y2="262" stroke="#7ee787" stroke-width="2"/>
+  <line x1="630" y1="254" x2="630" y2="262" stroke="#7ee787" stroke-width="2"/>
+  <line x1="435" y1="254" x2="435" y2="262" stroke="#7ee787" stroke-width="2"/>
+  <text x="525" y="30" fill="#c9d1d9" font-size="13" text-anchor="middle">orthophoto: straight down everywhere</text>
+  <text x="525" y="290" fill="#9ca3af" font-size="11" text-anchor="middle">every point over its own place (green):</text>
+  <text x="525" y="304" fill="#9ca3af" font-size="11" text-anchor="middle">one scale, measurable like a map</text>
+  <text x="350" y="324" fill="#9ca3af" font-size="11" text-anchor="middle">the depth maps act as a z-buffer: ground hidden in one photo is coloured from another</text>
+</svg>

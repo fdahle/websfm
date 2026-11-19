@@ -20,7 +20,7 @@ colour casts, fades over a wide distance, so nothing steps. Adding the bands bac
 together gives the blended image. Away from the seams every pixel keeps its own
 photo's colour.
 
-<!-- TODO(image): assets/multiband-blending.svg - two photos meeting at a vertical seam, split into three bands (fine edges, medium, coarse brightness), each band's blend mask beside it, narrow for the fine band and wide for the coarse one, and the recombined result without a step. -->
+![Two photos of the same ground, one exposed brighter, cut at a seam with a visible step. The image split into three bands, fine detail, medium and coarse brightness, each mixed with its own mask: a sharp step for fine detail, a wide ramp for brightness. The bands added back give an image with no step.](assets/multiband-blending.svg)
 
 In an [orthophoto](help:orthophoto) WebSfM blends in five bands, so the coarsest
 fades over about a hundred pixels either side, after per-photo colour balance has already

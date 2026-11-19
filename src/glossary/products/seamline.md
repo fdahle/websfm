@@ -24,7 +24,7 @@ but every pixel of seam costs the colour difference between the two photos there
 the seams bend around buildings and trees and follow open ground and roads, where the
 photos agree.
 
-<!-- TODO(image): assets/seamlines.svg - the nadir points of a 3 by 3 photo block, the region each photo is given, one nearest-nadir seam cutting through a building next to the graph-cut seam bending around it, and a before and after strip showing the exposure step across that seam removed by colour balance. -->
+![Two photos meeting at a seam over a building that each photo sees leaning a different way. Left, the nearest-nadir seam runs straight through it and the roof breaks at the seam; right, the graph-cut seam bends round it and the whole building comes from one photo. Below, a strip across the seam with an exposure step, and the same strip after colour balance with none.](assets/seamlines.svg)
 
 **Hiding them.** Two corrections work in linear light, the physical intensity before
 display gamma:
