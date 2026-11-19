@@ -30,7 +30,7 @@ winding of its triangles); a reference cloud has one only if it carries normals.
 on parts of the scene that did not change, for example with [ICP](help:icp), before
 measuring.
 
-<!-- TODO(image): assets/cloud-distance.svg - a reference surface in profile with points of a second epoch above and below it, nearest-point distances to a sparse reference cloud on one side, exact distances to a mesh on the other, and the points coloured blue to white to red by signed distance. -->
+![A reference surface in profile with points of a second epoch above and below it, coloured blue below, white on it and red above. Left, the reference is a sparse cloud and each point's distance runs to the nearest reference point; right, the reference is a mesh and each distance runs straight to the surface.](assets/cloud-distance.svg)
 
 In WebSfM, **Tools ▸ Measure ▸ Distance to reference** measures a dense cloud
 against another cloud (exact nearest neighbour) or a mesh (exact point-to-triangle).

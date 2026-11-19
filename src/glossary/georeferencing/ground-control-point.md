@@ -23,7 +23,7 @@ Each GCP carries three things:
 - An **enabled** flag and a **role**. A control point takes part in the fit; a
   checkpoint is left out of it, and its error then measures the model's accuracy.
 
-<!-- TODO(image): assets/gcp-marking.svg - the same surveyed target seen in three overlapping photos with its marked pixel in each, rays converging to one triangulated point, and that point paired by an arrow to its surveyed coordinate in the project CRS, with the residual between them labelled. -->
+![Three photos of one surveyed target, its marked pixel circled green in each. Below, rays from three cameras through the marked pixels meet in one triangulated point, beside the surveyed position; the short red line between them is the residual, listed with the survey coordinates in the project CRS.](assets/gcp-marking.svg)
 
 GCPs act at two stages. Their observations are
 [triangulated](help:triangulation) into the reconstruction's own frame and paired

@@ -1975,12 +1975,285 @@ def sparsedense():
     b += text(ox1 + 70, oy + 14, 'its track', BLUE, 11)
     svg('sparse-vs-dense.svg', W, H, b)
 
+def target(x, y, r=7):
+    # a GCP target: a black and white quartered disc
+    return circ(x, y, r, FG) + path(f'M {f2(x)} {f2(y)} L {f2(x + r)} {f2(y)} A {r} {r} 0 0 1 {f2(x)} {f2(y + r)} Z', None, fill=BG) + path(f'M {f2(x)} {f2(y)} L {f2(x - r)} {f2(y)} A {r} {r} 0 0 1 {f2(x)} {f2(y - r)} Z', None, fill=BG)
+def cross(x, y, c, r=6, w=2):
+    return line(x - r, y, x + r, y, c, w) + line(x, y - r, x, y + r, c, w)
+
+# ── georeferencing.svg ───────────────────────────────────────────────────────
+def georef():
+    W, H = 700, 360
+    rnd = random.Random(12)
+    # the block in its own frame, and the true similarity to the map
+    pts = [(rnd.uniform(-1, 1), rnd.uniform(-0.7, 0.7)) for _ in range(40)]
+    cams = [(-0.8 + 0.4 * i, -0.95) for i in range(5)]
+    gcp = [(-0.75, 0.5), (0.7, 0.45), (0.1, -0.55)]
+    s_true, a_true, t_true = 1.3, math.radians(32), (525, 180)
+    def T(p, s=s_true, a=a_true, t=t_true):
+        q = rot2((p[0] * 70 * s, p[1] * 70 * s), a); return (t[0] + q[0], t[1] + q[1])
+    surveyed = [(x + rnd.gauss(0, 4), y + rnd.gauss(0, 4)) for x, y in (T(g) for g in gcp)]
+    # least-squares 2D similarity from model (scaled to px) to surveyed: z' = a·z + b in complex numbers
+    zs = [complex(g[0] * 70, g[1] * 70) for g in gcp]; ws_ = [complex(*q) for q in surveyed]
+    mz = sum(zs) / 3; mw = sum(ws_) / 3
+    A = sum((w - mw) * (z - mz).conjugate() for z, w in zip(zs, ws_)) / sum(abs(z - mz) ** 2 for z in zs)
+    fit = lambda p: (lambda w: (w.real, w.imag))(A * complex(p[0] * 70, p[1] * 70) + (mw - A * mz))
+    b = ''
+    # left: the model frame
+    L = lambda p: (150 + p[0] * 95, 190 + p[1] * 95)
+    b += arrow(*L((-1.25, 1.05)), *L((-0.75, 1.05)), DIM, 1.2, 6) + arrow(*L((-1.25, 1.05)), *L((-1.25, 0.55)), DIM, 1.2, 6)
+    b += text(*L((-0.72, 1.12)), 'x', GREY, 10) + text(*L((-1.33, 0.52)), 'y', GREY, 10)
+    for p in pts: b += circ(*L(p), 2.3, GOLD)
+    for c in cams: b += cam2d(*L(c), math.pi / 2, size=10)
+    for k, g in enumerate(gcp): b += target(*L(g), 6) + text(L(g)[0] + 10, L(g)[1] - 8, str(k + 1), FG, 12)
+    b += text(150, 36, 'model frame: any scale, turn, position', FG, 12, 'middle')
+    # right: the map grid and the fitted block
+    gx0, gy0 = 380, 50
+    for k in range(7):
+        b += line(gx0 + k * 50, gy0, gx0 + k * 50, gy0 + 270, DIM, 0.7) + line(gx0, gy0 + k * 45, gx0 + 300, gy0 + k * 45, DIM, 0.7)
+    b += text(gx0 + 310, gy0 + 274, 'E', GREY, 11) + text(gx0 - 6, gy0 + 8, 'N', GREY, 11, 'end')
+    for p in pts:
+        q = fit(p)
+        if gx0 < q[0] < gx0 + 300 and gy0 < q[1] < gy0 + 270: b += circ(*q, 2.3, GOLD)
+    for c in cams: q = fit(c); b += circ(*q, 4, BLUE)
+    MAG = 4
+    for k, (g, sv) in enumerate(zip(gcp, surveyed)):
+        q = fit(g)
+        b += cross(*sv, GREEN, 7) + target(*q, 5)
+        e = (q[0] + MAG * (sv[0] - q[0]), q[1] + MAG * (sv[1] - q[1]))
+        b += arrow(*q, *e, RED, 1.6, 6)
+        b += curve((L(g)[0] + 10, L(g)[1]), (q[0] - 8, q[1]), -50 if k != 2 else 40, DIM, 1, '4 4', head=0)
+    b += text(gx0 + 150, 36, 'map grid: scaled, turned and shifted onto it', FG, 12, 'middle')
+    b += text(350, 342, f'green: surveyed position · red: the residual after the fit ({MAG}× longer) · the 7 unknowns: 1 scale, 3 rotation, 3 shift', GREY, 11, 'middle')
+    svg('georeferencing.svg', W, H, b)
+
+# ── gcp-marking.svg ──────────────────────────────────────────────────────────
+def gcpmark():
+    W, H = 700, 380
+    b = ''
+    # three photos of one target, each with the marked pixel
+    for k, (u, v) in enumerate(((0.62, 0.55), (0.40, 0.48), (0.22, 0.60))):
+        x, y = 40 + k * 130, 50
+        b += thumb(x, y, 110, 74, 300 + k)
+        b += target(x + u * 110, y + v * 74, 6)
+        b += circ(x + u * 110, y + v * 74, 10, GREEN, fill=False, w=1.6)
+        b += text(x + 55, y + 92, f'photo {k + 1}', GREY, 11, 'middle')
+    b += text(220, 30, 'the target marked in each photo (green)', FG, 12, 'middle')
+    # side view: three cameras, rays through the marked pixels nearly meeting
+    X = (240, 300)
+    cams = [(110, 175), (240, 160), (370, 175)]
+    for C in cams:
+        d = v_norm(v_sub(X, C)); off = random.Random(int(C[0])).gauss(0, 1.2)
+        n = (-d[1], d[0]); end = (X[0] + 26 * d[0] + off * n[0], X[1] + 26 * d[1] + off * n[1])
+        b += line(*C, *end, BLUE, 1.3)
+        t = (-d[1], d[0]); P0 = (C[0] + 24 * d[0], C[1] + 24 * d[1])
+        b += line(P0[0] - 14 * t[0], P0[1] - 14 * t[1], P0[0] + 14 * t[0], P0[1] + 14 * t[1], FG, 2) + circ(*P0, 3, GREEN)
+        b += cam2d(*C, math.atan2(d[1], d[0]), size=12)
+    b += circ(*X, 5.5, GOLD)
+    b += text(X[0] - 14, X[1] + 22, 'triangulated', GOLD, 11, 'end')
+    # the surveyed coordinate, and the residual between them
+    Sv = (X[0] + 26, X[1] + 14)
+    b += cross(*Sv, GREEN, 8, 2.2)
+    b += line(*X, *Sv, RED, 2)
+    b += text(Sv[0] + 12, Sv[1] + 18, 'surveyed', GREEN, 11)
+    b += rect(450, 150, 230, 150, DIM, fill=RAISED, sw=1, rx=6)
+    rows = [('GCP 7', FG), ('surveyed (project CRS)', GREEN), ('E 512,340.12 m', GREEN), ('N 7,120,553.40 m', GREEN), ('h 41.32 m', GREEN),
+            ('triangulated − surveyed', RED), ('residual 3.1 cm', RED)]
+    for k, (t, c) in enumerate(rows): b += text(466, 172 + k * 19, t, c, 12)
+    b += curve((Sv[0] + 10, Sv[1] - 4), (446, 210), -30, DIM, 1, '4 4')
+    b += text(350, 364, 'rays from the marked pixels meet in one triangulated point; its distance from the survey is the residual', GREY, 11, 'middle')
+    svg('gcp-marking.svg', W, H, b)
+
+# ── scale-bar.svg ────────────────────────────────────────────────────────────
+def scalebar():
+    W, H = 700, 330
+    b = ''
+    G = 250
+    # the same object at two sizes, the larger seen from twice as far: identical images
+    def scene(ox, s, dist):
+        nonlocal b
+        house = [(0, 0), (0, -40), (30, -62), (60, -40), (60, 0)]
+        P = lambda p: (ox + p[0] * s, G + p[1] * s)
+        b += poly([P(p) for p in house], GREY, fill=RAISED, w=1.6, closed=True)
+        C = (ox + 30 * s, G - 31 * s - dist)
+        for p in (house[1], house[2], house[3]):
+            b += line(*C, *P(p), BLUE, 0.9, op=0.7)
+        b += cam2d(*C, math.pi / 2, size=12)
+        # the bar between two targets on the object
+        b += target(*P((8, -6)), 5) + target(*P((52, -6)), 5)
+        return P, C
+    b += line(20, G, 680, G, GREY, 2)
+    P1, C1 = scene(70, 1.0, 55)
+    P2, C2 = scene(400, 2.0, 110)
+    b += text(100, 34, 'a small object, close', FG, 12, 'middle') + text(460, 34, 'twice as large, twice as far', FG, 12, 'middle')
+    # the one image both give
+    ix, iy, iw, ih = 235, 70, 110, 80
+    b += rect(ix, iy, iw, ih, DIM, fill=RAISED, sw=1)
+    house = [(0, 0), (0, -40), (30, -62), (60, -40), (60, 0)]
+    f_ = 0.9
+    pr = lambda p: (ix + iw / 2 + (p[0] - 30) * f_, iy + ih - 12 + p[1] * f_ * 0.9)
+    b += poly([pr(p) for p in house], GREY, fill=DIM, w=1.2, closed=True)
+    b += text(ix + iw / 2, iy + ih + 16, 'the same photo from both', GREY, 11, 'middle')
+    b += arrow(C1[0] + 14, C1[1] - 6, ix - 4, iy + 30, DIM, 1, 6) + arrow(C2[0] - 14, C2[1] - 6, ix + iw + 4, iy + 30, DIM, 1, 6)
+    # the measured distance decides
+    a, c = P1((8, -6)), P1((52, -6))
+    b += line(a[0], a[1] + 18, c[0], c[1] + 18, GREEN, 2) + line(a[0], a[1] + 12, a[0], a[1] + 24, GREEN, 2) + line(c[0], c[1] + 12, c[0], c[1] + 24, GREEN, 2)
+    b += text((a[0] + c[0]) / 2, a[1] + 40, 'measured: 2.00 m', GREEN, 12, 'middle')
+    a2, c2 = P2((8, -6)), P2((52, -6))
+    b += line(a2[0], a2[1] + 18, c2[0], c2[1] + 18, RED, 2, '5 3')
+    b += text((a2[0] + c2[0]) / 2, a2[1] + 40, 'would be 4.00 m: not this one', RED, 12, 'middle')
+    b += text(350, 318, 'the photos cannot tell the two apart; one measured distance between two targets fixes the scale', GREY, 11, 'middle')
+    svg('scale-bar.svg', W, H, b)
+
+# ── crs-polar.svg ────────────────────────────────────────────────────────────
+def crspolar():
+    import json
+    W, H = 700, 400
+    data = json.load(open(os.path.join(os.path.dirname(__file__), 'antarctica-110m.json')))
+    R = 6371.0
+    lam0 = math.radians(-57)              # UTM zone 21S, the Antarctic Peninsula's zone
+    # spherical forms; the scale factor k is what a length on the map is off by
+    def tm(lon, lat):
+        p, l = math.radians(lat), math.radians(lon) - lam0
+        B = math.cos(p) * math.sin(l)
+        return 0.5 * R * math.log((1 + B) / (1 - B)), R * math.atan2(math.tan(p), math.cos(l))
+    def tm_inv(x, y):
+        D = y / R; p = math.asin(max(-1, min(1, math.sin(D) / math.cosh(x / R)))); l = lam0 + math.atan2(math.sinh(x / R), math.cos(D))
+        k = 0.9996 / math.sqrt(max(1e-12, 1 - (math.cos(p) * math.sin(l - lam0)) ** 2))
+        return math.degrees(p), k
+    def ps(lon, lat):
+        p, l = math.radians(lat), math.radians(lon)
+        rho = 2 * R * math.tan(math.pi / 4 + p / 2)
+        return rho * math.sin(l), rho * math.cos(l)
+    def ps_inv(x, y):
+        p = 2 * math.atan(math.hypot(x, y) / (2 * R)) - math.pi / 2
+        k = (1 + math.sin(math.radians(71))) / (1 + math.sin(-p))     # true scale at 71° S, as EPSG:3031
+        return math.degrees(p), k
+    ERR = ((0, (98, 160, 118)), (0.33, (226, 200, 96)), (1, (206, 84, 72)))
+    b = ''
+    worst = {}
+    for pi, (proj, inv, title) in enumerate(((tm, tm_inv, 'UTM zone 21S'), (ps, ps_inv, 'EPSG:3031 polar stereographic'))):
+        ox, oy, bw, bh = 20 + pi * 345, 50, 320, 270
+        lines = [[proj(lon, lat) for lon, lat in ln] for ln in data['lines']]
+        allp = [p for ln in lines for p in ln]
+        xs, ys = [p[0] for p in allp], [p[1] for p in allp]
+        sc = min(bw / (max(xs) - min(xs)), bh / (max(ys) - min(ys))) * 0.9
+        mx, my = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+        S = lambda p: (ox + bw / 2 + (p[0] - mx) * sc, oy + bh / 2 - (p[1] - my) * sc)
+        # the scale error at every map pixel south of 60° S
+        n = 80
+        px = []
+        for j in range(n):
+            row = []
+            for i in range(n):
+                X = mx + ((i + 0.5) / n * bw - bw / 2) / sc; Y = my - ((j + 0.5) / n * bh - bh / 2) / sc
+                lat, k = inv(X, Y)
+                row.append(None if lat > -60 else min(1, abs(k - 1) / 0.15))
+            px.append(row)
+        worst[pi] = max(abs(inv(*p)[1] - 1) for p in allp)
+        b += rect(ox, oy, bw, bh, fill=RAISED)
+        b += image(ox, oy, bw, bh, map_px(px, lambda t: ramp(t, ERR)), op=0.75)
+        cid = f'crs{pi}'
+        b += f'  <clipPath id="{cid}"><rect x="{ox}" y="{oy}" width="{bw}" height="{bh}"/></clipPath>\n  <g clip-path="url(#{cid})">\n'
+        for lon in range(-180, 180, 30):
+            b += poly([S(proj(lon, lat)) for lat in [-60 - k for k in range(0, 30)]] + [S(proj(lon, -89.9))], DIM, w=0.6)
+        for lat in (-60, -70, -80):
+            b += poly([S(proj(lon, lat)) for lon in range(-180, 181, 3)], DIM, w=0.6)
+        for ln in lines:
+            b += poly([S(p) for p in ln], FG, w=1.3)
+        if pi == 0:  # UTM is not defined south of 80° S
+            b += poly([S(proj(lon, -80)) for lon in range(-180, 181, 3)], RED, w=2, dash='6 4')
+            q = max((S(proj(lon, -80)) for lon in range(-180, 181, 3)), key=lambda p: p[1])
+            b += text(q[0], q[1] + 16, 'UTM ends at 80° S', RED, 11, 'middle')
+        pole = S(proj(0, -89.999))
+        b += circ(*pole, 4.5, GOLD) + text(pole[0] + 8, pole[1] - 6, 'South Pole', GOLD, 11)
+        b += '  </g>\n' + rect(ox, oy, bw, bh, DIM, sw=1)
+        b += text(ox + bw / 2, 36, title, FG, 13, 'middle')
+    b += text(20 + 160, 342, f'true only near its own 6°: up to {100 * worst[0]:.0f}% scale error on the coast', RED, 12, 'middle')
+    b += text(365 + 160, 342, f'within {100 * worst[1]:.0f}% over the whole continent', GREEN, 12, 'middle')
+    for k in range(60):
+        b += rect(260 + k * 3, 362, 3.2, 10, fill=ramp(k / 59, ERR))
+    b += text(254, 371, 'scale error 0%', GREY, 11, 'end') + text(446, 371, '15% +', GREY, 11)
+    b += text(350, 392, 'coastline: Natural Earth', GREY, 10, 'middle')
+    svg('crs-polar.svg', W, H, b)
+
+# ── dem-coregistration.svg ───────────────────────────────────────────────────
+def demcoreg():
+    W, H = 700, 340
+    rnd = random.Random(5)
+    ridge = lambda x: 70 * math.exp(-((x - 160) / 70) ** 2) + 18 * math.exp(-((x - 250) / 40) ** 2)
+    shift = 14
+    b = ''
+    for pi, (lab, t) in enumerate((('before: the DEM sits a little to the right', shift), ('after: moved left by the fitted shift', 0.6))):
+        ox = 20 + pi * 345
+        xs = list(range(0, 320, 3))
+        ref = [(ox + x, 170 - ridge(x)) for x in xs]
+        dem = [(ox + x, 170 - ridge(x - t) + rnd.gauss(0, 0.6)) for x in xs]
+        b += poly(ref, GREY, w=2.2) + poly(dem, BLUE, w=1.6, dash='5 3')
+        # the height differences below
+        base = 260
+        b += line(ox, base, ox + 320, base, DIM, 1)
+        for x in xs:
+            dh = ridge(x - t) - ridge(x)
+            if abs(dh) > 0.3:
+                b += line(ox + x, base, ox + x, base - 2.2 * dh, RED if dh > 0 else BLUE, 2.2, op=0.8)
+        b += text(ox + 160, 36, lab, FG, 12, 'middle')
+        b += text(ox + 4, 70, 'reference', GREY, 11) + text(ox + 4, 86, 'DEM', BLUE, 11)
+        b += text(ox + 320, base + 18, 'DEM − reference', GREY, 11, 'end')
+    b += text(20 + 80, 300, '−', BLUE, 16, 'middle') + text(20 + 240, 236, '+', RED, 16, 'middle')
+    b += text(350, 326, 'a sideways shift reads as height error on slopes: + on one side of the ridge, − on the other', GREY, 11, 'middle')
+    svg('dem-coregistration.svg', W, H, b)
+
+# ── cloud-distance.svg ───────────────────────────────────────────────────────
+def clouddist():
+    W, H = 700, 330
+    rnd = random.Random(19)
+    surf = lambda x: 190 - 40 * math.sin(x / 70) - 14 * math.sin(x / 23)
+    b = ''
+    vmax = 24
+    col = lambda d: ramp((max(-vmax, min(vmax, d)) / vmax + 1) / 2, DIVERGE)
+    def epoch(x0, x1):
+        out = []
+        for _ in range(16):
+            x = rnd.uniform(x0, x1); d = rnd.choice((-1, 1)) * rnd.uniform(6, 26)
+            out.append((x, surf(x) - d))
+        return out
+    # left: a sparse reference cloud, nearest-point distance
+    ref_pts = [(x, surf(x)) for x in range(20, 330, 22)]
+    for p in ref_pts: b += circ(*p, 3, GREY)
+    for q in epoch(30, 320):
+        n = min(ref_pts, key=lambda p: math.dist(p, q))
+        d = math.dist(n, q) * (1 if q[1] < surf(q[0]) else -1)
+        b += line(*q, *n, DIM, 1.1)
+        b += circ(*q, 4.5, col(d)) + circ(*q, 4.5, DIM, fill=False, w=0.8)
+    # right: a mesh, exact perpendicular distance
+    mesh = [(x, surf(x)) for x in range(370, 690, 4)]
+    b += poly(mesh, GREY, w=2.2)
+    for q in epoch(380, 680):
+        best = None
+        for a, c in zip(mesh, mesh[1:]):
+            vx, vy = c[0] - a[0], c[1] - a[1]; t = max(0, min(1, ((q[0] - a[0]) * vx + (q[1] - a[1]) * vy) / (vx * vx + vy * vy)))
+            f = (a[0] + t * vx, a[1] + t * vy); dd = math.dist(f, q)
+            if best is None or dd < best[0]: best = (dd, f)
+        d = best[0] * (1 if q[1] < surf(q[0]) else -1)
+        b += line(*q, *best[1], DIM, 1.1)
+        b += circ(*q, 4.5, col(d)) + circ(*q, 4.5, DIM, fill=False, w=0.8)
+    b += line(350, 50, 350, 280, DIM, 1, '2 4')
+    b += text(175, 36, 'to a reference cloud: the nearest point', FG, 12, 'middle') + text(525, 36, 'to a mesh: the exact distance', FG, 12, 'middle')
+    b += text(175, 270, 'with gaps between the points,', GREY, 11, 'middle') + text(175, 284, 'a distance reads a little long', GREY, 11, 'middle')
+    for k in range(60):
+        b += rect(250 + k * 3.3, 300, 3.4, 10, fill=col(-vmax + 2 * vmax * k / 59))
+    b += text(244, 309, 'below', BLUE, 11, 'end') + text(454, 309, 'above', RED, 11)
+    b += text(350, 326, 'signed distance: blue below the reference, white on it, red above', GREY, 11, 'middle')
+    svg('cloud-distance.svg', W, H, b)
+
 FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning,
            volume, gauge, lowe, track, cog, mgraph, pose,
            kpmatch, fmatrix, homog, cheir, pnp, incsfm,
            bundle, selfcal, cycle, presel, mdensity, sensors,
            siftscale, siftdesc, sharp, imask, fiducial, depthmap,
-           photocost, geocons, pmatch, mvs, sparsedense]
+           photocost, geocons, pmatch, mvs, sparsedense,
+           georef, gcpmark, scalebar, crspolar, demcoreg, clouddist]
 only = set(sys.argv[2:])
 for f in FIGURES:
     if not only or f.__name__ in only: f()

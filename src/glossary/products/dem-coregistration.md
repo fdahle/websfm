@@ -12,7 +12,7 @@ sideways shift does not show; on a slope it reads as height error, and on a moun
 it can be most of the difference. Co-registration finds that offset on ground that has
 not changed, and removes it, so what is left is the real error, or the real change.
 
-<!-- TODO(image): assets/dem-coregistration.svg - a slope profile of a DEM drawn a little to the right of the reference profile; the height differences are positive on one side of the ridge and negative on the other, and vanish once the DEM is moved left. -->
+![Left, a DEM's profile drawn a little to the right of the reference profile over a ridge; below, the differences are negative on the rising slope and positive on the falling one. Right, after the DEM is moved left by the fitted shift, the profiles coincide and the differences vanish.](assets/dem-coregistration.svg)
 
 **Nuth & Kääb** (2011) find the horizontal shift from the slopes. A DEM displaced by a
 distance *t* in a direction θ differs from its reference, on a slope of angle α

@@ -25,7 +25,7 @@ Changing it reprojects all of them together rather than reinterpreting the
 numbers in place. A DEM or orthophoto can also be exported as a reprojected copy in
 another CRS, while the project stays in its working CRS.
 
-<!-- TODO(image): assets/crs-polar.svg - the same Antarctic coastline drawn in a UTM zone (severely distorted, zones converging) and in EPSG:3031 polar stereographic (clean), with the pole marked in both to show why the default choice fails at high latitude. -->
+![Antarctica in UTM zone 21S and in EPSG:3031 polar stereographic, both shaded by scale error. In UTM the error is small only along the zone's meridian and grows toward the far coasts, and a dashed circle marks where UTM ends at 80° S; in polar stereographic the error stays within a few percent over the whole continent.](assets/crs-polar.svg)
 
 **Polar work is the reason this is first-class here.** UTM zones converge and
 become unusable near the poles, and a default assumption of "WGS84 or UTM"

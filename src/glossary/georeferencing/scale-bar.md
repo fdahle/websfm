@@ -17,7 +17,7 @@ photographed from twice as far away produces identical images. Scale is one of
 the seven quantities the images leave undetermined (see
 [gauge freedom](help:gauge-freedom)); one measured distance fixes it.
 
-<!-- TODO(image): assets/scale-bar.svg - the same object reconstructed at two arbitrary sizes producing identical images, with one measured distance drawn across it resolving which of the two is real. -->
+![A small house photographed from close and a house twice as large photographed from twice as far give the same photo. A measured distance of 2.00 m between two targets on the house fits the small one; on the large one the same targets would be 4.00 m apart.](assets/scale-bar.svg)
 
 **One bar is enough.** With a second bar the two rarely agree exactly, and the
 fit becomes a weighted least squares over both: the scale that minimises

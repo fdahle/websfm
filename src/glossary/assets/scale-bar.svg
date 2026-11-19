@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 330" font-family="sans-serif" font-size="13">
+  <rect width="700" height="330" fill="#1b1f27"/>
+  <line x1="20" y1="250" x2="680" y2="250" stroke="#9ca3af" stroke-width="2"/>
+  <polygon points="70,250 70,210 100,188 130,210 130,250" fill="#2a303b" stroke="#9ca3af" stroke-width="1.6"/>
+  <line x1="100" y1="164" x2="70" y2="210" stroke="#5aa9e6" stroke-width="0.9" opacity="0.7"/>
+  <line x1="100" y1="164" x2="100" y2="188" stroke="#5aa9e6" stroke-width="0.9" opacity="0.7"/>
+  <line x1="100" y1="164" x2="130" y2="210" stroke="#5aa9e6" stroke-width="0.9" opacity="0.7"/>
+  <polygon points="104.9,175 100,164 95.1,175" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="104.9,175 100,164 95.1,175" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="100" cy="164" r="4.5" fill="#5aa9e6"/>
+  <circle cx="78" cy="244" r="5" fill="#c9d1d9"/>
+  <path d="M 78 244 L 83 244 A 5 5 0 0 1 78 249 Z" fill="#1b1f27"/>
+  <path d="M 78 244 L 73 244 A 5 5 0 0 1 78 239 Z" fill="#1b1f27"/>
+  <circle cx="122" cy="244" r="5" fill="#c9d1d9"/>
+  <path d="M 122 244 L 127 244 A 5 5 0 0 1 122 249 Z" fill="#1b1f27"/>
+  <path d="M 122 244 L 117 244 A 5 5 0 0 1 122 239 Z" fill="#1b1f27"/>
+  <polygon points="400,250 400,170 460,126 520,170 520,250" fill="#2a303b" stroke="#9ca3af" stroke-width="1.6"/>
+  <line x1="460" y1="78" x2="400" y2="170" stroke="#5aa9e6" stroke-width="0.9" opacity="0.7"/>
+  <line x1="460" y1="78" x2="460" y2="126" stroke="#5aa9e6" stroke-width="0.9" opacity="0.7"/>
+  <line x1="460" y1="78" x2="520" y2="170" stroke="#5aa9e6" stroke-width="0.9" opacity="0.7"/>
+  <polygon points="464.9,89 460,78 455.1,89" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="464.9,89 460,78 455.1,89" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="460" cy="78" r="4.5" fill="#5aa9e6"/>
+  <circle cx="416" cy="238" r="5" fill="#c9d1d9"/>
+  <path d="M 416 238 L 421 238 A 5 5 0 0 1 416 243 Z" fill="#1b1f27"/>
+  <path d="M 416 238 L 411 238 A 5 5 0 0 1 416 233 Z" fill="#1b1f27"/>
+  <circle cx="504" cy="238" r="5" fill="#c9d1d9"/>
+  <path d="M 504 238 L 509 238 A 5 5 0 0 1 504 243 Z" fill="#1b1f27"/>
+  <path d="M 504 238 L 499 238 A 5 5 0 0 1 504 233 Z" fill="#1b1f27"/>
+  <text x="100" y="34" fill="#c9d1d9" font-size="12" text-anchor="middle">a small object, close</text>
+  <text x="460" y="34" fill="#c9d1d9" font-size="12" text-anchor="middle">twice as large, twice as far</text>
+  <rect x="235" y="70" width="110" height="80" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="263,138 263,105.6 290,87.8 317,105.6 317,138" fill="#6b7280" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="290" y="166" fill="#9ca3af" font-size="11" text-anchor="middle">the same photo from both</text>
+  <line x1="114" y1="158" x2="225.6" y2="102.7" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="224.4,100.2 231,100 226.8,105.1" fill="#6b7280" stroke="#6b7280" stroke-width="1"/>
+  <line x1="446" y1="72" x2="354.8" y2="98.3" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="355.5,100.9 349,100 354,95.7" fill="#6b7280" stroke="#6b7280" stroke-width="1"/>
+  <line x1="78" y1="262" x2="122" y2="262" stroke="#7ee787" stroke-width="2"/>
+  <line x1="78" y1="256" x2="78" y2="268" stroke="#7ee787" stroke-width="2"/>
+  <line x1="122" y1="256" x2="122" y2="268" stroke="#7ee787" stroke-width="2"/>
+  <text x="100" y="284" fill="#7ee787" font-size="12" text-anchor="middle">measured: 2.00 m</text>
+  <line x1="416" y1="256" x2="504" y2="256" stroke="#ef6f6c" stroke-width="2" stroke-dasharray="5 3"/>
+  <text x="460" y="278" fill="#ef6f6c" font-size="12" text-anchor="middle">would be 4.00 m: not this one</text>
+  <text x="350" y="318" fill="#9ca3af" font-size="11" text-anchor="middle">the photos cannot tell the two apart; one measured distance between two targets fixes the scale</text>
+</svg>

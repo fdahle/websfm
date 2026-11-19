@@ -19,7 +19,7 @@ position in the reconstruction's frame and in the real world. Three
 non-collinear pairs are the minimum; more pairs both over-determine the fit and
 let the residuals be reported.
 
-<!-- TODO(image): assets/georeferencing.svg - a reconstruction in its arbitrary frame, arrows to the same block after scaling, rotating and translating onto a map grid, with three paired points connected between the two frames and the per-pair residual drawn after the fit. -->
+![Left, a block of cameras and points in its own model frame with three GCPs numbered 1 to 3. Right, the same block scaled, turned and shifted onto a map grid; dashed lines pair each GCP with its place, green crosses mark the surveyed positions and red arrows the residuals left after the fit.](assets/georeferencing.svg)
 
 The pairs come from either of two sources, and the choice matters:
 

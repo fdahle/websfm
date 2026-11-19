@@ -184,6 +184,14 @@ export const INCLUDED = [
           'Resampled to a 15′ grid from the U.S. National Geospatial-Intelligence Agency’s ' +
           'EGM96 and EGM2008 models, as PROJ distributes them.',
       },
+      {
+        // scripts/figures/antarctica-110m.json, drawn into src/glossary/assets/crs-polar.svg
+        name: 'Natural Earth coastlines',
+        license: 'Public domain',
+        url: 'https://www.naturalearthdata.com',
+        use: 'The Antarctic coastline in the glossary figure on polar map projections',
+        notice: 'Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.',
+      },
       // The example projects' photos (core/examples.js), downloaded when one is opened.
       // CC0 asks for nothing, but the people who flew and shared them are credited here,
       // in the project picker and in each download's CREDITS.txt.
