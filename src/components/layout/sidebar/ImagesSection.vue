@@ -1,8 +1,15 @@
 <script setup>
-import { ref, computed, watch, watchEffect, nextTick } from 'vue'
+import { ref, computed, watch, watchEffect, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
-import { gesture } from '../../../core/help/shortcuts.js'
+import { gesture, matches } from '../../../core/help/shortcuts.js'
+import { viewerMayHandleKey } from '../../../utils/keyRouting.js'
+import {
+  IMAGE_FILTER_STATES,
+  NO_IMAGE_FILTER,
+  imageFilterActive,
+  matchesImageFilter,
+} from '../../../core/imageFilter.js'
 import { useSensorsStore } from '../../../stores/useSensorsStore.js'
 import { usePosesStore } from '../../../stores/usePosesStore.js'
 import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
@@ -44,7 +51,39 @@ const { t } = useI18n()
 // (a group id, or UNGROUPED); it is the drop-target identity.
 const UNGROUPED = '__ungrouped__'
 const ungroupedCollapsed = ref(false)
-const sections = computed(() => groupImageSections(images.value, imageGroups.value))
+
+// ── Filter ───────────────────────────────────────────────────────────────────
+// By name and by state (core/imageFilter.js), for this session. While it is on, the
+// list shows only the matches: a group with none is left out, and a collapsed group
+// shows its matches. Previous / Next and a shift-click range follow what it shows.
+const filter = ref({ ...NO_IMAGE_FILTER })
+const filtering = computed(() => imageFilterActive(filter.value))
+const shownImages = computed(() =>
+  filtering.value
+    ? images.value.filter((img) =>
+        matchesImageFilter(img, filter.value, { unaligned: isUnaligned(img), enabled: isImageEnabled(img) }),
+      )
+    : images.value,
+)
+const filterStates = computed(() =>
+  IMAGE_FILTER_STATES.map((id) => ({
+    id,
+    label: t(`sidebar.images.filter.state.${id}`),
+    disabled: id === 'unaligned' && !sidebar.hasSparse,
+  })),
+)
+// A state that cannot apply any more (the sparse model was removed) falls back to All.
+watch(
+  () => sidebar.hasSparse,
+  (has) => {
+    if (!has && filter.value.state === 'unaligned') filter.value = { ...filter.value, state: 'all' }
+  },
+)
+function clearFilter() {
+  filter.value = { ...NO_IMAGE_FILTER }
+}
+
+const sections = computed(() => groupImageSections(shownImages.value, imageGroups.value))
 
 // Group by ▸ Sensors lists the images under their sensors instead (every sensor,
 // in the Sensors section's order, then "No sensor" while any image has none), and
@@ -75,7 +114,7 @@ const collapsedSensorKeys = ref(new Set())
 const sensorSections = computed(() => {
   const by = new Map(sensors.value.map((s) => [s.id, []]))
   const none = []
-  for (const img of images.value) (by.get(img.sensorId) ?? none).push(img)
+  for (const img of shownImages.value) (by.get(img.sensorId) ?? none).push(img)
   const out = sensors.value.map((s) => ({ groupKey: sensorKey(s.id), sensor: s, images: by.get(s.id) }))
   if (none.length) out.push({ groupKey: SENSORLESS, sensor: null, images: none })
   return out
@@ -90,7 +129,8 @@ const rows = computed(() => {
   }
   if (bySensor.value) {
     for (const { groupKey, sensor, images } of sensorSections.value) {
-      const collapsed = collapsedSensorKeys.value.has(groupKey)
+      if (filtering.value && !images.length) continue
+      const collapsed = !filtering.value && collapsedSensorKeys.value.has(groupKey)
       out.push({
         kind: 'group',
         key: `group:${groupKey}`,
@@ -105,12 +145,13 @@ const rows = computed(() => {
     return out
   }
   if (!imageGroups.value.length) {
-    for (const img of images.value) pushImage(img, undefined)
+    for (const img of shownImages.value) pushImage(img, undefined)
     return out
   }
   for (const { group, images } of sections.value) {
+    if (filtering.value && !images.length) continue
     const groupKey = group?.id ?? UNGROUPED
-    const collapsed = group ? group.collapsed : ungroupedCollapsed.value
+    const collapsed = !filtering.value && (group ? group.collapsed : ungroupedCollapsed.value)
     out.push({ kind: 'group', key: `group:${groupKey}`, groupKey, group, count: images.length, collapsed })
     if (!collapsed) for (const img of images) pushImage(img, groupKey)
   }
@@ -118,14 +159,14 @@ const rows = computed(() => {
 })
 // Image ids in on-screen order — what a shift-click range spans.
 const visibleIds = computed(() => rows.value.filter((r) => r.kind === 'image').map((r) => r.img.id))
-// Every image in the list's order, collapsed groups included: what Previous / Next
-// step through (composables/useImageOrder.js).
+// Every image the list shows, in its order, collapsed groups included: what Previous /
+// Next step through (composables/useImageOrder.js).
 watchEffect(() => {
   const ordered = bySensor.value
     ? sensorSections.value.flatMap((x) => x.images)
     : imageGroups.value.length
       ? sections.value.flatMap((x) => x.images)
-      : images.value
+      : shownImages.value
   imageListOrder.value = ordered.map((img) => img.id)
 })
 
@@ -149,12 +190,14 @@ function setCollapsed(groupKey, collapsed) {
 function headerName(row) {
   if (row.sensor) return row.sensor.label
   if (row.group) return row.group.name
-  return bySensor.value ? t('sidebar.images.noSensor') : 'Ungrouped'
+  return bySensor.value ? t('sidebar.images.noSensor') : t('sidebar.images.ungrouped')
 }
 function headerTitle(row) {
   if (row.sensor) return t('sidebar.images.sensorHeader', { name: row.sensor.label, n: row.count })
   if (bySensor.value) return t('sidebar.images.noSensorTitle')
-  return row.group ? `${row.group.name} — ${row.count} image${row.count !== 1 ? 's' : ''}` : 'Images in no group'
+  return row.group
+    ? t('sidebar.images.groupHeader', { name: row.group.name, n: row.count })
+    : t('sidebar.images.ungroupedTitle')
 }
 function toggleGroup(row) {
   setCollapsed(row.groupKey, !row.collapsed)
@@ -269,8 +312,8 @@ function poseFor(img) {
 }
 // Pose status shown on the image row: an imported pose, an EXIF GPS prior, or none.
 function poseStatus(img) {
-  if (poseFor(img)) return 'imported'
-  if (img.meta?.gpsLat != null && img.meta?.gpsLon != null) return 'GPS'
+  if (poseFor(img)) return t('sidebar.images.detail.poseImported')
+  if (img.meta?.gpsLat != null && img.meta?.gpsLon != null) return t('sidebar.images.detail.poseGps')
   return '—'
 }
 // The images with a computed footprint (the footprints have no sidebar row of their own).
@@ -298,18 +341,17 @@ function isUnaligned(img) {
 // behind its blob: URL went away and project storage had no usable copy, so it
 // will also fail detection / dense / ortho — worth saying, not just "failed".
 function failReason(img) {
-  return img.previewFailReason === 'source-lost'
-    ? 'image file no longer available — re-add the file'
-    : 'failed to load (could not decode image)'
+  return img.previewFailReason === 'source-lost' ? t('sidebar.images.fail.sourceLost') : t('sidebar.images.fail.decode')
 }
 
 // Tooltip for the image row, reflecting its load state.
 function rowTitle(img) {
-  if (img.previewPending) return `${img.name} — decoding…`
-  if (img.previewFailed) return `${img.name} — ${failReason(img)}`
-  if (isUnaligned(img)) return `${img.name} — not aligned (no camera in the sparse model)`
-  if (!isImageEnabled(img)) return `${img.name} — disabled: later runs leave it out`
-  return img.name
+  const name = img.name
+  if (img.previewPending) return t('sidebar.images.rowTitle.decoding', { name })
+  if (img.previewFailed) return t('sidebar.images.rowTitle.failed', { name, reason: failReason(img) })
+  if (isUnaligned(img)) return t('sidebar.images.rowTitle.unaligned', { name })
+  if (!isImageEnabled(img)) return t('sidebar.images.rowTitle.disabled', { name })
+  return name
 }
 
 // Multi-select: local array of selected ids + anchor for shift-range
@@ -348,6 +390,17 @@ const imagesFocused = computed(() => sidebar.focus?.kind === 'image')
 watch(imagesFocused, (focused) => {
   if (!focused) localSelected.value = []
 })
+
+// Select every image the list shows (images.selectAll), while an image row was the
+// last thing clicked in the sidebar and focus is in no field or dialog.
+function onSelectAllKey(e) {
+  if (!imagesFocused.value || !matches(e, 'images.selectAll') || !viewerMayHandleKey(e)) return
+  e.preventDefault()
+  localSelected.value = [...visibleIds.value]
+  anchor.value = visibleIds.value[0] ?? null
+}
+onMounted(() => document.addEventListener('keydown', onSelectAllKey))
+onBeforeUnmount(() => document.removeEventListener('keydown', onSelectAllKey))
 
 // Sensors ▸ a sensor's image count: list by sensor, open that sensor and select its images.
 watch(
@@ -429,7 +482,11 @@ function onRightClick(e, img) {
 // The action is the same either way (openImageTab focuses an existing tab), but
 // the label should tell you which one you'll get. Tab id per useTabs.openImageTab.
 const ctxOpenLabel = computed(() =>
-  sidebar.openTabIds.has(`img:${ctxMenu.value?.img?.id}`) ? 'Switch to tab' : 'Open in tab',
+  t(
+    sidebar.openTabIds.has(`img:${ctxMenu.value?.img?.id}`)
+      ? 'sidebar.images.menu.switchToTab'
+      : 'sidebar.images.menu.openInTab',
+  ),
 )
 
 // Run a menu item against the image it was opened on, then close.
@@ -535,18 +592,20 @@ function revealRow(key) {
   <div class="section">
     <button class="section-hd" @click="emit('toggle')">
       <span class="chevron">{{ open ? '▾' : '▸' }}</span>
-      <span class="section-name">Images</span>
+      <span class="section-name">{{ t('sidebar.images.title') }}</span>
       <span v-if="images.length" class="badge">{{ images.length }}</span>
     </button>
     <div
       v-if="open && metaPending"
       class="meta-progress"
-      :title="`Reading image metadata — ${metaDone} of ${images.length} done`"
+      :title="t('sidebar.images.readingMetaTitle', { done: metaDone, total: images.length })"
     >
       <div class="meta-progress-track">
         <div class="meta-progress-fill" :style="{ width: (metaDone / images.length) * 100 + '%' }"></div>
       </div>
-      <span class="meta-progress-label">Reading metadata… {{ metaDone }}/{{ images.length }}</span>
+      <span class="meta-progress-label">{{
+        t('sidebar.images.readingMeta', { done: metaDone, total: images.length })
+      }}</span>
     </div>
     <div v-if="open && images.length" class="group-by" role="group" :aria-label="t('sidebar.images.groupBy')">
       <span class="group-by-label">{{ t('sidebar.images.groupBy') }}</span>
@@ -568,6 +627,32 @@ function revealRow(key) {
       >
         {{ t('sidebar.images.bySensor') }}
       </button>
+    </div>
+    <div v-if="open && images.length > 1" class="image-filter">
+      <input
+        v-model="filter.text"
+        class="filter-text"
+        type="text"
+        spellcheck="false"
+        :placeholder="t('sidebar.images.filter.placeholder')"
+        :aria-label="t('sidebar.images.filter.label')"
+        @keydown.esc.stop="clearFilter"
+      />
+      <select v-model="filter.state" class="filter-state" :aria-label="t('sidebar.images.filter.stateLabel')">
+        <option
+          v-for="s in filterStates"
+          :key="s.id"
+          :value="s.id"
+          :disabled="s.disabled"
+          :title="s.disabled ? t('sidebar.images.filter.needsSparse') : null"
+        >
+          {{ s.label }}
+        </option>
+      </select>
+    </div>
+    <div v-if="open && filtering" class="filter-status">
+      <span>{{ t('sidebar.images.filter.count', { shown: shownImages.length, total: images.length }) }}</span>
+      <button class="link-btn" @click="clearFilter">{{ t('sidebar.images.filter.clear') }}</button>
     </div>
     <ul v-if="open" ref="listEl" class="item-list" @dragleave="onListDragLeave" @dragend="dropTarget = null">
       <li v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"></li>
@@ -621,10 +706,14 @@ function revealRow(key) {
             class="expand-btn"
             :class="{ open: isExpanded(row.img.id) }"
             @click.stop="toggleExpand(row.img.id)"
-            :title="isExpanded(row.img.id) ? 'Collapse' : 'Expand'"
+            :title="t(isExpanded(row.img.id) ? 'sidebar.images.collapse' : 'sidebar.images.expand')"
           ></button>
           <span v-if="row.img.previewPending" class="status-dot loading"></span>
-          <span v-else-if="row.img.loading" class="status-dot loading" title="Reading metadata…"></span>
+          <span
+            v-else-if="row.img.loading"
+            class="status-dot loading"
+            :title="t('sidebar.images.readingMetaRow')"
+          ></span>
           <span v-else-if="row.img.kpStatus === 'running'" class="status-dot running"></span>
           <span v-else-if="row.img.kpStatus === 'error'" class="status-dot error"></span>
           <input
@@ -639,73 +728,85 @@ function revealRow(key) {
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ row.img.name }}</span>
-          <span v-if="!isImageEnabled(row.img)" class="off-tag" title="Disabled: later runs leave it out">off</span>
-          <span v-if="row.img.previewPending" class="load-tag" title="Decoding image…">decoding…</span>
+          <span v-if="!isImageEnabled(row.img)" class="off-tag" :title="t('sidebar.images.offTitle')">{{
+            t('sidebar.images.off')
+          }}</span>
+          <span v-if="row.img.previewPending" class="load-tag" :title="t('sidebar.images.decodingTitle')">{{
+            t('sidebar.images.decoding')
+          }}</span>
           <span v-else-if="row.img.previewFailed" class="unaligned-tag failed-tag" :title="failReason(row.img)">⚠</span>
-          <span
-            v-else-if="isUnaligned(row.img)"
-            class="unaligned-tag"
-            title="Not aligned — no camera in the sparse model"
+          <span v-else-if="isUnaligned(row.img)" class="unaligned-tag" :title="t('sidebar.images.unalignedTitle')"
             >⚠</span
           >
         </li>
         <li v-else class="img-details" :class="{ 'in-group': row.groupKey }" @contextmenu.stop>
           <div class="detail-row">
-            <span class="detail-label">Keypoints</span>
+            <span class="detail-label">{{ t('sidebar.images.detail.keypoints') }}</span>
             <span class="detail-value">
               <template v-if="row.img.kpStatus === 'done'">
                 {{ row.img.kpCount }}
               </template>
-              <span v-else-if="row.img.kpStatus === 'running'" class="detail-dim">detecting…</span>
-              <span v-else-if="row.img.kpStatus === 'error'" class="detail-error">failed</span>
+              <span v-else-if="row.img.kpStatus === 'running'" class="detail-dim">{{
+                t('sidebar.images.detail.detecting')
+              }}</span>
+              <span v-else-if="row.img.kpStatus === 'error'" class="detail-error">{{
+                t('sidebar.images.detail.failed')
+              }}</span>
               <span v-else class="detail-dim">—</span>
             </span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">Mask</span>
+            <span class="detail-label">{{ t('sidebar.images.detail.mask') }}</span>
             <span class="detail-value">
-              <span v-if="row.img.mask">yes</span>
+              <span v-if="row.img.mask">{{ t('sidebar.images.detail.yes') }}</span>
               <span v-else class="detail-dim">—</span>
             </span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">Sensor</span>
+            <span class="detail-label">{{ t('sidebar.images.detail.sensor') }}</span>
             <span class="detail-value" :class="{ 'detail-dim': !row.img.sensorId }" :title="sensorLabel(row.img)">{{
               sensorLabel(row.img)
             }}</span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">Pose</span>
+            <span class="detail-label">{{ t('sidebar.images.detail.pose') }}</span>
             <span class="detail-value" :class="{ 'detail-dim': poseStatus(row.img) === '—' }">{{
               poseStatus(row.img)
             }}</span>
           </div>
           <div v-if="footprintSet" class="detail-row">
-            <span class="detail-label">Footprint</span>
+            <span class="detail-label">{{ t('sidebar.images.detail.footprint') }}</span>
             <span v-if="footprintImageIds.has(row.img.id)" class="detail-value">
-              <button class="link-btn" @click.stop="sidebar.zoomToImage(row.img.id)">Show on map</button>
+              <button class="link-btn" @click.stop="sidebar.zoomToImage(row.img.id)">
+                {{ t('sidebar.images.detail.showOnMap') }}
+              </button>
             </span>
             <span v-else class="detail-value detail-dim">—</span>
           </div>
           <div v-if="filmSensor(row.img)" class="detail-row">
-            <span class="detail-label">Fiducials</span>
+            <span class="detail-label">{{ t('sidebar.images.detail.fiducials') }}</span>
             <span
               class="detail-value"
               :class="{ 'detail-error': fiducialCount(row.img) < 3 }"
-              :title="fiducialCount(row.img) < 3 ? 'Interior orientation incomplete — mark ≥3 fiducials' : ''"
-              >{{ fiducialCount(row.img) }}{{ fiducialCount(row.img) < 3 ? ' (incomplete)' : '' }}</span
+              :title="fiducialCount(row.img) < 3 ? t('sidebar.images.detail.fiducialsIncompleteTitle') : ''"
+              >{{
+                fiducialCount(row.img) < 3
+                  ? t('sidebar.images.detail.fiducialsIncomplete', { n: fiducialCount(row.img) })
+                  : fiducialCount(row.img)
+              }}</span
             >
           </div>
           <div v-if="sidebar.hasSparse" class="detail-row">
-            <span class="detail-label">Registered</span>
+            <span class="detail-label">{{ t('sidebar.images.detail.registered') }}</span>
             <span class="detail-value" :class="{ 'detail-error': isUnaligned(row.img) }">{{
-              isUnaligned(row.img) ? 'no' : 'yes'
+              t(isUnaligned(row.img) ? 'sidebar.images.detail.no' : 'sidebar.images.detail.yes')
             }}</span>
           </div>
         </li>
       </template>
       <li v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"></li>
-      <li v-if="!images.length" class="empty">No images — drop here to add</li>
+      <li v-if="!images.length" class="empty">{{ t('sidebar.images.noImages') }}</li>
+      <li v-else-if="filtering && !shownImages.length" class="empty">{{ t('sidebar.images.filter.none') }}</li>
     </ul>
 
     <!-- Image context menu -->
@@ -717,7 +818,7 @@ function revealRow(key) {
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti }"
           :disabled="ctxIsMulti"
-          :title="ctxIsMulti ? 'Works on one image: right-click a single image' : null"
+          :title="ctxIsMulti ? t('sidebar.images.menu.oneImage') : null"
           @click="fromMenu((img) => sidebar.openImage(img.id))"
         >
           {{ ctxOpenLabel }}
@@ -728,56 +829,60 @@ function revealRow(key) {
           :disabled="ctxIsMulti || !ctxHasPosition"
           :title="
             ctxIsMulti
-              ? 'Works on one image: right-click a single image'
+              ? t('sidebar.images.menu.oneImage')
               : !ctxHasPosition
-                ? 'This image has no position (no GPS, footprint or pose)'
+                ? t('sidebar.images.menu.noPosition')
                 : null
           "
           @click="fromMenu((img) => sidebar.zoomToImage(img.id))"
         >
-          Locate on map
+          {{ t('sidebar.images.menu.locate') }}
         </button>
         <div class="ctx-sep"></div>
         <button
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti }"
           :disabled="ctxIsMulti"
-          :title="ctxIsMulti ? 'Works on one image: right-click a single image' : null"
+          :title="ctxIsMulti ? t('sidebar.images.menu.oneImage') : null"
           @click="fromMenu((img) => sidebar.showInfo(img.id))"
         >
-          Show information
+          {{ t('sidebar.images.menu.showInfo') }}
         </button>
         <button
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti }"
           :disabled="ctxIsMulti"
-          :title="ctxIsMulti ? 'Works on one image: right-click a single image' : null"
+          :title="ctxIsMulti ? t('sidebar.images.menu.oneImage') : null"
           @click="fromMenu((img) => sidebar.downloadImage(img.id))"
         >
-          Download original
+          {{ t('sidebar.images.menu.download') }}
         </button>
         <button
           class="ctx-item"
           :class="{ 'ctx-disabled': ctxIsMulti }"
           :disabled="ctxIsMulti"
-          :title="ctxIsMulti ? 'Works on one image: right-click a single image' : null"
+          :title="ctxIsMulti ? t('sidebar.images.menu.oneImage') : null"
           @click="fromMenu((img) => startRename(img.id, img.name))"
         >
-          Rename
+          {{ t('sidebar.images.menu.rename') }}
         </button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="ctxNewGroup">
-          {{ ctxIsMulti ? 'New group from selection' : 'New group with this image' }}
+          {{ t('sidebar.images.menu.newGroup', { n: ctxTargets.length }) }}
         </button>
         <div v-if="ctxMoveTargets.length" class="ctx-sub-wrap">
-          <button class="ctx-item ctx-has-sub">Move to group<span class="ctx-arrow">▸</span></button>
+          <button class="ctx-item ctx-has-sub">
+            {{ t('sidebar.images.menu.moveToGroup') }}<span class="ctx-arrow">▸</span>
+          </button>
           <div class="ctx-submenu">
             <button v-for="g in ctxMoveTargets" :key="g.id" class="ctx-item" @click="ctxMoveTo(g.id)">
               {{ g.name }}
             </button>
           </div>
         </div>
-        <button v-if="ctxInGroup" class="ctx-item" @click="ctxUngroup">Remove from group</button>
+        <button v-if="ctxInGroup" class="ctx-item" @click="ctxUngroup">
+          {{ t('sidebar.images.menu.removeFromGroup') }}
+        </button>
         <div class="ctx-sep"></div>
         <div v-if="ctxSensorTargets.length" class="ctx-sub-wrap">
           <button class="ctx-item ctx-has-sub">
@@ -796,37 +901,37 @@ function revealRow(key) {
           <div class="ctx-sep"></div>
           <button
             class="ctx-item"
-            title="Re-import this GeoTIFF as an imported DEM / orthophoto"
+            :title="t('sidebar.images.menu.convertTitle')"
             @click="fromMenu((img) => sidebar.convertImageToRaster(img.id))"
           >
-            Convert to reference data
+            {{ t('sidebar.images.menu.convert') }}
           </button>
         </template>
         <div class="ctx-sep"></div>
         <button
           class="ctx-item"
-          :title="
-            ctxAllDisabled
-              ? 'Use in later runs again'
-              : 'Leave out of later runs (alignment, depth maps, dense cloud, orthophoto, texture); its features, matches and pose stay'
-          "
+          :title="t(ctxAllDisabled ? 'sidebar.images.menu.enableTitle' : 'sidebar.images.menu.disableTitle')"
           @click="ctxToggleEnabled"
         >
-          {{ ctxAllDisabled ? 'Enable' : 'Disable' }}
+          {{ t(ctxAllDisabled ? 'sidebar.images.menu.enable' : 'sidebar.images.menu.disable') }}
         </button>
-        <button class="ctx-item" @click="ctxDetect">Detect features…</button>
+        <button class="ctx-item" @click="ctxDetect">{{ t('sidebar.images.menu.detect') }}</button>
         <button
           class="ctx-item"
           :class="{ 'ctx-disabled': !ctxHasKp }"
           :disabled="!ctxHasKp"
-          title="Match these images with every other image"
+          :title="t('sidebar.images.menu.matchTitle')"
           @click="ctxMatch"
         >
-          Match features…
+          {{ t('sidebar.images.menu.match') }}
         </button>
         <div class="ctx-sep"></div>
-        <button v-if="ctxHasKp" class="ctx-item danger" @click="ctxDeleteKp">Delete keypoints</button>
-        <button class="ctx-item danger" @click="ctxRemove">{{ ctxIsMulti ? 'Remove images' : 'Remove image' }}</button>
+        <button v-if="ctxHasKp" class="ctx-item danger" @click="ctxDeleteKp">
+          {{ t('sidebar.images.menu.deleteKeypoints') }}
+        </button>
+        <button class="ctx-item danger" @click="ctxRemove">
+          {{ t('sidebar.images.menu.remove', { n: ctxTargets.length }) }}
+        </button>
       </template>
     </ContextMenu>
 
@@ -837,30 +942,32 @@ function revealRow(key) {
           class="ctx-item"
           :class="{ 'ctx-disabled': !menu.row.count }"
           :disabled="!menu.row.count"
-          :title="menu.row.count ? null : 'This group has no images'"
+          :title="menu.row.count ? null : t('sidebar.images.groupMenu.empty')"
           @click="groupCtxSelect"
         >
-          Select images
+          {{ t('sidebar.images.groupMenu.select') }}
         </button>
         <template v-if="menu.row.group">
-          <button class="ctx-item" @click="fromGroupMenu((row) => startGroupRename(row.groupKey))">Rename</button>
+          <button class="ctx-item" @click="fromGroupMenu((row) => startGroupRename(row.groupKey))">
+            {{ t('sidebar.images.groupMenu.rename') }}
+          </button>
           <button
             class="ctx-item"
             :class="{ 'ctx-disabled': groupCtxIndex <= 0 }"
             :disabled="groupCtxIndex <= 0"
-            :title="groupCtxIndex <= 0 ? 'Already the first group' : null"
+            :title="groupCtxIndex <= 0 ? t('sidebar.images.groupMenu.first') : null"
             @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: -1 }))"
           >
-            Move up
+            {{ t('sidebar.images.groupMenu.moveUp') }}
           </button>
           <button
             class="ctx-item"
             :class="{ 'ctx-disabled': groupCtxIndex >= imageGroups.length - 1 }"
             :disabled="groupCtxIndex >= imageGroups.length - 1"
-            :title="groupCtxIndex >= imageGroups.length - 1 ? 'Already the last group' : null"
+            :title="groupCtxIndex >= imageGroups.length - 1 ? t('sidebar.images.groupMenu.last') : null"
             @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: 1 }))"
           >
-            Move down
+            {{ t('sidebar.images.groupMenu.moveDown') }}
           </button>
         </template>
         <button
@@ -871,16 +978,20 @@ function revealRow(key) {
           {{ t('sidebar.images.sensorInfo') }}
         </button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item" @click="groupCtxCollapseAll(true)">Collapse all</button>
-        <button class="ctx-item" @click="groupCtxCollapseAll(false)">Expand all</button>
+        <button class="ctx-item" @click="groupCtxCollapseAll(true)">
+          {{ t('sidebar.images.groupMenu.collapseAll') }}
+        </button>
+        <button class="ctx-item" @click="groupCtxCollapseAll(false)">
+          {{ t('sidebar.images.groupMenu.expandAll') }}
+        </button>
         <template v-if="menu.row.group">
           <div class="ctx-sep"></div>
           <button
             class="ctx-item"
-            title="The images stay in the project, ungrouped"
+            :title="t('sidebar.images.groupMenu.removeTitle')"
             @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'remove', id: row.groupKey }))"
           >
-            Remove group
+            {{ t('sidebar.images.groupMenu.remove') }}
           </button>
         </template>
       </template>
@@ -931,6 +1042,47 @@ function revealRow(key) {
   color: var(--text);
   border-color: var(--accent);
   background: rgba(14, 99, 156, 0.18);
+}
+/* The filter: a name field, a state, and while it is on, its count and a clear button. */
+.image-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px 4px 26px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.filter-text,
+.filter-state {
+  min-width: 0;
+  height: 20px;
+  padding: 0 5px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+}
+.filter-text {
+  flex: 1 1 50px;
+}
+/* As wide as its longest state, as a select is (docs/conventions.md). */
+.filter-state {
+  flex: 0 0 auto;
+}
+.filter-text:focus,
+.filter-state:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.filter-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 4px 26px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 /* Image group headers — lighter than a section header, heavier than a row. */
 .group-hd {

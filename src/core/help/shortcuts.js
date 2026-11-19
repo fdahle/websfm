@@ -55,6 +55,12 @@ const TABLE = [
     does: 'Select every image up to this one',
     where: 'ImagesSection',
   },
+  {
+    id: 'images.selectAll',
+    group: 'images',
+    keys: ['Mod+A'],
+    does: 'Select every image the list shows (after clicking an image in it)',
+  },
 
   // ── Image tab (App.vue): step through the photos in the image list's order ──
   {

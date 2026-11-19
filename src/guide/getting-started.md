@@ -81,6 +81,11 @@ Hover a button for its shortcut; **?** lists them all. **What's New** lists the 
 of each version. In a photo's tab, the arrow keys (or **Picture ▸ Previous** and **Next**)
 step through the photos in the image list's order, in the same tab.
 
+The filter over the image list shows only the photos whose name holds what you type, or
+those in one state: not aligned, disabled, without keypoints, not loaded. With a filter on,
+the arrow keys step through only those photos, and Ctrl+A (after clicking a photo in the
+list) selects them all, for a right-click on all of them at once.
+
 The Reconstruct dialogs (Detect Features, Match Features, Sparse Model, Depth Maps,
 Dense Cloud, DEM, Orthophoto, Mesh, Reflectance) and the Tools that take the longest to set up (Texture Mesh, Contour
 Lines, Co-register DEM, Align to Reference, Detect Targets) open on the settings of

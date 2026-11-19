@@ -85,3 +85,45 @@ test('arrow keys and Previous / Next step through the photos in list order', asy
   await expect.poll(async () => (await state(page)).tab).toBe(names[3])
   expect(errors).toEqual([])
 })
+
+test('the image list filters by name and state, and Ctrl+A selects what it shows', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await openFixture(page)
+  const { names } = await state(page)
+  // Sidebar sections start closed.
+  await page.locator('.section-hd', { hasText: /^\W*Images/ }).click()
+  const rows = page.locator('.item-list .list-item')
+  await expect(rows).toHaveCount(5)
+
+  // By name: one photo's own name leaves only it.
+  const field = page.getByLabel('Filter the images by name')
+  await field.fill(names[2])
+  await expect(rows).toHaveCount(1)
+  await expect(page.locator('.filter-status')).toContainText('1 of 5')
+  await field.press('Escape')
+  await expect(rows).toHaveCount(5)
+
+  // By state: disable two photos, then show the disabled ones.
+  await page.evaluate(async () => {
+    const { useImagesStore } = await import('/src/stores/useImagesStore.js')
+    const store = useImagesStore()
+    store.setImagesEnabled([store.images[1].id, store.images[3].id], false)
+  })
+  const select = page.getByLabel('Show the images that are')
+  await select.selectOption('disabled')
+  await expect(rows).toHaveCount(2)
+
+  // Ctrl+A after a click selects the shown images, and Next steps through only them.
+  await rows.first().click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await expect(page.locator('.item-list .list-item.selected')).toHaveCount(2)
+  await rows.first().dblclick()
+  await expect.poll(async () => (await state(page)).tab).toBe(names[1])
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => (await state(page)).tab).toBe(names[3])
+
+  await page.locator('.filter-status').getByRole('button', { name: 'Clear' }).click()
+  await expect(rows).toHaveCount(5)
+  expect(errors).toEqual([])
+})

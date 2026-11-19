@@ -25,7 +25,6 @@ export const I18N_PENDING = [
   'src/components/layout/WorkspaceView.vue',
   'src/components/layout/sidebar/CloudRows.vue',
   'src/components/layout/sidebar/GcpsSection.vue',
-  'src/components/layout/sidebar/ImagesSection.vue',
   'src/components/layout/sidebar/MatchesSection.vue',
   'src/components/layout/sidebar/ProductsSection.vue',
   'src/components/layout/sidebar/ReconstructionSection.vue',
