@@ -6,6 +6,13 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **A GCP without coordinates shows where the model puts it.** Marked in two photos of a
+  georeferenced model, its empty X, Y and Z cells in the Control & Markers table show the
+  model's position greyed, to help you find the point on a map or in the field; it is
+  never stored as the surveyed position. A GCP placed on the map (right-click ▸ Add GCP
+  here, or Edit GCPs) takes Z from a reference DEM that declares its vertical accuracy,
+  as one picked off a reference raster does. Clearing X or Y in the table now leaves it
+  empty instead of 0.
 - **Aligned photos open in Allmaps.** Export ▸ Allmaps writes one Georeference Annotation
   per aligned photo, the IIIF format Allmaps reads, so the scans on your IIIF image server
   open in Allmaps Viewer warped onto the map. You give the photos' IIIF address with

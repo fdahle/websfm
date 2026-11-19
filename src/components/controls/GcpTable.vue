@@ -1,6 +1,7 @@
 <script setup>
 import { VERTICAL_DATUMS, isConvertible } from '../../core/verticalDatum.js'
 import { ref } from 'vue'
+import { t } from '../../composables/useI18n.js'
 
 // Short labels for the cramped per-row datum select (core/verticalDatum.js ids).
 const DATUM_SHORT = [
@@ -76,6 +77,13 @@ function fmtCoord(v) {
 
 function reportFor(gcp) {
   return props.report.find((r) => r.gcpId === gcp.id) ?? null
+}
+
+// An empty coordinate shows, greyed, where the georeferenced model puts the point
+// (the report's `estimate`): a hint for finding it, never its stored position.
+function estimateHint(gcp, axis) {
+  const v = reportFor(gcp)?.estimate?.[axis]
+  return Number.isFinite(v) ? `≈ ${fmtCoord(v)}` : ''
 }
 
 // Mean per-observation reprojection error (px) for a GCP's report entry.
@@ -251,7 +259,9 @@ function onPositionInput(gcp, axis, e) {
                 class="coord-input"
                 type="number"
                 step="any"
-                :value="gcp.x"
+                :value="gcp.x ?? ''"
+                :placeholder="estimateHint(gcp, 0)"
+                :title="estimateHint(gcp, 0) ? t('gcps.table.estimateTip') : undefined"
                 @change="onPositionInput(gcp, 'x', $event)"
               />
             </td>
@@ -260,7 +270,9 @@ function onPositionInput(gcp, axis, e) {
                 class="coord-input"
                 type="number"
                 step="any"
-                :value="gcp.y"
+                :value="gcp.y ?? ''"
+                :placeholder="estimateHint(gcp, 1)"
+                :title="estimateHint(gcp, 1) ? t('gcps.table.estimateTip') : undefined"
                 @change="onPositionInput(gcp, 'y', $event)"
               />
             </td>
@@ -270,6 +282,8 @@ function onPositionInput(gcp, axis, e) {
                 type="number"
                 step="any"
                 :value="gcp.z ?? ''"
+                :placeholder="estimateHint(gcp, 2)"
+                :title="estimateHint(gcp, 2) ? t('gcps.table.estimateTip') : undefined"
                 @change="onPositionInput(gcp, 'z', $event)"
               />
             </td>

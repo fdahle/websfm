@@ -226,11 +226,34 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
     )
     refreshGcpReport()
   }
-  function addGcpAtCoord({ x, y }) {
+  // A point placed on the map takes its Z from a reference DEM there, when one declares
+  // its vertical accuracy (the rule of Fill Z and of a pick off a reference raster), in
+  // the point's own height datum when the DEM's converts to it. Otherwise Z stays empty.
+  async function addGcpAtCoord({ x, y }) {
     const id = addGcp()
     setGcpPosition(id, 'x', x)
     setGcpPosition(id, 'y', y)
     selectedGcpId.value = id
+    if (externalStore.hasReferenceDem) {
+      const g = gcps.value.find((gg) => gg.id === id)
+      let hit = null
+      try {
+        hit = await sampleReferenceDem(x, y, { datum: g?.verticalDatum })
+      } catch (err) {
+        log(`Reading the reference DEM at the new GCP failed: ${err.message}`, 'warn', 'Georeferencing')
+      }
+      if (hit?.z != null && hit.accuracy != null && gcps.value.some((gg) => gg.id === id)) {
+        gcpsStore.setGcpPosition(id, 'z', hit.z)
+        gcpsStore.setGcpAccuracy(id, 'z', hit.accuracy)
+        gcpsStore.setGcpVerticalDatum(id, hit.datum ?? 'unknown')
+        log(
+          `GCP "${g?.name ?? id}": Z ${hit.z.toLocaleString('en', { maximumFractionDigits: 3 })} m ` +
+            `(σ ${hit.accuracy} m, ${hit.datum ?? 'unknown datum'}) from the reference DEM "${hit.rasterName}"`,
+          'info',
+          'Georeferencing',
+        )
+      }
+    }
     refreshGcpReport()
   }
   // A GCP read straight off a reference raster tab (A-5): a new control point,

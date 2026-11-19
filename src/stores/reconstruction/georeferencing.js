@@ -660,6 +660,7 @@ export function createGeoreferencing({
           role: gcp.role ?? 'control',
           viewCount: 0,
           sfm: null,
+          estimate: null,
           dx: null,
           dy: null,
           dz: null,
@@ -702,6 +703,9 @@ export function createGeoreferencing({
         // position and the per-view reprojection errors are the only quality
         // signals it has. It is also what the scale-bar fit measures across.
         sfm: { x: tri.x, y: tri.y, z: tri.z },
+        // The same point in the project CRS through the georeference, or null: what a
+        // point without coordinates is shown as a hint (never stored as its position).
+        estimate: sim ? applySimilarity(sim, [tri.x, tri.y, tri.z]) : null,
         dx,
         dy,
         dz,

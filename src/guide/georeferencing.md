@@ -57,7 +57,10 @@ image marks (image name, pixel x/y). Check the columns it guessed before importi
 mark points, open an image and choose **Reconstruct ▸ Georeferencing ▸ Edit GCPs**; with
 the 2D map in front, the same button places the surveyed points on the map. Right-click adds a
 point directly. A point added in a photo has no coordinates until you type them in the GCP
-table or place it on the map; until then it is not used as control.
+table or place it on the map; until then it is not used as control. Once it is marked in two
+photos of a georeferenced model, its empty cells show greyed where the model puts it, to help
+you find it. A point placed on the map takes Z from a reference DEM that declares its vertical
+accuracy.
 
 ## Method
 <!-- param: method  default: Adjust with GCPs when three are marked -->

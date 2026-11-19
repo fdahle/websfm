@@ -1,6 +1,17 @@
-import { it, expect, vi } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { beforeAll, it, expect, vi } from 'vitest'
 import { ref, effectScope } from 'vue'
+import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { createGeoreferencing } from './georeferencing.js'
+import { applySimilarity } from '../../core/products/georef.js'
+import { projectPoint } from '../../core/sfm/geometry.js'
+
+// The accuracy report triangulates in the WASM module: hand init() its bytes.
+beforeAll(async () => {
+  const url = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
+  await initRecon({ module_or_path: await readFile(fileURLToPath(url)) })
+})
 const R = [
   [1, 0, 0],
   [0, 1, 0],
@@ -547,3 +558,49 @@ async function stripCase(sceneType, maxRollDeg, start) {
   }
   scope.stop()
 }
+
+it('reports where the georeferenced model puts a point without coordinates', async () => {
+  const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
+  // Looking along +Z from C = (0,0,0), (1,0,0), (0,1,0): t = −C.
+  const cams = new Map([
+    ['a', { R, t: [0, 0, 0], K }],
+    ['b', { R, t: [-1, 0, 0], K }],
+    ['c', { R, t: [0, -1, 0], K }],
+  ])
+  const X = [0.3, 0.2, 5]
+  const mark = (id) => {
+    const p = projectPoint(cams.get(id), ...X)
+    return { imageId: id, px: p.u, py: p.v }
+  }
+  const scope = effectScope()
+  const controls = ref([{ id: 'p', name: 'GCP 1', role: 'control', x: null, y: null, z: null, observations: [] }])
+  const georef = ref(null)
+  const api = scope.run(() =>
+    createGeoreferencing({
+      sparseCameras: ref(cams),
+      images: ref(['a', 'b', 'c'].map((id) => ({ id, uuid: id }))),
+      georef,
+      healthDirty: ref(0),
+      poses: () => [
+        { imageId: 'a', x: 0, y: 0, z: 0 },
+        { imageId: 'b', x: 2, y: 0, z: 0 },
+        { imageId: 'c', x: 0, y: 2, z: 0 },
+      ],
+      gcps: () => controls.value,
+      currentCrs: () => 'EPSG:3031',
+      modelStamp: () => 'm',
+      save: vi.fn(),
+      log: vi.fn(),
+    }),
+  )
+  // Not marked yet: nothing to estimate.
+  expect((await api.gcpAccuracyReport())[0].estimate).toBeNull()
+  await api.georeference()
+  controls.value[0].observations = [mark('a'), mark('b'), mark('c')]
+  const [row] = await api.gcpAccuracyReport()
+  const want = applySimilarity(georef.value.sim, X)
+  for (let i = 0; i < 3; i++) expect(row.estimate[i]).toBeCloseTo(want[i], 6)
+  // No coordinates: no residual, only the estimate.
+  expect(row.dTotal).toBeNull()
+  scope.stop()
+})

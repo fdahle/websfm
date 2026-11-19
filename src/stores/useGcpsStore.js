@@ -431,13 +431,14 @@ export const useGcpsStore = registerProjectStore(
     }
 
     // Update one ground-position axis ('x' | 'y' | 'z') of a GCP, in project-CRS
-    // units. Empty/invalid input is ignored (keeps the previous value) rather
-    // than silently persisting a NaN.
+    // units. Empty clears it; invalid input is ignored (keeps the previous value)
+    // rather than silently persisting a NaN.
     function setGcpPosition(id, axis, value) {
       const g = gcps.value.find((x) => x.id === id)
       if (!g || (axis !== 'x' && axis !== 'y' && axis !== 'z')) return
-      if (axis === 'z' && String(value ?? '').trim() === '') {
-        g.z = null
+      // Empty clears the axis: no coordinate (never 0, a real position).
+      if (String(value ?? '').trim() === '') {
+        g[axis] = null
         save()
         return
       }

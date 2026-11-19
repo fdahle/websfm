@@ -77,3 +77,16 @@ it('a marker made a control point keeps no position', () => {
   store.setGcpRole(id, 'control')
   expect(store.gcps.find((g) => g.id === id)).toMatchObject({ role: 'control', x: null, y: null })
 })
+
+it('clearing a coordinate leaves it empty, never 0', () => {
+  const store = useGcpsStore()
+  const id = store.addGcp()
+  store.setGcpPosition(id, 'x', 437029.8)
+  store.setGcpPosition(id, 'x', '')
+  store.setGcpPosition(id, 'y', '  ')
+  expect(store.gcps.find((g) => g.id === id)).toMatchObject({ x: null, y: null })
+  // Text that is not a number keeps what was there.
+  store.setGcpPosition(id, 'y', 12)
+  store.setGcpPosition(id, 'y', 'abc')
+  expect(store.gcps.find((g) => g.id === id).y).toBe(12)
+})
