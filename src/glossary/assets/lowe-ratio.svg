@@ -33,7 +33,7 @@
   <circle cx="110" cy="160" r="5.5" fill="#e6b84f"/>
   <text x="142" y="170" fill="#7ee787" font-size="12">d1</text>
   <text x="213" y="116" fill="#ef6f6c" font-size="12">d2</text>
-  <text x="110" y="290" fill="#7ee787" font-size="13" text-anchor="middle">d1 / d2 = 0.24 < 0.8: accept</text>
+  <text x="110" y="290" fill="#7ee787" font-size="13" text-anchor="middle">d1 / d2 = 0.24 &lt; 0.8: accept</text>
   <text x="110" y="30" fill="#c9d1d9" font-size="13" text-anchor="middle">distinctive: accepted</text>
   <rect x="245" y="70" width="44" height="44" fill="#2a303b" stroke="#e6b84f" stroke-width="2"/>
   <rect x="249" y="92" width="22" height="18" fill="#9ca3af"/>
@@ -76,7 +76,7 @@
   <circle cx="450" cy="160" r="5.5" fill="#e6b84f"/>
   <text x="498" y="176" fill="#7ee787" font-size="12">d1</text>
   <text x="402" y="200" fill="#ef6f6c" font-size="12" text-anchor="end">d2</text>
-  <text x="450" y="290" fill="#ef6f6c" font-size="13" text-anchor="middle">d1 / d2 = 0.95 > 0.8: reject</text>
+  <text x="450" y="290" fill="#ef6f6c" font-size="13" text-anchor="middle">d1 / d2 = 0.95 &gt; 0.8: reject</text>
   <text x="450" y="30" fill="#c9d1d9" font-size="13" text-anchor="middle">repetitive façade: rejected</text>
   <rect x="585" y="70" width="44" height="44" fill="#2a303b" stroke="#e6b84f" stroke-width="2"/>
   <rect x="591" y="76" width="13" height="13" fill="#9ca3af"/>

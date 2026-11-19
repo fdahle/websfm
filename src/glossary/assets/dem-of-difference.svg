@@ -112,6 +112,6 @@
   <line x1="130" y1="26" x2="170" y2="26" stroke="#c9d1d9" stroke-width="2"/>
   <text x="190" y="30" fill="#e6b84f" font-size="12">later date</text>
   <line x1="270" y1="26" x2="310" y2="26" stroke="#e6b84f" stroke-width="2" stroke-dasharray="6 4"/>
-  <text x="190" y="203.3" fill="#ef6f6c" font-size="12" text-anchor="middle">removed (later − earlier < 0)</text>
-  <text x="470" y="104.6" fill="#5aa9e6" font-size="12" text-anchor="middle">added (> 0)</text>
+  <text x="190" y="203.3" fill="#ef6f6c" font-size="12" text-anchor="middle">removed (later − earlier &lt; 0)</text>
+  <text x="470" y="104.6" fill="#5aa9e6" font-size="12" text-anchor="middle">added (&gt; 0)</text>
 </svg>

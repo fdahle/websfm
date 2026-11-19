@@ -19,7 +19,7 @@ which scores inliers by how well they fit rather than counting them — makes it
 robust to the wrong 3D–2D pairs that inevitably come out of matching. The
 winning pose is then polished by Gauss–Newton against all its inliers.
 
-<!-- TODO(image): assets/pnp-resection.svg - several known 3D tie points, their observed pixels in a new unposed image, and the rays from those pixels converging to determine the single camera centre and orientation; contrast with triangulation (known cameras, unknown point) in an inset. -->
+![Five known tie points above a new image; the rays from them through their pixels on the image plane meet at one camera centre, fixing the camera's position and orientation. An inset shows the dual, triangulation: two known cameras whose rays meet at one unknown point.](assets/pnp-resection.svg)
 
 PnP is the exact dual of [triangulation](help:triangulation): triangulation has
 known cameras and solves for a point, resection has known points and solves for a

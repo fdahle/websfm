@@ -30,7 +30,7 @@ from a carefully chosen seed:
    [tracks](help:track), filter high-residual points, and register whatever
    became possible.
 
-<!-- TODO(image): assets/incremental-sfm.svg - a four-stage strip: the match graph, the initial pair with its first triangulated points, one new camera being resected against those points, and the grown block after bundle adjustment - with an arrow looping from stage 3 back to itself. -->
+![Four panels: the match graph with the initial pair highlighted; the initial pair of cameras with their first triangulated points; a new camera resected against those points, with an arrow looping back to repeat for each image; and the grown block of cameras and points after bundle adjustment.](assets/incremental-sfm.svg)
 
 **The result is scale-free.** Photographs alone cannot tell a model of a quarry
 from a model of a sandpit; the reconstruction is correct only up to a similarity

@@ -19,7 +19,7 @@ a position and a **descriptor** (128 numbers for SIFT, DISK and ALIKED, 256 for
 SuperPoint) — a compact fingerprint of the surrounding pixels that lets two
 keypoints be compared numerically.
 
-<!-- TODO(image): assets/keypoint-matches.svg - two overlapping photos of the same scene side by side, detected keypoints drawn as circles sized by scale with an orientation tick, and a handful of correct matches joined by lines plus one obviously wrong match in a contrasting colour. -->
+![Two overlapping photos of the same scene, keypoints drawn as gold circles sized by scale with an orientation tick, green lines joining correct matches between the photos and one red dashed line joining a house corner to a rock: a wrong match.](assets/keypoint-matches.svg)
 
 When a keypoint in one image is paired with a keypoint in another (see
 [RANSAC](help:ransac) for how spurious pairs are filtered), the result is a

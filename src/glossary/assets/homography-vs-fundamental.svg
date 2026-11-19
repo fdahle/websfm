@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 460" font-family="sans-serif" font-size="13">
+  <rect width="680" height="460" fill="#1b1f27"/>
+  <text x="170" y="30" fill="#c9d1d9" font-size="13" text-anchor="middle">planar scene</text>
+  <polyline points="30,190 310,190" fill="none" stroke="#9ca3af" stroke-width="2"/>
+  <line x1="90" y1="70" x2="160.8" y2="198.8" stroke="#5aa9e6" stroke-width="1.4"/>
+  <line x1="208" y1="87.1" x2="272.2" y2="109.5" stroke="#c9d1d9" stroke-width="2.5"/>
+  <line x1="250" y1="70" x2="156" y2="190" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
+  <circle cx="156" cy="190" r="4" fill="#e6b84f"/>
+  <polygon points="102.8,79.7 90,70 91.3,85.9" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="102.8,79.7 90,70 91.3,85.9" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="90" cy="70" r="4.5" fill="#5aa9e6"/>
+  <text x="76" y="62" fill="#5aa9e6" font-size="12" text-anchor="middle">1</text>
+  <polygon points="251.3,85.9 250,70 239,81.6" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="251.3,85.9 250,70 239,81.6" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="250" cy="70" r="4.5" fill="#5aa9e6"/>
+  <text x="264" y="62" fill="#5aa9e6" font-size="12" text-anchor="middle">2</text>
+  <circle cx="230.5" cy="94.9" r="5" fill="#7ee787"/>
+  <text x="170" y="228" fill="#7ee787" font-size="12" text-anchor="middle">one exact match: x' = H x</text>
+  <text x="170" y="244" fill="#9ca3af" font-size="11" text-anchor="middle">no depth, nothing to triangulate</text>
+  <text x="510" y="30" fill="#c9d1d9" font-size="13" text-anchor="middle">scene with depth</text>
+  <polyline points="370,205 470,205 470,125 530,125 530,205 560,205 600,180 650,180" fill="none" stroke="#9ca3af" stroke-width="2"/>
+  <line x1="430" y1="70" x2="474.8" y2="151.5" stroke="#5aa9e6" stroke-width="1.4"/>
+  <line x1="548" y1="87.1" x2="612.2" y2="109.5" stroke="#c9d1d9" stroke-width="2.5"/>
+  <line x1="590" y1="70" x2="448" y2="102.7" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
+  <circle cx="448" cy="102.7" r="4" fill="#e6b84f"/>
+  <line x1="590" y1="70" x2="458.8" y2="122.4" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
+  <circle cx="458.8" cy="122.4" r="4" fill="#e6b84f"/>
+  <line x1="590" y1="70" x2="470" y2="142.7" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
+  <circle cx="470" cy="142.7" r="4" fill="#e6b84f"/>
+  <polygon points="442.8,79.7 430,70 431.3,85.9" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="442.8,79.7 430,70 431.3,85.9" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="430" cy="70" r="4.5" fill="#5aa9e6"/>
+  <text x="416" y="62" fill="#5aa9e6" font-size="12" text-anchor="middle">1</text>
+  <polygon points="591.3,85.9 590,70 579,81.6" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="591.3,85.9 590,70 579,81.6" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="590" cy="70" r="4.5" fill="#5aa9e6"/>
+  <text x="604" y="62" fill="#5aa9e6" font-size="12" text-anchor="middle">2</text>
+  <line x1="535.2" y1="82.6" x2="556.8" y2="90.1" stroke="#7ee787" stroke-width="5" opacity="0.5"/>
+  <circle cx="535.2" cy="82.6" r="3.5" fill="#7ee787"/>
+  <circle cx="547.6" cy="86.9" r="3.5" fill="#7ee787"/>
+  <circle cx="556.8" cy="90.1" r="3.5" fill="#7ee787"/>
+  <text x="510" y="228" fill="#7ee787" font-size="12" text-anchor="middle">a line of possible matches</text>
+  <text x="510" y="244" fill="#9ca3af" font-size="11" text-anchor="middle">its position along the line gives the depth</text>
+  <line x1="20" y1="268" x2="660" y2="268" stroke="#6b7280" stroke-width="1" stroke-dasharray="2 4"/>
+  <text x="340" y="296" fill="#c9d1d9" font-size="13" text-anchor="middle">pure rotation: zero baseline</text>
+  <line x1="301.1" y1="363.2" x2="335.4" y2="346.7" stroke="#c9d1d9" stroke-width="2.5"/>
+  <text x="292.3" y="359" fill="#9ca3af" font-size="11" text-anchor="end">image 1</text>
+  <line x1="344.6" y1="346.7" x2="378.9" y2="363.2" stroke="#c9d1d9" stroke-width="2.5"/>
+  <text x="387.7" y="359" fill="#9ca3af" font-size="11">image 2</text>
+  <line x1="340" y1="400" x2="264.6" y2="306.6" stroke="#5aa9e6" stroke-width="1" opacity="0.8"/>
+  <line x1="340" y1="400" x2="306.9" y2="284.6" stroke="#5aa9e6" stroke-width="1" opacity="0.8"/>
+  <line x1="340" y1="400" x2="372.1" y2="284.4" stroke="#5aa9e6" stroke-width="1" opacity="0.8"/>
+  <line x1="340" y1="400" x2="414.6" y2="306" stroke="#5aa9e6" stroke-width="1" opacity="0.8"/>
+  <circle cx="340" cy="400" r="5" fill="#5aa9e6"/>
+  <text x="470" y="380" fill="#9ca3af" font-size="11">both images see the same rays:</text>
+  <text x="470" y="395" fill="#9ca3af" font-size="11">H maps one onto the other,</text>
+  <text x="470" y="410" fill="#9ca3af" font-size="11">whatever the depth</text>
+  <text x="210" y="380" fill="#5aa9e6" font-size="11" text-anchor="end">one camera centre</text>
+  <text x="210" y="395" fill="#5aa9e6" font-size="11" text-anchor="end">turned in place</text>
+</svg>

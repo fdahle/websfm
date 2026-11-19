@@ -22,7 +22,7 @@ them, $F = K'^{-\top} E K^{-1}$. That is precisely why WebSfM verifies matches
 with $F$ rather than $E$: pair verification runs before intrinsics are known to
 be trustworthy, and before any self-calibration has happened.
 
-<!-- TODO(image): assets/fundamental-matrix.svg - a point x in the left image, the ray it back-projects to, and that ray imaged in the right view as the epipolar line l' = Fx, with a correct match on the line and an outlier match flagged off it. -->
+![Top: the ray from camera 1 through pixel x, with three possible points X1, X2, X3 at different depths, each seen by camera 2. Below: image 1 with x, and image 2 where the three points fall on one line, the epipolar line l' = F x; a match on the line is kept, an outlier off it, with its distance to the line drawn, is dropped.](assets/fundamental-matrix.svg)
 
 **Match verification** is its main job here. Given the putative matches of an
 image pair, [RANSAC](help:ransac) samples 8 correspondences at a time, fits $F$,

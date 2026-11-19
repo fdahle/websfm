@@ -19,7 +19,7 @@ Both cases share a defining property: **there is no parallax**, and therefore no
 depth information. This is what makes the homography useful as a *diagnostic* in
 Structure from Motion.
 
-<!-- TODO(image): assets/homography-vs-fundamental.svg - left, a planar scene where matches are predicted exactly by H; right, a scene with depth where a point in image 1 only constrains its match to the epipolar line. Below, a pure-rotation pair annotated as zero baseline. -->
+![Left, a flat scene: the ray from camera 1 meets the ground at one point, which lands at one exact spot in image 2, x' = H x. Right, a scene with a tower: the point may lie anywhere along the ray, and its possible positions fall along a line in image 2. Below, one camera centre with two image planes turned about it: zero baseline, the same rays in both images.](assets/homography-vs-fundamental.svg)
 
 When a pair's matches are explained just as well by an $H$ as by an $F$, the pair
 is **degenerate**: it has no usable [baseline](help:baseline), so the essential

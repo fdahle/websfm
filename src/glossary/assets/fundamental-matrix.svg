@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 470" font-family="sans-serif" font-size="13">
+  <rect width="680" height="470" fill="#1b1f27"/>
+  <line x1="285" y1="190" x2="499.9" y2="11.7" stroke="#5aa9e6" stroke-width="1.5"/>
+  <text x="489.9" y="15.7" fill="#5aa9e6" font-size="11" text-anchor="end">ray of x</text>
+  <line x1="395" y1="190" x2="354.1" y2="132.7" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
+  <circle cx="354.1" cy="132.7" r="4" fill="#e6b84f"/>
+  <text x="346.1" y="136.7" fill="#e6b84f" font-size="11" text-anchor="end">X1</text>
+  <line x1="395" y1="190" x2="400.1" y2="94.5" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
+  <circle cx="400.1" cy="94.5" r="4" fill="#e6b84f"/>
+  <text x="392.1" y="98.5" fill="#e6b84f" font-size="11" text-anchor="end">X2</text>
+  <line x1="395" y1="190" x2="476.8" y2="30.8" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
+  <circle cx="476.8" cy="30.8" r="4" fill="#e6b84f"/>
+  <text x="468.8" y="34.8" fill="#e6b84f" font-size="11" text-anchor="end">X3</text>
+  <circle cx="285" cy="190" r="5" fill="#5aa9e6"/>
+  <text x="275" y="206" fill="#5aa9e6" font-size="11" text-anchor="end">camera 1</text>
+  <circle cx="395" cy="190" r="5" fill="#5aa9e6"/>
+  <text x="405" y="206" fill="#5aa9e6" font-size="11">camera 2</text>
+  <text x="30" y="60" fill="#9ca3af" font-size="11">the depth along the ray is unknown:</text>
+  <text x="30" y="75" fill="#9ca3af" font-size="11">X1, X2, X3 all project to x in image 1</text>
+  <rect x="40" y="240" width="260" height="170" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <rect x="380" y="240" width="260" height="170" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <text x="170" y="428" fill="#c9d1d9" font-size="12" text-anchor="middle">image 1</text>
+  <text x="510" y="428" fill="#c9d1d9" font-size="12" text-anchor="middle">image 2</text>
+  <circle cx="215" cy="310" r="5" fill="#e6b84f"/>
+  <text x="224" y="314" fill="#e6b84f" font-size="13">x</text>
+  <line x1="380.2" y1="370.8" x2="639.8" y2="314.3" stroke="#5aa9e6" stroke-width="2"/>
+  <text x="386.2" y="388.8" fill="#5aa9e6" font-size="12">epipolar line l' = F x</text>
+  <circle cx="501.8" cy="344.3" r="3" fill="none" stroke="#e6b84f" stroke-width="1.2"/>
+  <circle cx="562.8" cy="331" r="3" fill="none" stroke="#e6b84f" stroke-width="1.2"/>
+  <circle cx="602.4" cy="322.4" r="3" fill="none" stroke="#e6b84f" stroke-width="1.2"/>
+  <circle cx="562.8" cy="331" r="5.5" fill="#7ee787"/>
+  <text x="572.8" y="347" fill="#7ee787" font-size="11">x': on the line, kept</text>
+  <line x1="493.1" y1="304.4" x2="501.8" y2="344.3" stroke="#ef6f6c" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <circle cx="493.1" cy="304.4" r="5.5" fill="#ef6f6c"/>
+  <text x="484.1" y="298.4" fill="#ef6f6c" font-size="11" text-anchor="end">outlier: off the line, dropped</text>
+</svg>

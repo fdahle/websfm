@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 360" font-family="sans-serif" font-size="13">
+  <rect width="680" height="360" fill="#1b1f27"/>
+  <line x1="193.9" y1="249.4" x2="313.5" y2="258.9" stroke="#c9d1d9" stroke-width="3"/>
+  <text x="325.5" y="263.4" fill="#c9d1d9" font-size="12">new image</text>
+  <line x1="80" y1="110" x2="250" y2="300" stroke="#5aa9e6" stroke-width="1.2" opacity="0.9"/>
+  <circle cx="205.5" cy="250.3" r="4" fill="#7ee787"/>
+  <circle cx="80" cy="110" r="6" fill="#e6b84f"/>
+  <line x1="170" y1="70" x2="250" y2="300" stroke="#5aa9e6" stroke-width="1.2" opacity="0.9"/>
+  <circle cx="233.5" cy="252.5" r="4" fill="#7ee787"/>
+  <circle cx="170" cy="70" r="6" fill="#e6b84f"/>
+  <line x1="260" y1="95" x2="250" y2="300" stroke="#5aa9e6" stroke-width="1.2" opacity="0.9"/>
+  <circle cx="252.2" cy="254" r="4" fill="#7ee787"/>
+  <circle cx="260" cy="95" r="6" fill="#e6b84f"/>
+  <line x1="340" y1="60" x2="250" y2="300" stroke="#5aa9e6" stroke-width="1.2" opacity="0.9"/>
+  <circle cx="266.8" cy="255.2" r="4" fill="#7ee787"/>
+  <circle cx="340" cy="60" r="6" fill="#e6b84f"/>
+  <line x1="420" y1="120" x2="250" y2="300" stroke="#5aa9e6" stroke-width="1.2" opacity="0.9"/>
+  <circle cx="290.5" cy="257.1" r="4" fill="#7ee787"/>
+  <circle cx="420" cy="120" r="6" fill="#e6b84f"/>
+  <polygon points="242.7,279.3 250,300 260.5,280.7" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="242.7,279.3 250,300 260.5,280.7" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="250" cy="300" r="4.5" fill="#5aa9e6"/>
+  <text x="266" y="322" fill="#5aa9e6" font-size="11">its centre and orientation: the one pose where all rays meet</text>
+  <text x="250" y="36" fill="#e6b84f" font-size="12" text-anchor="middle">known 3D tie points</text>
+  <text x="181.9" y="252.9" fill="#7ee787" font-size="11" text-anchor="end">their pixels</text>
+  <rect x="500" y="60" width="160" height="215" fill="none" stroke="#6b7280" stroke-width="1" rx="6"/>
+  <text x="580" y="80" fill="#c9d1d9" font-size="11" text-anchor="middle">triangulation (the dual)</text>
+  <line x1="530" y1="220" x2="580" y2="120" stroke="#5aa9e6" stroke-width="1.2"/>
+  <polygon points="530.6,206 530,220 540.8,211.1" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="530.6,206 530,220 540.8,211.1" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="530" cy="220" r="4.5" fill="#5aa9e6"/>
+  <line x1="630" y1="220" x2="580" y2="120" stroke="#5aa9e6" stroke-width="1.2"/>
+  <polygon points="619.2,211.1 630,220 629.4,206" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="619.2,211.1 630,220 629.4,206" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="630" cy="220" r="4.5" fill="#5aa9e6"/>
+  <circle cx="580" cy="120" r="6" fill="#e6b84f"/>
+  <text x="580" y="245" fill="#9ca3af" font-size="11" text-anchor="middle">known cameras,</text>
+  <text x="580" y="260" fill="#9ca3af" font-size="11" text-anchor="middle">one unknown point</text>
+  <text x="340" y="346" fill="#9ca3af" font-size="11" text-anchor="middle">resection: known points, one unknown camera; three points fix it, the rest vote in RANSAC</text>
+</svg>

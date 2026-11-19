@@ -15,7 +15,7 @@ relative pose from the [Essential Matrix](help:essential-matrix), whose
 decomposition yields four candidate camera configurations — only one of which
 places the scene in front of both cameras.
 
-<!-- TODO(image): assets/cheirality.svg - the four candidate decompositions of E drawn as four small two-camera diagrams, with the triangulated point in front of both cameras in exactly one and behind one or both in the other three. -->
+![Four two-camera diagrams, one per (R, t) from an essential matrix: in the first the triangulated point lies in front of both cameras; in the others it lies behind both, behind camera A, or behind camera B, the rays behind a camera drawn red and dashed.](assets/cheirality.svg)
 
 WebSfM enforces cheirality by requiring every triangulated [Tie Point](help:tie-point)
 to have positive depth in all the cameras that observed it. Points that fail the

@@ -34,6 +34,15 @@ describe('glossary figures', () => {
     })
   }
 
+  // A figure opens on GitHub or by itself as XML: a bare '<' or '&' in a label breaks it.
+  it('every figure is well-formed on its own', () => {
+    const bad = svgs.filter((f) => {
+      const raw = readFileSync(new URL(f, dir), 'utf8')
+      return /<(?![a-zA-Z/!?])/.test(raw) || /&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);)/i.test(raw)
+    })
+    expect(bad).toEqual([])
+  })
+
   it('glossary terms are not linked inside a figure', () => {
     const html = renderHelpMarkdown('![x](assets/ransac.svg)')
     expect(html.match(/<svg[\s\S]*<\/svg>/)[0]).not.toContain('glossary-link')

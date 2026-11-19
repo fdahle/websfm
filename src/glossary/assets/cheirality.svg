@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" font-family="sans-serif" font-size="13">
+  <rect width="680" height="340" fill="#1b1f27"/>
+  <rect x="20" y="50" width="150" height="240" fill="none" stroke="#6b7280" stroke-width="1" rx="6"/>
+  <line x1="41.5" y1="287.7" x2="88.5" y2="52.3" stroke="#6b7280" stroke-width="0.8" stroke-dasharray="1 4"/>
+  <line x1="205.3" y1="259.2" x2="44.7" y2="80.8" stroke="#6b7280" stroke-width="0.8" stroke-dasharray="1 4"/>
+  <line x1="65" y1="170" x2="75.9" y2="115.5" stroke="#5aa9e6" stroke-width="1.6"/>
+  <line x1="125" y1="170" x2="75.9" y2="115.5" stroke="#5aa9e6" stroke-width="1.6"/>
+  <line x1="65" y1="170" x2="125" y2="170" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3"/>
+  <polygon points="58.9,156.3 65,170 71.1,156.3" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="58.9,156.3 65,170 71.1,156.3" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="65" cy="170" r="4.5" fill="#5aa9e6"/>
+  <text x="65" y="193" fill="#5aa9e6" font-size="12" text-anchor="middle">A</text>
+  <polygon points="118.9,156.3 125,170 131.1,156.3" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="118.9,156.3 125,170 131.1,156.3" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="125" cy="170" r="4.5" fill="#5aa9e6"/>
+  <text x="125" y="193" fill="#5aa9e6" font-size="12" text-anchor="middle">B</text>
+  <circle cx="75.9" cy="115.5" r="5.5" fill="#e6b84f"/>
+  <text x="95" y="312" fill="#7ee787" font-size="13" text-anchor="middle">in front of both: kept</text>
+  <rect x="182" y="50" width="150" height="240" fill="none" stroke="#6b7280" stroke-width="1" rx="6"/>
+  <line x1="263.5" y1="287.7" x2="310.5" y2="52.3" stroke="#6b7280" stroke-width="0.8" stroke-dasharray="1 4"/>
+  <line x1="307.3" y1="259.2" x2="146.7" y2="80.8" stroke="#6b7280" stroke-width="0.8" stroke-dasharray="1 4"/>
+  <line x1="287" y1="170" x2="276.1" y2="224.5" stroke="#ef6f6c" stroke-width="1.6" stroke-dasharray="5 3"/>
+  <line x1="227" y1="170" x2="276.1" y2="224.5" stroke="#ef6f6c" stroke-width="1.6" stroke-dasharray="5 3"/>
+  <line x1="287" y1="170" x2="227" y2="170" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3"/>
+  <polygon points="280.9,156.3 287,170 293.1,156.3" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="280.9,156.3 287,170 293.1,156.3" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="287" cy="170" r="4.5" fill="#5aa9e6"/>
+  <text x="287" y="193" fill="#5aa9e6" font-size="12" text-anchor="middle">A</text>
+  <polygon points="220.9,156.3 227,170 233.1,156.3" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="220.9,156.3 227,170 233.1,156.3" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="227" cy="170" r="4.5" fill="#5aa9e6"/>
+  <text x="227" y="193" fill="#5aa9e6" font-size="12" text-anchor="middle">B</text>
+  <circle cx="276.1" cy="224.5" r="5.5" fill="#e6b84f"/>
+  <text x="257" y="312" fill="#ef6f6c" font-size="13" text-anchor="middle">behind both</text>
+  <rect x="344" y="50" width="150" height="240" fill="none" stroke="#6b7280" stroke-width="1" rx="6"/>
+  <line x1="365.5" y1="287.7" x2="412.5" y2="52.3" stroke="#6b7280" stroke-width="0.8" stroke-dasharray="1 4"/>
+  <line x1="529.3" y1="80.8" x2="368.7" y2="259.2" stroke="#6b7280" stroke-width="0.8" stroke-dasharray="1 4"/>
+  <line x1="389" y1="170" x2="371.9" y2="255.7" stroke="#ef6f6c" stroke-width="1.6" stroke-dasharray="5 3"/>
+  <line x1="449" y1="170" x2="371.9" y2="255.7" stroke="#5aa9e6" stroke-width="1.6"/>
+  <line x1="389" y1="170" x2="449" y2="170" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3"/>
+  <polygon points="382.9,156.3 389,170 395.1,156.3" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="382.9,156.3 389,170 395.1,156.3" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="389" cy="170" r="4.5" fill="#5aa9e6"/>
+  <text x="389" y="193" fill="#5aa9e6" font-size="12" text-anchor="middle">A</text>
+  <polygon points="455.1,183.7 449,170 442.9,183.7" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="455.1,183.7 449,170 442.9,183.7" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="449" cy="170" r="4.5" fill="#5aa9e6"/>
+  <text x="449" y="151" fill="#5aa9e6" font-size="12" text-anchor="middle">B</text>
+  <circle cx="371.9" cy="255.7" r="5.5" fill="#e6b84f"/>
+  <text x="419" y="312" fill="#ef6f6c" font-size="13" text-anchor="middle">behind A</text>
+  <rect x="506" y="50" width="150" height="240" fill="none" stroke="#6b7280" stroke-width="1" rx="6"/>
+  <line x1="587.5" y1="287.7" x2="634.5" y2="52.3" stroke="#6b7280" stroke-width="0.8" stroke-dasharray="1 4"/>
+  <line x1="631.3" y1="80.8" x2="470.7" y2="259.2" stroke="#6b7280" stroke-width="0.8" stroke-dasharray="1 4"/>
+  <line x1="611" y1="170" x2="628.1" y2="84.3" stroke="#5aa9e6" stroke-width="1.6"/>
+  <line x1="551" y1="170" x2="628.1" y2="84.3" stroke="#ef6f6c" stroke-width="1.6" stroke-dasharray="5 3"/>
+  <line x1="611" y1="170" x2="551" y2="170" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3"/>
+  <polygon points="604.9,156.3 611,170 617.1,156.3" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="604.9,156.3 611,170 617.1,156.3" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="611" cy="170" r="4.5" fill="#5aa9e6"/>
+  <text x="611" y="193" fill="#5aa9e6" font-size="12" text-anchor="middle">A</text>
+  <polygon points="557.1,183.7 551,170 544.9,183.7" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="557.1,183.7 551,170 544.9,183.7" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="551" cy="170" r="4.5" fill="#5aa9e6"/>
+  <text x="551" y="151" fill="#5aa9e6" font-size="12" text-anchor="middle">B</text>
+  <circle cx="628.1" cy="84.3" r="5.5" fill="#e6b84f"/>
+  <text x="581" y="312" fill="#ef6f6c" font-size="13" text-anchor="middle">behind B</text>
+  <text x="340" y="26" fill="#9ca3af" font-size="11" text-anchor="middle">the four (R, t) an essential matrix gives: the point lies in front of both cameras in one only</text>
+  <text x="340" y="334" fill="#9ca3af" font-size="11" text-anchor="middle">wedge: where a camera looks · blue: in front of it · red dashed: behind it (negative depth)</text>
+</svg>

@@ -20,6 +20,7 @@ def line(x1, y1, x2, y2, c=FG, w=1.5, dash=None, op=None):
 def circ(x, y, r, c, fill=True, w=1.5):
     return f'  <circle cx="{f2(x)}" cy="{f2(y)}" r="{f2(r)}" ' + (f'fill="{c}"' if fill else f'fill="none" stroke="{c}" stroke-width="{w}"') + '/>\n'
 def text(x, y, t, c=FG, size=None, anchor=None):
+    t = str(t).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     return f'  <text x="{f2(x)}" y="{f2(y)}" fill="{c}"' + (f' font-size="{size}"' if size else '') + (f' text-anchor="{anchor}"' if anchor else '') + f'>{t}</text>\n'
 def poly(pts, c, fill='none', w=1.5, op=None, closed=False, dash=None):
     d = ' '.join(f'{f2(x)},{f2(y)}' for x, y in pts)
@@ -45,6 +46,55 @@ def cov_from_rays(X, cams, sig):
 def camera(x, y, c=BLUE, label=None, ldx=-8, ldy=20):
     b = circ(x, y, 6, c)
     return b + (text(x + ldx, y + ldy, label, c) if label else '')
+RAISED = '#2a303b'
+def rect(x, y, w, h, c=None, fill='none', sw=1.5, op=None, rx=None, dash=None):
+    return f'  <rect x="{f2(x)}" y="{f2(y)}" width="{f2(w)}" height="{f2(h)}" fill="{fill}"' + (f' stroke="{c}" stroke-width="{sw}"' if c else '') + (f' opacity="{op}"' if op is not None else '') + (f' rx="{rx}"' if rx else '') + (f' stroke-dasharray="{dash}"' if dash else '') + '/>\n'
+def path(d, c=FG, fill='none', w=1.5, op=None, dash=None):
+    return f'  <path d="{d}" fill="{fill}"' + (f' stroke="{c}" stroke-width="{w}"' if c else '') + (f' opacity="{op}"' if op is not None else '') + (f' stroke-dasharray="{dash}"' if dash else '') + '/>\n'
+def arrow(x1, y1, x2, y2, c=FG, w=1.6, head=8, dash=None, op=None):
+    # A line with a filled head at (x2, y2).
+    d = math.hypot(x2 - x1, y2 - y1) or 1; ux, uy = (x2 - x1) / d, (y2 - y1) / d
+    bx, by = x2 - head * ux, y2 - head * uy
+    h = [(bx + head * 0.45 * uy, by - head * 0.45 * ux), (x2, y2), (bx - head * 0.45 * uy, by + head * 0.45 * ux)]
+    return line(x1, y1, bx, by, c, w, dash, op) + poly(h, c, fill=c, w=1, closed=True, op=op)
+def curve(p, q, bend, c=FG, w=1.6, dash=None, head=8):
+    # A quadratic arc from p to q, bulging by `bend` px to the left of p→q, with a head at q.
+    mx, my = (p[0] + q[0]) / 2, (p[1] + q[1]) / 2
+    d = math.hypot(q[0] - p[0], q[1] - p[1]) or 1; nx, ny = (p[1] - q[1]) / d, (q[0] - p[0]) / d
+    cx, cy = mx + bend * nx, my + bend * ny
+    b = path(f'M {f2(p[0])} {f2(p[1])} Q {f2(cx)} {f2(cy)} {f2(q[0])} {f2(q[1])}', c, w=w, dash=dash)
+    if head:
+        ux, uy = q[0] - cx, q[1] - cy; L = math.hypot(ux, uy) or 1; ux, uy = ux / L, uy / L
+        bx, by = q[0] - head * ux, q[1] - head * uy
+        b += poly([(bx + head * 0.45 * uy, by - head * 0.45 * ux), q, (bx - head * 0.45 * uy, by + head * 0.45 * ux)], c, fill=c, w=1, closed=True)
+    return b
+def hexc(r, g, b_):
+    return '#%02x%02x%02x' % tuple(max(0, min(255, round(v))) for v in (r, g, b_))
+def ramp(t, stops=((0, (49, 92, 140)), (0.5, (150, 145, 112)), (1, (214, 176, 90)))):
+    # A colour ramp (low blue-grey → high ochre by default), outside the palette on purpose:
+    # it reads the same on a light or dark ground.
+    t = max(0.0, min(1.0, t))
+    for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
+        if t <= t1:
+            u = (t - t0) / (t1 - t0) if t1 > t0 else 0
+            return hexc(*(a + (b_ - a) * u for a, b_ in zip(c0, c1)))
+    return hexc(*stops[-1][1])
+GRAYS = ((0, (24, 24, 24)), (1, (236, 236, 236)))
+DIVERGE = ((0, (52, 110, 190)), (0.5, (236, 236, 236)), (1, (200, 64, 58)))
+def raster(x, y, cell, vals, colour, nodata=None):
+    # A grid of cells, one rect per cell, merged along a row where neighbours share a colour.
+    b = ''
+    for j, row in enumerate(vals):
+        i = 0
+        while i < len(row):
+            v = row[i]
+            if v is None:
+                i += 1; continue
+            c = colour(v); k = i + 1
+            while k < len(row) and row[k] is not None and colour(row[k]) == c: k += 1
+            b += f'  <rect x="{f2(x + i * cell)}" y="{f2(y + j * cell)}" width="{f2((k - i) * cell + 0.3)}" height="{f2(cell + 0.3)}" fill="{c}"/>\n'
+            i = k
+    return b
 
 # ── gsd.svg ──────────────────────────────────────────────────────────────────
 def gsd():
@@ -707,5 +757,327 @@ def pose():
     b += text(320, 24, 'x_cam = R · x_world + t: R turns the world axes into the camera\'s, t then shifts', GREY, 11, 'middle')
     svg('camera-pose.svg', W, H, b)
 
-for f in (gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning, volume, gauge, lowe, track, cog, mgraph, pose): f()
+# ── 3D helpers for the scene drawings ────────────────────────────────────────
+def v_sub(a, b): return tuple(x - y for x, y in zip(a, b))
+def v_add(a, b): return tuple(x + y for x, y in zip(a, b))
+def v_mul(a, k): return tuple(x * k for x in a)
+def v_dot(a, b): return sum(x * y for x, y in zip(a, b))
+def v_cross(a, b): return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+def v_norm(a): L = math.sqrt(v_dot(a, a)) or 1; return tuple(x / L for x in a)
+def look_at(C, target, up=(0, 0, 1)):
+    # Rows of R: the camera's x (right), y (down) and z (forward) axes in world terms.
+    z = v_norm(v_sub(target, C)); x = v_norm(v_cross(z, up)); y = v_cross(z, x)
+    return (x, y, z)
+def project(R, C, f, cx, cy, X):
+    d = v_sub(X, C); xc, yc, zc = (v_dot(r, d) for r in R)
+    return (cx + f * xc / zc, cy + f * yc / zc), zc
+def rot2(p, a, o=(0, 0)):
+    c, s = math.cos(a), math.sin(a); x, y = p[0] - o[0], p[1] - o[1]
+    return (o[0] + c * x - s * y, o[1] + s * x + c * y)
+def cam2d(x, y, ang, c=BLUE, size=16, label=None, lo=(0, 0)):
+    # A camera seen from the side: its centre and a short wedge opening the way it looks
+    # (ang: the viewing direction on screen, radians, 0 = right, π/2 = down).
+    a1, a2 = ang - 0.42, ang + 0.42
+    w = [(x + size * math.cos(a1), y + size * math.sin(a1)), (x, y), (x + size * math.cos(a2), y + size * math.sin(a2))]
+    b = poly(w, c, fill=c, w=1, op=0.35, closed=True) + poly(w, c, w=1.4) + circ(x, y, 4.5, c)
+    return b + (text(x + lo[0], y + lo[1], label, c, 12, 'middle') if label else '')
+def isect(p, d, q, e):
+    # Lines p + s·d and q + u·e: returns (s, u).
+    den = d[0] * e[1] - d[1] * e[0]
+    s = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / den
+    u = ((q[0] - p[0]) * d[1] - (q[1] - p[1]) * d[0]) / den
+    return s, u
+
+# ── keypoint-matches.svg ─────────────────────────────────────────────────────
+def kpmatch():
+    W, H = 680, 330
+    rnd = random.Random(11)
+    # One scene in scene units: hills, a house, a tree, rocks. Each photo sees it through
+    # its own similarity (scale, turn, shift), as two overlapping aerial frames would.
+    house = [(0.42, 0.52), (0.58, 0.52), (0.58, 0.38), (0.50, 0.30), (0.42, 0.38)]
+    hill = [(0.0, 0.62), (0.15, 0.48), (0.3, 0.55), (0.62, 0.42), (0.8, 0.5), (1.0, 0.44), (1.0, 1.0), (0.0, 1.0)]
+    rocks = [(0.2, 0.8, 0.035), (0.7, 0.76, 0.05), (0.86, 0.86, 0.03), (0.33, 0.9, 0.04)]
+    tree = (0.76, 0.38)
+    kps = [(0.42, 0.52, 0.03, 0.6), (0.58, 0.52, 0.03, 2.5), (0.50, 0.30, 0.035, -1.6), (0.42, 0.38, 0.025, 3.6),
+           (0.15, 0.48, 0.05, -0.8), (0.62, 0.42, 0.06, 1.1), (0.76, 0.38, 0.045, -2.2), (0.2, 0.8, 0.04, 0.3),
+           (0.7, 0.76, 0.06, 2.0), (0.33, 0.9, 0.045, -0.4), (0.86, 0.86, 0.035, 1.6), (0.8, 0.5, 0.04, -1.2)]
+    frames = [(30, 50, 290, 230, 0.0, (0.0, 0.0), 1.0), (360, 50, 290, 230, 0.12, (0.18, 0.04), 1.15)]
+    b = ''
+    maps = []
+    for (fx, fy, fw, fh, ang, sh, sc) in frames:
+        def m(p, fx=fx, fy=fy, fw=fw, fh=fh, ang=ang, sh=sh, sc=sc):
+            q = rot2(((p[0] - sh[0]) * sc, (p[1] - sh[1]) * sc), ang, (0.5, 0.5))
+            return (fx + q[0] * fw, fy + q[1] * fh)
+        maps.append(m)
+        cid = f'kp{len(maps)}'
+        b += f'  <clipPath id="{cid}"><rect x="{fx}" y="{fy}" width="{fw}" height="{fh}"/></clipPath>\n  <g clip-path="url(#{cid})">\n'
+        b += rect(fx, fy, fw, fh, fill=RAISED)
+        big = [(-1, -1), (2, -1), (2, 2), (-1, 2)]
+        b += poly([m(p) for p in hill[:6]] + [m((1.6, 0.44)), m((1.6, 2)), m((-0.6, 2)), m((-0.6, 0.62))], DIM, fill=DIM, w=1, op=0.55, closed=True)
+        b += poly([m(p) for p in house], GREY, fill=GREY, w=1, closed=True)
+        for (rx, ry, rr) in rocks: b += circ(*m((rx, ry)), rr * fw * sc, GREY)
+        tx, ty = m(tree); b += circ(tx, ty, 0.05 * fw * sc, GREY)
+        b += '  </g>\n'
+        b += rect(fx, fy, fw, fh, DIM, sw=1)
+    shown = []
+    for k, (x, y, s, o) in enumerate(kps):
+        pts = []
+        for fi, m in enumerate(maps):
+            px, py = m((x, y))
+            fx, fy, fw, fh, ang, sh, sc = frames[fi]
+            if not (fx + 4 < px < fx + fw - 4 and fy + 4 < py < fy + fh - 4): pts.append(None); continue
+            r = s * fw * sc * 0.55; a = o + ang
+            b += circ(px, py, r, GOLD, fill=False, w=1.3) + line(px, py, px + r * math.cos(a), py + r * math.sin(a), GOLD, 1.3)
+            pts.append((px, py))
+        shown.append(pts)
+    good = [p for p in shown if p[0] and p[1]]
+    for p, q in good[:7]:
+        b += line(*p, *q, GREEN, 1.2, op=0.85)
+    # one wrong match: the house's corner paired with a rock in the other photo
+    p = shown[1][0]; q = shown[8][1]
+    b += line(*p, *q, RED, 1.8, '6 3')
+    b += text(170, 36, 'photo 1', FG, 12, 'middle') + text(505, 36, 'photo 2', FG, 12, 'middle')
+    b += text(340, 304, 'keypoints (gold): circle size = scale, tick = orientation', GREY, 11, 'middle')
+    b += text(340, 320, 'green: correct matches · red: a wrong match that RANSAC removes', GREY, 11, 'middle')
+    svg('keypoint-matches.svg', W, H, b)
+
+# ── fundamental-matrix.svg ───────────────────────────────────────────────────
+def fmatrix():
+    W, H = 680, 470
+    # Two cameras 1 m apart, turned slightly toward each other, both looking along +y.
+    C1, C2 = (-0.5, 0.0, 0.0), (0.5, 0.0, 0.25)
+    R1 = look_at(C1, (0.25, 4, -0.4)); R2 = look_at(C2, (-0.25, 4, -0.2))
+    f, cx, cy = 260, 130, 85
+    x = (175, 70)                                          # the point in image 1
+    d1 = v_norm(tuple(R1[0][i] * (x[0] - cx) / f + R1[1][i] * (x[1] - cy) / f + R1[2][i] for i in range(3)))
+    depths = [1.8, 3.0, 5.0]
+    Xs = [v_add(C1, v_mul(d1, t)) for t in depths]
+    # top view (x across, y up the page)
+    T = lambda P: (340 + 110 * P[0], 190 - 34 * P[1])
+    b = ''
+    far = v_add(C1, v_mul(d1, 5.6))
+    b += line(*T(C1), *T(far), BLUE, 1.5)
+    b += text(T(far)[0] - 10, T(far)[1] + 4, 'ray of x', BLUE, 11, 'end')
+    for k, X in enumerate(Xs):
+        b += line(*T(C2), *T(X), DIM, 1, '4 3')
+        b += circ(*T(X), 4, GOLD) + text(T(X)[0] - 8, T(X)[1] + 4, f'X{k + 1}', GOLD, 11, 'end')
+    b += circ(*T(C1), 5, BLUE) + text(T(C1)[0] - 10, T(C1)[1] + 16, 'camera 1', BLUE, 11, 'end')
+    b += circ(*T(C2), 5, BLUE) + text(T(C2)[0] + 10, T(C2)[1] + 16, 'camera 2', BLUE, 11)
+    b += text(30, 60, 'the depth along the ray is unknown:', GREY, 11) + text(30, 75, 'X1, X2, X3 all project to x in image 1', GREY, 11)
+    # the two images
+    I1, I2 = (40, 240), (380, 240)
+    b += rect(I1[0], I1[1], 2 * cx, 2 * cy, DIM, fill=RAISED, sw=1) + rect(I2[0], I2[1], 2 * cx, 2 * cy, DIM, fill=RAISED, sw=1)
+    b += text(I1[0] + cx, I1[1] + 2 * cy + 18, 'image 1', FG, 12, 'middle') + text(I2[0] + cx, I2[1] + 2 * cy + 18, 'image 2', FG, 12, 'middle')
+    b += circ(I1[0] + x[0], I1[1] + x[1], 5, GOLD) + text(I1[0] + x[0] + 9, I1[1] + x[1] + 4, 'x', GOLD, 13)
+    ps = [project(R2, C2, f, cx, cy, X)[0] for X in Xs]
+    (ax, ay), (bx, by) = ps[0], ps[-1]
+    dx, dy = bx - ax, by - ay; L = math.hypot(dx, dy); ux, uy = dx / L, dy / L
+    # the epipolar line, clipped to the frame
+    ts = []
+    for t in [i / 4 for i in range(-4000, 4001)]:
+        px, py = ax + ux * t, ay + uy * t
+        if 0 <= px <= 2 * cx and 0 <= py <= 2 * cy: ts.append(t)
+    e0 = (I2[0] + ax + ux * ts[0], I2[1] + ay + uy * ts[0]); e1 = (I2[0] + ax + ux * ts[-1], I2[1] + ay + uy * ts[-1])
+    b += line(*e0, *e1, BLUE, 2)
+    b += text(e0[0] + 6, e0[1] + 18, "epipolar line l' = F x", BLUE, 12)
+    for k, (px, py) in enumerate(ps):
+        b += circ(I2[0] + px, I2[1] + py, 3, GOLD, fill=False, w=1.2)
+    # a correct match on the line, an outlier off it with its distance drawn
+    g = (I2[0] + ps[1][0], I2[1] + ps[1][1])
+    b += circ(*g, 5.5, GREEN) + text(g[0] + 10, g[1] + 16, "x': on the line, kept", GREEN, 11)
+    o = (I2[0] + ps[0][0] + 12 * uy * 3.4, I2[1] + ps[0][1] - 12 * ux * 3.4)
+    t0 = (o[0] - I2[0] - ax) * ux + (o[1] - I2[1] - ay) * uy
+    foot = (I2[0] + ax + ux * t0, I2[1] + ay + uy * t0)
+    b += line(*o, *foot, RED, 1.2, '3 2') + circ(*o, 5.5, RED)
+    b += text(o[0] - 9, o[1] - 6, 'outlier: off the line, dropped', RED, 11, 'end')
+    svg('fundamental-matrix.svg', W, H, b)
+
+# ── homography-vs-fundamental.svg ────────────────────────────────────────────
+def homog():
+    W, H = 680, 460
+    b = ''
+    def panel(ox, title, ground, sub):
+        # side view: camera 1 and 2 above the scene, the ray from camera 1 through one pixel,
+        # and where the scene points along it land on camera 2's image plane
+        nonlocal b
+        C1, C2 = (ox + 70, 70), (ox + 230, 70)
+        b += text(ox + 150, 30, title, FG, 13, 'middle')
+        b += poly(ground, GREY, w=2)
+        d = v_norm((0.55, 1.0))
+        hits = []
+        for (gx0, gy0), (gx1, gy1) in zip(ground, ground[1:]):
+            s, u = isect(C1, d, (gx0, gy0), (gx1 - gx0, gy1 - gy0))
+            if s > 0 and 0 <= u <= 1: hits.append((C1[0] + s * d[0], C1[1] + s * d[1]))
+        hits = hits[:1]
+        if len(ground) > 2:  # unknown depth: the point may be anywhere along the ray
+            s0 = (hits[0][0] - C1[0]) / d[0]
+            hits = [(C1[0] + t * d[0], C1[1] + t * d[1]) for t in (s0 * 0.45, s0 * 0.72, s0)]
+        far = hits[-1]
+        b += line(*C1, far[0] + 10 * d[0], far[1] + 10 * d[1], BLUE, 1.4)
+        # camera 2's image plane: a segment 30 px in front of it, facing down-left
+        n2 = v_norm((-0.35, 1.0)); t2 = (n2[1], -n2[0])
+        P0 = (C2[0] + 30 * n2[0], C2[1] + 30 * n2[1])
+        b += line(P0[0] - 34 * t2[0], P0[1] - 34 * t2[1], P0[0] + 34 * t2[0], P0[1] + 34 * t2[1], FG, 2.5)
+        imgs = []
+        for X in hits:
+            e = (X[0] - C2[0], X[1] - C2[1])
+            s, u = isect(C2, e, (P0[0] - 34 * t2[0], P0[1] - 34 * t2[1]), (68 * t2[0], 68 * t2[1]))
+            imgs.append((C2[0] + s * e[0], C2[1] + s * e[1]))
+            b += line(*C2, *X, DIM, 1, '4 3')
+            b += circ(*X, 4, GOLD)
+        b += cam2d(*C1, math.atan2(d[1], d[0]), label='1', lo=(-14, -8)) + cam2d(*C2, math.atan2(n2[1], n2[0]), label='2', lo=(14, -8))
+        if len(imgs) == 1:
+            b += circ(*imgs[0], 5, GREEN)
+        else:
+            b += line(*imgs[0], *imgs[-1], GREEN, 5, op=0.5)
+            for p in imgs: b += circ(*p, 3.5, GREEN)
+        b += text(ox + 150, 228, sub[0], GREEN, 12, 'middle') + text(ox + 150, 244, sub[1], GREY, 11, 'middle')
+    panel(20, 'planar scene', [(ox, 190) for ox in (30, 310)], ('one exact match: x\' = H x', 'no depth, nothing to triangulate'))
+    panel(360, 'scene with depth', [(370, 205), (470, 205), (470, 125), (530, 125), (530, 205), (560, 205), (600, 180), (650, 180)],
+          ('a line of possible matches', 'its position along the line gives the depth'))
+    b += line(20, 268, 660, 268, DIM, 1, '2 4')
+    # pure rotation: one centre, two image planes turned about it
+    C = (340, 400)
+    b += text(340, 296, 'pure rotation: zero baseline', FG, 13, 'middle')
+    for k, a in enumerate((-math.pi / 2 - 0.45, -math.pi / 2 + 0.45)):
+        n = (math.cos(a), math.sin(a)); t = (-n[1], n[0])
+        P0 = (C[0] + 50 * n[0], C[1] + 50 * n[1])
+        b += line(P0[0] - 19 * t[0], P0[1] - 19 * t[1], P0[0] + 19 * t[0], P0[1] + 19 * t[1], FG, 2.5)
+        b += text(P0[0] + (-1 if k == 0 else 1) * 26, P0[1] + 4, f'image {k + 1}', GREY, 11, 'end' if k == 0 else None)
+    for a in (-2.25, -1.85, -1.3, -0.9):
+        b += line(*C, C[0] + 120 * math.cos(a), C[1] + 120 * math.sin(a), BLUE, 1, op=0.8)
+    b += circ(*C, 5, BLUE)
+    b += text(470, 380, 'both images see the same rays:', GREY, 11) + text(470, 395, 'H maps one onto the other,', GREY, 11)
+    b += text(470, 410, 'whatever the depth', GREY, 11)
+    b += text(210, 380, 'one camera centre', BLUE, 11, 'end') + text(210, 395, 'turned in place', BLUE, 11, 'end')
+    svg('homography-vs-fundamental.svg', W, H, b)
+
+# ── cheirality.svg ───────────────────────────────────────────────────────────
+def cheir():
+    W, H = 680, 340
+    b = ''
+    # The four (R, t) from E, drawn in the plane of the baseline and the point. Both
+    # cameras keep their observations (bearings rA, rB in their own frames). −t puts B on
+    # the other side of A; R' (a half turn of B about the baseline) turns B upside down,
+    # mirroring its viewing direction and its bearing across the baseline.
+    L, a, c = 60, 0.2, 0.9
+    cases = [(1, 1, 'in front of both: kept'), (-1, 1, 'behind both'), (1, -1, 'behind A'), (-1, -1, 'behind B')]
+    for k, (st, sr, lab) in enumerate(cases):
+        ox = 20 + k * 162; cy = 170
+        A = (ox + 75 - st * L / 2, cy); B = (A[0] + st * L, cy)
+        fA, fB = (0, -1), (0, -sr)
+        rA, rB = (a, -1), (-c, -sr)
+        s_, u = isect(A, rA, B, rB)
+        X = (A[0] + s_ * rA[0], A[1] + s_ * rA[1])
+        dA, dB = v_dot(v_sub(X, A), fA), v_dot(v_sub(X, B), fB)
+        b += rect(ox, 50, 150, 240, DIM, sw=1, rx=6)
+        for P, r_ in ((A, rA), (B, rB)):
+            n = v_norm(r_)
+            b += line(P[0] - 120 * n[0], P[1] - 120 * n[1], P[0] + 120 * n[0], P[1] + 120 * n[1], DIM, 0.8, '1 4')
+        for P, dep in ((A, dA), (B, dB)):
+            b += line(*P, *X, BLUE if dep > 0 else RED, 1.6, None if dep > 0 else '5 3')
+        b += line(*A, *B, DIM, 1, '3 3')
+        for P, f_, nm in ((A, fA, 'A'), (B, fB, 'B')):
+            b += cam2d(*P, math.atan2(f_[1], f_[0]), size=15)
+            b += text(P[0], P[1] - 18 * f_[1] + 5 * (1 if f_[1] < 0 else -0.2), nm, BLUE, 12, 'middle')
+        b += circ(*X, 5.5, GOLD)
+        b += text(ox + 75, 312, lab, GREEN if dA > 0 and dB > 0 else RED, 13, 'middle')
+    b += text(340, 26, 'the four (R, t) an essential matrix gives: the point lies in front of both cameras in one only', GREY, 11, 'middle')
+    b += text(340, 334, 'wedge: where a camera looks · blue: in front of it · red dashed: behind it (negative depth)', GREY, 11, 'middle')
+    svg('cheirality.svg', W, H, b)
+
+# ── pnp-resection.svg ────────────────────────────────────────────────────────
+def pnp():
+    W, H = 680, 360
+    b = ''
+    C = (250, 300)                                        # the camera centre to find
+    look = v_norm((0.08, -1.0)); t = (-look[1], look[0])
+    pts = [(80, 110), (170, 70), (260, 95), (340, 60), (420, 120)]
+    P0 = (C[0] + 46 * look[0], C[1] + 46 * look[1])
+    b += line(P0[0] - 60 * t[0], P0[1] - 60 * t[1], P0[0] + 60 * t[0], P0[1] + 60 * t[1], FG, 3)
+    b += text(P0[0] + 66 * t[0] + 6, P0[1] + 66 * t[1] + 4, 'new image', FG, 12)
+    for X in pts:
+        e = (C[0] - X[0], C[1] - X[1])
+        s, u = isect(X, e, (P0[0] - 60 * t[0], P0[1] - 60 * t[1]), (120 * t[0], 120 * t[1]))
+        px = (X[0] + s * e[0], X[1] + s * e[1])
+        b += line(*X, *C, BLUE, 1.2, op=0.9)
+        b += circ(*px, 4, GREEN)
+        b += circ(*X, 6, GOLD)
+    b += cam2d(*C, math.atan2(look[1], look[0]), size=22)
+    b += text(C[0] + 16, C[1] + 22, 'its centre and orientation: the one pose where all rays meet', BLUE, 11)
+    b += text(250, 36, 'known 3D tie points', GOLD, 12, 'middle')
+    b += text(P0[0] - 66 * t[0] - 6, P0[1] - 66 * t[1] + 4, 'their pixels', GREEN, 11, 'end')
+    # inset: triangulation, the dual
+    ix, iy = 500, 60
+    b += rect(ix, iy, 160, 215, DIM, sw=1, rx=6)
+    b += text(ix + 80, iy + 20, 'triangulation (the dual)', FG, 11, 'middle')
+    X = (ix + 80, iy + 60)
+    for cxp in (ix + 30, ix + 130):
+        b += line(cxp, iy + 160, *X, BLUE, 1.2)
+        b += cam2d(cxp, iy + 160, math.atan2(X[1] - (iy + 160), X[0] - cxp), size=14)
+    b += circ(*X, 6, GOLD)
+    b += text(ix + 80, iy + 185, 'known cameras,', GREY, 11, 'middle') + text(ix + 80, iy + 200, 'one unknown point', GREY, 11, 'middle')
+    b += text(340, 346, 'resection: known points, one unknown camera; three points fix it, the rest vote in RANSAC', GREY, 11, 'middle')
+    svg('pnp-resection.svg', W, H, b)
+
+# ── incremental-sfm.svg ──────────────────────────────────────────────────────
+def incsfm():
+    W, H = 700, 300
+    rnd = random.Random(5)
+    # the strip sits lower to leave room for stage 3's loop
+    b = ''
+    titles = ['1. match graph', '2. initial pair', '3. resect a new camera', '4. after bundle adjustment']
+    ground = lambda x: 210 + 10 * math.sin(x / 23)
+    for k in range(4):
+        ox = 10 + k * 172
+        b += rect(ox, 40, 162, 210, DIM, sw=1, rx=6)
+        b += text(ox + 81, 270, titles[k], FG, 12, 'middle')
+    # 1: nodes and verified pairs, the seed pair picked
+    ox = 10
+    nodes = [(ox + 40, 90), (ox + 85, 70), (ox + 130, 95), (ox + 45, 150), (ox + 95, 135), (ox + 130, 175), (ox + 70, 205)]
+    edges = [(0, 1), (1, 2), (0, 3), (1, 4), (3, 4), (2, 4), (4, 5), (3, 6), (4, 6), (5, 6), (0, 4)]
+    for i, j in edges: b += line(*nodes[i], *nodes[j], BLUE, 1.2, op=0.8)
+    b += line(*nodes[1], *nodes[4], GOLD, 3.5)
+    for p in nodes: b += circ(*p, 6, GOLD if p in (nodes[1], nodes[4]) else GREY)
+    # scene points shared by panels 2–4
+    def scene(ox, n, xr):
+        return [(ox + x, ground(x) - 30 - rnd.uniform(0, 40)) for x in [rnd.uniform(*xr) for _ in range(n)]]
+    rnd2 = random.Random(9)
+    base = sorted([(x, ground(x) - 22 - rnd2.uniform(0, 45)) for x in [rnd2.uniform(28, 134) for _ in range(9)]])
+    more = sorted([(x, ground(x) - 22 - rnd2.uniform(0, 45)) for x in [rnd2.uniform(10, 152) for _ in range(16)]])
+    cams2 = [(55, 70), (105, 70)]
+    # 2
+    ox = 182
+    for X in base:
+        for cx_, cy_ in cams2: b += line(ox + cx_, cy_, ox + X[0], X[1], BLUE, 0.7, op=0.55)
+    for X in base: b += circ(ox + X[0], X[1], 3.2, GOLD)
+    for cx_, cy_ in cams2: b += cam2d(ox + cx_, cy_, math.pi / 2, size=13)
+    # 3
+    ox = 354
+    for X in base: b += circ(ox + X[0], X[1], 3.2, GOLD)
+    for cx_, cy_ in cams2: b += cam2d(ox + cx_, cy_, math.pi / 2, size=13)
+    N = (ox + 140, 82)
+    for X in base[4:]: b += line(*N, ox + X[0], X[1], GREEN, 1, op=0.9)
+    b += cam2d(*N, math.pi / 2 + 0.5, c=GREEN, size=13)
+    b += text(N[0] - 4, N[1] - 14, 'new', GREEN, 11, 'middle')
+    b += curve((ox + 40, 36), (ox + 122, 36), 22, GREY, 1.4)
+    b += text(ox + 81, 22, 'repeat for each image', GREY, 11, 'middle')
+    # 4: the grown block
+    ox = 526
+    cams4 = [(18 + 26 * i, 70 + 6 * math.sin(i)) for i in range(6)]
+    for X in more:
+        for cx_, cy_ in cams4:
+            if abs(cx_ - X[0]) < 40: b += line(ox + cx_, cy_, ox + X[0], X[1], BLUE, 0.5, op=0.4)
+    for X in base + more: b += circ(ox + X[0], X[1], 2.8, GOLD)
+    for cx_, cy_ in cams4: b += cam2d(ox + cx_, cy_, math.pi / 2, size=11)
+    for k in range(3):
+        b += arrow(10 + k * 172 + 164, 145, 10 + (k + 1) * 172 - 2, 145, GREY, 1.4, 6)
+    svg('incremental-sfm.svg', W, H, b)
+
+FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning,
+           volume, gauge, lowe, track, cog, mgraph, pose,
+           kpmatch, fmatrix, homog, cheir, pnp, incsfm]
+only = set(sys.argv[2:])
+for f in FIGURES:
+    if not only or f.__name__ in only: f()
 print('ok')
