@@ -17,6 +17,15 @@ a textured model. Select a block to edit its settings; **Guided**, **Standard** 
 per project as its dialog would. Drag blocks to reorder; each can be disabled,
 duplicated or removed. **Recipe** shows the workflow as editable text.
 
+## Rebuild what is outdated
+After a step changes the sparse model (Optimize Cameras, gradual selection, Adjust with
+GCPs) or the georeference, the dense cloud, mesh, DEM and orthophoto built on the old
+one are outdated, and a message offers **Rebuild…**. It, and **Reconstruct ▸ Rebuild
+Outdated**, open a workflow of exactly the steps that rebuild them, in order: Georeference
+first when the products were georeferenced and the fit is gone, then depth maps, dense
+cloud, mesh, DEM, orthophoto. Each starts from its dialog's last settings and runs again;
+check them, then **Run workflow**. Nothing starts by itself.
+
 ## Run a workflow
 **Preflight** checks that each block has its inputs, including those earlier blocks
 make. **Run workflow** runs them in order; you can also run one block or start from it.

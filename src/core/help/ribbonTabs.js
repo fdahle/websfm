@@ -434,6 +434,16 @@ export const TABS = [
             icon: 'list',
             needs: ['project'],
           },
+          {
+            // A workflow of the steps that rebuild the outdated products, opened in the
+            // Workflow Builder (composables/useRebuildOutdated.js).
+            id: 'rebuild-outdated',
+            guide: 'workflow-builder',
+            tip: 'Rebuild the products a changed model outdated, in order, with their last settings',
+            label: 'Rebuild\nOutdated',
+            icon: 'redo',
+            needs: ['outdated'],
+          },
         ],
       },
       {

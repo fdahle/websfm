@@ -6,6 +6,12 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Rebuild what a changed model outdated.** After Optimize Cameras, gradual selection,
+  Adjust with GCPs or a refit outdates the products, a message offers **Rebuild…**, and
+  **Reconstruct ▸ Rebuild Outdated** does the same at any time: a workflow of exactly the
+  steps that rebuild the main products, in order (Georeference first when the fit is gone,
+  then depth maps, dense cloud, mesh, DEM, orthophoto), each from its dialog's last
+  settings, opens in the Workflow Builder to check and run. Nothing starts by itself.
 - **It says when the GCPs wait for Georeference.** Once three or more GCPs can be used but
   the model is not georeferenced with them (never, only by camera positions, or the fit was
   dropped because a GCP it used changed), the Control & Markers table says so with a

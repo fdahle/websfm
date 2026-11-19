@@ -1,4 +1,5 @@
 import { nextTick } from 'vue'
+import { openRebuildWorkflow } from './useRebuildOutdated.js'
 import { storeToRefs } from 'pinia'
 import { useGlossaryStore } from '../stores/useGlossaryStore.js'
 import { useGuideStore } from '../stores/useGuideStore.js'
@@ -481,6 +482,9 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         recon.setImageLayer({ visible: !recon.imageLayer?.visible })
         break
       }
+      case 'rebuild-outdated':
+        openRebuildWorkflow()
+        break
       // Reconstruct ▸ Georeferencing ▸ Edit GCPs: the mode of the view in front.
       case 'edit-gcps':
         if (activeView.value === 'map') mapGcpEdit.value = !mapGcpEdit.value

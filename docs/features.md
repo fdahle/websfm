@@ -52,6 +52,7 @@ product or an imported raster is open in front.
 | Where | Command | What it does | Guide |
 | --- | --- | --- | --- |
 | Reconstruct ▸ Workflow | Workflow Builder | Run several stages in one go, with quality checks between them. | [Workflow Builder](../src/guide/workflow-builder.md) |
+| Reconstruct ▸ Workflow | Rebuild Outdated | Rebuild the products a changed model outdated, in order, with their last settings. | [Workflow Builder](../src/guide/workflow-builder.md) |
 | Reconstruct ▸ Features | Detect Features | Find keypoints in every photo, with SIFT or a learned detector. | [Detect Features](../src/guide/detect-features.md) |
 | Reconstruct ▸ Features | Match Features | Match keypoints between image pairs and verify each pair geometrically. | [Match Features](../src/guide/match-features.md) |
 | Reconstruct ▸ Sparse | Sparse Model | Solve the camera poses and calibration, and triangulate the tie points. | [Sparse Reconstruction](../src/guide/sparse-reconstruction.md) |

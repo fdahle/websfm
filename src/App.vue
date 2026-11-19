@@ -1,4 +1,5 @@
 <script setup>
+import { useRebuildOffer } from './composables/useRebuildOutdated.js'
 import { pendingPersistence, persistenceFailures } from './utils/persistence.js'
 import { ref, computed, reactive, watch, onMounted, nextTick, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -416,6 +417,9 @@ const {
   },
   openInteractive: (id, value) => handleCommand(id, value),
 })
+
+// After a step outdated the products: a toast offering Rebuild Outdated.
+useRebuildOffer({ busy: isBusy })
 
 // ── Viewer refs ───────────────────────────────────────────────────────────────
 // Set by WorkspaceView; the command dispatch drives the viewers through them.

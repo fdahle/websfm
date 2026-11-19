@@ -13,6 +13,7 @@ import mapLayers from './mapLayers.js'
 import matchList from './matchList.js'
 import quality from './quality.js'
 import readText from './readText.js'
+import rebuild from './rebuild.js'
 import ribbon from './ribbon.js'
 import sidebar from './sidebar.js'
 import sparse from './sparse.js'
@@ -31,6 +32,7 @@ export default {
   matchList,
   quality,
   readText,
+  rebuild,
   ribbon,
   sidebar,
   sparse,

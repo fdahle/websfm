@@ -94,6 +94,10 @@ export const NEED_CHECKS = {
   // Tools that act on the view in front (`frontView`: 'image' | 'map' | 'viewer' |
   // 'raster' | ''). A mode belongs to one view, so the tool says which one it needs.
   imageView: { ok: (s) => s.frontView === 'image', reason: 'Open an image first' },
+  outdated: {
+    ok: (s) => s.outdatedCount > 0,
+    reason: 'Nothing is outdated: every product is built on the current model',
+  },
   gcpView: {
     ok: (s) =>
       s.frontView === 'image' ||

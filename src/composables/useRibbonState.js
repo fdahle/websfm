@@ -1,5 +1,6 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
+import { outdatedMainProducts } from './useRebuildOutdated.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
@@ -106,6 +107,7 @@ export function useRibbonState({
     // gcpView / measureHost), and the scene type the console's aerial-only check reads.
     frontView: frontView.value,
     referenceInFront: referenceInFront.value,
+    outdatedCount: outdatedMainProducts().length,
     mapMeasureTargetCount: mapMeasureTargets.value.length,
     sceneType: currentSceneType.value,
   }))

@@ -141,3 +141,12 @@ export function useDialogSettings(op, defaults, { initial = null, exclude = [] }
 
   return { settings, presets, source, remember, savePreset, applyPreset, deletePreset, reset }
 }
+
+// A dialog's last-run settings in the open project, over `defaults`, for a run started
+// without opening the dialog (Rebuild Outdated, composables/useRebuildOutdated.js).
+export async function lastDialogSettings(op, defaults) {
+  const projectId = useProjectsStore().currentProjectId
+  if (!projectId) return { ...defaults }
+  const data = await readLast(projectId).catch(() => ({}))
+  return normalizeSettings(data?.[op] ?? {}, defaults).settings
+}
