@@ -123,7 +123,6 @@ export const I18N_PENDING = [
   'src/components/viewers/RasterMeasurements.vue',
   'src/components/viewers/RegionToolbox.vue',
   'src/components/viewers/ScaleBarMarkingToolbox.vue',
-  'src/components/viewers/Viewer3D.vue',
   'src/components/viewers/ViewerImage.vue',
   'src/components/viewers/ViewerMap.vue',
   'src/components/viewers/ZoomField.vue',

@@ -20,6 +20,7 @@ import rebuild from './rebuild.js'
 import ribbon from './ribbon.js'
 import settings from './settings.js'
 import sidebar from './sidebar.js'
+import view3d from './view3d.js'
 import sparse from './sparse.js'
 
 export default {
@@ -44,4 +45,5 @@ export default {
   settings,
   sidebar,
   sparse,
+  view3d,
 }

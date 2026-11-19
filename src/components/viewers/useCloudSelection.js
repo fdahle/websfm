@@ -275,19 +275,13 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     onEditPending(new Set(edits.map((e) => e.cloudId)))
     emit('edit-selection', { edits, keepSelected, classValue })
   }
-  // Manual reclassification: the LAS classes offered for a selection (TODO ▸ F14).
-  const ASSIGN_CLASSES = [
-    [2, 'Ground'],
-    [1, 'Unclassified'],
-    [3, 'Low vegetation'],
-    [4, 'Medium vegetation'],
-    [5, 'High vegetation'],
-    [6, 'Building'],
-    [9, 'Water'],
-    [7, 'Low noise'],
-    [18, 'High noise'],
-  ]
+  // Manual reclassification: the LAS classes offered for a selection (TODO ▸ F14), in
+  // the order the toolbox lists them; their names are view3d.select.class.<n>.
+  const ASSIGN_CLASSES = [2, 1, 3, 4, 5, 6, 9, 7, 18]
   const assignClass = ref(2)
+  function setAssignClass(c) {
+    if (ASSIGN_CLASSES.includes(c)) assignClass.value = c
+  }
 
   // Esc during a stroke: drop it; the pointerup that follows finds nothing.
   function abortStroke() {
@@ -309,6 +303,7 @@ export function useCloudSelection({ view, container, cloudLayers, pointerPx, req
     selectionClouds,
     drawShape,
     assignClass,
+    setAssignClass,
     ASSIGN_CLASSES,
     selectableLayers,
     toggleSelectTool,

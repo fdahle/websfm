@@ -19,6 +19,7 @@ import { planMeshBlocks, blockMesh, joinBlocks, BLOCK_HEADROOM } from '../../cor
 import { cloudBounds, estimateSpacing } from '../../core/products/cloudEdit.js'
 import { CLOUD_EDIT_TUNING } from '../../core/tuning.js'
 import { editCommand } from '../../core/help/consoleEdits.js'
+import { msg, render } from '../../core/i18n/index.js'
 
 // Sizes that decide how an edit runs (core/tuning.js CLOUD_EDIT_TUNING says why).
 const {
@@ -96,7 +97,7 @@ export function createCloudEdits({
   // edits of a streamed cloud are not kept. A restored cloud has no octree: it is built
   // again, as after any edit (cloudLod.js).
   const history = createEditHistory({ maxEntries: CLOUD_UNDO_STEPS, maxBytes: CLOUD_UNDO_BYTES })
-  // { undo, redo }: what the next step each way would undo or redo, or null.
+  // { undo, redo }: what the next step each way would undo or redo (a message), or null.
   const cloudHistory = ref({ undo: null, redo: null })
   const syncHistory = () => {
     history.filter((e) => clouds.value.some((c) => c.id === e.cloudId) || e.kind === 'unfork')
@@ -117,8 +118,10 @@ export function createCloudEdits({
     return rest
   }
   const flatOf = (c) => ({ count: c.count, pos: c.pos, col: c.col, nrm: c.nrm, attributes: c.attributes })
+  // What a step undoes, as a message (the toolbox shows it in the user's language, the
+  // log in English).
   const editLabel = (mode, keepSelected) =>
-    mode === 'classify' ? 'classify points' : keepSelected ? 'keep the selected points' : 'delete the selected points'
+    msg(`view3d.history.${mode === 'classify' ? 'classify' : keepSelected ? 'keep' : 'delete'}`)
 
   // Undo (or redo, the same swap) one step. → the cloud now shown, or null.
   async function stepCloudHistory(direction) {
@@ -163,7 +166,7 @@ export function createCloudEdits({
       return null
     }
     log(
-      `${direction === 'undo' ? 'Undid' : 'Redid'}: ${entry.label} ("${shown.name}", ${shown.count.toLocaleString('en')} points)`,
+      `${direction === 'undo' ? 'Undid' : 'Redid'}: ${render(entry.label)} ("${shown.name}", ${shown.count.toLocaleString('en')} points)`,
       'info',
       'Products',
       {

@@ -25,6 +25,7 @@ vi.mock('../../workers/computeClient.js', () => ({
   optimizeSparse: async () => ({}),
 }))
 const { createCloudEdits } = await import('./cloudEdits.js')
+const { render } = await import('../../core/i18n/index.js')
 
 describe('replaceDerivedCloud', () => {
   it('keeps the identity but not the octree of the old points', () => {
@@ -151,6 +152,7 @@ describe('an alignment of a streamed source', () => {
 })
 
 describe('undo and redo of point edits', () => {
+  const labels = (h) => ({ undo: h.undo && render(h.undo), redo: h.redo && render(h.redo) })
   const setup = (cloud) => {
     const clouds = ref([cloud])
     const logs = []
@@ -173,17 +175,17 @@ describe('undo and redo of point edits', () => {
     await edits.editClouds({ mode: 'mask', sourceIds: ['d'], settings: mask(2) })
     const edited = clouds.value[0].pos
     expect(edited).not.toBe(pos)
-    expect(edits.cloudHistory.value).toEqual({ undo: 'delete the selected points', redo: null })
+    expect(labels(edits.cloudHistory.value)).toEqual({ undo: 'delete the selected points', redo: null })
 
     await edits.undoCloudEdit()
     expect(clouds.value).toHaveLength(1)
     expect(clouds.value[0].pos).toBe(pos)
-    expect(edits.cloudHistory.value).toEqual({ undo: null, redo: 'delete the selected points' })
+    expect(labels(edits.cloudHistory.value)).toEqual({ undo: null, redo: 'delete the selected points' })
     expect(logs.at(-1)).toEqual([expect.stringMatching(/^Undid: delete the selected points/), 'info', 'cloud undo'])
 
     await edits.redoCloudEdit()
     expect(clouds.value[0].pos).toBe(edited)
-    expect(edits.cloudHistory.value).toEqual({ undo: 'delete the selected points', redo: null })
+    expect(labels(edits.cloudHistory.value)).toEqual({ undo: 'delete the selected points', redo: null })
   })
 
   it('removes the copy a first edit made and shows the source, and brings the copy back', async () => {

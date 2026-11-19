@@ -8,6 +8,7 @@ import { storeToRefs } from 'pinia'
 import { recorderBitrate, recorderFormat, turntableStep } from '../../core/products/turntable.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
+import { msg } from '../../core/i18n/msg.js'
 import { downloadBlob } from '../../utils/download.js'
 
 // controls(): the current OrbitControls (Viewer3D rebuilds them when up changes).
@@ -82,7 +83,7 @@ export function useTurntable({ view, controls, alignUp, container, requestRender
         ? null
         : recorderFormat((t) => MediaRecorder.isTypeSupported(t))
     if (!format) {
-      recordError.value = 'This browser cannot record the 3D view.'
+      recordError.value = msg('view3d.turntable.cannotRecord')
       return
     }
     recordError.value = ''
@@ -108,7 +109,7 @@ export function useTurntable({ view, controls, alignUp, container, requestRender
       }
     }
     rec.onerror = (e) => {
-      recordError.value = `Recording failed: ${e.error?.message ?? 'unknown error'}`
+      recordError.value = msg('view3d.turntable.recordFailed', { error: e.error?.message ?? 'unknown error' })
       stopRecording(false)
     }
     recorder = rec

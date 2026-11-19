@@ -292,6 +292,7 @@ Notable changes to WebSfM. The format follows
   positions and pairs.
 
 ### Changed
+- **The 3D view's toolboxes in German.** Measure in 3D, the turntable and Select points (with the LAS class names) now show in the interface language, as the image list and both settings dialogs already do.
 - **Settings, regrouped.** The two run switches (Keep the screen on, Notify when a run ends) moved to Settings ▸ Compute ▸ During a run, and the settings almost nobody changes (a satellite source of your own, the 3D near clipping distance, the number of compute workers) show with **Show advanced settings**, now in the Settings footer as in the processing dialogs. The Memory safety limit says in plain words what it does and when to change it, and Downloaded AI models lists the models actually downloaded.
 - **Glossary figures follow the light theme.** In light mode the diagrams in the Glossary
   and the Guide are drawn on a light background with darker lines and labels, instead of

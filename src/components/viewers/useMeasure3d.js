@@ -8,6 +8,7 @@ import { pickNearestPoint } from '../../core/products/screenPick.js'
 import { polyline3d, polygon3d } from '../../core/products/measure.js'
 import { cloudUnits, formatMeasure } from '../../core/products/cloudUnits.js'
 import { disposeObject } from './threeResources.js'
+import { msg } from '../../core/i18n/msg.js'
 
 export function useMeasure3d({
   view,
@@ -34,6 +35,7 @@ export function useMeasure3d({
   const measureTool = ref(null) // null | 'distance' | 'polyline' | 'area'
   const measurePts = ref([]) // [{ pos: [x,y,z], cloudId }]
   const measureDone = ref(false)
+  // Why the last click placed nothing: a message (core/i18n), or ''.
   const measureNote = ref('')
   const measurementsStore = useMeasurementsStore()
   const raycaster = new THREE.Raycaster()
@@ -45,6 +47,11 @@ export function useMeasure3d({
       return
     }
     if (selectTool.value) exitSelection()
+    measureTool.value = kind
+    clearMeasure()
+  }
+  // The toolbox's Distance / Polyline / Area: that kind, from a fresh start.
+  function chooseMeasureTool(kind) {
     measureTool.value = kind
     clearMeasure()
   }
@@ -130,7 +137,7 @@ export function useMeasure3d({
   function measureClick(e) {
     const hit = surfaceHit(e)
     if (!hit) {
-      measureNote.value = 'Click on a cloud or a mesh'
+      measureNote.value = msg('view3d.measure.clickOnSurface')
       return
     }
     if (measureDone.value) {
@@ -142,7 +149,7 @@ export function useMeasure3d({
       first &&
       !!cloudLayers.get(first.cloudId)?.source?.imported !== !!cloudLayers.get(hit.cloudId)?.source?.imported
     ) {
-      measureNote.value = 'Imported and computed layers have different units: measure on one kind'
+      measureNote.value = msg('view3d.measure.mixedUnits')
       return
     }
     measureNote.value = ''
@@ -277,6 +284,7 @@ export function useMeasure3d({
     measurementsStore,
     fmt,
     toggleMeasureTool,
+    chooseMeasureTool,
     exitMeasure,
     clearMeasure,
     measureClick,

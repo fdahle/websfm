@@ -1,17 +1,18 @@
 <script setup>
 import { relativePositions } from '../../core/products/pointView.ts'
 import { MAX_BUFFER_BYTES } from '../../core/bufferLimit.js'
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { useLog } from '../../composables/useLog.js'
 import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
 import CloudLegend from './CloudLegend.vue'
-import FloatingToolbox from './FloatingToolbox.vue'
-import FieldHelp from '../guide/FieldHelp.vue'
-import { TURNTABLE_DEFAULTS } from '../../core/defaults.user.js'
-import { TURNTABLE_TUNING } from '../../core/tuning.js'
+import Measure3dToolbox from './Measure3dToolbox.vue'
+import TurntableToolbox from './TurntableToolbox.vue'
+import SelectionToolbox from './SelectionToolbox.vue'
+import { msg } from '../../core/i18n/msg.js'
+import { useI18n } from '../../composables/useI18n.js'
 import {
   buildCloudStyle,
   scalarRange,
@@ -23,7 +24,6 @@ import { pickNearestPoint } from '../../core/products/screenPick.js'
 import { settleEditLatch } from '../../core/products/editFraming.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 import { gesture, matches } from '../../core/help/shortcuts.js'
-import { keyLabel } from '../../utils/shortcutLabels.js'
 import { texturePageBlobs } from '../../stores/reconstruction/meshTexture.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { createLodLayer, LOD_VIEW_MIN } from './lodLayer.js'
@@ -207,6 +207,7 @@ const {
   selectionClouds,
   drawShape,
   assignClass,
+  setAssignClass,
   ASSIGN_CLASSES,
   selectableLayers,
   toggleSelectTool,
@@ -246,6 +247,7 @@ const {
   measurementsStore,
   fmt,
   toggleMeasureTool,
+  chooseMeasureTool,
   exitMeasure,
   clearMeasure,
   measureClick,
@@ -296,6 +298,47 @@ const {
   container,
   requestRender,
   emit,
+})
+// What each toolbox shows and calls (Measure3dToolbox, TurntableToolbox,
+// SelectionToolbox), as one reactive object each: its refs read as values there.
+const measureBox = reactive({
+  measureTool,
+  measureNote,
+  measureResult,
+  measureDone,
+  saved3d,
+  measurementsStore,
+  fmt,
+  chooseMeasureTool,
+  exitMeasure,
+  clearMeasure,
+  finishMeasure,
+  saveMeasure,
+  savedValue,
+  savedStale,
+})
+const turntableBox = reactive({
+  turntableSeconds,
+  setTurntableSeconds,
+  recording,
+  recordProgress,
+  recordError,
+  setTurntable,
+  recordTurn,
+  stopRecording,
+})
+const selectionBox = reactive({
+  selectTool,
+  selectionCount,
+  selectionStreamed,
+  selectionClouds,
+  assignClass,
+  setAssignClass,
+  ASSIGN_CLASSES,
+  selectableLayers,
+  exitSelection,
+  clearSelection,
+  commitSelection,
 })
 
 const BG = { dark: 0x1a1a1a, light: 0xf0f0f0, black: 0x000000 }
@@ -354,10 +397,7 @@ function init() {
     renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true })
   } catch (e) {
     // three.js has already logged the GL details to the console; this is the reader's version.
-    glError.value =
-      'The 3D view is unavailable: this browser or environment could not ' +
-      'create a WebGL context. This often happens over Remote Desktop, or when hardware ' +
-      'acceleration is turned off in the browser settings. The rest of the app is unaffected.'
+    glError.value = msg('view3d.glError')
     console.warn('[Viewer3D] WebGL unavailable — 3D view disabled:', e)
     return
   }
@@ -403,6 +443,7 @@ function init() {
 // whose points are in memory is drawn whole again (a streamed one cannot be).
 const reconStore = useReconstructionStore()
 const { log } = useLog()
+const { tx } = useI18n()
 const needsAllPoints = () => !!selectTool.value || !!props.pickMode
 // A cloud past 178 M points (its positions in shared memory, core/bigArray.js) cannot be
 // drawn whole: the GPU copy would be one Float32 buffer over the browser's 2 GiB. It is
@@ -1186,7 +1227,7 @@ onBeforeUnmount(() => {
   >
     <!-- WebGL unavailable: degrade gracefully instead of crashing app mount. -->
     <div v-if="glError" class="gl-error">
-      <div class="gl-error-box">{{ glError }}</div>
+      <div class="gl-error-box">{{ tx(glError) }}</div>
     </div>
 
     <CloudLegend v-if="showLegend" :layers="legendLayers" />
@@ -1207,248 +1248,15 @@ onBeforeUnmount(() => {
     <slot name="toolbox" />
 
     <!-- 3D measuring (Tools ▸ Measure ▸ Measure in 3D). -->
-    <FloatingToolbox
-      v-if="measureTool"
-      id="measure-3d"
-      title="Measure in 3D"
-      anchor="top-center"
-      :width="300"
-      close-title="Stop measuring"
-      close-key="measure3d.clear"
-      @close="exitMeasure"
-    >
-      <div class="tb-row" role="group" aria-label="Measure">
-        <button
-          v-for="t in [
-            ['distance', 'Distance'],
-            ['polyline', 'Polyline'],
-            ['area', 'Area'],
-          ]"
-          :key="t[0]"
-          class="tb-textbtn"
-          :class="{ active: measureTool === t[0] }"
-          :aria-pressed="measureTool === t[0]"
-          @click="
-            () => {
-              measureTool = t[0]
-              clearMeasure()
-            }
-          "
-        >
-          {{ t[1] }}
-        </button>
-      </div>
-      <template v-if="measureResult?.line">
-        <div class="tb-line">
-          <span class="tb-count">{{ fmt(measureResult.line.length, measureResult.units) }}</span>
-          <template v-if="measureResult.line.segments.length > 1">
-            over {{ measureResult.line.segments.length }} segments</template
-          >
-        </div>
-        <div class="tb-hint">
-          Horizontal {{ fmt(measureResult.line.horizontal, measureResult.units) }} · height change
-          {{ fmt(measureResult.line.vertical, measureResult.units) }}
-        </div>
-      </template>
-      <template v-else-if="measureResult?.area">
-        <div class="tb-line">
-          <span class="tb-count">{{ fmt(measureResult.area.area, measureResult.units, 2) }}</span> surface area
-        </div>
-        <div class="tb-hint">
-          Footprint {{ fmt(measureResult.area.footprint, measureResult.units, 2) }} · perimeter
-          {{ fmt(measureResult.area.perimeter, measureResult.units) }}
-          <template v-if="measureResult.area.planarity > 0.02 * measureResult.area.perimeter">
-            · the outline is far from flat</template
-          >
-        </div>
-      </template>
-      <div v-else class="tb-hint">
-        Click on a cloud or mesh to place points{{
-          measureTool === 'distance' ? '' : ` · ${keyLabel('measure3d.finish')} or double-click finishes`
-        }}
-        · {{ keyLabel('measure3d.undo') }} undoes · {{ keyLabel('measure3d.clear') }} exits
-      </div>
-      <div v-if="measureNote" class="tb-hint warn">{{ measureNote }}</div>
-      <div v-if="measureResult" class="tb-row">
-        <button
-          class="tb-textbtn"
-          :disabled="!measureDone"
-          title="Keep this measurement with the project"
-          @click="saveMeasure"
-        >
-          Save
-        </button>
-        <button v-if="!measureDone && measureTool !== 'distance'" class="tb-textbtn" @click="finishMeasure">
-          Finish
-        </button>
-        <button class="tb-textbtn" :title="`Start again (${keyLabel('measure3d.clear')})`" @click="clearMeasure">
-          Clear
-        </button>
-      </div>
-      <template v-if="saved3d.length">
-        <div class="tb-hint tb-row">
-          Saved
-          <button
-            class="tb-textbtn"
-            title="Export these measurements as CSV or GeoJSON"
-            @click="
-              emit('command', 'export-measurements', {
-                ids: saved3d.map((r) => r.id),
-                label: `${saved3d.length} 3D measurement${saved3d.length === 1 ? '' : 's'}`,
-              })
-            "
-          >
-            Export…
-          </button>
-        </div>
-        <div v-for="r in saved3d" :key="r.id" class="tb-line saved-measure">
-          <span :title="r.cloudName ? `Measured on ${r.cloudName}` : ''">{{ r.name }}</span>
-          <span>{{ savedValue(r) }}<template v-if="savedStale(r)"> · layer changed</template></span>
-          <button class="tb-textbtn danger" :aria-label="`Delete ${r.name}`" @click="measurementsStore.remove(r.id)">
-            ×
-          </button>
-        </div>
-      </template>
-    </FloatingToolbox>
+    <Measure3dToolbox v-if="measureTool" :m="measureBox" @command="(...a) => emit('command', ...a)" />
 
     <!-- The turntable (View ▸ Camera ▸ Turntable): its speed, and one turn recorded as
          a video. -->
-    <FloatingToolbox
-      v-if="turntableOn"
-      id="turntable-3d"
-      title="Turntable"
-      :width="236"
-      close-title="Stop the turntable"
-      @close="setTurntable(false)"
-    >
-      <label :title="recording ? 'Stop the recording to change it' : null" class="tb-field turn-field">
-        <FieldHelp
-          op="3d-view"
-          param="secondsPerTurn"
-          :value="turntableSeconds"
-          :default-value="TURNTABLE_DEFAULTS.secondsPerTurn"
-          >Seconds per turn</FieldHelp
-        >
-        <input
-          type="number"
-          class="tb-input"
-          :min="TURNTABLE_TUNING.minSecondsPerTurn"
-          :max="TURNTABLE_TUNING.maxSecondsPerTurn"
-          step="1"
-          :value="turntableSeconds"
-          :disabled="recording"
-          :title="recording ? 'Stop the recording to change it' : null"
-          @change="(e) => setTurntableSeconds(e.target.value)"
-        />
-      </label>
-      <div class="tb-row">
-        <button
-          v-if="!recording"
-          class="tb-textbtn"
-          title="Save one full turn of the 3D view as a video"
-          @click="recordTurn"
-        >
-          Record one turn
-        </button>
-        <template v-else>
-          <span class="tb-count">Recording {{ Math.round(recordProgress * 100) }} %</span>
-          <button class="tb-textbtn" title="Stop and discard the video" @click="stopRecording(false)">Cancel</button>
-        </template>
-      </div>
-      <div v-if="recordError" class="tb-hint warn">{{ recordError }}</div>
-      <div v-else class="tb-hint tb-row">
-        {{ recording ? 'The view is locked until the turn is done.' : 'Drag to steer; it turns on when you let go.' }}
-      </div>
-    </FloatingToolbox>
+    <TurntableToolbox v-if="turntableOn" :tt="turntableBox" />
 
     <!-- The selection tool's toolbox. The ribbon (View ▸ Select) chooses the tool;
          what you do with the selection lives here. -->
-    <FloatingToolbox
-      v-if="selectTool || selectionCount"
-      id="select-3d"
-      title="Select points"
-      anchor="top-center"
-      :width="260"
-      close-title="Stop selecting"
-      close-key="select3d.clear"
-      @close="exitSelection"
-    >
-      <template v-if="selectionCount">
-        <div class="tb-line">
-          <span class="tb-count">{{ selectionCount.toLocaleString() }}</span>
-          point{{ selectionCount === 1 ? '' : 's' }} selected<template v-if="selectionClouds > 1">
-            in {{ selectionClouds }} clouds</template
-          >
-        </div>
-        <div v-if="selectionStreamed" class="tb-hint tb-row">
-          Of the points drawn now: on a streamed cloud the edit takes every point inside the shape, at full detail.
-        </div>
-        <div class="tb-row">
-          <button
-            class="tb-textbtn danger"
-            :title="`Delete the selected points (${keyLabel('select3d.delete')})`"
-            @click="commitSelection(false)"
-          >
-            Delete
-          </button>
-          <button class="tb-textbtn" title="Keep only the selected points" @click="commitSelection(true)">
-            Keep only
-          </button>
-          <button
-            class="tb-textbtn"
-            :title="`Clear the selection (${keyLabel('select3d.clear')})`"
-            @click="clearSelection"
-          >
-            Clear
-          </button>
-        </div>
-        <div class="tb-row">
-          <select v-model.number="assignClass" class="tb-input assign-class" aria-label="Class to assign">
-            <option v-for="[c, label] in ASSIGN_CLASSES" :key="c" :value="c">{{ c }} · {{ label }}</option>
-          </select>
-          <button
-            class="tb-textbtn"
-            title="Set the selected points to this LAS class"
-            @click="commitSelection(false, assignClass)"
-          >
-            Assign class
-          </button>
-        </div>
-      </template>
-      <div v-if="reconStore.cloudHistory.undo || reconStore.cloudHistory.redo" class="tb-row">
-        <button
-          class="tb-textbtn"
-          :disabled="!reconStore.cloudHistory.undo"
-          :title="
-            reconStore.cloudHistory.undo
-              ? `Undo: ${reconStore.cloudHistory.undo} (${keyLabel('view3d.undo')})`
-              : 'Nothing to undo'
-          "
-          @click="reconStore.undoCloudEdit()"
-        >
-          Undo
-        </button>
-        <button
-          class="tb-textbtn"
-          :disabled="!reconStore.cloudHistory.redo"
-          :title="
-            reconStore.cloudHistory.redo
-              ? `Redo: ${reconStore.cloudHistory.redo} (${keyLabel('view3d.redo')})`
-              : 'Nothing to redo'
-          "
-          @click="reconStore.redoCloudEdit()"
-        >
-          Redo
-        </button>
-      </div>
-      <div v-if="!selectionCount" class="tb-hint">
-        {{
-          selectableLayers().length
-            ? `Drag a ${selectTool === 'lasso' ? 'lasso' : 'rectangle'} over dense-cloud points · ${keyLabel('select3d.add')} adds · ${keyLabel('select3d.subtract')} subtracts · ${keyLabel('select3d.clear')} exits`
-            : 'Show a dense cloud to select its points'
-        }}
-      </div>
-    </FloatingToolbox>
+    <SelectionToolbox v-if="selectTool || selectionCount" :sel="selectionBox" />
   </div>
 </template>
 
@@ -1458,35 +1266,6 @@ onBeforeUnmount(() => {
   height: 100%;
   position: relative;
   overflow: hidden;
-}
-
-/* 3D measuring toolbox. */
-.tb-textbtn.active {
-  background: rgba(14, 99, 156, 0.25);
-  border-color: var(--accent);
-}
-.tb-hint.warn {
-  color: #e0a040;
-  margin-top: 4px;
-}
-.saved-measure {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 6px;
-  align-items: center;
-  margin: 2px 0 0;
-}
-.turn-field {
-  grid-template-columns: 1fr 64px;
-}
-.assign-class {
-  flex: 1;
-  width: auto;
-}
-.saved-measure span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .gl-error {
@@ -1541,5 +1320,3 @@ onBeforeUnmount(() => {
   stroke-dasharray: 5 3;
 }
 </style>
-
-<style scoped src="./toolbox.css"></style>
