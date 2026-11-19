@@ -54,7 +54,9 @@ fixed, RTK float, total station, picked off a map), or type σ X/Y/Z. **Height d
 records what Z is measured from: *Ellipsoidal* for RTK or GNSS heights, unless the
 receiver was set to a geoid; *Other geoid / national* for heights above sea level from
 a survey sheet. It does not stop a point being used; it lets heights from different
-sources be converted. With four or more as control,
+sources be converted. Once three or more can be used but the model is not
+georeferenced with them, the table and the sidebar say so: **Georeference** with
+**Adjust with GCPs** lets the cameras and the lens follow them. With four or more as control,
 **Adjust with GCPs** also refines the focal length and lens, which a nadir block cannot
 fix by itself; with three it keeps them, and heights can be off by the focal's error.
 Keep some as checkpoints for an honest accuracy test.

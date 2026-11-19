@@ -32,6 +32,10 @@ export default {
   },
   // The Control & Markers table (components/controls/GcpTable.vue).
   table: {
+    awaitGeoreference:
+      'Three or more GCPs can be used, but the model is not georeferenced with them: run Georeference ' +
+      '(Adjust with GCPs, to let the cameras and lens follow them).',
+    georeference: 'Georeference…',
     status: 'Status',
     statusTip: 'What the point still needs before it is used: X, Y and Z, an accuracy, and marks in two photos',
     datum: 'Height datum',

@@ -6,7 +6,8 @@ import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
 import { pluralize } from '../../../core/textFormat.js'
-import { gcpReadiness, controlReadiness } from '../../../core/gcpReadiness.js'
+import { gcpReadiness, controlReadiness, gcpsAwaitGeoreference } from '../../../core/gcpReadiness.js'
+import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { t } from '../../../composables/useI18n.js'
 import { computed } from 'vue'
 
@@ -44,7 +45,12 @@ function notReadyTitle(gcp) {
   const r = readiness.value.get(gcp.id)
   return r && r.enabled && !r.ready ? t('gcps.sidebar.notReady', { needs: needText(r) }) : ''
 }
+const { canGeoreferenceGcps, validGeoref } = storeToRefs(useReconstructionStore())
+const awaiting = computed(() =>
+  gcpsAwaitGeoreference({ usable: canGeoreferenceGcps.value, georefMethod: validGeoref.value?.method ?? null }),
+)
 const headerWarn = computed(() => {
+  if (awaiting.value) return t('gcps.table.awaitGeoreference')
   const s = controlReadiness(gcps.value)
   return s.control && s.ready < 3
     ? t('gcps.table.summary', { ready: s.ready, control: s.control }) + ' ' + t('gcps.table.needThree')
@@ -96,7 +102,7 @@ function reprojFor(gcpId, imageId) {
     <button class="section-hd" @click="emit('toggle')">
       <span class="chevron">{{ open ? '▾' : '▸' }}</span>
       <span class="section-name">Control &amp; Markers</span>
-      <span v-if="headerWarn" class="ready-warn" :title="headerWarn">⚠</span>
+      <span v-if="headerWarn" class="ready-warn" :class="{ await: awaiting }" :title="headerWarn">⚠</span>
       <span v-if="gcps.length" class="badge">{{ gcps.length }}</span>
     </button>
     <ul v-if="open" class="item-list">
@@ -223,6 +229,9 @@ function reprojFor(gcpId, imageId) {
 </template>
 
 <style scoped src="./sidebar-sections.css">
+.ready-warn.await {
+  color: var(--accent);
+}
 .ready-warn {
   flex: none;
   margin-right: 4px;
@@ -314,6 +323,9 @@ function reprojFor(gcpId, imageId) {
   color: var(--text-dim);
   font-style: italic;
   margin: 2px 0;
+}
+.ready-warn.await {
+  color: var(--accent);
 }
 .ready-warn {
   flex: none;

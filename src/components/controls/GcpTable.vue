@@ -24,6 +24,9 @@ const props = defineProps({
   // Project scene type ('aerial' | 'object' | null) — orders the two create
   // buttons; an object project is almost always adding markers.
   sceneType: { type: String, default: null },
+  // Three or more GCPs can be used but the model is not georeferenced with them
+  // (core/gcpReadiness.js gcpsAwaitGeoreference): the line above the table says so.
+  awaitingGeoreference: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -40,6 +43,7 @@ const emit = defineEmits([
   'check-z',
   'convert-heights',
   'update-observation-accuracy',
+  'georeference',
 ])
 
 // Rows whose per-image observations are expanded (click the Observations count).
@@ -220,7 +224,11 @@ function onPositionInput(gcp, axis, e) {
         </select>
       </template>
     </div>
-    <div v-if="summaryText" class="ready-summary" :class="{ short: summary.ready < 3 }">{{ summaryText }}</div>
+    <div v-if="awaitingGeoreference" class="ready-summary await">
+      {{ t('gcps.table.awaitGeoreference') }}
+      <button class="tool-btn" @click="emit('georeference')">{{ t('gcps.table.georeference') }}</button>
+    </div>
+    <div v-else-if="summaryText" class="ready-summary" :class="{ short: summary.ready < 3 }">{{ summaryText }}</div>
     <table v-if="gcps.length">
       <thead>
         <tr>
@@ -751,6 +759,12 @@ tbody tr.obs-row > td {
 }
 .ready-summary.short {
   color: #e0a030;
+}
+.ready-summary.await {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
 }
 
 .action-cell {

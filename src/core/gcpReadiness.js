@@ -67,3 +67,13 @@ const NEED_WORDS = {
 }
 export const needWords = (needs, marks = 0) =>
   needs.map((k) => (typeof NEED_WORDS[k] === 'function' ? NEED_WORDS[k](marks) : NEED_WORDS[k]))
+
+/**
+ * Whether the model waits for Georeference to use its GCPs: three or more can be used,
+ * and the model is not georeferenced with them (never, by camera positions only, or the
+ * fit was dropped because a GCP it used changed).
+ * @param {{ usable: boolean, georefMethod: string|null }} s  usable: ≥ 3 GCPs the fit can
+ *   use (georeferencing.js canGeoreferenceGcps); georefMethod: the valid fit's, or null
+ */
+export const gcpsAwaitGeoreference = ({ usable = false, georefMethod = null } = {}) =>
+  !!usable && georefMethod !== 'gcps'

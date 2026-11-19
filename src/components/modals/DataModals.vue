@@ -1,4 +1,5 @@
 <script setup>
+import { gcpsAwaitGeoreference } from '../../core/gcpReadiness.js'
 import { computed, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
@@ -53,7 +54,8 @@ const { currentCrs, currentSceneType, projects, currentProjectId } = storeToRefs
 // Import ▸ Project into this project chooses among the others.
 const otherProjects = computed(() => projects.value.filter((p) => p.id !== currentProjectId.value))
 const reconstructionStore = useReconstructionStore()
-const { cameras, clouds, rasterProducts, sparseCameras } = storeToRefs(reconstructionStore)
+const { cameras, clouds, rasterProducts, sparseCameras, canGeoreferenceGcps, validGeoref } =
+  storeToRefs(reconstructionStore)
 const { setCloudStyle, setProductStyle } = reconstructionStore
 const imagesStore = useImagesStore()
 const { images, selectedId } = storeToRefs(imagesStore)
@@ -122,6 +124,7 @@ const {
   gcpImportOpen,
   gcpImportText,
   gcpTableOpen,
+  georeferenceOpen,
   imageTableOpen,
   importCloudData,
   importCloudOpen,
@@ -534,6 +537,15 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :selected-gcp-id="selectedGcpId"
       :has-reference-dem="hasReferenceDem"
       :scene-type="currentSceneType"
+      :awaiting-georeference="
+        gcpsAwaitGeoreference({ usable: canGeoreferenceGcps, georefMethod: validGeoref?.method ?? null })
+      "
+      @georeference="
+        () => {
+          gcpTableOpen = false
+          georeferenceOpen = true
+        }
+      "
       @fill-z="fillGcpZFromReferenceDem"
       @check-z="checkGcpZAgainstReferenceDem"
       @convert-heights="convertGcpHeightsTo"

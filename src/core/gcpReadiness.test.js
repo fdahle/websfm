@@ -72,3 +72,12 @@ it('counts the control points the georeference can use, and says why the others 
   })
   expect(needWords(['z', 'accuracy', 'marks'], 1)).toEqual(['no Z', 'no accuracy (σ)', 'marked in 1 of 2 photos'])
 })
+
+it('asks for Georeference while usable GCPs are not in the fit', async () => {
+  const { gcpsAwaitGeoreference } = await import('./gcpReadiness.js')
+  expect(gcpsAwaitGeoreference({ usable: true, georefMethod: null })).toBe(true)
+  expect(gcpsAwaitGeoreference({ usable: true, georefMethod: 'poses' })).toBe(true)
+  expect(gcpsAwaitGeoreference({ usable: true, georefMethod: 'dem-hold' })).toBe(true)
+  expect(gcpsAwaitGeoreference({ usable: true, georefMethod: 'gcps' })).toBe(false)
+  expect(gcpsAwaitGeoreference({ usable: false, georefMethod: null })).toBe(false)
+})

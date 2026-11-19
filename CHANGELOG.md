@@ -6,6 +6,10 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **It says when the GCPs wait for Georeference.** Once three or more GCPs can be used but
+  the model is not georeferenced with them (never, only by camera positions, or the fit was
+  dropped because a GCP it used changed), the Control & Markers table says so with a
+  **Georeference…** button, and the sidebar's Control & Markers header shows it.
 - **Edit GCPs on the photo or reference raster in front.** The Picture tab and an imported
   reference raster's tab have their own **Edit GCPs** button, the same as Reconstruct ▸
   Georeferencing ▸ Edit GCPs. On a reference raster it shows the Points toolbox and the GCPs

@@ -9,6 +9,7 @@ defineProps({
   selectedGcpId: { type: String, default: null },
   hasReferenceDem: { type: Boolean, default: false },
   sceneType: { type: String, default: null },
+  awaitingGeoreference: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -22,6 +23,7 @@ const emit = defineEmits([
   'update-vertical-datum',
   'update-accuracy-preset',
   'convert-heights',
+  'georeference',
   'refresh-report',
   'select',
   'add',
@@ -49,6 +51,8 @@ const emit = defineEmits([
       :selected-gcp-id="selectedGcpId"
       :has-reference-dem="hasReferenceDem"
       :scene-type="sceneType"
+      :awaiting-georeference="awaitingGeoreference"
+      @georeference="emit('georeference')"
       @fill-z="emit('fill-z')"
       @check-z="emit('check-z')"
       @remove="emit('remove', $event)"

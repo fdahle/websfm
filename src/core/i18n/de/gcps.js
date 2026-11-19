@@ -28,6 +28,10 @@ export default {
       'Gelände. {n, plural, one {Ihn} other {Sie}} auf einem Foto markieren.',
   },
   table: {
+    awaitGeoreference:
+      'Drei oder mehr GCPs sind verwendbar, aber das Modell ist nicht mit ihnen georeferenziert: Georeferenzieren ' +
+      'ausführen (Mit GCPs ausgleichen, damit Kameras und Objektiv ihnen folgen).',
+    georeference: 'Georeferenzieren…',
     status: 'Status',
     statusTip:
       'Was dem Punkt noch fehlt, bevor er verwendet wird: X, Y und Z, eine Genauigkeit und Markierungen auf zwei Fotos',
