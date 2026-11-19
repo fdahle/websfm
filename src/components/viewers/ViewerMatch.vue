@@ -1,8 +1,23 @@
+<script>
+import { reactive } from 'vue'
+
+// How far each photo is turned on screen, by its uuid: clockwise degrees, one of 0, 90,
+// 180, 270. A view setting alone (the photo, its keypoints and matches stay as they are),
+// kept for the session so a photo stays turned in every pair it is in.
+const viewTurns = reactive(new Map())
+</script>
+
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { asPairList } from '../../core/sfm/matchCodec.js'
+import { turnPosition } from '../../core/features/turn.js'
 import { MAX_SCALE, MIN_SCALE } from '../../composables/useImageViewport.js'
+import { useContextMenu } from '../../composables/useContextMenu.js'
+import { useI18n } from '../../composables/useI18n.js'
 import { clamp } from '../../core/stats.js'
+import ViewerContextMenu from './ViewerContextMenu.vue'
+
+const { t } = useI18n()
 
 const props = defineProps({
   imageA: { type: Object, required: true },
@@ -79,17 +94,78 @@ const R = ref({ scale: 1, tx: 0, ty: 0 })
 
 let dragging = null // null | { panel: 'L'|'R', startX, startY, startTx, startTy }
 
+// ── Turn (view only) ──────────────────────────────────────────────────────────
+
+const imageOf = (side) => (side === 'L' ? props.imageA : props.imageB)
+const turnOf = (side) => viewTurns.get(imageOf(side)?.uuid) ?? 0
+const turnL = computed(() => turnOf('L'))
+const turnR = computed(() => turnOf('R'))
+
+// The photo's size on screen before scaling: width and height swap at 90° and 270°.
+function shownSize(side) {
+  const img = side === 'L' ? leftImg.value : rightImg.value
+  if (!img?.naturalWidth) return null
+  const w = img.naturalWidth,
+    h = img.naturalHeight
+  return turnOf(side) % 180 ? [h, w] : [w, h]
+}
+
+// The image element's transform: pan and zoom, then the turn about its top-left corner,
+// shifted back so the turned photo starts at (0, 0) as turnPosition places it.
+function imgTransform(side) {
+  const s = side === 'L' ? L.value : R.value
+  const turn = side === 'L' ? turnL.value : turnR.value
+  const img = side === 'L' ? leftImg.value : rightImg.value
+  const w = img?.naturalWidth ?? 0,
+    h = img?.naturalHeight ?? 0
+  const [ox, oy] = { 90: [h, 0], 180: [w, h], 270: [0, w] }[turn] ?? [0, 0]
+  return `translate(${s.tx}px, ${s.ty}px) scale(${s.scale}) translate(${ox}px, ${oy}px) rotate(${turn}deg)`
+}
+
+function turnBy(side, deg) {
+  const uuid = imageOf(side)?.uuid
+  if (!uuid) return
+  const turn = (((turnOf(side) + deg) % 360) + 360) % 360
+  if (turn) viewTurns.set(uuid, turn)
+  else viewTurns.delete(uuid)
+  fit(side)
+}
+
+// Right-click on a panel: turn that photo.
+const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu()
+function onContextMenu(e, side) {
+  openCtx(e, { side })
+}
+const ctxItems = computed(() => {
+  const side = ctxMenu.value?.side
+  if (!side) return []
+  return [
+    { id: 'cw', label: t('matchList.preview.turnCw') },
+    { id: 'ccw', label: t('matchList.preview.turnCcw') },
+    ...(turnOf(side) ? [{ id: 'reset', label: t('matchList.preview.turnReset') }] : []),
+  ]
+})
+function onCtxSelect(id) {
+  const side = ctxMenu.value?.side
+  closeCtx()
+  if (!side) return
+  if (id === 'cw') turnBy(side, 90)
+  else if (id === 'ccw') turnBy(side, -90)
+  else if (id === 'reset') turnBy(side, -turnOf(side))
+}
+
 // ── Fit ───────────────────────────────────────────────────────────────────────
 
 function fit(side) {
   const c = side === 'L' ? leftContainer.value : rightContainer.value
-  const img = side === 'L' ? leftImg.value : rightImg.value
   const s = side === 'L' ? L.value : R.value
-  if (!c || !img?.naturalWidth) return
-  const sc = Math.min(c.clientWidth / img.naturalWidth, c.clientHeight / img.naturalHeight, 1)
+  const size = shownSize(side)
+  if (!c || !size) return
+  const [w, h] = size
+  const sc = Math.min(c.clientWidth / w, c.clientHeight / h, 1)
   s.scale = sc
-  s.tx = (c.clientWidth - img.naturalWidth * sc) / 2
-  s.ty = (c.clientHeight - img.naturalHeight * sc) / 2
+  s.tx = (c.clientWidth - w * sc) / 2
+  s.ty = (c.clientHeight - h * sc) / 2
   drawOverlay()
 }
 
@@ -193,12 +269,16 @@ function drawOverlay() {
   const rs = R.value.scale,
     rtx = R.value.tx + rOx,
     rty = R.value.ty + rOy
+  const lTurn = turnL.value,
+    rTurn = turnR.value
 
   function lPos(i) {
-    return { x: kpsA.nx(i) * lNW * ls + ltx, y: kpsA.ny(i) * lNH * ls + lty }
+    const [x, y] = turnPosition(kpsA.nx(i) * lNW, kpsA.ny(i) * lNH, lNW, lNH, lTurn)
+    return { x: x * ls + ltx, y: y * ls + lty }
   }
   function rPos(i) {
-    return { x: kpsB.nx(i) * rNW * rs + rtx, y: kpsB.ny(i) * rNH * rs + rty }
+    const [x, y] = turnPosition(kpsB.nx(i) * rNW, kpsB.ny(i) * rNH, rNW, rNH, rTurn)
+    return { x: x * rs + rtx, y: y * rs + rty }
   }
 
   const used = props.usedKeys
@@ -334,13 +414,14 @@ function onImgLoad(side) {
         @wheel.prevent="onWheel($event, 'L')"
         @mousedown="onMouseDown($event, 'L')"
         @dblclick="fit('L')"
+        @contextmenu="onContextMenu($event, 'L')"
       >
         <img
           ref="leftImg"
           :src="imageA.url"
           :alt="imageA.name"
           class="panel-img"
-          :style="{ transform: `translate(${L.tx}px, ${L.ty}px) scale(${L.scale})` }"
+          :style="{ transform: imgTransform('L') }"
           draggable="false"
           @load="onImgLoad('L')"
         />
@@ -356,13 +437,14 @@ function onImgLoad(side) {
         @wheel.prevent="onWheel($event, 'R')"
         @mousedown="onMouseDown($event, 'R')"
         @dblclick="fit('R')"
+        @contextmenu="onContextMenu($event, 'R')"
       >
         <img
           ref="rightImg"
           :src="imageB.url"
           :alt="imageB.name"
           class="panel-img"
-          :style="{ transform: `translate(${R.tx}px, ${R.ty}px) scale(${R.scale})` }"
+          :style="{ transform: imgTransform('R') }"
           draggable="false"
           @load="onImgLoad('R')"
         />
@@ -376,31 +458,29 @@ function onImgLoad(side) {
     <div class="status-bar">
       <span class="panel-label">{{ imageA.name }}</span>
       <span v-if="usedStats" class="match-legend">
-        <span class="swatch used" /> {{ usedStats.used }} aligned <span class="swatch unused" />
-        {{ usedStats.unused }} unused
-        <span
-          v-if="usedStats.indirect"
-          class="legend-indirect"
-          title="Tie points both photos see in the model, though this pair never matched them directly: other photos' matches joined them"
-          ><span class="swatch indirect" /> {{ usedStats.indirect }} via other photos</span
+        <span class="swatch used" /> {{ t('matchList.preview.aligned', { n: usedStats.used }) }}
+        <span class="swatch unused" /> {{ t('matchList.preview.unused', { n: usedStats.unused }) }}
+        <span v-if="usedStats.indirect" class="legend-indirect" :title="t('matchList.preview.indirectTip')"
+          ><span class="swatch indirect" /> {{ t('matchList.preview.indirect', { n: usedStats.indirect }) }}</span
         >
         <button
           v-if="usedStats.unused"
           class="legend-toggle"
           :class="{ on: hideUnused }"
-          :title="hideUnused ? 'Show unused matches' : 'Hide unused (red) matches'"
+          :title="hideUnused ? t('matchList.preview.showUnusedTip') : t('matchList.preview.hideUnusedTip')"
           @click="hideUnused = !hideUnused"
         >
-          {{ hideUnused ? 'Show unused' : 'Hide unused' }}
+          {{ hideUnused ? t('matchList.preview.showUnused') : t('matchList.preview.hideUnused') }}
         </button>
       </span>
-      <span v-else class="match-count">{{ matches.length }} tie points</span>
-      <label class="spill-toggle" title="Draw a panned image's points even where they overlap the other photo">
+      <span v-else class="match-count">{{ t('matchList.preview.matches', { n: pairList.length }) }}</span>
+      <label class="spill-toggle" :title="t('matchList.preview.spillTip')">
         <input v-model="spillPoints" type="checkbox" />
-        Points beyond panel
+        {{ t('matchList.preview.spill') }}
       </label>
       <span class="panel-label">{{ imageB.name }}</span>
     </div>
+    <ViewerContextMenu :menu="ctxMenu" :items="ctxItems" @select="onCtxSelect" />
   </div>
 </template>
 

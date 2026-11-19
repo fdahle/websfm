@@ -78,3 +78,20 @@ export function turnCentred(u, v, turn) {
       return [u, v]
   }
 }
+
+// A position in the unturned image (continuous pixels: the image spans 0…width and
+// 0…height, edges, not pixel centres) → the same position in the image turned clockwise
+// by `turn`, whose size is height × width at 90° and 270°. What a viewer that shows a
+// photo turned draws its points with.
+export function turnPosition(x, y, width, height, turn) {
+  switch (turn) {
+    case 90:
+      return [height - y, x]
+    case 180:
+      return [width - x, height - y]
+    case 270:
+      return [y, width - x]
+    default:
+      return [x, y]
+  }
+}

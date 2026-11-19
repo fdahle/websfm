@@ -133,7 +133,6 @@ export const I18N_PENDING = [
   'src/components/viewers/ViewerGcp.vue',
   'src/components/viewers/ViewerImage.vue',
   'src/components/viewers/ViewerMap.vue',
-  'src/components/viewers/ViewerMatch.vue',
   'src/components/viewers/ZoomField.vue',
   'src/components/viewers/raster/GpuRasterCanvas.vue',
 ]

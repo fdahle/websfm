@@ -47,7 +47,7 @@ function wordyLiterals(code) {
     if (EXEMPT_BEFORE.test(plain.slice(Math.max(0, m.index - 12), m.index))) continue
     const words = text.match(/[A-Za-z]{2,}/g) ?? []
     const capitalised = /\b[A-Z][a-z]+\b/.test(text) && /[a-z]\s+[A-Za-z]/.test(text)
-    if (/^(calc|var|rgba?|url)\(/.test(text)) continue
+    if (/^(calc|var|rgba?|url|translate|scale|rotate|matrix)\(/.test(text)) continue
     if (capitalised || (words.length >= 3 && /\s/.test(text.trim()))) out.push(m[0])
   }
   return out

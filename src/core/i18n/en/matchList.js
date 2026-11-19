@@ -50,6 +50,24 @@ export default {
     restoreTip: 'Include this pair in reconstruction again',
   },
   placeholder: 'Select a pair to preview matches',
+  // The pair's preview (components/viewers/ViewerMatch.vue).
+  preview: {
+    aligned: '{n, number} aligned',
+    unused: '{n, number} unused',
+    indirect: '{n, number} via other photos',
+    indirectTip:
+      "Tie points both photos see in the model, though this pair never matched them directly: other photos' matches joined them",
+    showUnused: 'Show unused',
+    hideUnused: 'Hide unused',
+    showUnusedTip: 'Show unused matches',
+    hideUnusedTip: 'Hide unused (red) matches',
+    matches: '{n, plural, one {# match} other {# matches}}',
+    spill: 'Points beyond panel',
+    spillTip: "Draw a panned image's points even where they overlap the other photo",
+    turnCw: 'Rotate clockwise',
+    turnCcw: 'Rotate counterclockwise',
+    turnReset: 'Reset rotation',
+  },
   resize: 'Drag to resize',
   graph: {
     force: 'Force',

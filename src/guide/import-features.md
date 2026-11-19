@@ -9,7 +9,9 @@ order: 14
 model can be built from them: a learned matcher run outside the browser, matches checked
 by hand, or keypoints from a detector WebSfM does not have. Load the photos first, then
 pick one or more `.txt`, `.csv` or `.key` files. The dialog shows how many images,
-keypoints, pairs and matches it found, and what to import.
+keypoints, pairs and matches it found, and what to import. The CSV files the
+keypoint and match exports write read back as they are, so features move between
+projects this way too.
 
 ## Keypoints
 Pixel positions with the origin at the image's top-left corner, as COLMAP writes them:

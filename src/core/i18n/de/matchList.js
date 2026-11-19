@@ -50,6 +50,24 @@ export default {
     restoreTip: 'Dieses Paar wieder in die Rekonstruktion aufnehmen',
   },
   placeholder: 'Ein Paar wählen, um seine Matches zu sehen',
+  preview: {
+    aligned: '{n, number} ausgerichtet',
+    unused: '{n, number} ungenutzt',
+    indirect: '{n, number} über andere Fotos',
+    indirectTip:
+      'Verknüpfungspunkte, die beide Fotos im Modell sehen, obwohl dieses Paar sie nie direkt gematcht hat: ' +
+      'die Matches anderer Fotos haben sie verbunden',
+    showUnused: 'Ungenutzte zeigen',
+    hideUnused: 'Ungenutzte ausblenden',
+    showUnusedTip: 'Ungenutzte Matches zeigen',
+    hideUnusedTip: 'Ungenutzte (rote) Matches ausblenden',
+    matches: '{n, plural, one {# Match} other {# Matches}}',
+    spill: 'Punkte über den Rand',
+    spillTip: 'Die Punkte eines verschobenen Bildes auch dort zeichnen, wo sie über dem anderen Foto liegen',
+    turnCw: 'Im Uhrzeigersinn drehen',
+    turnCcw: 'Gegen den Uhrzeigersinn drehen',
+    turnReset: 'Drehung zurücksetzen',
+  },
   resize: 'Ziehen, um die Breite zu ändern',
   graph: {
     force: 'Kräfte',

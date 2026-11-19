@@ -1,5 +1,5 @@
 <script setup>
-// Small right-click context menu shared by the 3D and 2D (map) viewers. Purely
+// Small right-click context menu shared by the 3D, 2D (map) and match viewers. Purely
 // presentational: the owner opens/closes it (via useContextMenu, which also wires
 // the document-click dismiss) and supplies the item list; a click emits the item id.
 import { useMenuPlacement } from '../../composables/useMenuPlacement.js'
@@ -13,8 +13,10 @@ const { el, pos } = useMenuPlacement(() => props.menu)
 </script>
 
 <template>
+  <!-- data-modal-exempt: the match preview opens it from inside a dialog, whose focus
+       trap (utils/modalFocus.js) would otherwise make it inert. -->
   <Teleport to="body">
-    <div v-if="menu" ref="el" class="viewer-ctx" :style="pos" @click.stop @contextmenu.prevent.stop>
+    <div v-if="menu" ref="el" class="viewer-ctx" data-modal-exempt :style="pos" @click.stop @contextmenu.prevent.stop>
       <template v-for="(it, i) in items" :key="it.id || i">
         <div v-if="it.separator" class="vctx-sep"></div>
         <button
@@ -35,7 +37,8 @@ const { el, pos } = useMenuPlacement(() => props.menu)
 <style scoped>
 .viewer-ctx {
   position: fixed;
-  z-index: 60;
+  /* Above the dialogs (200): the match preview opens it inside one. */
+  z-index: 600;
   min-width: 172px;
   padding: 4px;
   background: var(--panel);

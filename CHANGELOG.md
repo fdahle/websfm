@@ -216,6 +216,12 @@ Notable changes to WebSfM. The format follows
   Buninyong line (54,972.271 m), the WGS 84 quarter meridian and the closed-form area of
   latitude/longitude cells (within 1e-6 at 1 km, 1.3e-5 at 110 km). Profile and Volume
   still need a DEM, and the model frame still needs a raster to measure on.
+- **Turn a photo in the match preview.** In Matches, right-click either photo of the
+  pair and pick Rotate clockwise or Rotate counterclockwise to see it the way up that
+  matches the other one; its matches turn with it. The view alone turns: the photo, its
+  keypoints and matches stay as they are, and the turn lasts for the session in every
+  pair the photo is in. Without a sparse model the status bar now counts the pair's
+  matches, which it showed doubled before.
 
 ### Changed
 - **Build Mesh textures the mesh from the photos.** A new Texture step, on by default,
