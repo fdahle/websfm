@@ -82,7 +82,12 @@ test('a streamed cloud is selected, filtered, classified and exported without be
   // Its octree files outlive a prune while the step is held, so redo brings the copy
   // back readable.
   const shown = () => store((s) => s.clouds.map((c) => [c.count, c.visible !== false]))
-  // Keys typed into a field stay there: focus is left in one by the steps above.
+  // The copy is in the list before the edit has saved and recorded its step, and the
+  // run's progress dialog (which keeps keys from the 3D view) may still be closing;
+  // closed, it gives focus back to where it was, the console's prompt, and a key typed
+  // into a field stays there. So: wait for both, then take focus out of the field.
+  await expect.poll(() => store((s) => !!s.cloudHistory.undo)).toBe(true)
+  await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(0)
   await page.evaluate(() => document.activeElement?.blur())
   await page.keyboard.press('ControlOrMeta+z')
   await expect.poll(shown).toEqual([[total, true]])
