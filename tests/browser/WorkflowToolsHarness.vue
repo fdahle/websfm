@@ -40,6 +40,11 @@ window.workflowTools = {
 }
 // The raster tab's GCP pick, as useGcpEditing pickGcpFromReference runs it.
 const selectedGcp = ref(null)
+// Edit GCPs on the raster tab (App's rasterGcpEdit).
+const gcpEdit = ref(false)
+window.workflowTools.setGcpEdit = (on) => {
+  gcpEdit.value = on
+}
 async function pickGcp(pick) {
   const res = await external.pickGroundControl(raster.value.id, pick.col, pick.row, pick)
   const id = pick.gcpId ?? gcps.addGcp()
@@ -81,7 +86,11 @@ async function runFootprints(settings) {
       :product="raster"
       :source="external.sources.get(raster.id)"
       :selected-gcp="gcps.gcps.find((g) => g.id === selectedGcp) ?? null"
+      :gcp-edit="gcpEdit"
+      :gcps="gcps.gcps"
       @pick-gcp="pickGcp"
+      @select-gcp="(id) => (selectedGcp = id)"
+      @exit-gcp-edit="gcpEdit = false"
     /><ProductViewer
       v-else-if="recon.dem"
       ref="viewer"

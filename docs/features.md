@@ -55,7 +55,7 @@ product or an imported raster is open in front.
 | Reconstruct ▸ Features | Detect Features | Find keypoints in every photo, with SIFT or a learned detector. | [Detect Features](../src/guide/detect-features.md) |
 | Reconstruct ▸ Features | Match Features | Match keypoints between image pairs and verify each pair geometrically. | [Match Features](../src/guide/match-features.md) |
 | Reconstruct ▸ Sparse | Sparse Model | Solve the camera poses and calibration, and triangulate the tie points. | [Sparse Reconstruction](../src/guide/sparse-reconstruction.md) |
-| Reconstruct ▸ Georeferencing | Edit GCPs | Mark GCPs on the image in front, or place them on the map. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
+| Reconstruct ▸ Georeferencing | Edit GCPs | Mark GCPs on the photo in front, or place them on the map or a reference raster. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
 | Reconstruct ▸ Georeferencing | Find GCPs | Find GCPs automatically by matching the photos to a reference orthophoto. Aerial projects only. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
 | Reconstruct ▸ Georeferencing | Georeference | Place the model in a coordinate system, from GCPs or camera positions. Aerial projects only. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
 | Reconstruct ▸ Georeferencing | Scale Bars | Scale the model from known distances between points in the photos. | [Georeferencing & Scale](../src/guide/georeferencing.md) |

@@ -437,6 +437,7 @@ const {
   selectTool3d,
   turntable3d,
   mapGcpEdit,
+  rasterGcpEdit,
   setPointSize,
   setCameraScale,
   setMapBasemap,
@@ -549,6 +550,7 @@ onMounted(async () => {
         else if (exitModelTool()) {
           /* left the active 3D tool */
         } else if (mapGcpEdit.value && tab?.id === 'map') mapGcpEdit.value = false
+        else if (rasterGcpEdit.value && tab?.type === 'raster') rasterGcpEdit.value = false
       }
     }
   })
@@ -860,6 +862,7 @@ const { handleCommand, pickSfmFiles, pickSfmFolder, pickInteropSource, pickProje
     mapLayersPanel,
     selectTool3d,
     mapGcpEdit,
+    rasterGcpEdit,
     setPointSize,
     setCameraScale,
     setMapBasemap,
@@ -992,6 +995,7 @@ provideAppContext({
   jumpToImage,
   mapFrame,
   mapGcpEdit,
+  rasterGcpEdit,
   mapLayers,
   mapMeasureTarget,
   mapMeasureTargets,

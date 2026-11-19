@@ -42,6 +42,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     mapLayersPanel,
     selectTool3d,
     mapGcpEdit,
+    rasterGcpEdit,
     setPointSize,
     setCameraScale,
     setMapBasemap,
@@ -483,6 +484,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       // Reconstruct ▸ Georeferencing ▸ Edit GCPs: the mode of the view in front.
       case 'edit-gcps':
         if (activeView.value === 'map') mapGcpEdit.value = !mapGcpEdit.value
+        else if (activeTab.value?.type === 'raster') rasterGcpEdit.value = !rasterGcpEdit.value
         else handleCommand('img-gcp-edit')
         break
       case 'map-toggle-model-frame':

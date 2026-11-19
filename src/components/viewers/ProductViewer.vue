@@ -9,6 +9,11 @@ import RasterMeasurements from './RasterMeasurements.vue'
 import ZoomField from './ZoomField.vue'
 import { orthoAdjustFilter } from '../../utils/orthoFilter.js'
 import { clamp } from '../../core/stats.js'
+import { storeToRefs } from 'pinia'
+import { ensureProjection } from '../../core/crs.js'
+import { useExternalStore } from '../../stores/useExternalStore.js'
+import { useProjectsStore } from '../../stores/useProjectsStore.js'
+import GcpToolbar from './GcpToolbar.vue'
 const GpuRasterCanvas = defineAsyncComponent(() => import('./raster/GpuRasterCanvas.vue'))
 const gpuReady = ref(false)
 // What the tiled canvas draws: an imported raster's own meta, or a computed ortho's
@@ -50,11 +55,16 @@ const props = defineProps({
   // An imported raster's tab: the selected GCP ({ id, name, role }), so the menu can
   // offer to move it here (A-5). Computed products never offer GCP picking.
   selectedGcp: { type: Object, default: null },
+  // Edit GCPs on an imported raster's tab: the Points toolbox, the GCPs drawn as pins,
+  // and a click (not a pan) places the selected GCP here or adds a new one.
+  gcpEdit: { type: Boolean, default: false },
+  gcps: { type: Array, default: () => [] }, // the project's GCP records
 })
 // A command from the measuring layer (its saved list's Export…), for App's dispatch;
 // pick-gcp: { col, row, displayFactor, gcpId } — a GCP position read off this
 // reference raster (useGcpEditing pickGcpFromReference).
-const emit = defineEmits(['command', 'pick-gcp'])
+// select-gcp id | null, delete-gcp id, exit-gcp-edit: the Points toolbox's actions.
+const emit = defineEmits(['command', 'pick-gcp', 'select-gcp', 'delete-gcp', 'exit-gcp-edit'])
 // The canvas only reports readiness from its own load(); when it unmounts (the CRS
 // became unresolved) nothing would un-hide the preview, leaving a blank viewer.
 watch(
@@ -177,6 +187,73 @@ function closeMenu() {
   menu.value = null
 }
 
+// ── Edit GCPs on a reference raster ───────────────────────────────────────────
+const editingGcps = computed(() => props.gcpEdit && canPickGcp.value)
+const gcpBrief = computed(() =>
+  props.gcps.map((g) => ({ id: g.id, name: g.name, role: g.role, enabled: g.enabled !== false })),
+)
+// A marker has no ground position: with one selected, a click adds a new point.
+const placeableSelectedId = computed(() =>
+  props.selectedGcp && props.selectedGcp.role !== 'marker' ? props.selectedGcp.id : null,
+)
+const positionedGcpIds = computed(() =>
+  props.gcps.filter((g) => Number.isFinite(g.x) && Number.isFinite(g.y)).map((g) => g.id),
+)
+// The GCPs with a ground position, as this raster's pixels (project CRS → its CRS).
+const externalStore = useExternalStore()
+const { currentCrs } = storeToRefs(useProjectsStore())
+const gcpPins = ref([])
+let pinToken = 0
+watch(
+  () =>
+    editingGcps.value
+      ? JSON.stringify([
+          currentCrs.value,
+          props.product?.id,
+          props.gcps.map((g) => [g.id, g.name, g.role, g.enabled, g.x, g.y]),
+        ])
+      : null,
+  async (key) => {
+    const token = ++pinToken
+    if (key == null) {
+      gcpPins.value = []
+      return
+    }
+    try {
+      if (currentCrs.value) await ensureProjection(currentCrs.value)
+      if (props.product?.crs) await ensureProjection(props.product.crs)
+    } catch {
+      /* an unresolved CRS: toRasterCoords says null below */
+    }
+    if (token !== pinToken) return
+    const [w, h] = dims()
+    const pins = []
+    for (const g of props.gcps) {
+      if (g.role === 'marker' || !Number.isFinite(g.x) || !Number.isFinite(g.y)) continue
+      const xy = externalStore.toRasterCoords(props.product, g.x, g.y)
+      const p = xy && worldToPixel(desc.value, xy[0], xy[1])
+      if (!p || !(p.col >= 0 && p.row >= 0 && p.col <= w && p.row <= h)) continue
+      pins.push({ id: g.id, name: g.name, col: p.col, row: p.row, off: g.enabled === false })
+    }
+    gcpPins.value = pins
+  },
+  { immediate: true },
+)
+// A press that does not move is a click: it places; one that moves pans.
+const GCP_CLICK_MAX = 3
+let gcpPress = null
+function gcpClick(e) {
+  const press = gcpPress
+  gcpPress = null
+  if (!press || Math.hypot(e.clientX - press.x, e.clientY - press.y) >= GCP_CLICK_MAX) return
+  const rect = container.value.getBoundingClientRect()
+  const col = (e.clientX - rect.left - tx.value) / scale.value,
+    row = (e.clientY - rect.top - ty.value) / scale.value
+  const [w, h] = dims()
+  if (!(col >= 0 && row >= 0 && col <= w && row <= h)) return
+  emit('pick-gcp', { col, row, displayFactor: displayFactor(), gcpId: placeableSelectedId.value })
+}
+
 function menuCopyPixel() {
   const r = menu.value?.read
   if (r) copyToClipboard(`${r.px}, ${r.py}`, 'pixel')
@@ -213,6 +290,7 @@ function onMouseDown(e) {
   if (e.button !== 0) return
   const rect = container.value.getBoundingClientRect()
   if (!e.shiftKey && measurements.value?.pick(e.clientX - rect.left, e.clientY - rect.top)) return
+  gcpPress = editingGcps.value && !measurements.value?.active ? { x: e.clientX, y: e.clientY } : null
   dragging.value = true
   startX = e.clientX
   startY = e.clientY
@@ -231,8 +309,9 @@ function onMouseMove(e) {
   updateHover(x, y)
 }
 
-function onMouseUp() {
+function onMouseUp(e) {
   dragging.value = false
+  if (gcpPress) gcpClick(e)
 }
 
 // The measuring tools' view adapter: raster world ↔ viewport pixels through this
@@ -255,6 +334,7 @@ const view = computed(() => {
 })
 function onMouseLeave() {
   dragging.value = false
+  gcpPress = null
   hover.value = null
 }
 
@@ -522,6 +602,29 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         <button class="ctx-item" @click="menuFit">Fit to view</button>
       </div>
 
+      <template v-if="editingGcps">
+        <div
+          v-for="g in gcpPins"
+          :key="g.id"
+          class="gcp-pin"
+          :class="{ sel: g.id === placeableSelectedId, off: g.off }"
+          :style="{ left: tx + g.col * scale + 'px', top: ty + g.row * scale + 'px' }"
+        >
+          <span class="gcp-pin-name">{{ g.name }}</span>
+        </div>
+      </template>
+      <GcpToolbar
+        v-if="editingGcps"
+        noun="raster"
+        :all-gcps="gcpBrief"
+        :selected-id="placeableSelectedId"
+        :marked-ids="positionedGcpIds"
+        @select="(id) => emit('select-gcp', id)"
+        @select-new="emit('select-gcp', null)"
+        @delete="(id) => emit('delete-gcp', id)"
+        @close="emit('exit-gcp-edit')"
+      />
+
       <RasterMeasurements
         ref="measurements"
         :product="product"
@@ -728,5 +831,36 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
 }
 .channel.b {
   color: #6090e0;
+}
+/* A GCP on the reference raster while editing: a ring at its ground position. */
+.gcp-pin {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid #3fbf6f;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.gcp-pin.sel {
+  border-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+}
+.gcp-pin.off {
+  opacity: 0.45;
+}
+.gcp-pin-name {
+  position: absolute;
+  left: 14px;
+  top: -4px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #fff;
+  text-shadow:
+    0 0 2px #000,
+    0 0 2px #000;
 }
 </style>

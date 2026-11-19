@@ -15,8 +15,9 @@ import { pointGroups } from '../../core/gcpGroups.js'
 // plus a role edit afterwards: a point created as control and re-roled keeps the
 // coordinates it was born with (see useGcpsStore.addPoint / core/io/gcp.js).
 //
-// On the map a click sets a ground position, which a marker does not have: there
-// the list leaves markers out (and says how many) and only a control point is new.
+// On the map or a reference raster a click sets a ground position, which a marker does
+// not have: there the list leaves markers out (and says how many) and only a control
+// point is new.
 const props = defineProps({
   // Every point in the project [{ id, name, role, enabled }], for the target list.
   allGcps: { type: Array, default: () => [] },
@@ -26,14 +27,15 @@ const props = defineProps({
   newRole: { type: String, default: 'control' },
   // Ids of points already marked on this image (shown with a dot).
   markedIds: { type: Array, default: () => [] },
-  // What a click acts on — 'image' (mark a pixel observation) or 'map' (set the
-  // GCP's ground position).
+  // What a click acts on — 'image' (mark a pixel observation), or 'map' / 'raster'
+  // (set the GCP's ground position, on the map or off a reference raster).
   noun: { type: String, default: 'image' },
 })
 
 const emit = defineEmits(['close', 'select', 'delete', 'select-new'])
 
-const onMap = computed(() => props.noun === 'map')
+// A ground view: the map or a reference raster (`onMap` for short).
+const onMap = computed(() => props.noun !== 'image')
 // The list in role groups (control, checkpoints, markers); on the map without markers.
 const list = computed(() => pointGroups(props.allGcps, { onMap: onMap.value }))
 const groups = computed(() => list.value.groups)
@@ -43,14 +45,18 @@ const listed = computed(() => groups.value.reduce((n, grp) => n + grp.items.leng
 const selected = computed(() => props.allGcps.find((g) => g.id === props.selectedId) ?? null)
 const instruction = computed(() => {
   if (selected.value)
-    return t(onMap.value ? 'gcps.toolbox.placeMap' : 'gcps.toolbox.markImage', { name: selected.value.name })
-  return onMap.value ? t('gcps.toolbox.addMap') : t('gcps.toolbox.addImage', { role: props.newRole })
+    return onMap.value
+      ? t('gcps.toolbox.placeGround', { where: props.noun, name: selected.value.name })
+      : t('gcps.toolbox.markImage', { name: selected.value.name })
+  return onMap.value
+    ? t('gcps.toolbox.addGround', { where: props.noun })
+    : t('gcps.toolbox.addImage', { role: props.newRole })
 })
 const isNew = (role) => props.selectedId == null && (onMap.value ? role === 'control' : props.newRole === role)
 
 function dotTitle(g) {
   const on = props.markedIds.includes(g.id)
-  if (onMap.value) return t(on ? 'gcps.toolbox.placedMap' : 'gcps.toolbox.unplacedMap')
+  if (onMap.value) return t(on ? 'gcps.toolbox.placed' : 'gcps.toolbox.unplaced')
   return t(on ? 'gcps.toolbox.markedImage' : 'gcps.toolbox.unmarkedImage')
 }
 const pickTitle = (g) => (g.enabled === false ? t('gcps.toolbox.disabled', { name: g.name }) : g.name)

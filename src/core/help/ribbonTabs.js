@@ -28,12 +28,28 @@
 // which holds the tools that act on many objects at once. Two modes live elsewhere:
 // one that edits the object in front lives on that object's contextual tab (Edit Mask
 // on Picture), and one that is a step of a pipeline stage lives in that stage's group
-// (Edit GCPs in Reconstruct ▸ Georeferencing). Otherwise the View tab and the
+// (Edit GCPs in Reconstruct ▸ Georeferencing, also offered as the same object on the
+// Picture tab and an imported raster's tab). Otherwise the View tab and the
 // contextual tabs only show and arrange: camera presets, toggles, fit/zoom, styling,
 // on-map, remove. A command that does appear twice (Rebuild / Export on a raster
 // tab) is the SAME object below, so its prerequisites cannot drift.
 
 import { BASEMAPS } from '../basemaps.js'
+
+// One mode for the view in front: on an image a click marks a GCP (the floating
+// GcpToolbar), on the map or a reference raster it places/moves surveyed points. Its
+// home is Reconstruct ▸ Georeferencing; the Picture tab and an imported raster's tab
+// offer the same object (relabelled for a large button), as the object in front.
+const EDIT_GCPS = {
+  id: 'edit-gcps',
+  guide: 'georeferencing',
+  tip: 'Mark GCPs on the photo in front, or place them on the map or a reference raster',
+  label: 'Edit GCPs',
+  icon: 'map-pin',
+  activeKey: 'gcpEdit',
+  needs: ['gcpView'],
+}
+const EDIT_GCPS_TAB = { ...EDIT_GCPS, label: 'Edit\nGCPs', labelId: 'edit-gcps-tab' }
 
 // Shared between Reconstruct/Export and the raster tab's object actions.
 const GEN_DEM = {
@@ -470,17 +486,7 @@ export const TABS = [
         commands: [
           {
             pair: [
-              // One mode for the view in front: on an image a click marks a GCP (the
-              // floating GcpToolbar), on the map it places/moves surveyed points.
-              {
-                id: 'edit-gcps',
-                guide: 'georeferencing',
-                tip: 'Mark GCPs on the image in front, or place them on the map',
-                label: 'Edit GCPs',
-                icon: 'map-pin',
-                activeKey: 'gcpEdit',
-                needs: ['gcpView'],
-              },
+              EDIT_GCPS,
               {
                 id: 'find-gcps',
                 guide: 'georeferencing',
@@ -1475,7 +1481,7 @@ export const PICTURE_TAB = {
     },
     // A mode on the photo in front, beside its Mask toggle (ONE HOME PER TOOL);
     // brush/eraser/rect/invert/undo live in the floating MaskToolbar over the image.
-    // Edit GCPs is in Reconstruct ▸ Georeferencing.
+    // Edit GCPs is Reconstruct ▸ Georeferencing's own command, offered here too.
     {
       label: 'Edit',
       commands: [
@@ -1488,6 +1494,7 @@ export const PICTURE_TAB = {
           activeKey: 'maskEdit',
           needs: ['imageView'],
         },
+        EDIT_GCPS_TAB,
       ],
     },
   ],
@@ -1524,6 +1531,9 @@ export function rasterTab(r) {
               { id: 'raster-style', label: 'Style…', icon: 'settings' },
               { id: 'raster-toggle-map', label: 'In\nLayers', icon: 'layers', activeKey: 'rasterVisible' },
               { id: 'raster-remove', label: 'Remove', icon: 'remove', danger: true },
+              // Place GCPs off the reference (A-5). Not on a computed product: control
+              // read off a product of the same photos would be circular.
+              EDIT_GCPS_TAB,
             ],
           }
         : {

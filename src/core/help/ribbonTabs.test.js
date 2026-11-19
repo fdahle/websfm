@@ -215,7 +215,7 @@ describe('one home per tool', () => {
       expect(toolIds.has(id), id).toBe(true)
   })
 
-  it('puts Edit Mask on the Picture tab and Edit GCPs in Georeferencing, once each', () => {
+  it('puts Edit Mask on the Picture tab and Edit GCPs in Georeferencing, once each (Edit GCPs also as the object in front)', () => {
     const all = leafCommands([
       ...TABS.flatMap((t) => t.groups),
       CAMERA_GROUP,
@@ -230,8 +230,17 @@ describe('one home per tool', () => {
         leafCommands([group]).map((c) => c.id),
         id,
       ).toContain(id)
-      expect(all.filter((c) => c.id === id).length, id).toBe(1)
+      if (id !== 'edit-gcps') expect(all.filter((c) => c.id === id).length, id).toBe(1)
     }
+    // Edit GCPs also on the photo in front and an imported reference raster's tab, the
+    // same command with the same checks; never on a computed product's tab.
+    const pick = (c) => ({ id: c.id, needs: c.needs, activeKey: c.activeKey, guide: c.guide })
+    const home = leafCommands([HOMES['edit-gcps']]).find((c) => c.id === 'edit-gcps')
+    const at = (groups) => leafCommands(groups).filter((c) => c.id === 'edit-gcps')
+    expect(at(PICTURE_TAB.groups).map(pick)).toEqual([pick(home)])
+    expect(at(rasterTab({ kind: 'ortho', imported: true }).groups).map(pick)).toEqual([pick(home)])
+    expect(at(rasterTab({ kind: 'ortho', imported: false }).groups)).toEqual([])
+    expect(all.filter((c) => c.id === 'edit-gcps').length).toBe(3)
   })
 
   it('greys DEM-only measuring instead of hiding it, and keeps the menu the same on the map', () => {
@@ -265,6 +274,7 @@ describe('one home per tool', () => {
       'raster-style',
       'raster-toggle-map',
       'raster-remove',
+      'edit-gcps',
     ])
   })
 

@@ -76,6 +76,7 @@ const {
   selectTool3d,
   turntable3d,
   mapGcpEdit,
+  rasterGcpEdit,
   mapLayers,
   probeMapLayersAt,
   mapFrame,
@@ -498,8 +499,13 @@ watch(activeTabId, (id) => {
           :product="rasterById(tab.rasterId)"
           :source="rasterSources.get(tab.rasterId) ?? null"
           :selected-gcp="gcps.find((g) => g.id === selectedGcpId) ?? null"
+          :gcp-edit="rasterGcpEdit && activeTabId === tab.id"
+          :gcps="gcps"
           @command="handleCommand"
           @pick-gcp="(pick) => pickGcpFromReference(tab.rasterId, pick)"
+          @select-gcp="selectGcp"
+          @delete-gcp="confirmRemoveGcp"
+          @exit-gcp-edit="rasterGcpEdit = false"
         />
       </template>
 

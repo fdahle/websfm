@@ -696,6 +696,77 @@ test('a GCP picked off a reference ortho takes X/Y in the project CRS, σ from t
   expect(moved.z).toBeCloseTo(50 + (moved.X - 1000) / 2 - 0.5, 4)
 })
 
+test('Edit GCPs on a reference raster: a click places a GCP, a pan does not, and the pins follow', async ({ page }) => {
+  await page.goto(harness)
+  await page.evaluate(async () => {
+    const { writeGeoTiff, geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
+    const { external, projects, showRaster } = window.workflowTools
+    projects.projects = [{ id: 'edit', crs: 'EPSG:3031' }]
+    projects.currentProjectId = 'edit'
+    const W = 256,
+      rgb = new Uint8Array(W * W * 3).fill(128)
+    const ortho = await external.importRaster(
+      new File(
+        [
+          writeGeoTiff({
+            width: W,
+            height: W,
+            samples: [0, 1, 2].map(() => ({ bits: 8, format: 1 })),
+            photometric: 2,
+            data: rgb,
+            pixelScale: [2, 2, 0],
+            tiepoint: [0, 0, 0, 1000, 2000, 0],
+            geoKeys: geoKeysForEpsg(3031, false),
+          }),
+        ],
+        'ortho.tif',
+      ),
+      { forceKind: 'ortho' },
+    )
+    showRaster(ortho.id)
+    window.workflowTools.setGcpEdit(true)
+  })
+  const viewport = page.locator('.viewport')
+  const toolbox = page.locator('.floating-toolbox, [class*="toolbox"]').filter({ hasText: 'Points' }).first()
+  await expect(toolbox).toContainText('Click the raster to add a new control point')
+  const gcpList = () =>
+    page.evaluate(() => window.workflowTools.gcps.gcps.map((g) => ({ name: g.name, x: g.x, y: g.y })))
+
+  // A click places a new control point where it lands (the 256 px raster sits centred, at
+  // x 272…528 and y 172…428 of the viewport, 2 m a pixel).
+  await viewport.click({ position: { x: 300, y: 250 } })
+  await expect.poll(async () => (await gcpList()).length).toBe(1)
+  const [first] = await gcpList()
+  expect(first.x).toBeGreaterThan(1000)
+  expect(first.x).toBeLessThan(1512)
+  expect(first.y).toBeLessThan(2000)
+  expect(first.y).toBeGreaterThan(1488)
+  await expect(page.locator('.gcp-pin')).toHaveCount(1)
+  await expect(page.locator('.gcp-pin.sel')).toHaveCount(1)
+  // With it selected, the next click moves it there; a pan moves nothing.
+  await viewport.click({ position: { x: 360, y: 280 } })
+  await expect.poll(async () => (await gcpList())[0].x).toBeGreaterThan(first.x)
+  const moved = (await gcpList())[0]
+  const box = await viewport.boundingBox()
+  await page.mouse.move(box.x + 200, box.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 260, box.y + 240, { steps: 4 })
+  await page.mouse.up()
+  expect(await gcpList()).toEqual([moved])
+  // ＋ New control: the next click adds a second point; markers are not offered here.
+  await expect(toolbox.getByRole('button', { name: '＋ New marker' })).toHaveCount(0)
+  await toolbox.getByRole('button', { name: '＋ New control' }).click()
+  await viewport.click({ position: { x: 400, y: 330 } })
+  await expect.poll(async () => (await gcpList()).length).toBe(2)
+  await expect(page.locator('.gcp-pin')).toHaveCount(2)
+  expect((await gcpList())[0]).toEqual(moved)
+  // Out of Edit GCPs, a click places nothing and the pins go.
+  await page.evaluate(() => window.workflowTools.setGcpEdit(false))
+  await expect(page.locator('.gcp-pin')).toHaveCount(0)
+  await viewport.click({ position: { x: 200, y: 200 } })
+  expect(await gcpList()).toHaveLength(2)
+})
+
 test('reference DEM heights convert between geoid and ellipsoid with the shipped grids', async ({ page }) => {
   await page.goto(harness)
   const r = await page.evaluate(async () => {

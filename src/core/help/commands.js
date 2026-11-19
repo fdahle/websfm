@@ -95,8 +95,11 @@ export const NEED_CHECKS = {
   // 'raster' | ''). A mode belongs to one view, so the tool says which one it needs.
   imageView: { ok: (s) => s.frontView === 'image', reason: 'Open an image first' },
   gcpView: {
-    ok: (s) => s.frontView === 'image' || (s.frontView === 'map' && !s.mapModelFrame),
-    reason: 'Open an image, or the map in a CRS frame (not Model Frame)',
+    ok: (s) =>
+      s.frontView === 'image' ||
+      (s.frontView === 'map' && !s.mapModelFrame) ||
+      (s.frontView === 'raster' && s.referenceInFront),
+    reason: 'Open a photo, a reference raster, or the map in a CRS frame (not Model Frame)',
   },
   // The map measures by itself in a CRS frame (Ruler, Area); in the model frame only
   // over a raster (useMapProducts measureTargets).

@@ -54,8 +54,9 @@ Keep some as checkpoints for an honest accuracy test.
 
 **Import ▸ GCP File** reads a table of point names and coordinates, optionally with
 image marks (image name, pixel x/y). Check the columns it guessed before importing. To
-mark points, open an image and choose **Reconstruct ▸ Georeferencing ▸ Edit GCPs**; with
-the 2D map in front, the same button places the surveyed points on the map. Right-click adds a
+mark points, open an image and choose **Reconstruct ▸ Georeferencing ▸ Edit GCPs** (or **Edit
+GCPs** on the photo's own tab); with the 2D map or a reference raster in front, the same button
+places the surveyed points there. Right-click adds a
 point directly. A point added in a photo has no coordinates until you type them in the GCP
 table or place it on the map; until then it is not used as control. Once it is marked in two
 photos of a georeferenced model, its empty cells show greyed where the model puts it, to help
@@ -132,9 +133,10 @@ import a coarser or cropped copy (`gdal_translate -tr` or `-projwin`).
 Without survey data, a georeferenced orthophoto and DEM can stand in, often the only
 option for historical images. Open the raster from **Reference Data**, right-click a
 feature you can also find in your photos and choose **Add GCP here** (or **Move
-<name> here**). X/Y is the clicked point, with σ of one reference pixel. Z is read from
-a reference DEM when it declares a vertical accuracy. Then mark the point in at least
-two photos.
+<name> here**), or turn on **Edit GCPs** on the raster's tab and click: the GCPs show as
+rings, and a click places the selected one or a new one. X/Y is the clicked point, with σ
+of one reference pixel. Z is read from a reference DEM when it declares a vertical
+accuracy. Then mark the point in at least two photos.
 
 ## Height datums
 Every GCP and reference DEM declares its [vertical datum](help:vertical-datum): in the

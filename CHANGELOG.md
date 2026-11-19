@@ -6,6 +6,12 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Edit GCPs on the photo or reference raster in front.** The Picture tab and an imported
+  reference raster's tab have their own **Edit GCPs** button, the same as Reconstruct ▸
+  Georeferencing ▸ Edit GCPs. On a reference raster it shows the Points toolbox and the GCPs
+  as rings, and a click places the selected GCP there or adds a new one, with X/Y, σ and Z
+  read as **Add GCP here** reads them; a drag still pans. Not on a DEM or orthophoto built
+  from the same photos, which would make the control circular.
 - **The GCP view shows the photos a point is likely in.** Below its marks, dashed squares
   show each photo that has no mark of the GCP yet, centred where the model puts it (from
   two or more marks, or from its X, Y, Z through the georeference); click where the point

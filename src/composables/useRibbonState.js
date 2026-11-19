@@ -52,7 +52,8 @@ export function useRibbonState({
   const { poses } = storeToRefs(usePosesStore())
   const { sensors } = storeToRefs(useSensorsStore())
   const { depthMapCount, dem, currentFrameSignature } = storeToRefs(useReconstructionStore())
-  const { hasReferenceDem } = storeToRefs(useExternalStore())
+  const externalStore = useExternalStore()
+  const { hasReferenceDem } = storeToRefs(externalStore)
   const { records: measurementRecords } = storeToRefs(useMeasurementsStore())
   const { imageViewPrefs, showKeypointsFor } = useImageViewSettings()
 
@@ -64,6 +65,11 @@ export function useRibbonState({
     if (type === 'image') return 'image'
     if (type === 'product' || type === 'raster') return 'raster'
     return activeView.value === 'map' || activeView.value === 'viewer' ? activeView.value : ''
+  })
+  // An imported reference raster with a georeference is in front: GCPs can be placed on it.
+  const referenceInFront = computed(() => {
+    const tab = activeTab.value
+    return tab?.type === 'raster' && !!externalStore.rasterById(tab.rasterId)?.geoTransform
   })
   const commandState = computed(() => ({
     projectReady: !!currentProjectId.value,
@@ -99,6 +105,7 @@ export function useRibbonState({
     // The view in front, for the tools that act on one (NEED_CHECKS imageView /
     // gcpView / measureHost), and the scene type the console's aerial-only check reads.
     frontView: frontView.value,
+    referenceInFront: referenceInFront.value,
     mapMeasureTargetCount: mapMeasureTargets.value.length,
     sceneType: currentSceneType.value,
   }))

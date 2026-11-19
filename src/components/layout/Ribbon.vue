@@ -43,7 +43,7 @@ const props = defineProps({
   state: { type: Object, default: () => ({}) },
   // Display toggles and values the View tab shows as active / as stepper values:
   // { showCameras, showGrid, showLegend, showMapGrid, showMapCameras, showMapGcps, mapLayersPanel,
-  //   showFootprints, turntable, pointSize, cameraScale, selectRect, selectLasso, mapGcpEdit, mapBasemap,
+  //   showFootprints, turntable, pointSize, cameraScale, selectRect, selectLasso, mapGcpEdit, rasterGcpEdit, mapBasemap,
   //   mapBasemapReasons: { [value]: why that base layer is unavailable } }.
   viewState: { type: Object, default: () => ({}) },
   activeImageId: { type: String, default: null },
@@ -168,6 +168,7 @@ function isActive(cmd) {
   if (cmd.basemap) return props.viewState.mapBasemap === cmd.basemap
   // Edit GCPs is one mode per view: the map's own flag, else the image view's.
   if (cmd.activeKey === 'gcpEdit' && props.activeView === 'map') return !!props.viewState.mapGcpEdit
+  if (cmd.activeKey === 'gcpEdit' && props.activeRaster?.imported) return !!props.viewState.rasterGcpEdit
   if (cmd.measureTool) return measureCtx.value?.measure?.tool === cmd.measureTool
   if (cmd.activeKey === 'measureSaved') return !!measureCtx.value?.measure?.showSaved
   const s = props.imageViewState

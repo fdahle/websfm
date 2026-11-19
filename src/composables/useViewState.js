@@ -40,6 +40,8 @@ export function useViewState({ mapMode, mapFrame }) {
   const selectTool3d = ref(null) // null | 'rect' | 'lasso'
   const turntable3d = ref(false)
   const mapGcpEdit = ref(false)
+  // GCP editing on an imported reference raster's tab (the one in front).
+  const rasterGcpEdit = ref(false)
   const { pointSize, setPointSize, cameraScale, setCameraScale } = useViewerSettings()
   const { basemap: mapBasemap, setBasemap: setMapBasemap } = useMapSettings()
   // Why each base layer is unavailable in the map's current frame ('' = available).
@@ -66,6 +68,7 @@ export function useViewState({ mapMode, mapFrame }) {
     selectLasso: selectTool3d.value === 'lasso',
     turntable: turntable3d.value,
     mapGcpEdit: mapGcpEdit.value,
+    rasterGcpEdit: rasterGcpEdit.value,
     mapBasemap: mapBasemap.value,
     mapBasemapReasons: mapBasemapReasons.value,
   }))
@@ -82,6 +85,7 @@ export function useViewState({ mapMode, mapFrame }) {
     selectTool3d,
     turntable3d,
     mapGcpEdit,
+    rasterGcpEdit,
     setPointSize,
     setCameraScale,
     setMapBasemap,
