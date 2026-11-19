@@ -60,6 +60,55 @@ export async function targetPredictions({
   return out
 }
 
+// Where one GCP should be in every registered photo that has no mark of it yet (the
+// GCP view's likely places, components/viewers/ViewerGcp.vue): the same two sources
+// as targetPredictions, but triangulated once for all the photos.
+//   gcp       { role, x, y, z, enabled, observations: [{ imageId, px, py }] }, marks
+//             in the cameras' pinhole frame
+//   cameras   Map imageId → { R, t, K } of the registered photos
+//   toModel   as above, or null
+// → { from: 'marks' | 'coordinates' | null, viewCount, rejected, places: [{ imageId,
+//   u, v, depth }] } with u, v the pinhole pixel; from null and no places when neither
+//   source is there. Unlike targetPredictions it needs Z for the coordinates: a guessed
+//   height shifts the place by the parallax, which in a photo from 100 m up is metres.
+export async function gcpPlaces({ gcp, cameras, toModel = null }) {
+  const none = { from: null, viewCount: 0, rejected: 0, places: [] }
+  if (!gcp || gcp.enabled === false) return none
+  const obs = (gcp.observations ?? []).filter((o) => o.px != null && o.py != null)
+  const marked = new Set(obs.map((o) => o.imageId))
+  const views = obs.filter((o) => cameras.has(o.imageId))
+  let X = null,
+    from = null,
+    rejected = 0
+  if (views.length >= 2) {
+    const tri = await triangulateGcp(views, cameras, { robust: true })
+    if (tri && Number.isFinite(tri.x)) {
+      X = [tri.x, tri.y, tri.z]
+      from = 'marks'
+      rejected = tri.rejectedImageIds?.length ?? 0
+    }
+  }
+  if (
+    !X &&
+    toModel &&
+    gcp.role !== 'marker' &&
+    Number.isFinite(gcp.x) &&
+    Number.isFinite(gcp.y) &&
+    Number.isFinite(gcp.z)
+  ) {
+    X = toModel([gcp.x, gcp.y, gcp.z])
+    from = X ? 'coordinates' : null
+  }
+  if (!X) return none
+  const places = []
+  for (const [imageId, cam] of cameras) {
+    if (marked.has(imageId)) continue
+    const p = projectWithDepth(cam, X[0], X[1], X[2])
+    if (p) places.push({ imageId, u: p.u, v: p.v, depth: p.depth })
+  }
+  return { from, viewCount: from === 'marks' ? views.length : 0, rejected, places }
+}
+
 // The detector's sampling radius for a target of `halfPx`: inside the mat (its four
 // quadrants), clear of the ground around it. Without a scale, a middle value.
 export function quadRadiusFor(halfPx) {

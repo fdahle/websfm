@@ -468,6 +468,7 @@ watch(activeTabId, (id) => {
           :active="activeTabId === tab.id"
           @jump-to-image="jumpToImage"
           @remove-observation="confirmRemoveGcpObservation"
+          @set-mark="(m) => assignGcpObservation(m.imageId, m.imageName, { gcpId: m.gcpId, px: m.px, py: m.py })"
         />
         <ProductViewer
           v-else-if="tab.type === 'product'"

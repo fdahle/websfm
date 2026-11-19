@@ -37,6 +37,7 @@ export default {
     coords: 'X {x} · Y {y}',
     coordsZ: 'X {x} · Y {y} · Z {z}',
     noCoords: 'keine Koordinaten',
+    estimate: 'laut Modell bei ≈ X {x} · Y {y} · Z {z}',
     photos: '{n, plural, one {# Foto} other {# Fotos}}',
     notLoaded: '+{n, number} nicht geladen',
     notLoadedTip:

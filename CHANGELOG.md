@@ -6,6 +6,14 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **The GCP view shows the photos a point is likely in.** Below its marks, dashed squares
+  show each photo that has no mark of the GCP yet, centred where the model puts it (from
+  two or more marks, or from its X, Y, Z through the georeference); click where the point
+  is to mark it there, or ✓ to mark it at the crosshair, × to hide it, and A / X / S from
+  the keyboard. A mark is moved by dragging in its square. Only what you place is stored.
+  The point is triangulated once from its marks (robust, a disagreeing mark left out) and
+  projected into every registered photo; on the five-photo Aukerman project a mark taken
+  away came back within 3 px of where it was.
 - **A GCP without coordinates shows where the model puts it.** Marked in two photos of a
   georeferenced model, its empty X, Y and Z cells in the Control & Markers table show the
   model's position greyed, to help you find the point on a map or in the field; it is

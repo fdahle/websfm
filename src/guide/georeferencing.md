@@ -62,6 +62,14 @@ photos of a georeferenced model, its empty cells show greyed where the model put
 you find it. A point placed on the map takes Z from a reference DEM that declares its vertical
 accuracy.
 
+## The GCP view
+Double-click a GCP in the sidebar to see its marks side by side, each zoomed around its
+crosshair; drag in a square to move a mark. Below them, dashed squares show the photos it
+is likely in but not marked yet: where the model puts it, from two or more marks, or from
+its X, Y and Z once the model is georeferenced. Click where the point is (or drag the
+crosshair onto it) to mark it there; **✓** marks it at the crosshair, **×** hides the
+square. **A**, **X** and **S** work through them from the keyboard.
+
 ## Method
 <!-- param: method  default: Adjust with GCPs when three are marked -->
 **Adjust with GCPs** re-runs bundle adjustment with the control: the stronger choice,

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
-import { targetPredictions, quadRadiusFor, modelFromProject } from './targetPredict.js'
+import { targetPredictions, quadRadiusFor, modelFromProject, gcpPlaces } from './targetPredict.js'
 import { applySimilarity } from '../products/georef.js'
 import { projectPoint } from './geometry.js'
 
@@ -95,5 +95,82 @@ describe('modelFromProject', () => {
     const simL = { ...sim, t: [10, 20, 100], local }
     const backL = modelFromProject(simL, applySimilarity(simL, X))
     backL.forEach((v, i) => expect(v).toBeCloseTo(X[i], 6))
+  })
+})
+
+describe('gcpPlaces', () => {
+  const cameras = new Map([
+    ['a', cam(0, 0)],
+    ['b', cam(10, 0)],
+    ['c', cam(5, 8)],
+    ['d', cam(-6, 4)],
+  ])
+  const X = [4, 3, 1]
+  const mark = (id, at = X) => {
+    const p = projectPoint(cameras.get(id), ...at)
+    return { imageId: id, px: p.u, py: p.v }
+  }
+
+  it('triangulates the marks once and finds the point in every photo without a mark', async () => {
+    const r = await gcpPlaces({ gcp: { id: 'g', observations: [mark('a'), mark('b')] }, cameras })
+    expect(r.from).toBe('marks')
+    expect(r.viewCount).toBe(2)
+    expect(r.places.map((p) => p.imageId)).toEqual(['c', 'd'])
+    for (const p of r.places) {
+      const want = projectPoint(cameras.get(p.imageId), ...X)
+      expect(p.u).toBeCloseTo(want.u, 6)
+      expect(p.v).toBeCloseTo(want.v, 6)
+    }
+  })
+
+  it('leaves a misplaced mark out of the place it predicts', async () => {
+    const gcp = { id: 'g', observations: [mark('a'), mark('b'), mark('c'), { ...mark('d'), px: mark('d').px + 80 }] }
+    // Every photo is marked: nothing left to place, but the bad mark is counted.
+    const all = await gcpPlaces({ gcp, cameras })
+    expect(all.places).toEqual([])
+    const three = await gcpPlaces({
+      gcp: { id: 'g', observations: [mark('a'), mark('b'), { ...mark('c'), px: mark('c').px + 80 }] },
+      cameras,
+    })
+    const want = projectPoint(cameras.get('d'), ...X)
+    expect(three.rejected).toBe(1)
+    expect(three.places[0].u).toBeCloseTo(want.u, 3)
+  })
+
+  it('places a GCP with X, Y and Z through the georeference, and not one without Z', async () => {
+    const toModel = ([x, y, z]) => [x - 100, y - 200, z]
+    const r = await gcpPlaces({ gcp: { id: 'g', x: 104, y: 203, z: 1, observations: [mark('a')] }, cameras, toModel })
+    expect(r.from).toBe('coordinates')
+    expect(r.places.map((p) => p.imageId)).toEqual(['b', 'c', 'd'])
+    const want = projectPoint(cameras.get('b'), ...X)
+    expect(r.places[0].u).toBeCloseTo(want.u, 6)
+    const noZ = await gcpPlaces({ gcp: { id: 'g', x: 104, y: 203, z: null, observations: [] }, cameras, toModel })
+    expect(noZ).toEqual({ from: null, viewCount: 0, rejected: 0, places: [] })
+    const marker = await gcpPlaces({
+      gcp: { id: 'g', role: 'marker', x: 104, y: 203, z: 1, observations: [] },
+      cameras,
+      toModel,
+    })
+    expect(marker.from).toBe(null)
+    const off = await gcpPlaces({ gcp: { id: 'g', enabled: false, observations: [mark('a'), mark('b')] }, cameras })
+    expect(off.places).toEqual([])
+  })
+
+  it('places nothing behind a camera', async () => {
+    // A camera 60 up, looking up (t = −R·C): the point is behind it.
+    const up = {
+      R: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      t: [0, 0, -60],
+      K,
+    }
+    const r = await gcpPlaces({
+      gcp: { id: 'g', observations: [mark('a'), mark('b')] },
+      cameras: new Map([...cameras, ['up', up]]),
+    })
+    expect(r.places.map((p) => p.imageId)).toEqual(['c', 'd'])
   })
 })

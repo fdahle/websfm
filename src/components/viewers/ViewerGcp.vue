@@ -2,29 +2,39 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { useGcpsStore } from '../../stores/useGcpsStore.js'
-import { pluralize } from '../../core/textFormat.js'
+import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
+import { useGcpPlaces } from '../../composables/useGcpPlaces.js'
+import { t } from '../../composables/useI18n.js'
 import { matches } from '../../core/help/shortcuts.js'
 import { keyLabel } from '../../utils/shortcutLabels.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 
-// Multi-image GCP inspector: one panel per registered observation, each cropped
-// and zoomed to centre the GCP's marked pixel, with a crosshair marker. Opened
-// by double-clicking a GCP in the sidebar. Marking still happens in the full
-// image view (a panel's "Open" jumps there); a bad mark can be dropped here,
-// where the crops make it easy to spot, and a mark Detect targets placed accepted
-// (it is then yours: a later run does not replace it).
+// Multi-image GCP view: one square per photo, cropped and zoomed around the GCP's mark,
+// with a crosshair. Opened by double-clicking a GCP in the sidebar.
+//
+// - A mark is moved by dragging in its square (the crosshair follows; the mark lands
+//   where it is let go), or dropped with ×; a mark Detect targets placed is accepted
+//   with ✓ (it is then yours: a later run does not replace it), as is a dragged one.
+// - Below them, dashed squares show the photos the point is LIKELY in but not marked
+//   yet: where the model puts it, from its marks (two or more) or from its X, Y, Z
+//   through the georeference (useGcpPlaces). A click where the point is, or the
+//   crosshair dragged onto it, marks it there; ✓ marks it at the crosshair; × hides
+//   the square. Only a mark is ever stored, never a prediction.
+// - The keys (core/help/shortcuts.js gcpMarks.*) walk the detected marks, then the
+//   likely places: A accepts or marks, X removes or hides, S moves on.
 const props = defineProps({
   gcp: { type: Object, default: null }, // { id, name, x, y, z, observations }
   images: { type: Array, default: () => [] }, // full image list (resolve imageId → url)
-  // Accuracy-report entry for this GCP: { observations: [{ imageId, reprojPx }] }.
+  // Accuracy-report entry for this GCP: { observations: [{ imageId, reprojPx }], estimate }.
   report: { type: Object, default: null },
-  // The tab is the one shown: only then do its keys act.
+  // The tab is the one shown: only then do its keys act and its likely places update.
   active: { type: Boolean, default: true },
 })
-const emit = defineEmits(['jump-to-image', 'remove-observation'])
+// set-mark { gcpId, imageId, imageName, px, py }: a mark placed or moved by hand here.
+const emit = defineEmits(['jump-to-image', 'remove-observation', 'set-mark'])
 
-// Shared zoom across all panels (native px → screen px). Kept consistent so the
-// eye can compare the same-size neighbourhood in every image.
+// Shared zoom across all squares (native px → screen px), so the eye compares the
+// same-size neighbourhood in every photo.
 const zoom = ref(2)
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 16
@@ -48,14 +58,14 @@ function reprojFor(imageId) {
   return props.report?.observations?.find((o) => o.imageId === imageId)?.reprojPx ?? null
 }
 
-// Observations that resolve to a loaded image (unmatched ones — image not yet
-// added — are surfaced as a count, not a panel).
+// Marks that resolve to a photo in the project (the others are counted, not shown).
 const panels = computed(() => {
   const out = []
   for (const obs of props.gcp?.observations || []) {
     const img = obs.imageId != null ? imageById.value.get(obs.imageId) : null
     if (!img || obs.px == null || obs.py == null) continue
     out.push({
+      key: `m:${obs.imageId}`,
       imageId: obs.imageId,
       name: img.name,
       url: img.url,
@@ -77,22 +87,101 @@ function accept(p) {
 function acceptAll() {
   for (const p of detectedPanels.value) accept(p)
 }
+function setMark(p, px, py) {
+  emit('set-mark', { gcpId: props.gcp.id, imageId: p.imageId, imageName: p.name, px, py })
+}
 
-// Keyboard review (core/help/shortcuts.js gcpMarks.*): one detected mark is highlighted,
-// the first left after those skipped; A accepts it, X removes it, S moves on.
-const skipped = ref(new Set())
-const current = computed(
-  () => detectedPanels.value.find((p) => !skipped.value.has(p.imageId)) ?? detectedPanels.value[0] ?? null,
+// ── Likely places ─────────────────────────────────────────────────────────────
+const recon = useReconstructionStore()
+const { placesFor } = useGcpPlaces()
+const likely = ref({ from: null, viewCount: 0, rejected: 0, places: [] })
+// Hidden with × for this GCP, while the tab is open.
+const dismissed = ref(new Set())
+// Squares shown at first; a GCP in a large block can be in hundreds of photos.
+const LIKELY_PAGE = 24
+const likelyLimit = ref(LIKELY_PAGE)
+let likelyToken = 0
+// What a prediction is made from: the marks and the coordinates, the model, the fit.
+const likelyKey = computed(() => {
+  const g = props.gcp
+  if (!g || !props.active) return null
+  return JSON.stringify([
+    g.id,
+    g.role,
+    g.enabled,
+    g.x,
+    g.y,
+    g.z,
+    (g.observations ?? []).map((o) => [o.imageId, o.px, o.py]),
+    recon.mainSparseCloud?.id ?? null,
+    recon.mainSparseCloud?.createdAt ?? null,
+    recon.validGeoref?.evidenceKey ?? null,
+  ])
+})
+watch(
+  likelyKey,
+  async (key) => {
+    if (key == null) return
+    const token = ++likelyToken
+    const r = await placesFor(props.gcp)
+    if (token === likelyToken) likely.value = r
+  },
+  { immediate: true },
 )
 watch(
   () => props.gcp?.id,
-  () => (skipped.value = new Set()),
+  () => {
+    dismissed.value = new Set()
+    skipped.value = new Set()
+    likelyLimit.value = LIKELY_PAGE
+  },
 )
+const likelyAll = computed(() =>
+  likely.value.places
+    .filter((p) => !dismissed.value.has(p.imageId))
+    .flatMap((p) => {
+      const img = imageById.value.get(p.imageId)
+      return img
+        ? [{ key: `l:${p.imageId}`, imageId: p.imageId, name: img.name, url: img.url, px: p.px, py: p.py }]
+        : []
+    }),
+)
+const likelyPanels = computed(() => likelyAll.value.slice(0, likelyLimit.value))
+const likelySource = computed(() => {
+  const r = likely.value
+  if (r.from === 'coordinates') return t('gcps.view.fromCoordinates')
+  if (r.from !== 'marks') return ''
+  return r.rejected
+    ? t('gcps.view.fromMarksRejected', { used: r.viewCount - r.rejected, n: r.viewCount, rejected: r.rejected })
+    : t('gcps.view.fromMarks', { n: r.viewCount })
+})
+// Why no likely place shows, when the next step would give some.
+const likelyWhy = computed(() => {
+  if (likely.value.from || !props.gcp || props.gcp.enabled === false) return null
+  if (!recon.mainSparseCloud?.cameras?.size) return 'noModel'
+  return panels.value.length === 1 ? 'oneMark' : null
+})
+function dismiss(p) {
+  dismissed.value = new Set([...dismissed.value, p.imageId])
+}
+function place(p) {
+  setMark(p, p.px, p.py)
+}
+
+// ── Keyboard review: the detected marks, then the likely places ───────────────
+// One is highlighted, the first left after those skipped; A accepts or marks it, X
+// removes or hides it, S moves on.
+const queue = computed(() => [...detectedPanels.value, ...likelyPanels.value])
+const skipped = ref(new Set())
+const current = computed(() => queue.value.find((p) => !skipped.value.has(p.key)) ?? queue.value[0] ?? null)
 const gridEl = ref(null)
+// Scrolled to only after a key: opening the view shows the marks first.
+let keyed = false
 watch(current, async (p) => {
-  if (!p || !props.active) return
+  if (!p || !props.active || !keyed) return
+  keyed = false
   await nextTick()
-  gridEl.value?.querySelector(`[data-image-id="${p.imageId}"]`)?.scrollIntoView?.({ block: 'nearest' })
+  gridEl.value?.querySelector(`[data-key="${p.key}"]`)?.scrollIntoView?.({ block: 'nearest' })
 })
 function onKey(e) {
   if (!props.active || !props.gcp || !viewerMayHandleKey(e)) return
@@ -102,27 +191,74 @@ function onKey(e) {
     acceptAll()
   } else if (matches(e, 'gcpMarks.accept')) {
     if (!p) return
-    accept(p)
+    if (p.detected != null) accept(p)
+    else place(p)
   } else if (matches(e, 'gcpMarks.reject')) {
     if (!p) return
-    emit('remove-observation', { gcpId: props.gcp.id, imageId: p.imageId })
+    if (p.detected != null) emit('remove-observation', { gcpId: props.gcp.id, imageId: p.imageId })
+    else dismiss(p)
   } else if (matches(e, 'gcpMarks.skip')) {
     if (!p) return
     const next = new Set(skipped.value)
-    next.add(p.imageId)
+    next.add(p.key)
     // Past the last one, start again from the first.
-    skipped.value = detectedPanels.value.every((q) => next.has(q.imageId)) ? new Set() : next
+    skipped.value = queue.value.every((q) => next.has(q.key)) ? new Set() : next
   } else return
+  keyed = true
   e.preventDefault()
 }
+
+// ── Dragging a mark, clicking a likely place ──────────────────────────────────
+// The crosshair follows the pointer by the drag; let go, and the mark lands there
+// (its square then centres on it again). A click without a drag marks a likely place
+// where it was clicked; on a mark it does nothing, so a stray click moves nothing.
+const DRAG_MIN = 3 // px on screen before a press counts as a drag
+const drag = ref(null) // { key, dx, dy }
+let press = null
+function onPanelDown(p, e) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  const rect = e.currentTarget.getBoundingClientRect()
+  press = { p, x: e.clientX, y: e.clientY, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 }
+  window.addEventListener('mousemove', onPanelMove)
+  window.addEventListener('mouseup', onPanelUp)
+}
+function onPanelMove(e) {
+  if (!press) return
+  const dx = e.clientX - press.x,
+    dy = e.clientY - press.y
+  if (drag.value || Math.hypot(dx, dy) >= DRAG_MIN) drag.value = { key: press.p.key, dx, dy }
+}
+function onPanelUp(e) {
+  window.removeEventListener('mousemove', onPanelMove)
+  window.removeEventListener('mouseup', onPanelUp)
+  const pr = press,
+    d = drag.value
+  press = null
+  drag.value = null
+  if (!pr || !props.gcp) return
+  const s = zoom.value
+  if (d) setMark(pr.p, pr.p.px + d.dx / s, pr.p.py + d.dy / s)
+  else if (pr.p.key.startsWith('l:'))
+    setMark(pr.p, pr.p.px + (e.clientX - pr.cx) / s, pr.p.py + (e.clientY - pr.cy) / s)
+}
+function crosshairStyle(p) {
+  const d = drag.value
+  return d && d.key === p.key ? { transform: `translate(${d.dx}px, ${d.dy}px)` } : null
+}
+
 onMounted(() => window.addEventListener('keydown', onKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('mousemove', onPanelMove)
+  window.removeEventListener('mouseup', onPanelUp)
+})
 
 const missingCount = computed(
   () => (props.gcp?.observations || []).filter((o) => o.imageId == null && o.px != null).length,
 )
 
-// Place the marked pixel at the panel's centre. The image's top-left corner is
+// Place the marked pixel at the square's centre. The image's top-left corner is
 // pinned to the viewport centre (left/top: 50%, transform-origin: 0 0); the
 // transform then maps image point (px,py) back onto that centre:
 // scale first (→ px·s, py·s), then translate by −(px·s, py·s) → (0,0) = centre.
@@ -137,102 +273,182 @@ function fmtCoord(v) {
   if (v == null || Number.isNaN(v)) return '—'
   return Math.abs(v) >= 1000 ? v.toFixed(2) : v.toFixed(6)
 }
+const hasXY = computed(() => Number.isFinite(props.gcp?.x) && Number.isFinite(props.gcp?.y))
+const coordsText = computed(() => {
+  const g = props.gcp
+  if (!hasXY.value) return t('gcps.view.noCoords')
+  const xy = { x: fmtCoord(g.x), y: fmtCoord(g.y) }
+  return g.z != null ? t('gcps.view.coordsZ', { ...xy, z: fmtCoord(g.z) }) : t('gcps.view.coords', xy)
+})
+// For a point without coordinates: where the georeferenced model puts it (a hint).
+const estimateText = computed(() => {
+  const e = props.report?.estimate
+  if (hasXY.value || !e) return ''
+  return t('gcps.view.estimate', { x: fmtCoord(e[0]), y: fmtCoord(e[1]), z: fmtCoord(e[2]) })
+})
 </script>
 
 <template>
   <div class="gcp-view">
     <div class="gcp-hd">
       <div class="gcp-hd-main">
-        <span class="gcp-title">{{ gcp?.name ?? 'GCP' }}</span>
-        <span class="gcp-coords">
-          X {{ fmtCoord(gcp?.x) }} · Y {{ fmtCoord(gcp?.y)
-          }}<template v-if="gcp?.z != null"> · Z {{ fmtCoord(gcp?.z) }}</template>
-        </span>
-        <span class="gcp-count">{{ panels.length }} image{{ panels.length === 1 ? '' : 's' }}</span>
-        <span
-          v-if="missingCount"
-          class="gcp-missing"
-          :title="`${pluralize(missingCount, 'observation')} reference images that aren't loaded yet`"
-        >
-          +{{ missingCount }} not loaded
+        <span class="gcp-title">{{ gcp?.name ?? t('gcps.view.fallbackName') }}</span>
+        <span class="gcp-coords">{{ coordsText }}</span>
+        <span v-if="estimateText" class="gcp-coords gcp-estimate" :title="t('gcps.table.estimateTip')">{{
+          estimateText
+        }}</span>
+        <span class="gcp-count">{{ t('gcps.view.photos', { n: panels.length }) }}</span>
+        <span v-if="missingCount" class="gcp-missing" :title="t('gcps.view.notLoadedTip', { n: missingCount })">
+          {{ t('gcps.view.notLoaded', { n: missingCount }) }}
         </span>
       </div>
       <button
         v-if="detectedPanels.length"
         class="btn btn-sm"
-        :title="`Keep every mark Detect targets placed here as yours; remove the bad ones first (${keyLabel('gcpMarks.acceptAll')})`"
+        :title="t('gcps.view.acceptAllTip', { key: keyLabel('gcpMarks.acceptAll') })"
         @click="acceptAll"
       >
-        Accept {{ pluralize(detectedPanels.length, 'detection') }}
+        {{ t('gcps.view.acceptAll', { n: detectedPanels.length }) }}
       </button>
       <div class="gcp-zoom">
-        <button class="zoom-btn" title="Zoom out" @click="zoomOut">−</button>
+        <button class="zoom-btn" :title="t('gcps.view.zoomOut')" @click="zoomOut">−</button>
         <span class="zoom-val">{{ zoom.toFixed(2) }}×</span>
-        <button class="zoom-btn" title="Zoom in" @click="zoomIn">+</button>
+        <button class="zoom-btn" :title="t('gcps.view.zoomIn')" @click="zoomIn">+</button>
       </div>
     </div>
 
-    <div v-if="panels.length" ref="gridEl" class="gcp-grid">
-      <div
-        v-for="p in panels"
-        :key="p.imageId"
-        class="gcp-panel"
-        :class="{ current: current && p.imageId === current.imageId }"
-        :data-image-id="p.imageId"
-      >
-        <div class="panel-viewport">
-          <img
-            class="panel-img"
-            :src="p.url"
-            :alt="p.name"
-            :style="imgStyle(p)"
-            draggable="false"
-            decoding="async"
-            @error="imagesStore.reportImageLoadError(p.imageId)"
-          />
-          <div class="panel-crosshair">
-            <span class="ch-h"></span>
-            <span class="ch-v"></span>
-            <span class="ch-dot"></span>
+    <div ref="gridEl" class="gcp-body">
+      <div v-if="panels.length" class="gcp-grid">
+        <div
+          v-for="p in panels"
+          :key="p.key"
+          class="gcp-panel"
+          :class="{ current: current && p.key === current.key }"
+          :data-key="p.key"
+        >
+          <div class="panel-viewport" :title="t('gcps.view.dragTip')" @mousedown="onPanelDown(p, $event)">
+            <img
+              class="panel-img"
+              :src="p.url"
+              :alt="p.name"
+              :style="imgStyle(p)"
+              draggable="false"
+              decoding="async"
+              @error="imagesStore.reportImageLoadError(p.imageId)"
+            />
+            <div class="panel-crosshair" :style="crosshairStyle(p)">
+              <span class="ch-h"></span>
+              <span class="ch-v"></span>
+              <span class="ch-dot"></span>
+            </div>
+          </div>
+          <div class="panel-cap">
+            <button
+              class="panel-open"
+              :title="t('gcps.view.open', { name: p.name })"
+              @click="emit('jump-to-image', { imageId: p.imageId })"
+            >
+              {{ p.name }}
+            </button>
+            <span v-if="p.detected != null" class="panel-detected" :title="t('gcps.view.detectedTip')">{{
+              t('gcps.view.detected', { score: p.detected })
+            }}</span>
+            <span v-if="p.reprojPx != null" class="panel-reproj" :title="t('gcps.view.reprojTip')">{{
+              t('gcps.view.reproj', { px: p.reprojPx })
+            }}</span>
+            <button
+              v-if="p.detected != null"
+              class="panel-accept"
+              :title="t('gcps.view.accept', { name: p.name, key: keyLabel('gcpMarks.accept') })"
+              @click="accept(p)"
+            >
+              ✓
+            </button>
+            <button
+              class="panel-remove"
+              :title="
+                p.detected != null
+                  ? t('gcps.view.removeKey', { name: p.name, key: keyLabel('gcpMarks.reject') })
+                  : t('gcps.view.remove', { name: p.name })
+              "
+              @click="emit('remove-observation', { gcpId: gcp.id, imageId: p.imageId })"
+            >
+              ×
+            </button>
           </div>
         </div>
-        <div class="panel-cap">
-          <button class="panel-open" :title="`Open ${p.name}`" @click="emit('jump-to-image', { imageId: p.imageId })">
-            {{ p.name }}
-          </button>
-          <span
-            v-if="p.detected != null"
-            class="panel-detected"
-            title="Placed by Detect targets (score); move it if it is off — then it counts as yours"
-            >detected {{ p.detected.toFixed(2) }}</span
-          >
-          <span v-if="p.reprojPx != null" class="panel-reproj" title="Reprojection error (px)"
-            >{{ p.reprojPx.toFixed(1) }}px</span
-          >
-          <button
-            v-if="p.detected != null"
-            class="panel-accept"
-            :title="`Accept the detected mark in ${p.name}: it counts as yours (${keyLabel('gcpMarks.accept')} on the highlighted one)`"
-            @click="accept(p)"
-          >
-            ✓
-          </button>
-          <button
-            class="panel-remove"
-            :title="
-              p.detected != null
-                ? `Remove the mark in ${p.name} (${keyLabel('gcpMarks.reject')} on the highlighted one)`
-                : `Remove the mark in ${p.name}`
-            "
-            @click="emit('remove-observation', { gcpId: gcp.id, imageId: p.imageId })"
-          >
-            ×
-          </button>
-        </div>
       </div>
-    </div>
-    <div v-else class="gcp-empty">
-      This GCP has no observations on loaded images. Right-click a position in an image tab to mark it.
+      <div v-else class="gcp-empty">{{ t('gcps.view.empty') }}</div>
+
+      <template v-if="likelyAll.length">
+        <div class="likely-hd">
+          <span class="likely-title">{{ t('gcps.view.likely', { n: likelyAll.length }) }}</span>
+          <span class="likely-from">{{ likelySource }}</span>
+          <span class="likely-hint">{{ t('gcps.view.likelyHint') }}</span>
+        </div>
+        <div class="gcp-grid">
+          <div
+            v-for="p in likelyPanels"
+            :key="p.key"
+            class="gcp-panel likely"
+            :class="{ current: current && p.key === current.key }"
+            :data-key="p.key"
+          >
+            <div
+              class="panel-viewport"
+              :title="t('gcps.view.likelyTip', { name: p.name })"
+              @mousedown="onPanelDown(p, $event)"
+            >
+              <img
+                class="panel-img"
+                :src="p.url"
+                :alt="p.name"
+                :style="imgStyle(p)"
+                draggable="false"
+                decoding="async"
+                loading="lazy"
+                @error="imagesStore.reportImageLoadError(p.imageId)"
+              />
+              <div class="panel-crosshair" :style="crosshairStyle(p)">
+                <span class="ch-h"></span>
+                <span class="ch-v"></span>
+                <span class="ch-dot"></span>
+              </div>
+            </div>
+            <div class="panel-cap">
+              <button
+                class="panel-open"
+                :title="t('gcps.view.open', { name: p.name })"
+                @click="emit('jump-to-image', { imageId: p.imageId })"
+              >
+                {{ p.name }}
+              </button>
+              <button
+                class="panel-accept"
+                :title="t('gcps.view.place', { key: keyLabel('gcpMarks.accept') })"
+                @click="place(p)"
+              >
+                ✓
+              </button>
+              <button
+                class="panel-remove"
+                :title="t('gcps.view.dismiss', { key: keyLabel('gcpMarks.reject') })"
+                @click="dismiss(p)"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+        <button
+          v-if="likelyAll.length > likelyPanels.length"
+          class="btn btn-sm likely-more"
+          @click="likelyLimit += LIKELY_PAGE"
+        >
+          {{ t('gcps.view.showMore', { n: Math.min(LIKELY_PAGE, likelyAll.length - likelyPanels.length) }) }}
+        </button>
+      </template>
+      <div v-else-if="likelyWhy" class="likely-none">{{ t('gcps.view.likelyNone', { why: likelyWhy }) }}</div>
     </div>
   </div>
 </template>
@@ -310,9 +526,6 @@ function fmtCoord(v) {
 }
 
 .gcp-grid {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
@@ -451,7 +664,6 @@ function fmtCoord(v) {
 }
 
 .gcp-empty {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -459,5 +671,67 @@ function fmtCoord(v) {
   color: var(--text-dim, #9a9aa5);
   font-size: 13px;
   text-align: center;
+}
+.gcp-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.gcp-estimate {
+  font-style: italic;
+}
+.panel-viewport {
+  cursor: grab;
+}
+.panel-viewport:active {
+  cursor: grabbing;
+}
+/* A likely place: not a mark yet. */
+.gcp-panel.likely {
+  border-style: dashed;
+}
+.gcp-panel.likely .panel-viewport {
+  cursor: crosshair;
+}
+.gcp-panel.likely .ch-h,
+.gcp-panel.likely .ch-v {
+  background: transparent;
+  border-color: rgba(90, 170, 255, 0.9);
+  border-style: dashed;
+  border-width: 0;
+}
+.gcp-panel.likely .ch-h {
+  border-top-width: 1px;
+}
+.gcp-panel.likely .ch-v {
+  border-left-width: 1px;
+}
+.gcp-panel.likely .ch-dot {
+  border-color: rgba(90, 170, 255, 0.95);
+  border-style: dashed;
+}
+.likely-hd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 4px 14px 0;
+}
+.likely-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.likely-from,
+.likely-hint {
+  font-size: 12px;
+  color: var(--text-dim, #9a9aa5);
+}
+.likely-more {
+  margin: 0 14px 14px;
+}
+.likely-none {
+  padding: 0 14px 14px;
+  font-size: 12px;
+  color: var(--text-dim, #9a9aa5);
 }
 </style>

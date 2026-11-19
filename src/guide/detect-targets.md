@@ -20,7 +20,8 @@ tag carries its number, so every photo is searched whole, even before Align. Tag
 name ("7", "Tag 7", "GCP-07"); a tag no GCP is named after becomes a new marker.
 
 To review, double-click a GCP in the sidebar: its marks sit side by side, each centred
-on its crosshair. **✓** accepts a detected mark (it is then yours), **×** removes it,
+on its crosshair ([the GCP view](guide:georeferencing)). **✓** accepts a detected mark (it
+is then yours), dragging in its square moves it, **×** removes it,
 and **Accept** in the header takes the rest. From the keyboard, one detected mark is
 highlighted: **A** accepts it, **X** removes it, **S** leaves it for later, and
 **Shift+A** accepts them all.

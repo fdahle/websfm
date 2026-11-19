@@ -42,6 +42,7 @@ export default {
     coords: 'X {x} · Y {y}',
     coordsZ: 'X {x} · Y {y} · Z {z}',
     noCoords: 'no coordinates',
+    estimate: 'the model puts it at ≈ X {x} · Y {y} · Z {z}',
     photos: '{n, plural, one {# photo} other {# photos}}',
     notLoaded: '+{n, number} not loaded',
     notLoadedTip: '{n, plural, one {# mark is} other {# marks are}} on photos that are not in the project (yet)',
