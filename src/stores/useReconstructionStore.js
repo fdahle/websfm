@@ -697,10 +697,12 @@ export const useReconstructionStore = registerProjectStore(
       makeCloudId,
       selectedCloudId,
       projectCrs: () => projects.currentCrs ?? null,
+      // The octree files the undo history holds (cloudEdits.js), created just below.
+      heldLodFiles: () => heldLodFiles(),
     })
 
     // Crop / filter / merge / select and the other Tools-tab edits (reconstruction/cloudEdits.js).
-    const { editClouds, addDerivedMesh, cloudHistory, undoCloudEdit, redoCloudEdit } = createCloudEdits({
+    const { editClouds, addDerivedMesh, cloudHistory, undoCloudEdit, redoCloudEdit, heldLodFiles } = createCloudEdits({
       lastModelChange,
       clouds,
       healthDirty,
@@ -995,6 +997,8 @@ export const useReconstructionStore = registerProjectStore(
       importStreamedCloud,
       importCopcCloud,
       exportCloudLod,
+      // Delete the octree files no cloud and no undo step names (cloudLod.js).
+      pruneLod,
       exportCloudTiles,
       // Tools ▸ Model ▾ ▸ Region (core/products/region.js).
       region,

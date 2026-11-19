@@ -2,11 +2,12 @@
 // in the 3D view keeps the points it removed). Pure: an entry is the caller's own
 // record, with the `bytes` it holds on to; the history only orders and bounds them.
 //
-// Bounded twice: at most `maxEntries` steps back, and at most `maxBytes` held by them
-// all (a dense cloud's previous points are hundreds of MB), the oldest dropped first.
+// Bounded: at most `maxEntries` steps back, and at most `maxBytes` held by them all (a
+// dense cloud's previous points are hundreds of MB), the oldest dropped first. `limits`
+// [{ match(entry), max }] bound one kind more tightly (steps that hold files on disk).
 // A new edit clears the redo side, as in every editor.
 
-export function createEditHistory({ maxEntries = 10, maxBytes = 2 ** 30 } = {}) {
+export function createEditHistory({ maxEntries = 10, maxBytes = 2 ** 30, limits = [] } = {}) {
   let undo = []
   let redo = []
   const bytesOf = (list) => list.reduce((n, e) => n + (e.bytes ?? 0), 0)
@@ -14,6 +15,13 @@ export function createEditHistory({ maxEntries = 10, maxBytes = 2 ** 30 } = {}) 
     while (undo.length > maxEntries) undo.shift()
     while (undo.length > 1 && bytesOf(undo) + bytesOf(redo) > maxBytes) undo.shift()
     while (redo.length > 1 && bytesOf(undo) + bytesOf(redo) > maxBytes) redo.shift()
+    for (const { match, max } of limits) {
+      while (undo.filter(match).length + redo.filter(match).length > max) {
+        const i = undo.findIndex(match)
+        if (i >= 0) undo.splice(i, 1)
+        else redo.splice(redo.findIndex(match), 1)
+      }
+    }
   }
   return {
     /** A new edit: it can be undone, and nothing undone before can be redone. */
@@ -41,6 +49,8 @@ export function createEditHistory({ maxEntries = 10, maxBytes = 2 ** 30 } = {}) 
       undo = undo.filter(keep)
       redo = redo.filter(keep)
     },
+    /** Every entry held, both sides (what they keep alive). */
+    entries: () => [...undo, ...redo],
     clear() {
       undo = []
       redo = []

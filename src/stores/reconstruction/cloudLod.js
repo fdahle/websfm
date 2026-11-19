@@ -54,6 +54,7 @@ export function createCloudLod({
   makeCloudId,
   selectedCloudId,
   projectCrs = () => null,
+  heldLodFiles = () => [],
 }) {
   const building = new Set() // octree names being written (kept by pruning)
 
@@ -62,6 +63,8 @@ export function createCloudLod({
     if (!pid) return 0
     const keep = new Set()
     for (const c of clouds.value) if (c.lod) for (const f of lodFileNames(c.lod)) keep.add(f)
+    // Octrees an undo step can bring back (cloudEdits.js).
+    for (const f of heldLodFiles()) keep.add(f)
     for (const name of building) {
       keep.add(`${name}.lod`)
       keep.add(`${name}.hier`)

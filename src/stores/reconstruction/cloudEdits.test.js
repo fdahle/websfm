@@ -222,3 +222,60 @@ describe('undo and redo of point edits', () => {
     expect(await edits.undoCloudEdit()).toBeNull()
   })
 })
+
+describe('undo of a streamed cloud’s point edits', () => {
+  const lod = (name) => ({ dataFile: `${name}.lod`, hierarchyFile: `${name}.hier`, points: 10 })
+  const setup = (first) => {
+    const clouds = ref([first])
+    let n = 0
+    // As cloudLod.js editStreamedCloud: a new derived cloud with an octree of its own.
+    const editStreamedCloud = async (source, { name }) => {
+      const cloud = { id: `e${++n}`, name, kind: 'dense', derived: true, count: 5, pos: null, lod: lod(`e${n}`) }
+      clouds.value.push(cloud)
+      return cloud
+    }
+    const edits = createCloudEdits({
+      clouds,
+      selectedCloudId: ref(null),
+      reconStatus: ref('idle'),
+      log: () => {},
+      save: async () => {},
+      editStreamedCloud,
+    })
+    return { clouds, edits }
+  }
+  const selection = { selection: [{ kind: 'rect' }], keepSelected: false }
+
+  it('puts the replaced cloud back, octree and all, and holds its files meanwhile', async () => {
+    const working = { id: 'w', name: 'Mine', kind: 'dense', derived: true, count: 10, pos: null, lod: lod('w') }
+    const { clouds, edits } = setup(working)
+    await edits.editClouds({ mode: 'mask', sourceIds: ['w'], settings: selection })
+    expect(clouds.value.map((c) => c.id)).toEqual(['e1'])
+    // The replaced cloud's files are held for its undo.
+    expect(edits.heldLodFiles()).toEqual(['w.lod', 'w.hier'])
+
+    await edits.undoCloudEdit()
+    expect(clouds.value).toEqual([working])
+    expect(clouds.value[0].lod).toEqual(lod('w'))
+    expect(edits.heldLodFiles()).toEqual(['e1.lod', 'e1.hier'])
+
+    await edits.redoCloudEdit()
+    expect(clouds.value.map((c) => c.id)).toEqual(['e1'])
+    expect(edits.heldLodFiles()).toEqual(['w.lod', 'w.hier'])
+  })
+
+  it('removes the copy a first edit made and keeps its octree for redo', async () => {
+    const big = { id: 'b', name: 'Survey', kind: 'dense', count: 10, pos: null, lod: lod('b'), visible: true }
+    const { clouds, edits } = setup(big)
+    await edits.editClouds({ mode: 'mask', sourceIds: ['b'], settings: selection })
+    expect(clouds.value.map((c) => [c.id, c.visible !== false])).toEqual([
+      ['b', false],
+      ['e1', true],
+    ])
+    await edits.undoCloudEdit()
+    expect(clouds.value.map((c) => [c.id, c.visible !== false])).toEqual([['b', true]])
+    expect(edits.heldLodFiles()).toEqual(['e1.lod', 'e1.hier'])
+    await edits.redoCloudEdit()
+    expect(clouds.value.find((c) => c.id === 'e1').lod).toEqual(lod('e1'))
+  })
+})

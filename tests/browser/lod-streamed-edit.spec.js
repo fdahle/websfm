@@ -78,6 +78,26 @@ test('a streamed cloud is selected, filtered, classified and exported without be
   expect(afterDelete.count).toBeGreaterThan(total * 0.3)
   await viewer.evaluate((el) => el.__vueParentComponent.setupState.toggleSelectTool('rect'))
 
+  // Undo the delete (Ctrl+Z in the 3D view): the copy goes, the original shows again.
+  // Its octree files outlive a prune while the step is held, so redo brings the copy
+  // back readable.
+  const shown = () => store((s) => s.clouds.map((c) => [c.count, c.visible !== false]))
+  // Keys typed into a field stay there: focus is left in one by the steps above.
+  await page.evaluate(() => document.activeElement?.blur())
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(shown).toEqual([[total, true]])
+  await store((s) => s.pruneLod())
+  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await expect.poll(shown).toEqual([
+    [total, false],
+    [afterDelete.count, true],
+  ])
+  const reread = await store(async (s) => {
+    const { blob } = await s.exportCloudLod(s.clouds[1], { format: 'las' })
+    return new DataView(await blob.slice(0, 120).arrayBuffer()).getUint32(107, true)
+  })
+  expect(reread).toBe(afterDelete.count)
+
   // Outlier filter, ground filter and an inverted crop, each into a new streamed cloud.
   const results = await store(async (s, total) => {
     const src = s.clouds[0]

@@ -61,4 +61,13 @@ describe('edit history', () => {
     h.clear()
     expect(h.peek()).toEqual({ undo: null, redo: null })
   })
+
+  it('bounds one kind of step more tightly, the oldest of it first', () => {
+    const h = createEditHistory({ limits: [{ match: (x) => x.disk, max: 2 }] })
+    h.record({ label: 'd1', disk: true })
+    h.record({ label: 'm1' })
+    h.record({ label: 'd2', disk: true })
+    h.record({ label: 'd3', disk: true })
+    expect(h.entries().map((x) => x.label)).toEqual(['m1', 'd2', 'd3'])
+  })
 })

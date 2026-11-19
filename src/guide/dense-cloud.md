@@ -90,8 +90,9 @@ clears; selected points turn pink. **Delete** or **Keep only** acts on them, and
 rotate first if you only want the front layer; hidden points are never selected. The
 first edit makes an "(edited)" copy and hides the original; later edits refine that
 copy. **Ctrl+Z** in the 3D view (or **Undo** in the selection toolbox) takes the last
-edits back, **Ctrl+Shift+Z** redoes them, for as long as the project is open. The edits
-of a cloud streamed from storage can't be taken back yet.
+edits back, **Ctrl+Shift+Z** redoes them, for as long as the project is open. A cloud
+streamed from storage keeps its last three edits: its earlier version stays on disk until
+then.
 
 ## Saved depth maps and memory
 Fusion reads the saved depth maps a few at a time rather than holding them all. It

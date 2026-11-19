@@ -919,6 +919,9 @@ export const CLOUD_EDIT_TUNING = {
   // on dense clouds and the steps on small ones.
   undoSteps: 10,
   undoBytes: 2 ** 30,
+  // Steps of a streamed cloud keep its old octree files on disk (gigabytes for a big
+  // cloud) instead of points in memory: at most this many of them.
+  undoStreamedSteps: 3,
   // A crop of a streamed cloud becomes a resident one: at most this many points.
   streamedCropMaxPoints: 25_000_000,
   // From this many points the outlier filter and normals split the cloud into slabs over

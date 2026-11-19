@@ -1,4 +1,5 @@
 import { isStreamed, streamedRefusal, anyCloudBounds, STREAMED_ICP_SAMPLE_POINTS } from '../../core/lod/streamed.js'
+import { lodFileNames } from '../../core/lod/cloudSource.js'
 import { markRaw, ref, toRaw, watch } from 'vue'
 import { createEditHistory } from '../../core/editHistory.js'
 import { rawTexture } from './meshTexture.js'
@@ -31,6 +32,7 @@ const {
   streamedReferenceMaxPoints: STREAMED_REFERENCE_MAX_POINTS,
   undoSteps: CLOUD_UNDO_STEPS,
   undoBytes: CLOUD_UNDO_BYTES,
+  undoStreamedSteps: CLOUD_UNDO_STREAMED_STEPS,
 } = CLOUD_EDIT_TUNING
 // Edits a streamed cloud takes as it is (core/lod/transform.js); the rest need a crop.
 const STREAMED_EDIT_MODES = new Set(['crop', 'mask', 'classify', 'filter', 'classify-ground', 'transform'])
@@ -93,10 +95,19 @@ export function createCloudEdits({
   // A selection edit in the 3D view (delete, keep, classify) can be undone: an edit of
   // a working copy keeps the points it replaced ('replace'), the first edit of a
   // computed or imported cloud the copy it made ('fork': undoing removes the copy and
-  // shows the source again). For this session, within the history's memory cap; the
-  // edits of a streamed cloud are not kept. A restored cloud has no octree: it is built
-  // again, as after any edit (cloudLod.js).
-  const history = createEditHistory({ maxEntries: CLOUD_UNDO_STEPS, maxBytes: CLOUD_UNDO_BYTES })
+  // shows the source again). For this session, within the history's memory cap. A
+  // restored resident cloud has no octree: it is built again, as after any edit
+  // (cloudLod.js). A streamed cloud's step keeps the cloud it replaced, octree and all
+  // ('swap'): its files stay on disk while the step is held (heldLodFiles, which the
+  // octree pruning keeps), so undo puts it back as it was, with nothing to rebuild.
+  const history = createEditHistory({
+    maxEntries: CLOUD_UNDO_STEPS,
+    maxBytes: CLOUD_UNDO_BYTES,
+    limits: [{ match: (e) => !!e.streamed, max: CLOUD_UNDO_STREAMED_STEPS }],
+  })
+  // The octree files the held steps keep alive (cloudLod.js prune keeps them too).
+  const heldLodFiles = () =>
+    history.entries().flatMap((e) => (e.streamed && e.cloud?.lod ? lodFileNames(e.cloud.lod) : []))
   // { undo, redo }: what the next step each way would undo or redo (a message), or null.
   const cloudHistory = ref({ undo: null, redo: null })
   const syncHistory = () => {
@@ -129,7 +140,19 @@ export function createCloudEdits({
     if (!entry) return null
     const back = direction === 'undo' ? (e) => history.undone(e) : (e) => history.redone(e)
     let shown = null
-    if (entry.kind === 'replace') {
+    if (entry.kind === 'swap') {
+      // A streamed cloud: the held one goes back in the current one's place.
+      const i = clouds.value.findIndex((c) => c.id === entry.cloudId)
+      if (i >= 0) {
+        const current = clouds.value[i]
+        const next = [...clouds.value]
+        next.splice(i, 1, entry.cloud)
+        clouds.value = next
+        selectedCloudId.value = entry.cloud.id
+        shown = entry.cloud
+        back({ ...entry, cloudId: entry.cloud.id, cloud: current })
+      }
+    } else if (entry.kind === 'replace') {
       const current = clouds.value.find((c) => c.id === entry.cloudId)
       if (current) {
         shown = replaceDerivedCloud(current, flatOf(entry.cloud))
@@ -143,12 +166,15 @@ export function createCloudEdits({
         if (source) source.visible = true
         selectedCloudId.value = source?.id ?? clouds.value[0]?.id ?? null
         shown = source ?? null
+        // A streamed copy keeps its octree (held on disk); a resident one is rebuilt.
+        const streamedCopy = isStreamed(copy)
         back({
           kind: 'unfork',
-          cloud: withoutLod(copy),
+          cloud: streamedCopy ? copy : withoutLod(copy),
           sourceId: entry.sourceId,
           label: entry.label,
           bytes: heavyBytes(copy),
+          streamed: streamedCopy,
         })
       }
     } else if (entry.kind === 'unfork') {
@@ -158,7 +184,14 @@ export function createCloudEdits({
       if (source) source.visible = false
       selectedCloudId.value = copy.id
       shown = copy
-      back({ kind: 'fork', cloudId: copy.id, sourceId: entry.sourceId, label: entry.label, bytes: 0 })
+      back({
+        kind: 'fork',
+        cloudId: copy.id,
+        sourceId: entry.sourceId,
+        label: entry.label,
+        bytes: 0,
+        streamed: entry.streamed,
+      })
     }
     syncHistory()
     if (!shown) {
@@ -976,10 +1009,33 @@ export function createCloudEdits({
           cloud.style = { field: 'attribute:classification' }
           cloud.classifiedBy = classifiedBy(settings)
         }
+        const undoLabel = editLabel(mode, settings.keepSelected)
         if (cloud && refine) {
           clouds.value = clouds.value.filter((c) => c !== streamed)
+          history.record({
+            kind: 'swap',
+            cloudId: cloud.id,
+            cloud: streamed,
+            label: undoLabel,
+            bytes: 0,
+            streamed: true,
+          })
+          syncHistory()
           await save()
-        } else if (cloud && (selection || REPLACES_SOURCE_VIEW.has(mode))) streamed.visible = false
+        } else if (cloud && (selection || REPLACES_SOURCE_VIEW.has(mode))) {
+          streamed.visible = false
+          if (selection) {
+            history.record({
+              kind: 'fork',
+              cloudId: cloud.id,
+              sourceId: streamed.id,
+              label: undoLabel,
+              bytes: 0,
+              streamed: true,
+            })
+            syncHistory()
+          }
+        }
         reconStatus.value = cloud ? 'done' : 'error'
         if (cloud)
           log(
@@ -1194,6 +1250,7 @@ export function createCloudEdits({
   }
 
   return {
+    heldLodFiles,
     cloudHistory,
     undoCloudEdit,
     redoCloudEdit,
