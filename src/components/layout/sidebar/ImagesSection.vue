@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, watchEffect, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { gesture } from '../../../core/help/shortcuts.js'
@@ -13,6 +13,7 @@ import { isImageEnabled } from '../../../core/imageEnabled.js'
 import { isTiff } from '../../../utils/tiff.js'
 import { groupImageSections } from '../../../utils/imageGroups.js'
 import { useVirtualList } from '../../../composables/useVirtualList.js'
+import { imageListOrder } from '../../../composables/useImageOrder.js'
 import ContextMenu from './ContextMenu.vue'
 import { useI18n } from '../../../composables/useI18n.js'
 import { useSidebar } from './sidebarContext.js'
@@ -117,6 +118,16 @@ const rows = computed(() => {
 })
 // Image ids in on-screen order — what a shift-click range spans.
 const visibleIds = computed(() => rows.value.filter((r) => r.kind === 'image').map((r) => r.img.id))
+// Every image in the list's order, collapsed groups included: what Previous / Next
+// step through (composables/useImageOrder.js).
+watchEffect(() => {
+  const ordered = bySensor.value
+    ? sensorSections.value.flatMap((x) => x.images)
+    : imageGroups.value.length
+      ? sections.value.flatMap((x) => x.images)
+      : images.value
+  imageListOrder.value = ordered.map((img) => img.id)
+})
 
 function membersOf(groupKey) {
   if (bySensor.value) return sensorSections.value.find((x) => x.groupKey === groupKey)?.images ?? []
@@ -359,6 +370,8 @@ watch(selectedId, (newId) => {
   }
   localSelected.value = newId ? [newId] : []
   anchor.value = newId
+  // Chosen elsewhere (Previous / Next, a tab): bring its row into view.
+  if (newId) nextTick(() => revealRow(newId))
 })
 
 // Image context menu (right-click). { x, y, img }

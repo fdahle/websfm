@@ -1451,6 +1451,22 @@ export const PICTURE_TAB = {
     {
       label: 'Image',
       commands: [
+        {
+          id: 'img-prev',
+          label: 'Previous',
+          icon: 'chevron-left',
+          tip: 'Show the previous photo in the image list',
+          shortcut: 'picture.prev',
+          disableKey: 'firstImage',
+        },
+        {
+          id: 'img-next',
+          label: 'Next',
+          icon: 'chevron-right',
+          tip: 'Show the next photo in the image list',
+          shortcut: 'picture.next',
+          disableKey: 'lastImage',
+        },
         { id: 'img-show-info', label: 'Image\nInfo', icon: 'info' },
         { id: 'img-remove', label: 'Remove', icon: 'remove', danger: true },
       ],

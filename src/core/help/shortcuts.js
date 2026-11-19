@@ -18,6 +18,7 @@
 export const SHORTCUT_GROUPS = [
   { id: 'app', title: 'Anywhere' },
   { id: 'images', title: 'Image list' },
+  { id: 'picture', title: 'Image tab' },
   { id: 'mask', title: 'Image tab ▸ Mask editing' },
   { id: 'select3d', title: '3D view ▸ Select points' },
   { id: 'measure3d', title: '3D view ▸ Measure' },
@@ -53,6 +54,20 @@ const TABLE = [
     keys: ['Shift+Click'],
     does: 'Select every image up to this one',
     where: 'ImagesSection',
+  },
+
+  // ── Image tab (App.vue): step through the photos in the image list's order ──
+  {
+    id: 'picture.next',
+    group: 'picture',
+    keys: ['ArrowRight', 'PageDown'],
+    does: 'Show the next photo in the image list',
+  },
+  {
+    id: 'picture.prev',
+    group: 'picture',
+    keys: ['ArrowLeft', 'PageUp'],
+    does: 'Show the previous photo in the image list',
   },
 
   // ── Mask editing (composables/useMaskEditor.js; Escape is App's) ──
@@ -195,7 +210,17 @@ export function matches(e, id) {
   return shortcut(id).combos.some((c) => comboMatches(e, c))
 }
 
-const KEY_NAMES = { 'Escape': 'Esc', 'Delete': 'Del', ' ': 'Space' }
+const KEY_NAMES = {
+  'Escape': 'Esc',
+  'Delete': 'Del',
+  ' ': 'Space',
+  'ArrowLeft': '←',
+  'ArrowRight': '→',
+  'ArrowUp': '↑',
+  'ArrowDown': '↓',
+  'PageUp': 'PgUp',
+  'PageDown': 'PgDn',
+}
 const MAC_MODS = { Mod: '⌘', Shift: '⇧', Alt: '⌥' }
 const PC_MODS = { Mod: 'Ctrl', Shift: 'Shift', Alt: 'Alt' }
 

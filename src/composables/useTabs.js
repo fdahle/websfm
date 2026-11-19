@@ -61,6 +61,22 @@ export function useTabs(imageById, showMap) {
     activeTabId.value = tabId
   }
 
+  // Show another photo in the image tab `tabId` (Picture ▸ Previous / Next): the tab
+  // moves to it rather than a tab opening per photo. A photo already open in a tab of
+  // its own is shown there instead.
+  function showImageInTab(tabId, imageId, imageName) {
+    const target = `img:${imageId}`
+    if (tabs.value.some((t) => t.id === target)) {
+      activeTabId.value = target
+      return
+    }
+    const tab = tabs.value.find((t) => t.id === tabId)
+    if (!tab || tab.type !== 'image') return
+    const img = imageById(imageId)
+    Object.assign(tab, { id: target, imageId, title: imageName ?? img?.name ?? imageId })
+    activeTabId.value = target
+  }
+
   function openMatchTab(pairId, imgIdA, imgIdB, nameA, nameB) {
     const tabId = `match:${pairId}`
     if (!tabs.value.some((t) => t.id === tabId)) {
@@ -227,6 +243,7 @@ export function useTabs(imageById, showMap) {
     openTabIds,
     activateTab,
     openImageTab,
+    showImageInTab,
     openMatchTab,
     openGcpTab,
     openMetadataTab,

@@ -173,6 +173,8 @@ product or an imported raster is open in front.
 
 | Where | Command | What it does | Guide |
 | --- | --- | --- | --- |
+| Picture ▸ Image | Previous | Show the previous photo in the image list. |  |
+| Picture ▸ Image | Next | Show the next photo in the image list. |  |
 | Picture ▸ Image | Image Info, Remove |  |  |
 | Picture ▸ View | Fit View, Zoom In, Zoom Out |  |  |
 | Picture ▸ Toggles | Keypoints, Mask, Depth, GCPs, Residuals, Fiducials |  |  |

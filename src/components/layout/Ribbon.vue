@@ -7,6 +7,7 @@ import { newCount } from '../../composables/useWhatsNew.js'
 import { commandReasonKey } from '../../core/help/commands.js'
 import { cmdKey, slug } from '../../core/help/ribbonText.js'
 import { useI18n } from '../../composables/useI18n.js'
+import { keyLabel } from '../../utils/shortcutLabels.js'
 import {
   TABS,
   CAMERA_GROUP,
@@ -28,7 +29,11 @@ import {
 const { t, tx, locale } = useI18n()
 const words = {
   label: (cmd) => t(cmdKey(cmd, 'label')),
-  tip: (cmd) => (cmd.tip ? t(cmdKey(cmd, 'tip')) : null),
+  // A command with a shortcut names its key after the tip ("… (→)"), as the table says.
+  tip: (cmd) => {
+    const tip = cmd.tip ? t(cmdKey(cmd, 'tip')) : null
+    return tip && cmd.shortcut ? `${tip} (${keyLabel(cmd.shortcut)})` : tip
+  },
   blurb: (cmd) => (cmd.blurb ? t(cmdKey(cmd, 'blurb')) : cmd.blurb),
   section: (text) => t(`ribbon.section.${slug(text)}`),
   group: (text) => t(`ribbon.group.${slug(text)}`),
@@ -206,6 +211,8 @@ function disabledReason(cmd) {
   if (cmd.disableKey === 'noMask' && !s?.hasMask) return t('ribbon.ui.noMask')
   if (cmd.disableKey === 'noDepth' && !s?.hasDepth) return t('ribbon.ui.noDepth')
   if (cmd.disableKey === 'noGcps' && !s?.gcpCount) return t('ribbon.ui.noGcps')
+  if (cmd.disableKey === 'firstImage' && s?.first) return t('ribbon.ui.firstImage')
+  if (cmd.disableKey === 'lastImage' && s?.last) return t('ribbon.ui.lastImage')
   return ''
 }
 

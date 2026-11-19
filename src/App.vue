@@ -24,6 +24,8 @@ import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
 import { useTabMemory } from './composables/useTabMemory.js'
+import { imageListOrder } from './composables/useImageOrder.js'
+import { stepImage } from './core/imageOrder.js'
 import { useImageViewSettings } from './composables/useImageViewSettings.js'
 import { useUiSettings } from './composables/useUiSettings.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
@@ -100,6 +102,7 @@ const {
   openTabIds,
   activateTab,
   openImageTab,
+  showImageInTab,
   openProductTab,
   openGcpTab,
   // Aliased: App.vue wraps this in an `openRasterTab` that also kicks off the
@@ -218,6 +221,18 @@ const {
 function openQuality(section = 'overview') {
   qualitySection.value = section
   qualityOpen.value = true
+}
+// Picture ▸ Previous / Next and their keys: the image tab moves to the photo before or
+// after it in the image list's order (composables/useImageOrder.js; the store's order
+// until the list has drawn), and the list selects it.
+function stepImageTab(step) {
+  const tab = activeTab.value
+  if (tab?.type !== 'image') return
+  const order = imageListOrder.value.length ? imageListOrder.value : imagesStore.images.map((i) => i.id)
+  const next = stepImage(order, tab.imageId, step)
+  if (next == null) return
+  showImageInTab(tab.id, next, imageById(next)?.name)
+  imagesStore.selectImage(next)
 }
 // From the hub's Image Errors row → open the image AND enable the residual overlay
 // (it's a global toggle, so setting it from here is legitimate — WS3).
@@ -571,6 +586,13 @@ onMounted(async () => {
     } else if (matches(e, 'app.shortcuts') && viewerMayHandleKey(e)) {
       e.preventDefault()
       shortcutsOpen.value = true
+    } else if (
+      (matches(e, 'picture.next') || matches(e, 'picture.prev')) &&
+      activeTab.value?.type === 'image' &&
+      viewerMayHandleKey(e)
+    ) {
+      e.preventDefault()
+      stepImageTab(matches(e, 'picture.next') ? 1 : -1)
     } else if (matches(e, 'app.escape')) {
       if (!closeTopModal()) {
         // Nothing modal to dismiss — Escape exits mask/GCP-edit mode on the active tab.
@@ -873,7 +895,7 @@ const mapMeasure = computed(() =>
 // ── Commands ──────────────────────────────────────────────────────────────────
 // Every ribbon button, console verb, viewer menu and interactive workflow block.
 const { handleCommand, pickSfmFiles, pickSfmFolder, pickInteropSource, pickProjectFile } = useCommandDispatch({
-  tabs: { activateTab, activeView, activeTab, activeImageTab, openProductTab },
+  tabs: { activateTab, activeView, activeTab, activeImageTab, openProductTab, stepImageTab },
   viewers: { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab },
   view: {
     showCameras,

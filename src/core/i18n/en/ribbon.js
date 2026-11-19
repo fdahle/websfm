@@ -24,5 +24,7 @@ export default {
     noMask: 'No mask available',
     noDepth: 'No depth map available',
     noGcps: 'No GCPs on this image',
+    firstImage: 'This is the first photo in the image list',
+    lastImage: 'This is the last photo in the image list',
   },
 }

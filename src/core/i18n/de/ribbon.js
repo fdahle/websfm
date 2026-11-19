@@ -132,6 +132,8 @@ export default {
     noMask: 'Keine Maske vorhanden',
     noDepth: 'Keine Tiefenkarte vorhanden',
     noGcps: 'Keine GCPs auf diesem Bild',
+    firstImage: 'Dies ist das erste Foto in der Bildliste',
+    lastImage: 'Dies ist das letzte Foto in der Bildliste',
   },
   cmd: {
     'open-image-table': { label: 'Bilder', tip: 'EXIF, Kamera und Pose jedes Fotos, wie gelesen und wie geschätzt' },
@@ -525,6 +527,8 @@ export default {
     'map-basemap:terrain': { label: 'Gelände', blurb: 'Schummerung eines globalen Höhenmodells' },
     'map-basemap:none': { label: 'Keine', blurb: 'Nur Gitter' },
     'map-toggle-model-frame': { label: 'Modell-\nrahmen' },
+    'img-prev': { label: 'Zurück', tip: 'Das vorige Foto der Bildliste zeigen' },
+    'img-next': { label: 'Weiter', tip: 'Das nächste Foto der Bildliste zeigen' },
     'img-show-info': { label: 'Bild-\ninfo' },
     'img-remove': { label: 'Entfernen' },
     'img-fit': { label: 'Ansicht\neinpassen' },

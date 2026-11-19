@@ -78,7 +78,8 @@ in a menu per subject: Images, Model, Point Cloud, Mesh, Products, Measure. The 
 only changes what you see. A tool that can't run yet stays in its menu, greyed with the
 reason. Interactive tools open a small toolbox over the view (close with × or Esc).
 Hover a button for its shortcut; **?** lists them all. **What's New** lists the changes
-of each version.
+of each version. In a photo's tab, the arrow keys (or **Picture ▸ Previous** and **Next**)
+step through the photos in the image list's order, in the same tab.
 
 The Reconstruct dialogs (Detect Features, Match Features, Sparse Model, Depth Maps,
 Dense Cloud, DEM, Orthophoto, Mesh, Reflectance) and the Tools that take the longest to set up (Texture Mesh, Contour

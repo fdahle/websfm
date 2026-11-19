@@ -29,7 +29,7 @@ import { useFeatureImport } from './useFeatureImport.js'
 //              and useProjectLifecycle's onProjectFilePick
 //   consoleOpen — App's console toggle
 export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, removals, imports, consoleOpen }) {
-  const { activateTab, activeView, activeTab, activeImageTab, openProductTab } = tabs
+  const { activateTab, activeView, activeTab, activeImageTab, openProductTab, stepImageTab } = tabs
   const { openFeatureImport } = useFeatureImport()
   const { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab } = viewers
   const {
@@ -514,6 +514,12 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         break
       case 'view-select-lasso':
         chooseSelectTool('lasso')
+        break
+      case 'img-prev':
+        stepImageTab(-1)
+        break
+      case 'img-next':
+        stepImageTab(1)
         break
       case 'img-fit':
         if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.fit()

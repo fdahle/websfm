@@ -51,6 +51,10 @@ export const icons = {
   'grid': `
     <rect x="4" y="4" width="16" height="16" rx="1.5" />
     <path d="M4 10h16M4 14h16M10 4v16M14 4v16" />`,
+  'chevron-left': `
+    <path d="M14.5 6l-6 6 6 6" />`,
+  'chevron-right': `
+    <path d="M9.5 6l6 6-6 6" />`,
   'fit-view': `
     <path d="M4 9V5a1 1 0 0 1 1-1h4" />
     <path d="M20 9V5a1 1 0 0 0-1-1h-4" />

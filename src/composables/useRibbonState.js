@@ -10,6 +10,8 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
+import { imageListOrder } from './useImageOrder.js'
+import { imagePlace } from '../core/imageOrder.js'
 import { useMeasurementsStore } from '../stores/useMeasurementsStore.js'
 
 // The state the ribbon renders from, lifted out of App.vue: `commandState`, the
@@ -135,6 +137,8 @@ export function useRibbonState({
       hasDepth: !!img.depth,
       gcpCount: activeImageGcps.value.length,
       fidCount: img.fiducialDetections?.length || 0,
+      // Where it stands in the image list, for Previous / Next.
+      ...imagePlace(imageListOrder.value.length ? imageListOrder.value : images.value.map((i) => i.id), img.id),
     }
   })
 
