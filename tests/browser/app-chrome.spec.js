@@ -184,3 +184,51 @@ test('System info copies a summary for a bug report, with nothing about the proj
   expect(text).toMatch(/\nProject: in browser storage/)
   expect(errors).toEqual([])
 })
+
+test('settings export to a file, reset to their defaults, and come back from the file', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  const openStorage = async () => {
+    await page.getByRole('button', { name: 'Other', exact: true }).click()
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+    await settings.getByRole('tab', { name: 'Storage' }).click()
+    return settings
+  }
+  await page.evaluate(() => {
+    localStorage.setItem('gridZ', 'max')
+    localStorage.setItem('websfm.dense.memBudgetGb', '3')
+  })
+
+  let settings = await openStorage()
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    settings.getByRole('button', { name: 'Export', exact: true }).click(),
+  ])
+  expect(download.suggestedFilename()).toBe('websfm-settings.json')
+  const path = await download.path()
+  const file = JSON.parse((await import('node:fs')).readFileSync(path, 'utf8'))
+  expect(file).toMatchObject({ app: 'WebSfM', kind: 'settings', version: 1 })
+  expect(file.preferences.gridZ).toBe('max')
+  // This computer's memory limit stays here.
+  expect(file.preferences['websfm.dense.memBudgetGb']).toBeUndefined()
+
+  await settings.getByRole('button', { name: 'Reset', exact: true }).click()
+  await page.getByRole('button', { name: 'Reset and reload' }).click()
+  await page.waitForEvent('load')
+  // On start is reset too, and the test fixture keeps it off: the project list shows.
+  await page.locator('.project-main').first().click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  expect(
+    await page.evaluate(() => [localStorage.getItem('gridZ'), localStorage.getItem('websfm.dense.memBudgetGb')]),
+  ).toEqual([null, null])
+
+  settings = await openStorage()
+  await settings.locator('input[type=file]').setInputFiles(path)
+  await page.getByRole('button', { name: 'Import and reload' }).click()
+  await page.waitForEvent('load')
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  expect(await page.evaluate(() => localStorage.getItem('gridZ'))).toBe('max')
+  expect(errors).toEqual([])
+})

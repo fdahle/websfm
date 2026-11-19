@@ -1156,6 +1156,8 @@ provideAppContext({
   workflowRunning,
   workflowState,
   workflowStatuses,
+  // ProjectModals: Settings holds back an import or reset, which reload the page.
+  workInFlight,
 })
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────

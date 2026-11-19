@@ -114,6 +114,7 @@ const {
   workflowState,
   workflowStatuses,
   activeTabId,
+  workInFlight,
 } = useAppContext()
 // A sparse run draws its model as it grows (liveSparse): over the 3D view, that view
 // stays lit and orbitable, the rest is dimmed and locked, and the bar docks in its
@@ -284,6 +285,7 @@ const progressSpotlight = computed(() =>
       v-if="settingsOpen"
       :theme="themePreference"
       :resolved-theme="theme"
+      :busy="workInFlight"
       @close="settingsOpen = false"
       @set-theme="setTheme"
     />

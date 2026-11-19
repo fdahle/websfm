@@ -18,6 +18,8 @@ export default {
     view3d: '3D view',
     resources: 'Resources',
     run: 'During a run',
+    data: 'Data in this browser',
+    settings: 'Settings',
     advanced: 'Advanced',
   },
   // A tab's advanced rows while Show advanced settings (the footer) is off.
@@ -185,5 +187,29 @@ export default {
       'Remove the downloaded AI models? They download again when a step needs them. Projects are not affected.',
     removed: 'The downloaded AI models were removed.',
     failed: 'Removing the downloaded models failed: {error}',
+  },
+  transfer: {
+    label: 'Settings and presets',
+    desc: 'Save your preferences, dialog presets and workflow templates to a file, to bring them to another browser or computer. The memory limit, the workers and the GPU switch stay with this computer.',
+    export: 'Export',
+    import: 'Import…',
+    busy: 'Wait for the run, the opening or the saving to finish: WebSfM reloads to apply this',
+    importTitle: 'Import settings?',
+    importMessage:
+      'Import the settings in “{name}”? Its preferences replace yours; its dialog presets and workflow templates are added to yours, replacing those of the same name. WebSfM then reloads to apply them.',
+    importConfirm: 'Import and reload',
+    notSettings: '“{name}” is not a WebSfM settings file. Make one with Export, on this tab.',
+    newer: '“{name}” was saved by a newer version of WebSfM. Update WebSfM, then import it.',
+    exportFailed: 'Exporting the settings failed: {error}',
+    importFailed: 'Importing the settings failed: {error}',
+    resetLabel: 'Reset all settings',
+    resetDesc:
+      'Put every setting back to its default, the layout too (sidebar width, console, open steps). Projects, dialog presets and workflow templates are kept.',
+    reset: 'Reset',
+    resetTitle: 'Reset all settings?',
+    resetMessage:
+      'Put every setting back to its default? Projects, dialog presets and workflow templates are kept. WebSfM then reloads.',
+    resetConfirm: 'Reset and reload',
+    resetFailed: 'Resetting the settings failed: {error}',
   },
 }

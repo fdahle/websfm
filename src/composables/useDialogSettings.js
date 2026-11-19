@@ -24,7 +24,9 @@ import { normalizeSettings, changedSettings, presetName } from '../core/dialogSe
 //   source    'last' when the dialog opened on the last run's settings, a preset's name
 //             after one was applied, null otherwise
 
-const PRESETS = 'dialog-presets.json'
+// The named presets of this browser, by dialog; also read and written by Settings ▸
+// Storage ▸ Export / Import settings (useSettingsTransfer.js).
+export const PRESETS = 'dialog-presets.json'
 // internal/dialogs.json (core/projectLayout.js); at the folder's top before format version 3.
 const LAST = DIALOGS_PATH
 let presetsCache = null

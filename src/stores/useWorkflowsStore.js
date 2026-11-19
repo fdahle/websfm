@@ -8,7 +8,7 @@ import { useProjectsStore } from './useProjectsStore.js'
 import { useLog } from '../composables/useLog.js'
 import { editCommand } from '../core/help/consoleEdits.js'
 
-const TEMPLATE_KEY = 'websfm-workflow-templates-v1'
+export const TEMPLATE_KEY = 'websfm-workflow-templates-v1'
 const MAX_RUNS = 30
 
 function readTemplates() {

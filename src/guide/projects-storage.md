@@ -65,6 +65,14 @@ read from storage when needed, so the first overlay after opening may take a mom
 A project from an older version is upgraded when opened (the console says how) and then
 no longer opens in older versions; one from a newer version needs a page reload.
 
+## Your settings on another computer
+Settings are kept in the browser, not in a project. **Settings ▸ Storage ▸ Export** saves
+your preferences, dialog presets and workflow templates to `websfm-settings.json`;
+**Import…** on the other browser or computer reads it back and reloads. The memory limit,
+the number of workers and the GPU switch stay behind, as they belong to the computer.
+**Reset all settings** puts every setting back to its default; projects, presets and
+templates are kept.
+
 ## When the tab closes during a run
 Detect Features, Match Features and Build Depth Maps save as they go. If the tab closes
 mid-run, reopening the project offers **Continue**, which does only the missing work

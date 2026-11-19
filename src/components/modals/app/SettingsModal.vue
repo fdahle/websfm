@@ -10,6 +10,7 @@ import { useBrowserWarning } from '../../../composables/useBrowserWarning.js'
 import { useMobileWarning } from '../../../composables/useMobileWarning.js'
 import { useMapSettings } from '../../../composables/useMapSettings.js'
 import { useI18n } from '../../../composables/useI18n.js'
+import { useSettingsTransfer } from '../../../composables/useSettingsTransfer.js'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import { BASEMAPS, SATELLITE } from '../../../core/basemaps.js'
 import { PLANNED_LANGUAGES, msg } from '../../../core/i18n/index.js'
@@ -29,7 +30,9 @@ import ShowAdvancedSettings from '../ui/ShowAdvancedSettings.vue'
 //
 // `theme` is the stored preference ('system' | 'light' | 'dark'); `resolvedTheme`
 // is what 'system' currently evaluates to, shown so the choice isn't opaque.
-defineProps({ theme: String, resolvedTheme: String })
+// `busy`: a run, an opening or a save is in flight (App's workInFlight), so the page
+// must not reload, which an import or a reset of the settings does.
+const props = defineProps({ theme: String, resolvedTheme: String, busy: { type: Boolean, default: false } })
 const emit = defineEmits(['close', 'set-theme'])
 const { t, tx, locale, setLanguage, languages } = useI18n()
 const layout = provideStepLayout('settings')
@@ -185,6 +188,54 @@ async function clearModelCache() {
     storageMessage.value = msg('settings.models.failed', { error: errorText(err) })
   } finally {
     storageBusy.value = false
+  }
+}
+
+// Settings ▸ Storage ▸ Settings (composables/useSettingsTransfer.js). An import or a
+// reset reloads the page, so neither runs while work is in flight.
+const transfer = useSettingsTransfer()
+const settingsFileInput = ref(null)
+async function onExportSettings() {
+  try {
+    await transfer.exportSettings()
+  } catch (err) {
+    storageMessage.value = msg('settings.transfer.exportFailed', { error: errorText(err) })
+  }
+}
+async function onImportFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  const read = await transfer.readFile(file)
+  if (read.error) {
+    storageMessage.value = msg(read.error, { name: file.name })
+    return
+  }
+  const ok = await confirmDialog({
+    title: t('settings.transfer.importTitle'),
+    message: t('settings.transfer.importMessage', { name: file.name }),
+    confirmLabel: t('settings.transfer.importConfirm'),
+  })
+  if (!ok) return
+  try {
+    await transfer.applyImport(read, file.name)
+    location.reload()
+  } catch (err) {
+    storageMessage.value = msg('settings.transfer.importFailed', { error: errorText(err) })
+  }
+}
+async function onResetSettings() {
+  const ok = await confirmDialog({
+    title: t('settings.transfer.resetTitle'),
+    message: t('settings.transfer.resetMessage'),
+    confirmLabel: t('settings.transfer.resetConfirm'),
+  })
+  if (!ok) return
+  try {
+    await transfer.resetSettings()
+    location.reload()
+  } catch (err) {
+    storageMessage.value = msg('settings.transfer.resetFailed', { error: errorText(err) })
   }
 }
 
@@ -636,6 +687,7 @@ onMounted(() => {
       </template>
 
       <template v-else-if="activeTab === 'storage'">
+        <h3 class="group-head">{{ t('settings.group.data') }}</h3>
         <div class="setting-row setting-row-stacked">
           <div class="setting-info">
             <span class="setting-label">{{ t('settings.storage.label') }}</span>
@@ -695,6 +747,48 @@ onMounted(() => {
             @click="clearModelCache"
           >
             {{ t('settings.models.clear') }}
+          </button>
+        </div>
+
+        <h3 class="group-head">{{ t('settings.group.settings') }}</h3>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ t('settings.transfer.label') }}</span>
+            <span class="setting-desc">{{ t('settings.transfer.desc') }}</span>
+          </div>
+          <div class="setting-actions">
+            <button class="btn" @click="onExportSettings">{{ t('settings.transfer.export') }}</button>
+            <button
+              class="btn"
+              :disabled="props.busy"
+              :title="props.busy ? t('settings.transfer.busy') : null"
+              @click="settingsFileInput?.click()"
+            >
+              {{ t('settings.transfer.import') }}
+            </button>
+            <input
+              ref="settingsFileInput"
+              type="file"
+              accept=".json,application/json"
+              hidden
+              :aria-label="t('settings.transfer.import')"
+              @change="onImportFile"
+            />
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ t('settings.transfer.resetLabel') }}</span>
+            <span class="setting-desc">{{ t('settings.transfer.resetDesc') }}</span>
+          </div>
+          <button
+            class="btn"
+            :disabled="props.busy"
+            :title="props.busy ? t('settings.transfer.busy') : null"
+            @click="onResetSettings"
+          >
+            {{ t('settings.transfer.reset') }}
           </button>
         </div>
 

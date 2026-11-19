@@ -17,6 +17,8 @@ export default {
     view3d: '3D-Ansicht',
     resources: 'Ressourcen',
     run: 'Während eines Laufs',
+    data: 'Daten in diesem Browser',
+    settings: 'Einstellungen',
     advanced: 'Erweitert',
   },
   advancedHidden:
@@ -183,5 +185,30 @@ export default {
       'Die heruntergeladenen KI-Modelle entfernen? Sie werden erneut geladen, wenn ein Schritt sie braucht. Projekte sind nicht betroffen.',
     removed: 'Die heruntergeladenen KI-Modelle wurden entfernt.',
     failed: 'Das Entfernen der heruntergeladenen Modelle ist fehlgeschlagen: {error}',
+  },
+  transfer: {
+    label: 'Einstellungen und Presets',
+    desc: 'Ihre Einstellungen, Dialog-Presets und Workflow-Vorlagen in eine Datei speichern, um sie in einen anderen Browser oder auf einen anderen Rechner mitzunehmen. Speichergrenze, Worker und GPU-Schalter bleiben bei diesem Rechner.',
+    export: 'Exportieren',
+    import: 'Importieren…',
+    busy: 'Warten Sie, bis der Lauf, das Öffnen oder das Speichern abgeschlossen ist: WebSfM lädt dafür neu',
+    importTitle: 'Einstellungen importieren?',
+    importMessage:
+      'Die Einstellungen aus „{name}“ importieren? Ihre Einstellungen werden ersetzt; Dialog-Presets und Workflow-Vorlagen kommen zu Ihren hinzu und ersetzen gleichnamige. Danach lädt WebSfM neu.',
+    importConfirm: 'Importieren und neu laden',
+    notSettings: '„{name}“ ist keine Einstellungsdatei von WebSfM. Erstellen Sie eine mit Exportieren auf diesem Tab.',
+    newer:
+      '„{name}“ wurde von einer neueren Version von WebSfM gespeichert. Aktualisieren Sie WebSfM und importieren Sie sie dann.',
+    exportFailed: 'Das Exportieren der Einstellungen ist fehlgeschlagen: {error}',
+    importFailed: 'Das Importieren der Einstellungen ist fehlgeschlagen: {error}',
+    resetLabel: 'Alle Einstellungen zurücksetzen',
+    resetDesc:
+      'Jede Einstellung auf ihren Standard zurücksetzen, auch das Layout (Breite der Seitenleiste, Konsole, offene Schritte). Projekte, Dialog-Presets und Workflow-Vorlagen bleiben.',
+    reset: 'Zurücksetzen',
+    resetTitle: 'Alle Einstellungen zurücksetzen?',
+    resetMessage:
+      'Jede Einstellung auf ihren Standard zurücksetzen? Projekte, Dialog-Presets und Workflow-Vorlagen bleiben. Danach lädt WebSfM neu.',
+    resetConfirm: 'Zurücksetzen und neu laden',
+    resetFailed: 'Das Zurücksetzen der Einstellungen ist fehlgeschlagen: {error}',
   },
 }
