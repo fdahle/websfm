@@ -1694,11 +1694,293 @@ def depthmap():
     b += text(540, 316, 'side view of the traced pixel (red):', GREY, 11, 'middle') + text(540, 332, 'the depth map stores the length of its ray,', GREY, 11, 'middle') + text(540, 348, 'a normal plane the surface direction', GREY, 11, 'middle')
     svg('depth-map.svg', W, H, b)
 
+DEPTH = ((0, (238, 214, 120)), (0.5, (96, 162, 146)), (1, (66, 76, 150)))
+def zncc(a, b_):
+    n = len(a); ma, mb = sum(a) / n, sum(b_) / n
+    da = [x - ma for x in a]; db = [x - mb for x in b_]
+    sa = math.sqrt(sum(x * x for x in da)); sb = math.sqrt(sum(x * x for x in db))
+    return sum(x * y for x, y in zip(da, db)) / (sa * sb) if sa > 1e-9 and sb > 1e-9 else 0.0
+def strip_px(vals, lo=0.0, hi=1.0):
+    return [[(lambda g: (g, g, g))(255 * max(0, min(1, (v - lo) / (hi - lo)))) for v in vals]]
+
+# ── photometric-cost.svg ─────────────────────────────────────────────────────
+def photocost():
+    W, H = 700, 360
+    rnd = random.Random(31)
+    # A surface texture seen by three cameras, each adding its own sensor noise. A
+    # candidate depth shifts where a source view samples the surface; the cost is
+    # 1 − ZNCC of the reference window and the source window, averaged over the sources.
+    n = 420
+    def views(amp):
+        surf = gauss([[amp * rnd.uniform(-1, 1) for _ in range(n)]], 1.6)[0]
+        return [[sv + rnd.gauss(0, 0.04) for sv in surf] for _ in range(3)]
+    tex, flat = views(1.0), views(0.004)
+    x0, win, k = 210, 21, 7.0
+    def ws(t, c):  # a window centred at c, sampled between pixels by linear interpolation
+        out = []
+        for q in range(-(win // 2), win // 2 + 1):
+            x = c + q; i = int(math.floor(x)); f = x - i
+            out.append(t[i] * (1 - f) + t[i + 1] * f)
+        return out
+    depths = [i / 30 for i in range(-90, 91)]
+    def cost(vs):
+        return [1 - (zncc(ws(vs[0], x0), ws(vs[1], x0 + k * d)) + zncc(ws(vs[0], x0), ws(vs[2], x0 - k * d))) / 2 for d in depths]
+    b = ''
+    C = (60, 50); G = 215
+    ray = v_norm((0.55, 1)); tD = (G - C[1]) / ray[1]
+    S1, S2 = (210, 46), (300, 72)
+    b += line(20, G, 330, G, GREY, 2)
+    b += line(*C, C[0] + ray[0] * (tD + 40), C[1] + ray[1] * (tD + 40), BLUE, 1.5)
+    cands = [('d1', tD - 70, RED), ('d2', tD, GREEN), ('d3', tD + 26, RED)]
+    for lab, t, c in cands:
+        X = (C[0] + ray[0] * t, C[1] + ray[1] * t)
+        for S in (S1, S2): b += line(*S, *X, c, 1, '4 3', op=0.8)
+        b += circ(*X, 5, c) + text(X[0] - 10, X[1] + 4, lab, c, 12, 'end')
+    b += cam2d(*C, math.atan2(ray[1], ray[0]), label='reference', lo=(-4, -12))
+    for S, nm in ((S1, 'source 1'), (S2, 'source 2')):
+        b += cam2d(*S, math.atan2(G - S[1], 150 - S[0]), label=nm, lo=(0, -12))
+    # the patches: the reference window and what each candidate brings from the sources
+    px, py, pw = 24, 262, 66
+    b += image(px, py, pw, 12, strip_px(ws(tex[0], x0), -0.8, 0.8), smooth=False) + rect(px, py, pw, 12, BLUE, sw=1.2)
+    b += text(px + pw / 2, py + 26, 'reference', BLUE, 10, 'middle')
+    for ci, (lab, t, c) in enumerate(cands):
+        d = (t - tD) / 30
+        for si, sgn in enumerate((1, -1)):
+            xx = px + 84 + ci * 78; yy = py + si * 16
+            b += image(xx, yy, pw, 12, strip_px(ws(tex[1 + si], x0 + sgn * k * d), -0.8, 0.8), smooth=False) + rect(xx, yy, pw, 12, c, sw=1.2)
+        b += text(px + 84 + ci * 78 + pw / 2, py + 44, lab, c, 10, 'middle')
+    b += text(175, 328, 'each candidate depth warps the patch into', GREY, 11, 'middle') + text(175, 342, 'the source views; only d2 brings the same pixels', GREY, 11, 'middle')
+    # cost against depth
+    gx, gy, gw, gh = 400, 70, 270, 190
+    b += line(gx, gy + gh, gx + gw, gy + gh, GREY, 1) + line(gx, gy, gx, gy + gh, GREY, 1)
+    b += text(gx + gw / 2, gy + gh + 32, 'candidate depth', GREY, 11, 'middle')
+    b += text(gx - 8, gy + 4, '2', GREY, 10, 'end') + text(gx - 8, gy + gh, '0', GREY, 10, 'end') + text(gx - 10, gy + gh / 2, 'cost', GREY, 11, 'end')
+    dx = lambda d: gx + gw * (d - depths[0]) / (depths[-1] - depths[0])
+    for vs, c in ((flat, GOLD), (tex, BLUE)):
+        cs = cost(vs)
+        b += poly([(dx(d), gy + gh - gh * min(1, max(0, v / 2))) for d, v in zip(depths, cs)], c, w=1.8)
+    for lab, t, c in cands:
+        d = (t - tD) / 30
+        b += line(dx(d), gy + gh, dx(d), gy + gh + 5, c, 1.4) + text(dx(d), gy + gh + 17, lab, c, 11, 'middle')
+    b += text(gx + 8, gy - 22, 'textured: one sharp minimum at the true depth', BLUE, 12)
+    b += text(gx + 8, gy - 6, 'textureless: flat, no depth stands out', GOLD, 12)
+    b += text(gx + gw / 2, gy + gh + 54, 'cost = 1 − ZNCC of the reference window', GREY, 11, 'middle') + text(gx + gw / 2, gy + gh + 68, 'and each warped source window', GREY, 11, 'middle')
+    svg('photometric-cost.svg', W, H, b)
+
+# ── geometric-consistency.svg ────────────────────────────────────────────────
+def geocons():
+    W, H = 700, 340
+    b = ''
+    ground = lambda x: 255 + 14 * math.sin(x / 40)
+    def hit(C, d):
+        t = 0
+        while True:
+            t += 0.5; X = (C[0] + d[0] * t, C[1] + d[1] * t)
+            if X[1] >= ground(X[0]) or t > 900: return X
+    def plane_pt(C, look, X, f=34):
+        # where the ray C→X crosses the image line f px in front of C
+        n = look; t = (-n[1], n[0]); d = (X[0] - C[0], X[1] - C[1]); z = d[0] * n[0] + d[1] * n[1]
+        u = f * (d[0] * t[0] + d[1] * t[1]) / z
+        return (C[0] + f * n[0] + u * t[0], C[1] + f * n[1] + u * t[1])
+    for pi, sky in enumerate((False, True)):
+        ox = pi * 350
+        R, N = (ox + 90, 70), (ox + 250, 85)
+        lr, ln = v_norm((0.25, 1)), v_norm((-0.45, 1))
+        b += poly([(ox + x, ground(ox + x)) for x in range(10, 340, 6)], GREY, w=2)
+        for C, lk in ((R, lr), (N, ln)):
+            t = (-lk[1], lk[0]); P0 = (C[0] + 34 * lk[0], C[1] + 34 * lk[1])
+            L_ = 60 if (sky and C == R) else 26
+            b += line(P0[0] - L_ * t[0], P0[1] - L_ * t[1], P0[0] + L_ * t[0], P0[1] + L_ * t[1], FG, 2)
+        d = v_norm((0.35 if not sky else -0.1, 1)) if not sky else v_norm((0.5, 0.55))
+        p = plane_pt(R, lr, (R[0] + d[0], R[1] + d[1]))
+        # 1. the reference depth: the surface, or for sky a guess that fits any depth
+        X = hit(R, d) if not sky else (R[0] + d[0] * 150, R[1] + d[1] * 150)
+        b += line(*R, *X, BLUE, 1.6)
+        # 2. into the neighbour, read its own depth along that ray
+        q = plane_pt(N, ln, X)
+        dn = v_norm((X[0] - N[0], X[1] - N[1]))
+        Y = hit(N, dn) if not sky else (N[0] + dn[0] * 60, N[1] + dn[1] * 60)
+        b += line(*N, *X, GOLD, 1.3, '5 3') + line(*N, *Y, GOLD, 1.6)
+        # 3. back into the reference
+        p2 = plane_pt(R, lr, Y)
+        b += line(*Y, *R, GREEN if not sky else RED, 1.3, '3 3')
+        b += circ(*X, 5, BLUE) + circ(*Y, 4, GOLD)
+        b += cam2d(*R, math.atan2(lr[1], lr[0]), label='reference', lo=(-6, -12)) + cam2d(*N, math.atan2(ln[1], ln[0]), label='neighbour', lo=(6, -12))
+        b += circ(*p, 4, BLUE)
+        b += circ(*p2, 6, GREEN if not sky else RED, fill=False, w=2)
+        if sky:
+            b += line(*p, *p2, RED, 2)
+            b += text(p2[0] + 10, p2[1] - 8, 'ends far away', RED, 11)
+            b += text(X[0] + 8, X[1] - 6, 'sky: any depth fits', BLUE, 11)
+            b += text(Y[0] + 8, Y[1] + 4, 'neighbour’s own depth', GOLD, 11)
+        else:
+            b += text(X[0] + 8, X[1] - 8, 'surface point', BLUE, 11)
+            b += text(p2[0] + 14, p2[1] + 18, 'back where it started', GREEN, 11)
+        b += text(ox + 175, 26, 'sky pixel: the trip does not close, dropped' if sky else 'surface pixel: the trip closes, kept', RED if sky else GREEN, 13, 'middle')
+    b += line(350, 40, 350, 310, DIM, 1, '2 4')
+    b += text(350, 330, 'blue: the reference depth · gold: into the neighbour, its own depth · dashed: back into the reference', GREY, 11, 'middle')
+    svg('geometric-consistency.svg', W, H, b)
+
+# ── patchmatch.svg ───────────────────────────────────────────────────────────
+def pmatch():
+    W, H = 700, 340
+    b = ''
+    n, c = 8, 30; ox, oy = 30, 60
+    for j in range(n):
+        for i in range(n):
+            red = (i + j) % 2 == 0
+            b += rect(ox + i * c, oy + j * c, c, c, DIM, fill=RED if red else RAISED, sw=0.8, op=None)
+            if red: b += rect(ox + i * c, oy + j * c, c, c, fill=BG if False else 'none')
+    # dim the red cells so the picked pixel and its neighbours read
+    b = ''
+    for j in range(n):
+        for i in range(n):
+            red = (i + j) % 2 == 0
+            b += rect(ox + i * c + 1, oy + j * c + 1, c - 2, c - 2, fill=RED if red else GREY, op=0.28 if red else 0.22)
+    pi_, pj = 4, 4
+    cx, cy = ox + (pi_ + 0.5) * c, oy + (pj + 0.5) * c
+    b += rect(ox + pi_ * c + 1, oy + pj * c + 1, c - 2, c - 2, GOLD, fill=GOLD, sw=2, op=0.9)
+    for (di, dj), ang in (((-1, 0), 0.5), ((1, 0), 0.2), ((0, -1), -0.4), ((0, 1), 0.7)):
+        nx, ny = cx + di * c, cy + dj * c
+        b += line(nx - 9 * math.cos(ang), ny - 9 * math.sin(ang), nx + 9 * math.cos(ang), ny + 9 * math.sin(ang), BLUE, 2.4)
+        b += arrow(nx + di * -6 + (0 if di == 0 else 0), ny + dj * -6, cx + di * 0.45 * c, cy + dj * 0.45 * c, BLUE, 1.4, 5)
+    b += text(ox + n * c / 2, 40, 'red and black pixels update in turn', FG, 12, 'middle')
+    b += text(ox + n * c / 2, oy + n * c + 22, 'a red pixel (gold) tries its four black', GREY, 11, 'middle')
+    b += text(ox + n * c / 2, oy + n * c + 36, 'neighbours’ planes (blue) as candidates', GREY, 11, 'middle')
+    # inset: the neighbour's plane met by this pixel's own ray. A surface seen at a
+    # grazing angle shows the difference best.
+    ix = 340
+    b += rect(ix, 50, 340, 260, DIM, sw=1, rx=6)
+    b += text(ix + 170, 72, 'turning a neighbour’s plane into a depth', FG, 12, 'middle')
+    C = (ix + 40, 100)
+    A, B = (ix + 20, 250), (ix + 330, 175)
+    on = lambda u: (A[0] + u * (B[0] - A[0]), A[1] + u * (B[1] - A[1]))
+    Xn, Xg = on(0.3), on(0.72)
+    rn = v_norm(v_sub(Xn, C)); rp = v_norm(v_sub(Xg, C))
+    ax = v_norm(v_add(rn, rp))                              # the camera's viewing axis
+    tb = v_dot(v_sub(Xn, C), ax) / v_dot(rp, ax)
+    Xb = (C[0] + tb * rp[0], C[1] + tb * rp[1])            # this ray meets a plane facing the camera through Xn
+    b += line(*A, *B, GREY, 2)
+    b += line(*C, *Xn, DIM, 1.2, '4 3')
+    b += line(*C, Xg[0] + 24 * rp[0], Xg[1] + 24 * rp[1], BLUE, 1.6)
+    b += line(*Xn, *on(0.85), GREEN, 4, op=0.55)
+    u = v_norm(v_sub(Xb, Xn))                               # along the plane facing the camera
+    b += line(Xn[0] - 30 * u[0], Xn[1] - 30 * u[1], Xb[0] + 24 * u[0], Xb[1] + 24 * u[1], RED, 1.6, '5 3')
+    b += circ(*Xn, 4.5, GREY) + circ(*Xg, 5.5, GREEN) + circ(*Xb, 5.5, RED)
+    b += cam2d(*C, math.atan2(rp[1], rp[0]), size=14)
+    b += text(Xn[0] - 4, Xn[1] + 20, 'neighbour’s point', GREY, 11, 'middle')
+    b += text(Xg[0] + 2, Xg[1] + 24, 'its plane met by this ray: right', GREEN, 11, 'middle')
+    b += text(Xb[0] - 6, Xb[1] - 10, 'its depth copied: wrong', RED, 11, 'end')
+    b += text(ix + 170, 280, 'green: the neighbour’s slanted plane · red: a copy facing', GREY, 11, 'middle')
+    b += text(ix + 170, 296, 'the camera, which is what copying a depth assumes', GREY, 11, 'middle')
+    svg('patchmatch.svg', W, H, b)
+
+# ── mvs-pipeline.svg ─────────────────────────────────────────────────────────
+def mvs():
+    W, H = 720, 300
+    rnd = random.Random(17)
+    g = lambda x: 200 + 18 * math.sin(x / 22) + 10 * math.sin(x / 9 + 1)
+    b = ''
+    titles = ['1. posed cameras, sparse cloud', '2. one depth map', '3. a depth map per view', '4. fused dense cloud']
+    for k in range(4):
+        ox = 10 + k * 177
+        b += rect(ox, 40, 167, 210, DIM, sw=1, rx=6)
+        b += text(ox + 83, 270, titles[k], FG, 12, 'middle')
+        if k < 3: b += arrow(ox + 169, 145, ox + 185, 145, GREY, 1.4, 6)
+    cams = [(30, 70), (70, 66), (110, 70), (150, 66)]
+    # 1
+    ox = 10
+    for cx_, cy_ in cams: b += cam2d(ox + cx_, cy_, math.pi / 2, size=12)
+    for x in [rnd.uniform(12, 155) for _ in range(16)]: b += circ(ox + x, g(x) + rnd.gauss(0, 2), 2.6, GOLD)
+    # 2: a depth map seen from straight above, computed from a terrain
+    w, h = 36, 36
+    terr = [[0.5 + 0.25 * math.sin(i / 5) * math.cos(j / 7) + 0.2 * math.sin((i + j) / 9) for i in range(w)] for j in range(h)]
+    b += image(10 + 177 + 18, 70, 130, 130, map_px([[1 - v for v in row] for row in terr], lambda u: ramp(u, DEPTH)))
+    b += rect(10 + 177 + 18, 70, 130, 130, DIM, sw=1)
+    b += text(10 + 177 + 83, 222, 'near (yellow) to far (blue)', GREY, 10, 'middle')
+    # 3: per-view surfaces, slightly different, with a few disagreeing pixels
+    ox = 10 + 2 * 177
+    cols = [BLUE, GREEN, GOLD]
+    outl = []
+    for vi, c in enumerate(cols):
+        off = (vi - 1) * 1.6
+        pts = [(ox + x, g(x) + off + rnd.gauss(0, 1.2)) for x in range(10, 160, 4)]
+        b += poly(pts, c, w=1.4, op=0.85)
+        for _ in range(3):
+            x = rnd.uniform(15, 150); outl.append((ox + x, g(x) - rnd.uniform(18, 50)))
+    for cx_, cy_ in cams[:3]: b += cam2d(ox + cx_ + 20, cy_, math.pi / 2, size=12)
+    for p in outl: b += line(p[0] - 4, p[1] - 4, p[0] + 4, p[1] + 4, RED, 1.6) + line(p[0] - 4, p[1] + 4, p[0] + 4, p[1] - 4, RED, 1.6)
+    b += text(ox + 83, 236, 'red: views disagree, dropped', RED, 10, 'middle')
+    # 4
+    ox = 10 + 3 * 177
+    for x in [i * 0.9 for i in range(12, 172)]:
+        for _ in range(2): b += circ(ox + x, g(x) + rnd.gauss(0, 1.3) + rnd.uniform(0, 3), 1.3, GOLD)
+    b += text(360, 22, 'from posed cameras to a dense cloud: PatchMatch per image, then fusion', GREY, 11, 'middle')
+    svg('mvs-pipeline.svg', W, H, b)
+
+# ── sparse-vs-dense.svg ──────────────────────────────────────────────────────
+def sparsedense():
+    W, H = 700, 340
+    rnd = random.Random(23)
+    def z(x, y):
+        h = 0.45 * math.sin(x * 0.9) * math.cos(y * 0.7) + 0.15 * math.sin(2.1 * x + y)
+        if 0.3 < x < 1.5 and -0.6 < y < 0.5: h = max(h, 1.3)
+        return h
+    tex = scene_img(60, 60, 41)
+    def colour(x, y):
+        t = tex[int((y + 3) * 9.9) % 60][int((x + 3) * 9.9) % 60]
+        if 0.3 < x < 1.5 and -0.6 < y < 0.5: return (196, 170, 150)
+        return (100 + 70 * t, 110 + 55 * t, 80 + 35 * t)
+    V = (-1.0, -7.5, 5.2); RV = look_at(V, (0.2, 0.3, 0.0)); fv = 260
+    pw, ph = 300, 210
+    def scr(P): (u, v), zc = project(RV, V, fv, pw / 2, ph / 2, P); return u, v, zc
+    # sparse: points where features are, denser at the building's edges
+    sp = []
+    while len(sp) < 150:
+        x, y = rnd.uniform(-3, 3), rnd.uniform(-3, 3)
+        edge = min(abs(x - 0.3), abs(x - 1.5), abs(y + 0.6), abs(y - 0.5)) < 0.12 and 0.2 < x < 1.6 and -0.7 < y < 0.6
+        if edge or rnd.random() < 0.25: sp.append((x, y, z(x, y)))
+    b = ''
+    ox1, ox2, oy = 20, 380, 60
+    b += rect(ox1, oy, pw, ph, DIM, sw=1, rx=4) + rect(ox2, oy, pw, ph, DIM, sw=1, rx=4)
+    for P in sp:
+        u, v, _ = scr(P)
+        if 0 < u < pw and 0 < v < ph: b += circ(ox1 + u, oy + v, 2.2, hexc(*colour(P[0], P[1])))
+    # one point's track: three images that saw it
+    P = sp[[i for i, q in enumerate(sp) if 0.25 < q[0] < 1.6 and q[2] > 1][0]]
+    u, v, _ = scr(P)
+    for k, (cx_, cy_) in enumerate(((ox1 + 60, oy + 18), (ox1 + 150, oy + 10), (ox1 + 240, oy + 20))):
+        b += line(cx_, cy_, ox1 + u, oy + v, BLUE, 1.2) + cam2d(cx_, cy_, math.atan2(oy + v - cy_, ox1 + u - cx_), size=12)
+    b += circ(ox1 + u, oy + v, 5, GOLD, fill=False, w=2)
+    # dense: thousands of points splatted into an image with a depth buffer
+    S = 2
+    buf = [[None] * (pw // S) for _ in range(ph // S)]; zb = [[1e9] * (pw // S) for _ in range(ph // S)]
+    for _ in range(26000):
+        x, y = rnd.uniform(-3, 3), rnd.uniform(-3, 3)
+        u_, v_, zc = scr((x, y, z(x, y)))
+        i, j = int(u_ / S), int(v_ / S)
+        if 0 <= i < pw // S and 0 <= j < ph // S and zc < zb[j][i]:
+            zb[j][i] = zc; buf[j][i] = colour(x, y)
+    # the building's walls, seen from the front
+    for _ in range(5000):
+        x, zz = rnd.uniform(0.3, 1.5), rnd.uniform(0, 1.3)
+        u_, v_, zc = scr((x, -0.6, zz)); i, j = int(u_ / S), int(v_ / S)
+        if 0 <= i < pw // S and 0 <= j < ph // S and zc < zb[j][i]: zb[j][i] = zc; buf[j][i] = (150, 132, 118)
+    b += image(ox2, oy, pw, ph, buf, smooth=False)
+    b += text(ox1 + pw / 2, 40, 'sparse cloud: tie points', FG, 13, 'middle') + text(ox2 + pw / 2, 40, 'dense cloud', FG, 13, 'middle')
+    b += text(ox1 + pw / 2, oy + ph + 22, 'one point per matched feature, each with its track', GREY, 11, 'middle')
+    b += text(ox1 + pw / 2, oy + ph + 38, 'thousands to a few hundred thousand points', GOLD, 11, 'middle')
+    b += text(ox2 + pw / 2, oy + ph + 22, 'a point for nearly every pixel, fused from depth maps', GREY, 11, 'middle')
+    b += text(ox2 + pw / 2, oy + ph + 38, 'millions to tens of millions of points', GOLD, 11, 'middle')
+    b += text(ox1 + 70, oy + 14, 'its track', BLUE, 11)
+    svg('sparse-vs-dense.svg', W, H, b)
+
 FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning,
            volume, gauge, lowe, track, cog, mgraph, pose,
            kpmatch, fmatrix, homog, cheir, pnp, incsfm,
            bundle, selfcal, cycle, presel, mdensity, sensors,
-           siftscale, siftdesc, sharp, imask, fiducial, depthmap]
+           siftscale, siftdesc, sharp, imask, fiducial, depthmap,
+           photocost, geocons, pmatch, mvs, sparsedense]
 only = set(sys.argv[2:])
 for f in FIGURES:
     if not only or f.__name__ in only: f()

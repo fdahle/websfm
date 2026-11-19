@@ -25,7 +25,7 @@ looking at something else there, such as an occluder or noise, it ends far away 
 that view does not vouch for the pixel. A pixel is kept only when enough views vouch
 for it independently.
 
-<!-- TODO(image): assets/geometric-consistency.svg - a reference camera and a neighbouring camera above a surface; a surface pixel whose round trip (reference pixel to 3D point, into the neighbour, back through the neighbour's own depth) closes on itself, beside a sky pixel whose round trip ends far from where it started. -->
+![A reference and a neighbouring camera above the ground, twice. Left, a surface pixel: its depth gives a surface point, the neighbour's own depth finds the same point, and projecting it back lands where the trip started. Right, a sky pixel: its depth is a guess in the air, the neighbour's own depth along that ray is somewhere else, and the trip back ends far from the starting pixel.](assets/geometric-consistency.svg)
 
 This is the filter that removes sky and vegetation. Both score well photometrically:
 a bush matches itself because it is genuinely textured, and smooth sky matches at

@@ -28,7 +28,7 @@ and it is stored as flat typed arrays rather than point objects, because
 materialising thirty million objects is the difference between working and
 running out of memory.
 
-<!-- TODO(image): assets/sparse-vs-dense.svg - the same scene as a sparse tie-point cloud (with one point's track drawn back to three images) and as a dense cloud, side by side at the same viewpoint, with point counts labelled. -->
+![The same terrain with a building from the same viewpoint. Left, the sparse cloud: scattered tie points, one of them with its track drawn to the three images that saw it. Right, the dense cloud: a point for nearly every pixel, the building and the ground's texture visible.](assets/sparse-vs-dense.svg)
 
 Fusion needs one more step than "keep everything". A surface seen by $k$ cameras
 produces $k$ near-coincident copies of itself — a shell — so kept pixels are

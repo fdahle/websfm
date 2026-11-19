@@ -24,7 +24,7 @@ is from the window's centre and the more its grey value differs from the centre 
 At the edge of an object, the other side of the edge usually has another colour, so it
 barely counts and does not drag the depth across the edge.
 
-<!-- TODO(image): assets/photometric-cost.svg - a pixel's viewing ray with three candidate depths, each warping a patch into two source views; beside it a cost-versus-depth curve with a sharp minimum for textured surface, and a second flat curve for a textureless region annotated as ambiguous. -->
+![Left, a reference camera's ray with three candidate depths d1, d2, d3, each seen by two source cameras, and under them the reference window beside the windows each candidate brings from the sources: only d2's match it. Right, cost against candidate depth: the textured surface's curve has one sharp minimum at d2, the textureless surface's curve stays flat with no depth standing out.](assets/photometric-cost.svg)
 
 **Its blind spots define the rest of the pipeline.** ZNCC has nothing to say
 about three common cases:

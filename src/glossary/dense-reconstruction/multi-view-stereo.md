@@ -19,7 +19,7 @@ several sweeps. Second, the per-image depth maps are **fused** into a single
 point cloud, keeping only depths that several views agree on so noise and
 occlusions are culled.
 
-<!-- TODO(image): assets/mvs-pipeline.svg - a four-panel strip: posed cameras over a sparse cloud, one image's PatchMatch depth map, the same scene as several overlapping per-view depth maps, and the fused dense cloud - with the discarded pixels between panels 3 and 4 marked as cross-view disagreement. -->
+![Four panels: posed cameras over a sparse cloud; one image's depth map, near yellow to far blue; the per-view depth maps of three cameras as overlapping surface lines, with red crosses where views disagree; and the fused dense cloud along the surface.](assets/mvs-pipeline.svg)
 
 The result is a dense 3D [point cloud](help:point-cloud) — the raw material for the survey products:
 the [Digital Elevation Model](help:digital-elevation-model) (terrain height) and

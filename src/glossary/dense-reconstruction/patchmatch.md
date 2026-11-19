@@ -30,7 +30,7 @@ from coarse to fine:
 3. **Refine** — perturb the current plane by a decaying random amount, keeping
    any improvement.
 
-<!-- TODO(image): assets/patchmatch.svg - a red-black checkerboard sweep pattern over a pixel grid, one pixel receiving candidate planes from its four neighbours, and an inset showing a slanted plane intersected with the pixel's viewing ray to yield the candidate depth (versus the wrong fronto-parallel copy). -->
+![Left, a pixel grid in a red and black checkerboard; one red pixel takes the planes of its four black neighbours as candidates. Right, a side view: the neighbour's slanted plane met by this pixel's own ray gives the right depth on the surface, while copying the neighbour's depth, a plane facing the camera, gives a wrong point off the surface.](assets/patchmatch.svg)
 
 Candidates are scored by [photometric consistency](help:photometric-consistency)
 against several neighbouring views, keeping the best-K sources so that a surface

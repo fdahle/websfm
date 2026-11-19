@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 360" font-family="sans-serif" font-size="13">
+  <rect width="700" height="360" fill="#1b1f27"/>
+  <line x1="20" y1="215" x2="330" y2="215" stroke="#9ca3af" stroke-width="2"/>
+  <line x1="60" y1="50" x2="170" y2="250" stroke="#5aa9e6" stroke-width="1.5"/>
+  <line x1="210" y1="46" x2="117" y2="153.7" stroke="#ef6f6c" stroke-width="1" stroke-dasharray="4 3" opacity="0.8"/>
+  <line x1="300" y1="72" x2="117" y2="153.7" stroke="#ef6f6c" stroke-width="1" stroke-dasharray="4 3" opacity="0.8"/>
+  <circle cx="117" cy="153.7" r="5" fill="#ef6f6c"/>
+  <text x="107" y="157.7" fill="#ef6f6c" font-size="12" text-anchor="end">d1</text>
+  <line x1="210" y1="46" x2="150.8" y2="215" stroke="#7ee787" stroke-width="1" stroke-dasharray="4 3" opacity="0.8"/>
+  <line x1="300" y1="72" x2="150.8" y2="215" stroke="#7ee787" stroke-width="1" stroke-dasharray="4 3" opacity="0.8"/>
+  <circle cx="150.8" cy="215" r="5" fill="#7ee787"/>
+  <text x="140.8" y="219" fill="#7ee787" font-size="12" text-anchor="end">d2</text>
+  <line x1="210" y1="46" x2="163.3" y2="237.8" stroke="#ef6f6c" stroke-width="1" stroke-dasharray="4 3" opacity="0.8"/>
+  <line x1="300" y1="72" x2="163.3" y2="237.8" stroke="#ef6f6c" stroke-width="1" stroke-dasharray="4 3" opacity="0.8"/>
+  <circle cx="163.3" cy="237.8" r="5" fill="#ef6f6c"/>
+  <text x="153.3" y="241.8" fill="#ef6f6c" font-size="12" text-anchor="end">d3</text>
+  <polygon points="72.8,59.7 60,50 61.3,65.9" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="72.8,59.7 60,50 61.3,65.9" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="60" cy="50" r="4.5" fill="#5aa9e6"/>
+  <text x="56" y="38" fill="#5aa9e6" font-size="12" text-anchor="middle">reference</text>
+  <polygon points="211.3,62 210,46 199,57.6" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="211.3,62 210,46 199,57.6" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="210" cy="46" r="4.5" fill="#5aa9e6"/>
+  <text x="210" y="34" fill="#5aa9e6" font-size="12" text-anchor="middle">source 1</text>
+  <polygon points="293.9,86.8 300,72 284.9,77.4" fill="#5aa9e6" stroke="#5aa9e6" stroke-width="1" opacity="0.35"/>
+  <polyline points="293.9,86.8 300,72 284.9,77.4" fill="none" stroke="#5aa9e6" stroke-width="1.4"/>
+  <circle cx="300" cy="72" r="4.5" fill="#5aa9e6"/>
+  <text x="300" y="60" fill="#5aa9e6" font-size="12" text-anchor="middle">source 2</text>
+  <image x="24" y="262" width="66" height="12" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABUAAAABCAYAAAAxUOUbAAAAUUlEQVR42h3GsQnAIBBA0YxztTiFlUsIB3JaCw6gS+gE4og/JMWD9/TeqbViZnxvrf3mnKy1uPdyzmHvzRiDnDOlFFJKqCohBLz3iAjOOWKMvIlaMKaslDqIAAAAAElFTkSuQmCC"/>
+  <rect x="24" y="262" width="66" height="12" fill="none" stroke="#5aa9e6" stroke-width="1.2"/>
+  <text x="57" y="288" fill="#5aa9e6" font-size="10" text-anchor="middle">reference</text>
+  <image x="108" y="262" width="66" height="12" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABUAAAABCAYAAAAxUOUbAAAAUElEQVR42h3KsQkAIRAAwW/z0AIESxDOUxAL0NzIEgysbh8MB+abczLGoLVGjBHvPSKCc44QAqUU9t7ceznnsNZ6t/dOrRUzQ1VJKZFzfv4BtOw1RP9+FXUAAAAASUVORK5CYII="/>
+  <rect x="108" y="262" width="66" height="12" fill="none" stroke="#ef6f6c" stroke-width="1.2"/>
+  <image x="108" y="278" width="66" height="12" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABUAAAABCAYAAAAxUOUbAAAAVElEQVR42hXJsQ1AERRA0b+OTvk2UAnyBhBRWcMCEjvo9TqLXfmnPV8IAWstxhhEBOccMUa89/yXc6a1Ru+dOSdrLc453HvZezPGoNaKqpJSopTCAzKFLxRZbtB2AAAAAElFTkSuQmCC"/>
+  <rect x="108" y="278" width="66" height="12" fill="none" stroke="#ef6f6c" stroke-width="1.2"/>
+  <text x="141" y="306" fill="#ef6f6c" font-size="10" text-anchor="middle">d1</text>
+  <image x="186" y="262" width="66" height="12" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABUAAAABCAYAAAAxUOUbAAAAUUlEQVR42h3IIQoAIRBA0b3RRLPZ5ClkME4QRFBPYtXmDf+y2x7vmXPSWqPWyucxBqWU/9ZanHPYe3PvpfeOmZFSQlXJORNjxHuPiOCcI4TAC6trMV3+lJ8lAAAAAElFTkSuQmCC"/>
+  <rect x="186" y="262" width="66" height="12" fill="none" stroke="#7ee787" stroke-width="1.2"/>
+  <image x="186" y="278" width="66" height="12" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABUAAAABCAYAAAAxUOUbAAAAVElEQVR42h3FsQnAIBBA0SxzE4gTOIeVzWF7CIKNhRNYOYB27vhDUjzeU0rhY2aMMei901r7X2tx7+Wcw96bOSe1VlSVnDMpJWKMeO8REZxzhBB4AZjVMOsYqSAvAAAAAElFTkSuQmCC"/>
+  <rect x="186" y="278" width="66" height="12" fill="none" stroke="#7ee787" stroke-width="1.2"/>
+  <text x="219" y="306" fill="#7ee787" font-size="10" text-anchor="middle">d2</text>
+  <image x="264" y="262" width="66" height="12" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABUAAAABCAYAAAAxUOUbAAAAUElEQVR42h3IoQ1AIQwA0b8RFskACEhYAEWwSEQ7CpaKzng/QVxecp+IcM7BzLj34u6oKmstxhjMOV+lFFJKhBCIMZJzfq+1Rq312Xtn780PSrQu8AIo6/cAAAAASUVORK5CYII="/>
+  <rect x="264" y="262" width="66" height="12" fill="none" stroke="#ef6f6c" stroke-width="1.2"/>
+  <image x="264" y="278" width="66" height="12" preserveAspectRatio="none" style="image-rendering:pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABUAAAABCAYAAAAxUOUbAAAAT0lEQVR42h3LsQkAIRAAwW/3TMVE4fAQbEAwMNbIArS7fTCYcL57L+ccxhjUWlFVYoyEEB7vPaUUzIyUEjlneu/svVlrMeektfaOiOCc4wc1IDbTbJrKbgAAAABJRU5ErkJggg=="/>
+  <rect x="264" y="278" width="66" height="12" fill="none" stroke="#ef6f6c" stroke-width="1.2"/>
+  <text x="297" y="306" fill="#ef6f6c" font-size="10" text-anchor="middle">d3</text>
+  <text x="175" y="328" fill="#9ca3af" font-size="11" text-anchor="middle">each candidate depth warps the patch into</text>
+  <text x="175" y="342" fill="#9ca3af" font-size="11" text-anchor="middle">the source views; only d2 brings the same pixels</text>
+  <line x1="400" y1="260" x2="670" y2="260" stroke="#9ca3af" stroke-width="1"/>
+  <line x1="400" y1="70" x2="400" y2="260" stroke="#9ca3af" stroke-width="1"/>
+  <text x="535" y="292" fill="#9ca3af" font-size="11" text-anchor="middle">candidate depth</text>
+  <text x="392" y="74" fill="#9ca3af" font-size="10" text-anchor="end">2</text>
+  <text x="392" y="260" fill="#9ca3af" font-size="10" text-anchor="end">0</text>
+  <text x="390" y="165" fill="#9ca3af" font-size="11" text-anchor="end">cost</text>
+  <polyline points="400,142.2 401.5,143.8 403,150.7 404.5,161.3 406,168.2 407.5,171.4 409,173 410.5,171.7 412,171.2 413.5,170.8 415,169 416.5,168 418,167 419.5,165.4 421,163 422.5,157.6 424,155.9 425.5,157.6 427,153.5 428.5,149.4 430,150.1 431.5,151.4 433,151.8 434.5,153.1 436,156.6 437.5,161.2 439,164.6 440.5,168.5 442,173.7 443.5,175.6 445,175.2 446.5,172.7 448,166 449.5,158.7 451,155.6 452.5,156.4 454,161.1 455.5,169.2 457,173.8 458.5,173.8 460,169 461.5,160.8 463,154.9 464.5,152.5 466,149.7 467.5,148.5 469,152.4 470.5,157.1 472,154.1 473.5,149.3 475,148.1 476.5,150.4 478,154.5 479.5,163.8 481,176.6 482.5,184 484,189 485.5,201.9 487,210.8 488.5,207.3 490,200.3 491.5,199.6 493,191.4 494.5,175.2 496,162.5 497.5,158.6 499,156.2 500.5,156 502,157.8 503.5,159 505,160.5 506.5,163.7 508,166.7 509.5,168.2 511,169.6 512.5,170.3 514,169.1 515.5,167.9 517,163.1 518.5,154.2 520,145.9 521.5,144 523,142.9 524.5,142.2 526,146.9 527.5,154.3 529,160.2 530.5,169.3 532,181.6 533.5,189.1 535,190.9 536.5,189.2 538,182 539.5,169.7 541,160.4 542.5,152.4 544,141.4 545.5,133.4 547,132.7 548.5,133.9 550,137 551.5,146.5 553,158.6 554.5,167.4 556,177 557.5,188.8 559,194.6 560.5,194.6 562,199.1 563.5,201.7 565,194.5 566.5,184.8 568,178.5 569.5,168.8 571,155.9 572.5,148.7 574,146.6 575.5,149.5 577,157.9 578.5,170.1 580,177 581.5,178.8 583,179.3 584.5,177.6 586,174.5 587.5,170.9 589,165 590.5,158.5 592,154.2 593.5,149.8 595,141.5 596.5,136.2 598,138.3 599.5,142.7 601,153.2 602.5,170.3 604,187.1 605.5,196.4 607,200.7 608.5,201.9 610,195.8 611.5,186.5 613,181.7 614.5,177.2 616,169.2 617.5,161.4 619,156.2 620.5,150.4 622,144.8 623.5,143.1 625,144.4 626.5,146.4 628,151.6 629.5,159.5 631,166.4 632.5,170.2 634,174.6 635.5,177.9 637,178.1 638.5,176.6 640,173 641.5,166.3 643,159.5 644.5,155.8 646,157.2 647.5,159.8 649,163 650.5,165.9 652,168.7 653.5,172 655,174.9 656.5,176.3 658,176.8 659.5,176.9 661,175.3 662.5,171.6 664,166.8 665.5,157.2 667,146.2 668.5,139.6 670,137.6" fill="none" stroke="#e6b84f" stroke-width="1.8"/>
+  <polyline points="400,161.8 401.5,160.8 403,160.1 404.5,159.6 406,159.5 407.5,159.2 409,158.9 410.5,159 412,159.5 413.5,159.9 415,160.3 416.5,161.1 418,162.1 419.5,163.3 421,164.7 422.5,166.3 424,168 425.5,169.6 427,170.6 428.5,171.5 430,172.3 431.5,172.8 433,172.8 434.5,172.5 436,172 437.5,171.2 439,169.9 440.5,167.9 442,165.5 443.5,162.8 445,160 446.5,156.8 448,153.3 449.5,149.6 451,145.9 452.5,142.3 454,138.5 455.5,134.9 457,131.6 458.5,128.7 460,125.9 461.5,123.2 463,120.8 464.5,118.9 466,116.5 467.5,114.4 469,113 470.5,112.3 472,111.1 473.5,110.3 475,110.6 476.5,112.3 478,114.2 479.5,116.5 481,120.3 482.5,125.3 484,130.4 485.5,134.9 487,140.3 488.5,146.3 490,152.4 491.5,156.9 493,161.8 494.5,167 496,171.9 497.5,176.3 499,180.5 500.5,184.7 502,188.4 503.5,192 505,195.7 506.5,198.9 508,201.4 509.5,203.6 511,208.5 512.5,212.6 514,215.8 515.5,218.1 517,222.9 518.5,227.4 520,231 521.5,233.7 523,237.7 524.5,242.7 526,246.8 527.5,249.8 529,252.4 530.5,255.3 532,257.2 533.5,258 535,257.8 536.5,257.7 538,256.5 539.5,254.2 541,251 542.5,248.4 544,245.4 545.5,241.4 547,236.4 548.5,232.3 550,229.4 551.5,225.6 553,220.9 554.5,216 556,213.9 557.5,210.9 559,207.1 560.5,202.5 562,199.4 563.5,196 565,192.2 566.5,188.1 568,184.1 569.5,180 571,175.7 572.5,171.3 574,166.9 575.5,162 577,157 578.5,152.3 580,147.9 581.5,141.6 583,135.5 584.5,130 586,125.3 587.5,120.4 589,116 590.5,112.7 592,110.6 593.5,109.2 595,108.2 596.5,108.3 598,109.3 599.5,110.7 601,111.3 602.5,112.5 604,114.4 605.5,116.7 607,119 608.5,121.7 610,124.8 611.5,128.1 613,131.3 614.5,134.8 616,138.6 617.5,142.6 619,146.4 620.5,150.1 622,153.9 623.5,157.6 625,161.1 626.5,163.9 628,166.5 629.5,168.9 631,171 632.5,172.4 634,173.4 635.5,174.1 637,174.5 638.5,174.7 640,174.5 641.5,174.1 643,173.6 644.5,172.9 646,171.9 647.5,170.6 649,169.3 650.5,168 652,167 653.5,166 655,165.1 656.5,164.4 658,164.1 659.5,164 661,164.2 662.5,164.5 664,164.7 665.5,164.3 667,164 668.5,164 670,164.1" fill="none" stroke="#5aa9e6" stroke-width="1.8"/>
+  <line x1="430" y1="260" x2="430" y2="265" stroke="#ef6f6c" stroke-width="1.4"/>
+  <text x="430" y="277" fill="#ef6f6c" font-size="11" text-anchor="middle">d1</text>
+  <line x1="535" y1="260" x2="535" y2="265" stroke="#7ee787" stroke-width="1.4"/>
+  <text x="535" y="277" fill="#7ee787" font-size="11" text-anchor="middle">d2</text>
+  <line x1="574" y1="260" x2="574" y2="265" stroke="#ef6f6c" stroke-width="1.4"/>
+  <text x="574" y="277" fill="#ef6f6c" font-size="11" text-anchor="middle">d3</text>
+  <text x="408" y="48" fill="#5aa9e6" font-size="12">textured: one sharp minimum at the true depth</text>
+  <text x="408" y="64" fill="#e6b84f" font-size="12">textureless: flat, no depth stands out</text>
+  <text x="535" y="314" fill="#9ca3af" font-size="11" text-anchor="middle">cost = 1 − ZNCC of the reference window</text>
+  <text x="535" y="328" fill="#9ca3af" font-size="11" text-anchor="middle">and each warped source window</text>
+</svg>
