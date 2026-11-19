@@ -22,7 +22,7 @@ import { viewerClipping } from '../../core/products/viewerClipping.js'
 import { pickNearestPoint } from '../../core/products/screenPick.js'
 import { settleEditLatch } from '../../core/products/editFraming.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
-import { matches } from '../../core/help/shortcuts.js'
+import { gesture, matches } from '../../core/help/shortcuts.js'
 import { keyLabel } from '../../utils/shortcutLabels.js'
 import { texturePageBlobs } from '../../stores/reconstruction/meshTexture.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
@@ -236,6 +236,7 @@ const {
 // How close to the pointer (px) a pick lands, for point picking and 3D measuring.
 const PICK_RADIUS_PX = 8
 const {
+  surfaceHit,
   measureTool,
   measurePts,
   measureDone,
@@ -687,6 +688,7 @@ function pointerPx(e) {
 function onSelectKey(e) {
   if (!container.value?.offsetParent) return // tab hidden (v-show)
   if (!viewerMayHandleKey(e)) return
+  if (onViewKey(e)) return
   if (matches(e, 'region3d.abort') && abortRegionDrag()) {
     e.preventDefault()
     return
@@ -777,8 +779,58 @@ function alignUpToScene() {
   syncControlsUp()
 }
 
+// The camera presets' keys (shortcuts.js ▸ view3d): 7 top, 1 front, 3 right, 9 the
+// opposite of the last preset, 0 the oblique overview. → whether the key was one.
+const OPPOSITE = { top: 'bottom', bottom: 'top', front: 'back', back: 'front', right: 'left', left: 'right' }
+let lastPreset = null
+function onViewKey(e) {
+  const dir = matches(e, 'view3d.top')
+    ? 'top'
+    : matches(e, 'view3d.front')
+      ? 'front'
+      : matches(e, 'view3d.right')
+        ? 'right'
+        : matches(e, 'view3d.opposite') && lastPreset
+          ? OPPOSITE[lastPreset]
+          : null
+  if (dir) setView(dir)
+  else if (matches(e, 'view3d.reset')) resetView()
+  else return false
+  e.preventDefault()
+  return true
+}
+
+// Double-click on the cloud or a mesh with no tool active (view3d.focus): orbit about
+// the point under the pointer. The camera stays where it is and turns to it, so the
+// point comes to the centre at the same distance; orbit and zoom then work around it.
+function onDoubleClick(e) {
+  if (measureTool.value) {
+    finishMeasure()
+    return
+  }
+  if (selectTool.value || props.pickMode || !camera || !controls || !gesture(e, 'view3d.focus')) return
+  const hit = surfaceHit(e)
+  if (!hit) return
+  controls.target.set(...hit.pos)
+  controls.update()
+  updateClipping()
+  requestRender()
+}
+
+// Save Image (View ▸ Camera): a frame drawn now, as the PNG the canvas holds, at the
+// canvas's own pixel size. → { blob, width, height } or null.
+function snapshot() {
+  if (!renderer || !container.value?.offsetParent) return Promise.resolve(null)
+  renderFrame()
+  const canvas = renderer.domElement
+  return new Promise((resolve) =>
+    canvas.toBlob((blob) => resolve(blob ? { blob, width: canvas.width, height: canvas.height } : null), 'image/png'),
+  )
+}
+
 function setView(dir) {
   if (!camera || !controls) return
+  lastPreset = dir
   const { up, right, fwd } = upBasis()
   const d = sceneRadius * 2.5
   let dirVec, camUp
@@ -822,6 +874,7 @@ function setView(dir) {
 
 function resetView() {
   if (!camera || !controls) return
+  lastPreset = null
   const { up, right, fwd } = upBasis()
   camera.up.copy(up)
   syncControlsUp()
@@ -854,6 +907,7 @@ defineExpose({
   toggleMeasureTool,
   exitTools,
   toggleTurntable,
+  snapshot,
 })
 
 function onResize() {
@@ -1102,7 +1156,7 @@ onBeforeUnmount(() => {
     class="viewer"
     :class="{ 'selecting': !!selectTool || !!pickMode || !!measureTool, 'region-handle': !!regionHover }"
     @contextmenu.prevent
-    @dblclick="measureTool && finishMeasure()"
+    @dblclick="onDoubleClick"
     @pointerdown.capture="
       (e) => {
         onRegionPointerDown(e)

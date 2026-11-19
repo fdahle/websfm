@@ -527,6 +527,10 @@ export default {
     'map-basemap:terrain': { label: 'Gelände', blurb: 'Schummerung eines globalen Höhenmodells' },
     'map-basemap:none': { label: 'Keine', blurb: 'Nur Gitter' },
     'map-toggle-model-frame': { label: 'Modell-\nrahmen' },
+    'view-save-image': {
+      label: 'Bild\nspeichern',
+      tip: 'Die 3D-Ansicht als PNG-Bild speichern, wie sie auf dem Bildschirm ist',
+    },
     'img-prev': { label: 'Zurück', tip: 'Das vorige Foto der Bildliste zeigen' },
     'img-next': { label: 'Weiter', tip: 'Das nächste Foto der Bildliste zeigen' },
     'img-show-info': { label: 'Bild-\ninfo' },

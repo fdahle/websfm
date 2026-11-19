@@ -267,6 +267,7 @@ export function useMeasure3d({
   watch(saved3d, drawMeasure)
 
   return {
+    surfaceHit,
     measureTool,
     measurePts,
     measureDone,

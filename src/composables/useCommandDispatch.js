@@ -10,6 +10,10 @@ import { FILE_PICKERS, pickFiles } from '../utils/pickFiles.js'
 import { useImageViewSettings } from './useImageViewSettings.js'
 import { useTheme } from './useTheme.js'
 import { useFeatureImport } from './useFeatureImport.js'
+import { useLog } from './useLog.js'
+import { useProjectsStore } from '../stores/useProjectsStore.js'
+import { downloadBlob } from '../utils/download.js'
+import { fileSafe } from '../core/exportNames.js'
 
 // The one command dispatch, lifted out of App.vue: every ribbon button, console
 // verb, viewer menu and interactive workflow block arrives here as a command id
@@ -31,6 +35,24 @@ import { useFeatureImport } from './useFeatureImport.js'
 export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, removals, imports, consoleOpen }) {
   const { activateTab, activeView, activeTab, activeImageTab, openProductTab, stepImageTab } = tabs
   const { openFeatureImport } = useFeatureImport()
+  const { log } = useLog()
+  const projects = useProjectsStore()
+
+  // View ▸ Camera ▸ Save Image: the 3D view as a PNG, at the canvas's pixel size.
+  async function saveViewImage() {
+    const shot = await viewerRef.value?.snapshot()
+    if (!shot) {
+      log('Saving the 3D view failed: the 3D view is not showing', 'error', 'Export')
+      return
+    }
+    const name = `${fileSafe(projects.currentProjectName) || 'websfm'}-3d-view.png`
+    downloadBlob(name, shot.blob, 'image/png')
+    log(
+      `3D view saved as "${name}" (${shot.width.toLocaleString('en')} × ${shot.height.toLocaleString('en')} px)`,
+      'success',
+      'Export',
+    )
+  }
   const { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab } = viewers
   const {
     showCameras,
@@ -448,6 +470,9 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
         break
       case 'view-toggle-turntable':
         viewerRef.value?.toggleTurntable()
+        break
+      case 'view-save-image':
+        saveViewImage()
         break
       case 'view-toggle-cameras':
         showCameras.value = !showCameras.value

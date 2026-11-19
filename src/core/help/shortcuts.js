@@ -20,6 +20,7 @@ export const SHORTCUT_GROUPS = [
   { id: 'images', title: 'Image list' },
   { id: 'picture', title: 'Image tab' },
   { id: 'mask', title: 'Image tab ▸ Mask editing' },
+  { id: 'view3d', title: '3D view' },
   { id: 'select3d', title: '3D view ▸ Select points' },
   { id: 'measure3d', title: '3D view ▸ Measure' },
   { id: 'region3d', title: '3D view ▸ Region' },
@@ -74,6 +75,25 @@ const TABLE = [
     group: 'picture',
     keys: ['ArrowLeft', 'PageUp'],
     does: 'Show the previous photo in the image list',
+  },
+
+  // ── 3D view (Viewer3D.vue): the camera presets of View ▸ Camera, and the orbit centre ──
+  { id: 'view3d.top', group: 'view3d', keys: ['7'], does: 'Look from the top' },
+  { id: 'view3d.front', group: 'view3d', keys: ['1'], does: 'Look from the front' },
+  { id: 'view3d.right', group: 'view3d', keys: ['3'], does: 'Look from the right' },
+  {
+    id: 'view3d.opposite',
+    group: 'view3d',
+    keys: ['9'],
+    does: 'Look from the opposite side (top ↔ bottom, front ↔ back, right ↔ left)',
+  },
+  { id: 'view3d.reset', group: 'view3d', keys: ['0'], does: 'Back to the oblique overview' },
+  {
+    id: 'view3d.focus',
+    group: 'view3d',
+    keys: ['DoubleClick'],
+    does: 'Orbit about the point under the pointer, and bring it to the centre',
+    where: 'Viewer3D',
   },
 
   // ── Mask editing (composables/useMaskEditor.js; Escape is App's) ──
@@ -163,7 +183,7 @@ const TABLE = [
 ]
 
 const MODIFIERS = new Set(['Mod', 'Shift', 'Alt'])
-const MOUSE = new Set(['Click', 'Drag'])
+const MOUSE = new Set(['Click', 'DoubleClick', 'Drag'])
 
 // 'Mod+Shift+Z' → { mod, shift, alt, key: 'Z', mouse }. Only the last part may be a
 // key, so '+' itself cannot be bound (nothing needs it).

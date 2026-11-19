@@ -1326,25 +1326,32 @@ export const CAMERA_GROUP = {
   commands: [
     {
       pair: [
-        { id: 'view-preset-top', guide: '3d-view', label: 'Top', icon: 'view-top' },
+        { id: 'view-preset-top', guide: '3d-view', label: 'Top', icon: 'view-top', shortcut: 'view3d.top' },
         { id: 'view-preset-bottom', guide: '3d-view', label: 'Bottom', icon: 'view-bottom' },
       ],
     },
     {
       pair: [
         { id: 'view-preset-left', guide: '3d-view', label: 'Left', icon: 'view-left' },
-        { id: 'view-preset-right', guide: '3d-view', label: 'Right', icon: 'view-right' },
+        { id: 'view-preset-right', guide: '3d-view', label: 'Right', icon: 'view-right', shortcut: 'view3d.right' },
       ],
     },
     {
       pair: [
-        { id: 'view-preset-front', guide: '3d-view', label: 'Front', icon: 'view-front' },
+        { id: 'view-preset-front', guide: '3d-view', label: 'Front', icon: 'view-front', shortcut: 'view3d.front' },
         { id: 'view-preset-back', guide: '3d-view', label: 'Back', icon: 'view-back' },
       ],
     },
-    { id: 'reset-view', guide: '3d-view', label: 'Reset\nView', icon: 'view-reset' },
+    { id: 'reset-view', guide: '3d-view', label: 'Reset\nView', icon: 'view-reset', shortcut: 'view3d.reset' },
     // The camera circles the scene; its toolbox holds the speed and the recording.
     { id: 'view-toggle-turntable', guide: '3d-view', label: 'Turntable', icon: 'turntable', activeKey: 'turntable' },
+    {
+      id: 'view-save-image',
+      guide: '3d-view',
+      label: 'Save\nImage',
+      icon: 'image',
+      tip: 'Save the 3D view as a PNG image, as it is on screen',
+    },
   ],
 }
 

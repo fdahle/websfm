@@ -32,7 +32,9 @@ const words = {
   // A command with a shortcut names its key after the tip ("… (→)"), as the table says.
   tip: (cmd) => {
     const tip = cmd.tip ? t(cmdKey(cmd, 'tip')) : null
-    return tip && cmd.shortcut ? `${tip} (${keyLabel(cmd.shortcut)})` : tip
+    if (!cmd.shortcut) return tip
+    const text = tip ?? t(cmdKey(cmd, 'label')).replace(/-\n/g, '').replace(/\n/g, ' ')
+    return `${text} (${keyLabel(cmd.shortcut)})`
   },
   blurb: (cmd) => (cmd.blurb ? t(cmdKey(cmd, 'blurb')) : cmd.blurb),
   section: (text) => t(`ribbon.section.${slug(text)}`),

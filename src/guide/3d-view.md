@@ -14,6 +14,8 @@ coordinates. While it is in front, the ribbon's **View** tab adds two groups for
 - **Drag** with the right button to pan.
 - **Scroll** to zoom. The zoom heads for the point under the cursor and takes the orbit
   centre with it, so you can zoom into a detail and then orbit around it.
+- **Double-click** a point of a cloud or a mesh to orbit around it: the view turns to it,
+  at the same distance.
 
 To bring one cloud or mesh into view, right-click it in the sidebar and choose
 **Zoom to**.
@@ -22,7 +24,9 @@ To bring one cloud or mesh into view, right-click it in the sidebar and choose
 - **Top**, **Bottom**, **Left**, **Right**, **Front** and **Back** look at the whole
   scene from that side, level with the scene's up direction (from the cameras, or
   from **Tools ▸ Model ▾ ▸ Orient model**). **Reset View** returns to the oblique
-  overview.
+  overview. The number keys do the same: **7** top, **1** front, **3** right, **9** the
+  opposite side of the last one, **0** the overview.
+- **Save Image** saves the view as a PNG, as it is on screen.
 - **Cameras**, **Grid** and **Legend** show or hide the camera frustums, the ground
   grid and the colour legend. The two steppers set the point size and the size of
   the camera frustums.
