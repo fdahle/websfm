@@ -281,6 +281,10 @@ Notable changes to WebSfM. The format follows
   positions and pairs.
 
 ### Changed
+- **Glossary figures follow the light theme.** In light mode the diagrams in the Glossary
+  and the Guide are drawn on a light background with darker lines and labels, instead of
+  always in the dark palette. The SVG files stay as drawn; the app maps each palette
+  colour to a theme colour as it shows them.
 - **Import mirrors Export.** The Import tab has a Features group like Export's (Image
   Fiducials, Keypoints, Matches), and one SfM Project button whose dialog starts with
   the format: COLMAP, Metashape or Other SfM. Keypoints and Matches open the same dialog

@@ -365,7 +365,8 @@ function onBodyClick(e) {
   padding: 1px 4px;
   font-size: 12px;
 }
-.guide-body :deep(img.glossary-img) {
+.guide-body :deep(.glossary-img) {
+  display: block;
   max-width: 100%;
   height: auto;
   border-radius: 6px;

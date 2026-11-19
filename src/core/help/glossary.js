@@ -106,7 +106,7 @@ export function parseGlossaryEntry(raw, sourcePath = '<string>') {
 // walk the HTML as an alternating tag/text stream and suppress linking inside
 // anchors, code, KaTeX output, and any element carrying a `no-help` class — the
 // authoring opt-out for a specific occurrence.
-const SUPPRESS_TAGS = new Set(['a', 'code', 'pre', 'script', 'style', 'button'])
+const SUPPRESS_TAGS = new Set(['a', 'code', 'pre', 'script', 'style', 'button', 'svg'])
 const VOID_TAGS = new Set(['br', 'img', 'hr', 'input', 'wbr'])
 
 function buildAliasIndex(entries, selfId) {

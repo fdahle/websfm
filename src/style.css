@@ -19,6 +19,17 @@
   --console-text-label: #888;
   --console-hover: #222222;
   --console-btn-hover: #2a2a2a;
+
+  /* Glossary figures (core/help/helpMarkdown.js): the palette they are drawn in. */
+  --fig-bg: #1b1f27;
+  --fig-raised: #2a303b;
+  --fig-line: #6b7280;
+  --fig-label: #9ca3af;
+  --fig-ink: #c9d1d9;
+  --fig-blue: #5aa9e6;
+  --fig-yellow: #e6b84f;
+  --fig-red: #ef6f6c;
+  --fig-green: #7ee787;
 }
 
 [data-theme='light'] {
@@ -41,6 +52,16 @@
   --console-text-label: #666666;
   --console-hover: #ebebeb;
   --console-btn-hover: #e0e0e0;
+
+  --fig-bg: #f6f7f9;
+  --fig-raised: #e2e5ea;
+  --fig-line: #8b929d;
+  --fig-label: #555d69;
+  --fig-ink: #1f2328;
+  --fig-blue: #1f6fb2;
+  --fig-yellow: #a87308;
+  --fig-red: #c9302c;
+  --fig-green: #1a7f37;
 }
 
 * {
