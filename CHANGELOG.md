@@ -6,6 +6,7 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Ctrl+S confirms the project is saved.** WebSfM saves as you work; Ctrl+S now waits for the last change to be written and says so, instead of the browser offering to save the web page.
 - **Faster around the 3D view.** Double-click a point of a cloud or mesh to orbit around it, use the number keys for the camera presets (7 top, 1 front, 3 right, 9 the opposite side, 0 the overview), and save the view as a PNG with View ▸ Camera ▸ Save Image. The ribbon's tooltips name the keys.
 - **Find photos in a long image list.** A filter over the image list shows only the photos whose name holds what you type, or those not aligned, disabled, without keypoints or not loaded. The arrow keys in a photo's tab then step through only those, and Ctrl+A selects them all for one right-click (Disable, Detect features…, Remove…). The image list's words are now in the translation catalogues too.
 - **Step through the photos with the arrow keys.** In a photo's tab, → / PgDn and ← / PgUp (or Picture ▸ Previous and Next) show the next or previous photo in the image list's order, in the same tab, and the list selects it; mask editing and GCP marking stay on, so a set of photos can be checked or marked one after another.

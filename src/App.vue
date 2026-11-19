@@ -1,6 +1,6 @@
 <script setup>
 import { useRebuildOffer } from './composables/useRebuildOutdated.js'
-import { pendingPersistence, persistenceFailures } from './utils/persistence.js'
+import { flushPersistence, pendingPersistence, persistenceFailures } from './utils/persistence.js'
 import { ref, computed, reactive, watch, onMounted, nextTick, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import Ribbon from './components/layout/Ribbon.vue'
@@ -67,6 +67,8 @@ import HelpPopupStack from './components/glossary/HelpPopupStack.vue'
 import { matches } from './core/help/shortcuts.js'
 import { loadChangelog } from './composables/useWhatsNew.js'
 import { viewerMayHandleKey } from './utils/keyRouting.js'
+import { showToast } from './composables/useToasts.js'
+import { t } from './composables/useI18n.js'
 
 // These dialogs pull in large reports, Markdown/KaTeX, or diagnostic code and are
 // not needed for the initial workspace. Load them on first open instead of putting
@@ -222,6 +224,21 @@ function openQuality(section = 'overview') {
   qualitySection.value = section
   qualityOpen.value = true
 }
+// Ctrl+S: WebSfM saves as it goes, so the key waits for the writes in flight and says
+// that all is saved (or that a write failed; the console has why).
+async function confirmSaved() {
+  if (!projectsStore.currentProjectId) {
+    showToast(t('common.save.noProject'), { kind: 'info' })
+    return
+  }
+  try {
+    await flushPersistence()
+    showToast(t('common.save.saved'))
+  } catch {
+    showToast(t('common.save.failed'), { kind: 'error' })
+  }
+}
+
 // Picture ▸ Previous / Next and their keys: the image tab moves to the photo before or
 // after it in the image list's order (composables/useImageOrder.js; the store's order
 // until the list has drawn), and the list selects it.
@@ -577,7 +594,11 @@ onMounted(async () => {
     // one key press does one thing, innermost first (see utils/keyRouting.js).
     // Keys are named in core/help/shortcuts.js, which the Shortcuts dialog lists.
     if (e.defaultPrevented) return
-    if (matches(e, 'app.console')) {
+    if (matches(e, 'app.save')) {
+      // Any focus, any dialog: the browser's own Save page is never what is meant.
+      e.preventDefault()
+      confirmSaved()
+    } else if (matches(e, 'app.console')) {
       e.preventDefault()
       consoleOpen.value = !consoleOpen.value
     } else if (matches(e, 'app.consolePrompt')) {

@@ -265,3 +265,18 @@ test('Project Settings changes the capture type, and the project keeps it', asyn
   await expect(page.locator('.tab').filter({ hasText: /^2D$/ })).toHaveCount(1)
   expect(errors).toEqual([])
 })
+
+test('Ctrl+S says everything is saved instead of saving the page', async ({ page }) => {
+  await createProject(page)
+  let downloads = 0
+  page.on('download', () => downloads++)
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(page.locator('.toast', { hasText: 'All changes are saved' })).toBeVisible()
+  // In a field too: the page is never saved.
+  await page.getByRole('button', { name: 'Other', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Settings', exact: true }).getByLabel('Language').focus()
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(page.locator('.toast', { hasText: 'All changes are saved' }).first()).toBeVisible()
+  expect(downloads).toBe(0)
+})

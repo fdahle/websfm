@@ -26,6 +26,12 @@ export default {
   advanced: 'Advanced',
   showAdvanced: 'Show advanced settings',
   advancedHidden: '{n, plural, one {# advanced setting hidden} other {# advanced settings hidden}}',
+  // Ctrl+S (app.save): WebSfM saves as you work, so the key waits for the writes and says so.
+  save: {
+    saved: 'All changes are saved: WebSfM saves as you work. Other ▸ Export Project writes a project file.',
+    failed: 'Saving failed. The console says why.',
+    noProject: 'No project is open.',
+  },
   // A length in project units, three significant digits ("0.05 units", "1,230 m").
   length: '{v, number, ::@##} {unit}',
 }

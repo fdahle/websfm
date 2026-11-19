@@ -24,5 +24,11 @@ export default {
   showAdvanced: 'Erweiterte Einstellungen anzeigen',
   advancedHidden:
     '{n, plural, one {# erweiterte Einstellung ausgeblendet} other {# erweiterte Einstellungen ausgeblendet}}',
+  save: {
+    saved:
+      'Alle Änderungen sind gespeichert: WebSfM speichert beim Arbeiten. Weiteres ▸ Projekt exportieren schreibt eine Projektdatei.',
+    failed: 'Speichern fehlgeschlagen. Die Konsole sagt, warum.',
+    noProject: 'Es ist kein Projekt geöffnet.',
+  },
   length: '{v, number, ::@##} {unit}',
 }

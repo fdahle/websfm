@@ -7,7 +7,8 @@ order: 2
 ---
 WebSfM saves projects on your computer as you work; there is no upload or account, so
 projects work offline (see [Working Offline](guide:offline)). Imported images are
-copied into the project, so moving the originals later changes nothing.
+copied into the project, so moving the originals later changes nothing. There is nothing to save by
+hand: **Ctrl+S** only waits for the last change to be written and says so.
 
 The project list shows under each name where the project is kept (a folder or browser
 icon), its CRS, its size and when it was edited. **Project settings ▸ Where it is

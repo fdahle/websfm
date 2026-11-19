@@ -33,6 +33,12 @@ const TABLE = [
   // ── Anywhere (App.vue) ──
   { id: 'app.shortcuts', group: 'app', keys: ['?'], does: 'Show this list of shortcuts' },
   { id: 'app.console', group: 'app', keys: ['Mod+`'], does: 'Show or hide the console' },
+  {
+    id: 'app.save',
+    group: 'app',
+    keys: ['Mod+S'],
+    does: 'Wait until every change is saved (WebSfM saves as you work), instead of the browser saving the page',
+  },
   { id: 'app.consolePrompt', group: 'app', keys: ['Mod+K'], does: 'Open the console with the cursor in its prompt' },
   {
     id: 'app.escape',
