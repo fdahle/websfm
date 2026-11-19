@@ -37,7 +37,6 @@ export const I18N_PENDING = [
   'src/components/modals/app/DebugSummaryModal.vue',
   'src/components/modals/app/ModelDownloadModal.vue',
   'src/components/modals/app/ProgressModal.vue',
-  'src/components/modals/app/SettingsModal.vue',
   'src/components/modals/app/ShortcutsModal.vue',
   'src/components/modals/app/SystemInfoModal.vue',
   'src/components/modals/app/WhatsNewModal.vue',

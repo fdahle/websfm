@@ -124,8 +124,10 @@ change to every component:
   language keeps its own word order.
 - **Languages:** `src/core/i18n/<lang>/` holds a language's catalogue; a key it lacks
   shows in English. A `preview` language (German, for now) is never picked from the
-  browser's language, only by typing `lang de` in the command line, until it covers
-  the app. Add the German for the keys you add when you can. German keeps a technical
+  browser's language, only by hand (Settings ▸ General ▸ Language, which lists it as
+  partly translated, or `lang de` in the command line), until it covers the app.
+  `PLANNED_LANGUAGES` (`core/i18n/index.js`) are the languages to come: Settings lists
+  them greyed out; one moves into `LANGUAGES` with its first catalogue. Add the German for the keys you add when you can. German keeps a technical
   term in English where people in the field say it in English (Outlier, Preset, GCP,
   GSD, Mesh, DEM, Cluster); everyday words and the sentences around them are German
   (*Abbrechen*, *Punktwolke*, *Ausgabe*).

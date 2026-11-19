@@ -17,10 +17,23 @@ import de from './de/index.js'
 // language id → { dotted key → ICU message }. Add a language here with its catalogue.
 export const CATALOGS = { en: flatten(en), de: flatten(de) }
 // A `preview` language is partly translated: it is never picked from the browser's
-// languages, only chosen by hand (the console's `lang`), until it covers the app.
+// languages, only chosen by hand (Settings ▸ General ▸ Language, or the console's
+// `lang`), until it covers the app. Settings shows which is which.
 export const LANGUAGES = [
   { id: 'en', label: 'English' },
   { id: 'de', label: 'Deutsch', preview: true },
+]
+// Languages WebSfM means to offer but has no catalogue for yet. Settings lists them,
+// greyed out, so a user sees they are coming; nothing else reads them. A language
+// moves into LANGUAGES (as `preview`) with its first catalogue. Each is named in its
+// own language.
+export const PLANNED_LANGUAGES = [
+  { id: 'es', label: 'Español' },
+  { id: 'fr', label: 'Français' },
+  { id: 'it', label: 'Italiano' },
+  { id: 'pt', label: 'Português' },
+  { id: 'zh', label: '中文（简体）' },
+  { id: 'ja', label: '日本語' },
 ]
 export const FALLBACK = 'en'
 

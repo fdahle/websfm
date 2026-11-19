@@ -1,8 +1,8 @@
 import { ref } from 'vue'
 import { FALLBACK, LANGUAGES, msg, render, renderAll, renderRich } from '../core/i18n/index.js'
 
-// The UI language, for this browser: the one chosen (the console's `lang`; Settings
-// later), else the first of the browser's languages WebSfM has in full (not a
+// The UI language, for this browser: the one chosen (Settings ▸ General ▸ Language, or
+// the console's `lang`), else the first of the browser's languages WebSfM has in full (not a
 // `preview` one), else English. Text in a template is `t('area.key',
 // params)`; a message that came from core (a step effect, a preset card) is `tx(m)`,
 // and a plain string passes through `tx` unchanged. Both read `locale`, so whatever

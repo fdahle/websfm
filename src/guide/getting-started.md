@@ -67,7 +67,7 @@ was made.
 
 ## Leaving a long run
 Dense clouds and fine orthophotos can take hours. The tab title shows the stage and its
-progress, and the screen is kept on while the tab is visible (Settings ▸ General).
+progress, and the screen is kept on while the tab is visible (Settings ▸ Compute).
 **Notify when a run ends** sends a desktop notification when a run ends or a workflow
 needs you.
 

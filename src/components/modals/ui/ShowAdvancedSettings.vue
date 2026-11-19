@@ -3,8 +3,8 @@ import { useStepLayout } from '../../../composables/useStepLayout.js'
 import { t } from '../../../composables/useI18n.js'
 
 // The footer's "Show advanced settings" (dev/planning/plan-dialog-layout.md): the
-// advanced fields of every open step, remembered as Settings ▸ Display ▸ Expand
-// advanced settings. A closed step stays closed.
+// advanced fields of every open step, one switch for every dialog (Settings has it in its
+// own footer, for its advanced rows). A closed step stays closed.
 const layout = useStepLayout()
 </script>
 

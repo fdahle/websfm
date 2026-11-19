@@ -238,7 +238,8 @@ const VERB_HANDLERS = {
     env.clear()
   },
 
-  // The interface language: a preview language (partly translated) is only chosen here.
+  // The interface language: a preview language (partly translated) is only chosen here
+  // or in Settings ▸ General ▸ Language.
   lang(rest, env, log) {
     const all = env.languages?.() ?? []
     const id = rest.trim().toLowerCase()

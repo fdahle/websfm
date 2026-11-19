@@ -6,6 +6,7 @@
 // CRS whose area lies inside the tiles (they stop at ±85°), so a polar CRS greys
 // them out rather than drawing a ring with a hole at the pole. "Automatic" keeps
 // the CRS-aware default (OSM, or NASA GIBS for the polar presets).
+import { msg } from './i18n/msg.js'
 
 export const BASEMAPS = [
   {
@@ -50,13 +51,13 @@ export const SATELLITE = {
 // is unknown; past 20 most commercial imagery runs out, so OL upsamples from there.
 export const CUSTOM_SATELLITE_MAX_ZOOM = 20
 
-/** Why `url` is not a usable XYZ tile template, or '' (empty = use the default). */
+/** Why `url` is not a usable XYZ tile template (a message), or '' (empty = use the default). */
 export function tileUrlError(url) {
   const u = url.trim()
   if (!u) return ''
-  if (!/^https?:\/\//i.test(u)) return 'The URL must start with https://'
+  if (!/^https?:\/\//i.test(u)) return msg('settings.satellite.errorHttps')
   if (!u.includes('{z}') || !u.includes('{x}') || !(u.includes('{y}') || u.includes('{-y}')))
-    return 'The URL needs {z}, {x} and {y} placeholders'
+    return msg('settings.satellite.errorPlaceholders')
   return ''
 }
 

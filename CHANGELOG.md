@@ -6,6 +6,7 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Choose the language in Settings.** Settings ▸ General ▸ Language lists the languages by how far they are translated: English in full, German in part (what is not translated yet shows in English), and Spanish, French, Italian, Portuguese, Chinese and Japanese as not translated yet, greyed out. Before, German could only be chosen with `lang de` in the console; it is still never picked from the browser's language while it is partly translated.
 - **Figures in the Glossary.** 46 Glossary entries that waited for a diagram now have one, from SIFT's scale space and the fundamental matrix to PatchMatch, seamlines, graph cuts and ground classification, in the light and the dark theme. Each is drawn from computed geometry by `scripts/figures/glossary.py`: the cost curves are real ZNCC against candidate depths, the graph cut is found by max flow, view selection and ICP really run, and the polar map is shaded by each projection's computed scale error over Natural Earth's Antarctic coastline.
 - **See whether a change made the model more accurate.** Evaluate ▸ Accuracy now starts
   with **Since the fit before**: every Georeference keeps the accuracy it reached, and the
@@ -282,6 +283,7 @@ Notable changes to WebSfM. The format follows
   positions and pairs.
 
 ### Changed
+- **Settings, regrouped.** The two run switches (Keep the screen on, Notify when a run ends) moved to Settings ▸ Compute ▸ During a run, and the settings almost nobody changes (a satellite source of your own, the 3D near clipping distance, the number of compute workers) show with **Show advanced settings**, now in the Settings footer as in the processing dialogs. The Memory safety limit says in plain words what it does and when to change it, and Downloaded AI models lists the models actually downloaded.
 - **Glossary figures follow the light theme.** In light mode the diagrams in the Glossary
   and the Guide are drawn on a light background with darker lines and labels, instead of
   always in the dark palette. The SVG files stay as drawn; the app maps each palette

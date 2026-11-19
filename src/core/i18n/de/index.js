@@ -17,6 +17,7 @@ import quality from './quality.js'
 import readText from './readText.js'
 import rebuild from './rebuild.js'
 import ribbon from './ribbon.js'
+import settings from './settings.js'
 import sidebar from './sidebar.js'
 import sparse from './sparse.js'
 
@@ -38,6 +39,7 @@ export default {
   readText,
   rebuild,
   ribbon,
+  settings,
   sidebar,
   sparse,
 }

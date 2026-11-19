@@ -1,7 +1,8 @@
 import { test, expect } from './fixtures.js'
 
 // The app's own chrome: Settings ▸ General ▸ Notices hides the bug-report button,
-// the Guide's tab strip keeps to one row however many operations are open, and
+// Settings ▸ General ▸ Language lists the languages by how far they are translated,
+// Settings' advanced rows show with its footer switch, the Guide's tab strip keeps to one row however many operations are open, and
 // What's New leaves glossary terms unlinked.
 
 async function createProject(page) {
@@ -20,12 +21,7 @@ test('Settings hides the bug-report button, and it stays hidden after a reload',
   await page.getByRole('button', { name: 'Other', exact: true }).click()
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
-  await expect(settings.locator('.group-head')).toHaveText([
-    'Appearance',
-    'Help and dialogs',
-    'During a run',
-    'Notices',
-  ])
+  await expect(settings.locator('.group-head')).toHaveText(['Appearance', 'Help', 'Editing', 'Notices'])
   const row = settings.locator('.setting-row').filter({ hasText: 'Bug report button' })
   await row.locator('.slider').click()
   await expect(page.locator('.bug-report-fab')).toHaveCount(0)
@@ -34,6 +30,57 @@ test('Settings hides the bug-report button, and it stays hidden after a reload',
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
   await expect(page.locator('.bug-report-fab')).toHaveCount(0)
   expect(errors).toEqual([])
+})
+
+test('Settings lists languages by how far they are translated, and switches to one', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  await page.getByRole('button', { name: 'Other', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+  const select = settings.getByLabel('Language')
+  await expect(select.locator('optgroup')).toHaveCount(3)
+  expect(await select.locator('optgroup').evaluateAll((els) => els.map((e) => e.label))).toEqual([
+    'Translated',
+    'Partly translated',
+    'Not translated yet',
+  ])
+  // A planned language is listed but cannot be chosen, and says why.
+  const planned = select.locator('optgroup').nth(2).locator('option')
+  expect(await planned.count()).toBeGreaterThan(0)
+  for (const o of await planned.all()) {
+    await expect(o).toBeDisabled()
+    await expect(o).toHaveAttribute('title', /Not translated yet/)
+  }
+
+  // German, a partly translated language: the dialog redraws in it at once, says the
+  // rest is English, and the choice outlives a reload.
+  await select.selectOption('de')
+  const einstellungen = page.getByRole('dialog', { name: 'Einstellungen', exact: true })
+  await expect(einstellungen.getByRole('tab', { name: 'Allgemein' })).toBeVisible()
+  await expect(einstellungen.getByText(/Teilweise übersetzt: Was noch nicht übersetzt ist/)).toBeVisible()
+  await page.reload()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.lang)).toBe('de')
+  await page.evaluate(() => localStorage.setItem('uiLanguage', 'en'))
+  expect(errors).toEqual([])
+})
+
+test("Settings' advanced rows show with the footer switch", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('advancedSettingsExpanded', 'false'))
+  await createProject(page)
+  await page.getByRole('button', { name: 'Other', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+  await settings.getByRole('tab', { name: 'Compute' }).click()
+  await expect(settings.getByText('Compute workers')).toHaveCount(0)
+  await expect(settings.locator('.advanced-note')).toHaveText(/1 advanced setting hidden/)
+  await settings.getByLabel('Show advanced settings').check()
+  await expect(settings.getByText('Compute workers')).toBeVisible()
+  await settings.getByRole('tab', { name: 'Map & 3D' }).click()
+  await expect(settings.getByText('3D near clipping distance')).toBeVisible()
+  await expect(settings.getByText('Satellite imagery source')).toBeVisible()
 })
 
 test('the Guide tab strip scrolls sideways only, with Home fixed', async ({ page }) => {

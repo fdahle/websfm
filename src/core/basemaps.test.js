@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { msg } from './i18n/msg.js'
 import { basemapReason, customAttribution, decodeTerrarium, hillshade, tileUrlError } from './basemaps.js'
 
 const UTM = { basemap: 'osm', geographic: false }
@@ -68,8 +69,8 @@ describe('custom satellite source', () => {
   })
 
   it('rejects a URL without a scheme or placeholders', () => {
-    expect(tileUrlError('example.com/{z}/{x}/{y}.png')).toMatch(/https/)
-    expect(tileUrlError('https://example.com/tiles.png')).toMatch(/placeholders/)
+    expect(tileUrlError('example.com/{z}/{x}/{y}.png')).toEqual(msg('settings.satellite.errorHttps'))
+    expect(tileUrlError('https://example.com/tiles.png')).toEqual(msg('settings.satellite.errorPlaceholders'))
   })
 
   it('escapes the attribution and falls back to the host', () => {

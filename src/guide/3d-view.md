@@ -26,8 +26,9 @@ To bring one cloud or mesh into view, right-click it in the sidebar and choose
 - **Cameras**, **Grid** and **Legend** show or hide the camera frustums, the ground
   grid and the colour legend. The two steppers set the point size and the size of
   the camera frustums.
-- The background colour, the grid's height and the near clipping distance are in
-  **Settings ▸ Map & 3D**.
+- The background colour, the grid's height and the point budget are in
+  **Settings ▸ Map & 3D**; the near clipping distance is there too, with **Show
+  advanced settings** on.
 
 ## Turntable
 **View ▸ Camera ▸ Turntable** turns the camera slowly around the centre of the view,

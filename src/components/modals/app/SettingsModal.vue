@@ -1,5 +1,6 @@
 <script setup>
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
+import I18nText from '../../I18nText.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useGlossarySettings } from '../../../composables/useGlossarySettings.js'
 import { useComputeSettings } from '../../../composables/useComputeSettings.js'
@@ -8,17 +9,31 @@ import { useUiSettings } from '../../../composables/useUiSettings.js'
 import { useBrowserWarning } from '../../../composables/useBrowserWarning.js'
 import { useMobileWarning } from '../../../composables/useMobileWarning.js'
 import { useMapSettings } from '../../../composables/useMapSettings.js'
+import { useI18n } from '../../../composables/useI18n.js'
+import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import { BASEMAPS, SATELLITE } from '../../../core/basemaps.js'
+import { PLANNED_LANGUAGES, msg } from '../../../core/i18n/index.js'
 import { formatBytes } from '../../../core/io/projectArchive.js'
-import { MODEL_CACHE_NAME } from '../../../core/models/registry.js'
+import { MODELS, MODEL_CACHE_NAME, modelUrl } from '../../../core/models/registry.js'
+import { isModelCached } from '../../../utils/modelCache.js'
 import * as opfs from '../../../utils/opfs.js'
 import { confirmDialog } from '../../../composables/useConfirmations.js'
 import ModalShell from '../ui/ModalShell.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
+import ShowAdvancedSettings from '../ui/ShowAdvancedSettings.vue'
 
+// The preferences of this browser, by tab and group. A row whose default suits almost
+// everyone (a custom satellite source, the near clipping distance, the worker count)
+// is advanced: it shows under a tab's Advanced heading while the footer's Show advanced
+// settings is on, the same switch as in the processing dialogs.
+//
 // `theme` is the stored preference ('system' | 'light' | 'dark'); `resolvedTheme`
 // is what 'system' currently evaluates to, shown so the choice isn't opaque.
-const props = defineProps({ theme: String, resolvedTheme: String })
+defineProps({ theme: String, resolvedTheme: String })
 const emit = defineEmits(['close', 'set-theme'])
+const { t, tx, locale, setLanguage, languages } = useI18n()
+const layout = provideStepLayout('settings')
+const showAdvanced = computed(() => layout.showAdvanced.value)
 
 const { gaps: browserGaps, warningEnabled, setEnabled: setBrowserWarningEnabled } = useBrowserWarning()
 const { isMobile, warningEnabled: mobileWarningEnabled, setEnabled: setMobileWarningEnabled } = useMobileWarning()
@@ -30,7 +45,6 @@ const {
   resetMemBudgetAuto,
   deviceBudgetInfo,
   MAX_BUDGET_GB,
-  POOL_BUDGET_GB,
   useGpu,
   setUseGpu,
   workerCount,
@@ -38,8 +52,6 @@ const {
   MAX_POOL_SIZE,
 } = useComputeSettings()
 const {
-  advancedSettingsExpanded,
-  setAdvancedSettingsExpanded,
   motion,
   setMotion,
   confirmRemoveMark,
@@ -54,17 +66,13 @@ const {
 } = useUiSettings()
 const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
 // Why the notification switch stayed off, when the browser said no.
-const notifyRefusal = ref('')
+const notifyRefusal = ref(null)
 async function onNotifyToggle(event) {
   const wanted = event.target.checked
   const permission = await setNotifyWhenDone(wanted)
   event.target.checked = notifyWhenDone.value
-  if (!wanted || notifyWhenDone.value) notifyRefusal.value = ''
-  else if (permission === 'denied') {
-    notifyRefusal.value =
-      'Notifications are blocked for this site. Allow them in the browser’s site settings, then turn this on.'
-  } else
-    notifyRefusal.value = 'The browser did not grant permission to notify. Turn this on again to be asked once more.'
+  if (!wanted || notifyWhenDone.value) notifyRefusal.value = null
+  else notifyRefusal.value = permission === 'denied' ? 'settings.notify.blocked' : 'settings.notify.notGranted'
 }
 const { gridZ, setGridZ, background, setBackground, nearClip, setNearClip, pointBudget, setPointBudget } =
   useViewerSettings()
@@ -87,17 +95,27 @@ function resetSatelliteSource() {
   applySatelliteSource()
 }
 
-const themeDesc = computed(() =>
-  props.theme === 'system'
-    ? `Following your operating system — currently ${props.resolvedTheme === 'light' ? 'light' : 'dark'}.`
-    : 'Appearance used throughout the application.',
-)
+const themeOptions = ['system', 'light', 'dark'].map((id) => ({ id, label: msg(`settings.theme.${id}`) }))
+const gridOptions = ['min', 'avg', 'max'].map((id) => ({ id, label: msg(`settings.gridZ.${id}`) }))
+const BACKGROUNDS = ['theme', 'dark', 'light', 'black']
 
+// The language list in three groups: translated, partly translated (a `preview`
+// language; the rest shows in English) and planned (core/i18n PLANNED_LANGUAGES, shown
+// but not selectable).
+const fullLanguages = languages.filter((l) => !l.preview)
+const partialLanguages = languages.filter((l) => l.preview)
+const currentIsPartial = computed(() => partialLanguages.some((l) => l.id === locale.value))
+
+// What the automatic memory limit was read from, in the user's terms.
+const memorySource = { 'navigator.deviceMemory': 'device', 'performance.memory': 'heap' }[deviceBudgetInfo.source]
+
+// Each tab's advanced rows, counted for the note shown while they are hidden.
+const ADVANCED_COUNT = { general: 0, visualization: 2, compute: 1, storage: 0 }
 const tabs = [
-  { id: 'general', label: 'General' },
-  { id: 'visualization', label: 'Map & 3D' },
-  { id: 'compute', label: 'Compute' },
-  { id: 'storage', label: 'Storage' },
+  { id: 'general', label: 'settings.tab.general' },
+  { id: 'visualization', label: 'settings.tab.view' },
+  { id: 'compute', label: 'settings.tab.compute' },
+  { id: 'storage', label: 'settings.tab.storage' },
 ]
 const activeTab = ref('general')
 
@@ -105,20 +123,21 @@ const storageUsage = ref(null)
 const storageQuota = ref(null)
 const storageDurable = ref(null)
 const storageBusy = ref(false)
-const storageMessage = ref('')
+// The last storage action's outcome: a message, or null.
+const storageMessage = ref(null)
 const usagePercent = computed(() =>
   storageQuota.value > 0 ? Math.min(100, (storageUsage.value / storageQuota.value) * 100) : 0,
 )
+const errorText = (err) => String(err?.message ?? err)
 
 async function refreshStorage() {
-  storageMessage.value = ''
   try {
     const estimate = await opfs.getQuota()
     storageUsage.value = estimate.usage ?? 0
     storageQuota.value = estimate.quota ?? 0
     storageDurable.value = navigator.storage?.persisted ? await navigator.storage.persisted() : null
   } catch (err) {
-    storageMessage.value = `Storage information is unavailable: ${err?.message ?? err}`
+    storageMessage.value = msg('settings.storage.readFailed', { error: errorText(err) })
   }
 }
 
@@ -130,183 +149,196 @@ async function requestDurableStorage() {
   storageBusy.value = true
   try {
     storageDurable.value = await opfs.requestDurable()
-    storageMessage.value = storageDurable.value
-      ? 'Persistent storage enabled.'
-      : 'The browser declined for now — most browsers grant this automatically once the site is used regularly, bookmarked, or installed as an app, without asking. Projects still save normally, but may be evicted if disk space runs critically low. You can try again later.'
+    storageMessage.value = msg(storageDurable.value ? 'settings.durable.granted' : 'settings.durable.declined')
   } catch (err) {
-    storageMessage.value = `Could not request persistent storage: ${err?.message ?? err}`
+    storageMessage.value = msg('settings.durable.failed', { error: errorText(err) })
   } finally {
     storageBusy.value = false
   }
+}
+
+// The models in the cache, named from the registry, so a model added there is listed
+// without touching this dialog. null while checking.
+const cachedModels = ref(null)
+async function refreshModels() {
+  const found = []
+  for (const [id, m] of Object.entries(MODELS)) if (await isModelCached(modelUrl(id))) found.push(m.label)
+  cachedModels.value = found
 }
 
 async function clearModelCache() {
   if (
     !(await confirmDialog({
-      title: 'Remove downloaded models?',
-      message: 'Remove downloaded AI models? They will be downloaded again when needed. Projects are not affected.',
+      title: t('settings.models.confirmTitle'),
+      message: t('settings.models.confirmMessage'),
     }))
   )
     return
   storageBusy.value = true
   try {
-    const removed = typeof caches !== 'undefined' && (await caches.delete(MODEL_CACHE_NAME))
-    await refreshStorage()
-    storageMessage.value = removed ? 'Downloaded AI models removed.' : 'No downloaded AI models were stored.'
+    if (typeof caches !== 'undefined') await caches.delete(MODEL_CACHE_NAME)
+    await Promise.all([refreshStorage(), refreshModels()])
+    storageMessage.value = msg('settings.models.removed')
   } catch (err) {
-    storageMessage.value = `Could not clear downloaded models: ${err?.message ?? err}`
+    storageMessage.value = msg('settings.models.failed', { error: errorText(err) })
   } finally {
     storageBusy.value = false
   }
 }
 
-onMounted(refreshStorage)
+onMounted(() => {
+  refreshStorage()
+  refreshModels()
+})
 </script>
 
 <template>
-  <!-- Flush: the tab bar runs edge to edge; each tab's rows carry their own padding. -->
-  <ModalShell title="Settings" width="540px" flush @close="emit('close')">
-    <div class="tab-bar" role="tablist">
+  <!-- Flush: each tab's rows carry their own padding. -->
+  <ModalShell :title="t('settings.title')" width="540px" flush @close="emit('close')">
+    <template #tabs>
       <button
         v-for="tab in tabs"
         :key="tab.id"
-        class="tab"
+        class="modal-tab"
         role="tab"
         :class="{ active: activeTab === tab.id }"
         :aria-selected="activeTab === tab.id"
         @click="activeTab = tab.id"
       >
-        {{ tab.label }}
+        {{ t(tab.label) }}
       </button>
-    </div>
+    </template>
 
     <div class="settings-body">
       <template v-if="activeTab === 'general'">
-        <h3 class="group-head">Appearance</h3>
+        <h3 class="group-head">{{ t('settings.group.appearance') }}</h3>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Theme</span>
-            <span class="setting-desc">{{ themeDesc }}</span>
+            <span class="setting-label">{{ t('settings.theme.label') }}</span>
+            <span class="setting-desc">{{
+              theme === 'system'
+                ? t('settings.theme.followsSystem', { mode: resolvedTheme === 'light' ? 'light' : 'dark' })
+                : t('settings.theme.fixed')
+            }}</span>
           </div>
-          <div class="seg-toggle compact">
-            <button :class="{ active: theme === 'system' }" @click="emit('set-theme', 'system')">System</button>
-            <button :class="{ active: theme === 'light' }" @click="emit('set-theme', 'light')">Light</button>
-            <button :class="{ active: theme === 'dark' }" @click="emit('set-theme', 'dark')">Dark</button>
-          </div>
+          <SegmentedControl
+            :model-value="theme"
+            :options="themeOptions"
+            @update:model-value="emit('set-theme', $event)"
+          />
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Motion</span>
-            <span class="setting-desc">Follow the operating system or minimize interface animation.</span>
+            <span class="setting-label">{{ t('settings.motion.label') }}</span>
+            <span class="setting-desc">{{ t('settings.motion.desc') }}</span>
           </div>
-          <select class="select" :value="motion" @change="setMotion($event.target.value)">
-            <option value="system">Follow system</option>
-            <option value="reduce">Reduce motion</option>
+          <select
+            class="field-select"
+            :aria-label="t('settings.motion.label')"
+            :value="motion"
+            @change="setMotion($event.target.value)"
+          >
+            <option value="system">{{ t('settings.motion.system') }}</option>
+            <option value="reduce">{{ t('settings.motion.reduce') }}</option>
           </select>
         </div>
 
-        <h3 class="group-head">Help and dialogs</h3>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Glossary terms</span>
-            <span class="setting-desc"
-              >Underline explained words and put a ? after settings with advice; hover for the explanation and a link to
-              the full entry.</span
-            >
+            <label class="setting-label" for="settings-language">{{ t('settings.language.label') }}</label>
+            <span class="setting-desc">{{
+              t(currentIsPartial ? 'settings.language.descPartial' : 'settings.language.descFull')
+            }}</span>
+          </div>
+          <select
+            id="settings-language"
+            class="field-select"
+            :value="locale"
+            @change="setLanguage($event.target.value)"
+          >
+            <optgroup :label="t('settings.language.full')">
+              <option v-for="l in fullLanguages" :key="l.id" :value="l.id" :lang="l.id">{{ l.label }}</option>
+            </optgroup>
+            <optgroup v-if="partialLanguages.length" :label="t('settings.language.partial')">
+              <option v-for="l in partialLanguages" :key="l.id" :value="l.id" :lang="l.id">{{ l.label }}</option>
+            </optgroup>
+            <optgroup v-if="PLANNED_LANGUAGES.length" :label="t('settings.language.planned')">
+              <option
+                v-for="l in PLANNED_LANGUAGES"
+                :key="l.id"
+                :value="l.id"
+                :lang="l.id"
+                disabled
+                :title="t('settings.language.plannedReason')"
+              >
+                {{ l.label }}
+              </option>
+            </optgroup>
+          </select>
+        </div>
+
+        <h3 class="group-head">{{ t('settings.group.help') }}</h3>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ t('settings.glossary.label') }}</span>
+            <span class="setting-desc">{{ t('settings.glossary.desc') }}</span>
           </div>
           <label class="switch">
             <input
               type="checkbox"
               :checked="glossaryTermsEnabled"
+              :aria-label="t('settings.glossary.label')"
               @change="setGlossaryTermsEnabled($event.target.checked)"
             />
             <span class="slider"></span>
           </label>
         </div>
 
+        <h3 class="group-head">{{ t('settings.group.editing') }}</h3>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Show advanced settings</span>
-            <span class="setting-desc"
-              >Show the advanced settings of each open step in processing dialogs (the same switch as in their
-              footer).</span
-            >
+            <span class="setting-label">{{ t('settings.confirmMark.label') }}</span>
+            <span class="setting-desc">{{ t('settings.confirmMark.desc') }}</span>
           </div>
           <label class="switch">
             <input
               type="checkbox"
-              :checked="advancedSettingsExpanded"
-              @change="setAdvancedSettingsExpanded($event.target.checked)"
+              :checked="confirmRemoveMark"
+              :aria-label="t('settings.confirmMark.label')"
+              @change="setConfirmRemoveMark($event.target.checked)"
             />
             <span class="slider"></span>
           </label>
         </div>
 
+        <h3 class="group-head">{{ t('settings.group.notices') }}</h3>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Confirm before removing a mark</span>
-            <span class="setting-desc">Ask before deleting a single image mark of a control point or marker.</span>
+            <span class="setting-label">{{ t('settings.bugButton.label') }}</span>
+            <span class="setting-desc">{{ t('settings.bugButton.desc') }}</span>
           </div>
           <label class="switch">
-            <input type="checkbox" :checked="confirmRemoveMark" @change="setConfirmRemoveMark($event.target.checked)" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <h3 v-if="wakeLockSupported || notifySupported" class="group-head">During a run</h3>
-        <div v-if="wakeLockSupported" class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">Keep the screen on during a run</span>
-            <span class="setting-desc"
-              >Stop the display, and on most systems the computer, from going to sleep while a stage or workflow runs.
-              Applies while the WebSfM tab is visible.</span
-            >
-          </div>
-          <label class="switch">
-            <input type="checkbox" :checked="keepAwake" @change="setKeepAwake($event.target.checked)" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <div v-if="notifySupported" class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">Notify when a run ends</span>
-            <span class="setting-desc">{{
-              notifyRefusal ||
-              'A desktop notification when a run of 30 seconds or more ends, or a workflow needs you, while the WebSfM tab is in the background.'
-            }}</span>
-          </div>
-          <label class="switch">
-            <input type="checkbox" :checked="notifyWhenDone" @change="onNotifyToggle" />
-            <span class="slider"></span>
-          </label>
-        </div>
-
-        <h3 class="group-head">Notices</h3>
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">Bug report button</span>
-            <span class="setting-desc"
-              >Show the round button at the bottom right that opens a new GitHub issue. Other ▸ About links there
-              too.</span
-            >
-          </div>
-          <label class="switch">
-            <input type="checkbox" :checked="showBugButton" @change="setShowBugButton($event.target.checked)" />
+            <input
+              type="checkbox"
+              :checked="showBugButton"
+              :aria-label="t('settings.bugButton.label')"
+              @change="setShowBugButton($event.target.checked)"
+            />
             <span class="slider"></span>
           </label>
         </div>
 
         <div v-if="browserGaps.length" class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Warn on unsupported browser</span>
-            <span class="setting-desc">Remind me when browser limitations can affect compute or file access.</span>
+            <span class="setting-label">{{ t('settings.browserWarning.label') }}</span>
+            <span class="setting-desc">{{ t('settings.browserWarning.desc') }}</span>
           </div>
           <label class="switch">
             <input
               type="checkbox"
               :checked="warningEnabled"
+              :aria-label="t('settings.browserWarning.label')"
               @change="setBrowserWarningEnabled($event.target.checked)"
             />
             <span class="slider"></span>
@@ -315,15 +347,14 @@ onMounted(refreshStorage)
 
         <div v-if="isMobile" class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Warn on mobile devices</span>
-            <span class="setting-desc"
-              >Show the notice that WebSfM is a desktop application and mobile layout is unsupported.</span
-            >
+            <span class="setting-label">{{ t('settings.mobileWarning.label') }}</span>
+            <span class="setting-desc">{{ t('settings.mobileWarning.desc') }}</span>
           </div>
           <label class="switch">
             <input
               type="checkbox"
               :checked="mobileWarningEnabled"
+              :aria-label="t('settings.mobileWarning.label')"
               @change="setMobileWarningEnabled($event.target.checked)"
             />
             <span class="slider"></span>
@@ -332,110 +363,133 @@ onMounted(refreshStorage)
       </template>
 
       <template v-else-if="activeTab === 'visualization'">
-        <h3 class="group-head">Map</h3>
+        <h3 class="group-head">{{ t('settings.group.map') }}</h3>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Map base layer</span>
-            <span class="setting-desc"
-              >Automatic uses OpenStreetMap normally and the matching NASA layer for polar coordinate systems. Satellite
-              and Terrain are not available for polar systems.</span
-            >
+            <span class="setting-label">{{ t('settings.basemap.label') }}</span>
+            <span class="setting-desc">{{ t('settings.basemap.desc') }}</span>
           </div>
-          <select class="select" :value="basemap" @change="setBasemap($event.target.value)">
+          <select
+            class="field-select"
+            :aria-label="t('settings.basemap.label')"
+            :value="basemap"
+            @change="setBasemap($event.target.value)"
+          >
             <option v-for="b in BASEMAPS" :key="b.value" :value="b.value">{{ b.label }}</option>
           </select>
         </div>
 
-        <div class="setting-row setting-row-stacked">
-          <div class="setting-info">
-            <span class="setting-label">Satellite imagery source</span>
-            <span class="setting-desc">
-              By default Satellite shows Esri World Imagery, which is provided under
-              <a :href="SATELLITE.terms" target="_blank" rel="noopener">Esri's terms of use</a> — commercial use may
-              need an ArcGIS account. To use a provider you hold a licence for, enter its XYZ tile URL with
-              <code>{z}</code>, <code>{x}</code> and <code>{y}</code>
-              (and your API key, if it needs one). It is stored only in this browser.
-            </span>
-          </div>
-          <input
-            v-model="satUrlDraft"
-            class="text-input"
-            type="url"
-            spellcheck="false"
-            placeholder="Esri World Imagery (default)"
-            aria-label="Satellite tile URL"
-            @keydown.enter="applySatelliteSource"
-          />
-          <input
-            v-model="satAttributionDraft"
-            class="text-input"
-            type="text"
-            placeholder="Attribution, e.g. © Provider"
-            aria-label="Satellite attribution"
-            :disabled="!satUrlDraft.trim()"
-            :title="satUrlDraft.trim() ? null : 'Enter a tile URL first'"
-            @keydown.enter="applySatelliteSource"
-          />
-          <div class="setting-actions">
-            <button
-              class="btn"
-              :disabled="!satDirty"
-              :title="satDirty ? null : 'No changes to apply'"
-              @click="applySatelliteSource"
-            >
-              Apply
-            </button>
-            <button
-              class="btn"
-              :disabled="!satelliteUrl && !satUrlDraft"
-              :title="!satelliteUrl && !satUrlDraft ? 'Already using Esri' : null"
-              @click="resetSatelliteSource"
-            >
-              Use Esri
-            </button>
-            <span v-if="satError" class="field-error">{{ satError }}</span>
-          </div>
-        </div>
-
-        <h3 class="group-head">3D view</h3>
+        <h3 class="group-head">{{ t('settings.group.view3d') }}</h3>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">3D background</span>
-            <span class="setting-desc">Choose a neutral canvas independently of the application theme.</span>
+            <span class="setting-label">{{ t('settings.background.label') }}</span>
+            <span class="setting-desc">{{ t('settings.background.desc') }}</span>
           </div>
-          <select class="select" :value="background" @change="setBackground($event.target.value)">
-            <option value="theme">Follow theme</option>
-            <option value="dark">Dark grey</option>
-            <option value="light">Light grey</option>
-            <option value="black">Black</option>
+          <select
+            class="field-select"
+            :aria-label="t('settings.background.label')"
+            :value="background"
+            @change="setBackground($event.target.value)"
+          >
+            <option v-for="b in BACKGROUNDS" :key="b" :value="b">{{ t(`settings.background.${b}`) }}</option>
           </select>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">3D ground-grid height</span>
-            <span class="setting-desc"
-              >Place the reference grid at the bottom, centre, or top of the loaded point cloud.</span
-            >
+            <span class="setting-label">{{ t('settings.gridZ.label') }}</span>
+            <span class="setting-desc">{{ t('settings.gridZ.desc') }}</span>
           </div>
-          <div class="seg-toggle compact">
-            <button :class="{ active: gridZ === 'min' }" @click="setGridZ('min')">Bottom</button>
-            <button :class="{ active: gridZ === 'avg' }" @click="setGridZ('avg')">Middle</button>
-            <button :class="{ active: gridZ === 'max' }" @click="setGridZ('max')">Top</button>
-          </div>
+          <SegmentedControl :model-value="gridZ" :options="gridOptions" @update:model-value="setGridZ" />
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <label class="setting-label" for="viewer-near-clip">3D near clipping distance</label>
-            <span class="setting-desc"
-              >0 adjusts automatically as you zoom. A smaller manual distance keeps nearby points visible. Values use
-              scene units.</span
-            >
+            <!-- One span, so the label's flex gap does not split the sentence. -->
+            <label class="setting-label" for="viewer-point-budget">
+              <span>
+                <I18nText k="settings.pointBudget.label">
+                  <template #glossary="{ text }">
+                    <GlossaryTerm id="level-of-detail">{{ text }}</GlossaryTerm>
+                  </template>
+                </I18nText>
+              </span>
+            </label>
+            <span class="setting-desc">{{ t('settings.pointBudget.desc') }}</span>
           </div>
-          <div class="num-input">
+          <input
+            id="viewer-point-budget"
+            class="field-input"
+            type="number"
+            min="1"
+            max="30"
+            step="1"
+            :value="pointBudget"
+            @change="setPointBudget($event.target.value)"
+          />
+        </div>
+
+        <h3 class="group-head">{{ t('settings.group.advanced') }}</h3>
+        <template v-if="showAdvanced">
+          <div class="setting-row setting-row-stacked">
+            <div class="setting-info">
+              <span class="setting-label">{{ t('settings.satellite.label') }}</span>
+              <span class="setting-desc">
+                <I18nText k="settings.satellite.desc">
+                  <template #terms="{ text }">
+                    <a :href="SATELLITE.terms" target="_blank" rel="noopener">{{ text }}</a>
+                  </template>
+                </I18nText>
+              </span>
+            </div>
+            <input
+              v-model="satUrlDraft"
+              class="field-input wide"
+              type="url"
+              spellcheck="false"
+              :placeholder="t('settings.satellite.urlPlaceholder')"
+              :aria-label="t('settings.satellite.urlLabel')"
+              @keydown.enter="applySatelliteSource"
+            />
+            <input
+              v-model="satAttributionDraft"
+              class="field-input wide"
+              type="text"
+              :placeholder="t('settings.satellite.attributionPlaceholder')"
+              :aria-label="t('settings.satellite.attributionLabel')"
+              :disabled="!satUrlDraft.trim()"
+              :title="satUrlDraft.trim() ? null : t('settings.satellite.needsUrl')"
+              @keydown.enter="applySatelliteSource"
+            />
+            <div class="setting-actions">
+              <button
+                class="btn"
+                :disabled="!satDirty"
+                :title="satDirty ? null : t('settings.satellite.noChanges')"
+                @click="applySatelliteSource"
+              >
+                {{ t('settings.satellite.apply') }}
+              </button>
+              <button
+                class="btn"
+                :disabled="!satelliteUrl && !satUrlDraft"
+                :title="!satelliteUrl && !satUrlDraft ? t('settings.satellite.alreadyEsri') : null"
+                @click="resetSatelliteSource"
+              >
+                {{ t('settings.satellite.useEsri') }}
+              </button>
+              <span v-if="satError" class="field-error">{{ tx(satError) }}</span>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="viewer-near-clip">{{ t('settings.nearClip.label') }}</label>
+              <span class="setting-desc">{{ t('settings.nearClip.desc') }}</span>
+            </div>
             <input
               id="viewer-near-clip"
+              class="field-input"
               type="number"
               min="0"
               max="1000"
@@ -444,46 +498,32 @@ onMounted(refreshStorage)
               @change="setNearClip($event.target.value)"
             />
           </div>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <label class="setting-label" for="viewer-point-budget"
-              >3D <GlossaryTerm id="level-of-detail">point budget</GlossaryTerm> (million points)</label
-            >
-            <span class="setting-desc"
-              >Clouds of 4 million points or more are drawn level of detail: at most this many points at once, in most
-              detail near the view's centre of attention. Lower it if orbiting stutters.</span
-            >
-          </div>
-          <div class="num-input">
-            <input
-              id="viewer-point-budget"
-              type="number"
-              min="1"
-              max="30"
-              step="1"
-              :value="pointBudget"
-              @change="setPointBudget($event.target.value)"
-            />
-          </div>
-        </div>
+        </template>
+        <p v-else class="advanced-note">{{ t('settings.advancedHidden', { n: ADVANCED_COUNT.visualization }) }}</p>
       </template>
 
       <template v-else-if="activeTab === 'compute'">
+        <h3 class="group-head">{{ t('settings.group.resources') }}</h3>
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Memory safety limit</span>
+            <label class="setting-label" for="settings-memory">{{ t('settings.memory.label') }}</label>
             <span class="setting-desc">
-              Dense runs stop before starting when estimated peak memory exceeds this amount. Runs use at most
-              {{ POOL_BUDGET_GB }} GB of it in buffers (a Chrome tab holds 16 GB of them, shared by the page and all its
-              workers); fusion keeps its largest arrays in WebAssembly memory and may use the rest.
-              {{ memBudgetAuto ? `Automatically derived from ${deviceBudgetInfo.source}.` : 'Manually overridden.' }}
+              {{ t('settings.memory.desc') }}
+              {{
+                memBudgetAuto
+                  ? t('settings.memory.auto', {
+                      source: memorySource ?? 'other',
+                      gb: deviceBudgetInfo.deviceMemoryGB ?? 0,
+                    })
+                  : t('settings.memory.manual')
+              }}
             </span>
           </div>
           <div class="setting-actions">
             <div class="num-input">
               <input
+                id="settings-memory"
+                class="field-input"
                 type="number"
                 min="0.25"
                 :max="MAX_BUDGET_GB"
@@ -491,56 +531,96 @@ onMounted(refreshStorage)
                 :value="memBudgetGb"
                 @change="setMemBudgetGb($event.target.value)"
               />
-              <span class="num-unit">GB</span>
+              <span class="num-unit">{{ t('settings.memory.unit') }}</span>
             </div>
             <button
               class="btn btn-compact"
               :disabled="memBudgetAuto"
-              :title="memBudgetAuto ? 'Already using the detected device budget' : 'Use the detected device budget'"
+              :title="memBudgetAuto ? t('settings.memory.autoActive') : t('settings.memory.autoTip')"
               @click="resetMemBudgetAuto"
             >
-              Auto
+              {{ t('settings.memory.autoButton') }}
             </button>
           </div>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Compute workers</span>
-            <span class="setting-desc"
-              >Limit parallel CPU tasks to reduce memory pressure. Automatic uses up to {{ MAX_POOL_SIZE }} workers on
-              this device.</span
+            <span class="setting-label"
+              >{{ t('settings.gpu.label') }} <span class="badge">{{ t('settings.gpu.recommended') }}</span></span
             >
-          </div>
-          <select class="select" :value="workerCount" @change="setWorkerCount($event.target.value)">
-            <option value="0">Automatic ({{ MAX_POOL_SIZE }})</option>
-            <option v-for="n in MAX_POOL_SIZE" :key="n" :value="n">{{ n }}</option>
-          </select>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">Use GPU <span class="badge">Recommended</span></span>
-            <span class="setting-desc"
-              >Automatically enabled when this browser offers WebGPU. Supported matching and dense operations use it;
-              unavailable operations fall back to CPU.</span
-            >
+            <span class="setting-desc">{{ t('settings.gpu.desc') }}</span>
           </div>
           <label class="switch">
-            <input type="checkbox" :checked="useGpu" @change="setUseGpu($event.target.checked)" />
+            <input
+              type="checkbox"
+              :checked="useGpu"
+              :aria-label="t('settings.gpu.label')"
+              @change="setUseGpu($event.target.checked)"
+            />
             <span class="slider"></span>
           </label>
         </div>
+
+        <template v-if="wakeLockSupported || notifySupported">
+          <h3 class="group-head">{{ t('settings.group.run') }}</h3>
+          <div v-if="wakeLockSupported" class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">{{ t('settings.keepAwake.label') }}</span>
+              <span class="setting-desc">{{ t('settings.keepAwake.desc') }}</span>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                :checked="keepAwake"
+                :aria-label="t('settings.keepAwake.label')"
+                @change="setKeepAwake($event.target.checked)"
+              />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div v-if="notifySupported" class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">{{ t('settings.notify.label') }}</span>
+              <span class="setting-desc">{{ t(notifyRefusal ?? 'settings.notify.desc') }}</span>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                :checked="notifyWhenDone"
+                :aria-label="t('settings.notify.label')"
+                @change="onNotifyToggle"
+              />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </template>
+
+        <h3 class="group-head">{{ t('settings.group.advanced') }}</h3>
+        <div v-if="showAdvanced" class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ t('settings.workers.label') }}</span>
+            <span class="setting-desc">{{ t('settings.workers.desc', { n: MAX_POOL_SIZE }) }}</span>
+          </div>
+          <select
+            class="field-select"
+            :aria-label="t('settings.workers.label')"
+            :value="workerCount"
+            @change="setWorkerCount($event.target.value)"
+          >
+            <option value="0">{{ t('settings.workers.auto', { n: MAX_POOL_SIZE }) }}</option>
+            <option v-for="n in MAX_POOL_SIZE" :key="n" :value="n">{{ n }}</option>
+          </select>
+        </div>
+        <p v-else class="advanced-note">{{ t('settings.advancedHidden', { n: ADVANCED_COUNT.compute }) }}</p>
       </template>
 
       <template v-else-if="activeTab === 'storage'">
         <div class="setting-row setting-row-stacked">
           <div class="setting-info">
-            <span class="setting-label">Browser storage</span>
-            <span class="setting-desc"
-              >Includes browser-backed projects, derived files, downloaded AI models, and other data stored for this
-              site.</span
-            >
+            <span class="setting-label">{{ t('settings.storage.label') }}</span>
+            <span class="setting-desc">{{ t('settings.storage.desc') }}</span>
           </div>
           <div
             v-if="storageUsage != null && storageQuota"
@@ -552,82 +632,65 @@ onMounted(refreshStorage)
           >
             <div class="usage-fill" :style="{ width: usagePercent + '%' }"></div>
           </div>
-          <span v-if="storageUsage != null && storageQuota" class="setting-desc"
-            >{{ formatBytes(storageUsage) }} used of {{ formatBytes(storageQuota) }} available to this site</span
-          >
-          <span v-else class="setting-desc">Storage usage is unavailable in this browser.</span>
+          <span v-if="storageUsage != null && storageQuota" class="setting-desc">{{
+            t('settings.storage.used', { used: formatBytes(storageUsage), quota: formatBytes(storageQuota) })
+          }}</span>
+          <span v-else class="setting-desc">{{ t('settings.storage.unavailable') }}</span>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Storage protection</span>
-            <span class="setting-desc"
-              >Persistent storage makes the browser less likely to evict local projects when disk space is low. The
-              browser decides this itself — usually without asking — based on how often the site is used.</span
-            >
+            <span class="setting-label">{{ t('settings.durable.label') }}</span>
+            <span class="setting-desc">{{ t('settings.durable.desc') }}</span>
           </div>
-          <span v-if="storageDurable" class="status-ok">Protected</span>
+          <span v-if="storageDurable" class="status-ok">{{ t('settings.durable.protected') }}</span>
           <button
             v-else-if="storageDurable === false"
             class="btn"
             :disabled="storageBusy"
-            :title="storageBusy ? 'Wait for the storage request to finish' : null"
+            :title="storageBusy ? t('settings.durable.busy') : null"
             @click="requestDurableStorage"
           >
-            {{ storageBusy ? 'Requesting…' : 'Request' }}
+            {{ t(storageBusy ? 'settings.durable.requesting' : 'settings.durable.request') }}
           </button>
-          <span v-else class="readout">Unavailable</span>
+          <span v-else class="readout">{{ t('settings.durable.unavailable') }}</span>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-label">Downloaded AI models</span>
-            <span class="setting-desc"
-              >Remove reusable SuperPoint, DISK, ALIKED, LightGlue, and Smart Select weights. They download again only
-              when needed.</span
-            >
+            <span class="setting-label">{{ t('settings.models.label') }}</span>
+            <span class="setting-desc">{{
+              cachedModels == null
+                ? t('settings.models.checking')
+                : cachedModels.length
+                  ? t('settings.models.some', { names: cachedModels })
+                  : t('settings.models.none')
+            }}</span>
           </div>
           <button
             class="btn"
-            :disabled="storageBusy"
-            :title="storageBusy ? 'Wait for the storage request to finish' : null"
+            :disabled="storageBusy || !cachedModels?.length"
+            :title="
+              storageBusy ? t('settings.durable.busy') : !cachedModels?.length ? t('settings.models.nothing') : null
+            "
             @click="clearModelCache"
           >
-            Clear models
+            {{ t('settings.models.clear') }}
           </button>
         </div>
 
-        <div v-if="storageMessage" class="status-message" aria-live="polite">{{ storageMessage }}</div>
+        <div v-if="storageMessage" class="status-message" aria-live="polite">{{ tx(storageMessage) }}</div>
       </template>
     </div>
+
+    <template #footer>
+      <ShowAdvancedSettings />
+    </template>
   </ModalShell>
 </template>
 
+<style scoped src="../ui/modal.css"></style>
 <style scoped>
-.tab-bar {
-  display: flex;
-  gap: 2px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--panel-border);
-}
-.tab {
-  background: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 13px;
-  padding: 10px 12px;
-  margin-bottom: -1px;
-  cursor: pointer;
-}
-.tab:hover:not(.active) {
-  color: var(--text);
-}
-.tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-}
 .settings-body {
   padding: 8px 0;
   min-height: 240px;
@@ -659,6 +722,13 @@ onMounted(refreshStorage)
   margin-top: 4px;
   border-top: 1px solid var(--panel-border);
 }
+/* The note under Advanced while its rows are hidden: a note, not a link. */
+.advanced-note {
+  margin: 0;
+  padding: 4px 16px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
 .setting-row-stacked {
   flex-direction: column;
   align-items: stretch;
@@ -685,8 +755,6 @@ onMounted(refreshStorage)
 }
 .status-message {
   padding: 11px 16px;
-}
-.status-message {
   color: var(--text);
   border-top: 1px solid var(--panel-border);
 }
@@ -699,63 +767,28 @@ onMounted(refreshStorage)
   border-radius: 4px;
   padding: 1px 5px;
 }
-.seg-toggle {
-  display: flex;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  overflow: hidden;
+.seg-row {
   flex-shrink: 0;
 }
-.seg-toggle button {
-  background: none;
-  border: 0;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 16px;
-  cursor: pointer;
+.field-select {
+  flex-shrink: 0;
+  max-width: 200px;
 }
-.seg-toggle.compact button {
-  padding-inline: 9px;
+.field-input {
+  flex-shrink: 0;
+  width: 76px;
 }
-.seg-toggle button:hover:not(.active) {
-  background: var(--hover-bg);
-  color: var(--text);
+.field-input.wide {
+  width: 100%;
+  max-width: none;
 }
-.seg-toggle button.active {
-  background: var(--accent);
-  color: #fff;
-}
-.select,
-.num-input input {
-  background: var(--input-bg, var(--panel));
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 8px;
-}
-.select {
-  max-width: 165px;
-}
-.text-input {
-  background: var(--input-bg, var(--panel));
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 8px;
-  min-width: 0;
-}
-.text-input:disabled {
+.field-input:disabled {
   opacity: 0.5;
 }
 .setting-desc a {
   color: var(--accent);
 }
-.setting-desc code {
+.setting-desc :deep(code) {
   font-size: 10.5px;
 }
 .field-error {
@@ -775,9 +808,6 @@ onMounted(refreshStorage)
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-}
-.num-input input {
-  width: 76px;
 }
 .num-unit,
 .readout {
@@ -861,9 +891,6 @@ onMounted(refreshStorage)
   .setting-row:not(.setting-row-stacked) {
     align-items: flex-start;
     flex-direction: column;
-  }
-  .tab {
-    padding-inline: 8px;
   }
 }
 </style>
