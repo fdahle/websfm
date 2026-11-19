@@ -15,7 +15,8 @@ import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../../core/sfm/gcpTriangulation.js'
 import { gcpGuidesForImage, gcpEstimateForImage } from '../../core/sfm/gcpGuides.js'
 import { gcpsInPinholeFrame, guideToScan, makePinholeToMark } from '../../core/sfm/displayFrame.js'
-import { isGeographic, ensureProjection, transform, metresPerCrsUnit } from '../../core/crs.js'
+import { isGeographic, ensureProjection, transform, metresPerCrsUnit, linearCrsUnit } from '../../core/crs.js'
+import { accuracySnapshot, withSnapshot, accuracyLogText } from '../../core/eval/accuracySnapshot.js'
 import {
   normalizedGroundResidual,
   precisionFromGcp,
@@ -76,6 +77,10 @@ export function createGeoreferencing({
   save,
   log,
   modelStamp = () => null,
+  // The accuracy after each fit (core/eval/accuracySnapshot.js), and what last changed
+  // the model ({ value: text | null }, set by a sparse run or a model edit).
+  accuracyHistory = ref([]),
+  lastModelChange = ref(null),
   // The main model's heldFrame (sparseRun.js heldFrameOf), or null.
   heldFrame = () => null,
   // image → { dist, selfCal, fiducial } from the run record (displayFrame.js). Marks
@@ -426,6 +431,7 @@ export function createGeoreferencing({
       )
       healthDirty.value++
       save()
+      recordAccuracy(georef.value)
       return georef.value
     }
     // The vertical datum the fitted heights are in, recorded on the fit and so on
@@ -521,7 +527,40 @@ export function createGeoreferencing({
       )
     healthDirty.value++ // GCP prune / refit → the hub overview must recompute
     save()
+    recordAccuracy(georef.value)
     return georef.value
+  }
+
+  // After a fit: how accurate the model is now (checkpoints, leave-one-out of four or
+  // more control points, the camera positions when fitted to the GCPs), kept in the
+  // history and written to the log beside the value before. Not awaited: the fit is
+  // done, and the report triangulates every GCP. A refit that changed nothing adds
+  // nothing; a fit replaced while the report ran is not recorded.
+  async function recordAccuracy(fit) {
+    if (restoring.value || !fit) return
+    try {
+      const report = await gcpAccuracyReport()
+      if (validGeoref.value !== fit && georef.value !== fit) return
+      const snap = accuracySnapshot({
+        report,
+        poseResiduals: poseResidualReport(),
+        method: fit.method,
+        change: lastModelChange.value,
+      })
+      const prev = accuracyHistory.value.at(-1) ?? null
+      const next = withSnapshot(accuracyHistory.value, snap)
+      if (next === accuracyHistory.value) return
+      accuracyHistory.value = next
+      lastModelChange.value = null
+      log(
+        `Accuracy after the fit: ${accuracyLogText(snap, prev, linearCrsUnit(currentCrs()) || 'units')}`,
+        'info',
+        'Georeferencing',
+      )
+      save()
+    } catch (err) {
+      log(`Measuring the accuracy after the fit failed: ${err?.message ?? err}`, 'debug', 'Georeferencing')
+    }
   }
 
   // A fit `g` composed with the co-registration (core/products/demCoregistration.js):

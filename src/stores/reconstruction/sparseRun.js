@@ -59,6 +59,7 @@ import { datumLabel, isConvertible } from '../../core/verticalDatum.js'
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createSparseRun({
+  lastModelChange = null,
   SUMMARY_HISTORY_MAX,
   clouds,
   frameModelFor,
@@ -900,6 +901,9 @@ export function createSparseRun({
           summaryHistory.value = [...summaryHistory.value, summary.value].slice(-SUMMARY_HISTORY_MAX)
         }
         summary.value = result.summary ? { ...result.summary, ...(extensions ? { extensions } : {}) } : null
+        // Named in the accuracy recorded after the next fit (accuracySnapshot.js).
+        if (lastModelChange)
+          lastModelChange.value = `Sparse Model: ${(result.summary?.nCameras ?? 0).toLocaleString('en')} cameras`
         healthDirty.value++
         reconStatus.value = 'done'
         const saved = await save()

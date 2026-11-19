@@ -64,6 +64,7 @@ const classifiedBy = (settings) => ({
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createCloudEdits({
+  lastModelChange = null,
   clouds,
   healthDirty,
   imagesStore,
@@ -266,6 +267,8 @@ export function createCloudEdits({
       if (!(await save())) {
         log(`${label}: the edited model could not be saved — it will be lost on reload`, 'warn', 'Sparse')
       }
+      // Named in the accuracy recorded after the next fit (accuracySnapshot.js).
+      if (lastModelChange) lastModelChange.value = `${label}: ${describe(result)}`
       const held = result.constraints ?? {}
       log(
         `${label}: ${describe(result)}; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px` +

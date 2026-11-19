@@ -50,6 +50,15 @@ RMSE_V with the checkpoints' declared accuracy counted in, the mean error per ax
 the standard's sentence once there are 30 checkpoints with declared accuracies. With
 fewer, the figures are still given, marked as not compliant.
 
+**Since the fit before**, at the top of the GCP tab, shows whether a change helped: every
+Georeference (also after Adjust with GCPs, Optimize Cameras or a role change) keeps the
+accuracy it reached, and the last fit is set against the one before, with what changed
+between them. Only independent checks are compared: checkpoints, control points left
+out in turn (four or more), and the camera positions when the fit was made to the GCPs.
+A control point's own residual always shrinks when it is used, so it never counts, and
+an error measured on other points than before is shown as not comparable. **Every fit**
+lists the history; each fit also writes its numbers, and the ones before, to the log.
+
 ## Dense
 Review depth-map completion, valid-pixel fractions, and consistency before fusion.
 One weak image is often cheaper to exclude or mask than to make every threshold loose.

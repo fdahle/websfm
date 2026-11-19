@@ -6,6 +6,15 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **See whether a change made the model more accurate.** Evaluate ▸ Accuracy now starts
+  with **Since the fit before**: every Georeference keeps the accuracy it reached, and the
+  last fit is set against the one before (▲ better, ▼ worse), with what changed between
+  them (Optimize Cameras, a new Sparse Model, control points added or dropped). **Every
+  fit** lists the last 20, saved with the project, and each fit writes its numbers and
+  the ones before to the log. Only independent checks are compared: checkpoints, control
+  points left out in turn (four or more), and the camera positions when the fit was made
+  to the GCPs; a control point's own residual, which always shrinks when it is used, never
+  counts, and an error measured on other points than before is shown as not comparable.
 - **Optimize Cameras can refine the whole lens.** Its Free parameters have a third choice,
   **Full lens** (f, cx, cy, k1–k3, p1, p2; a fisheye's k1–k4), as Metashape's Optimize
   Cameras: the lens is solved with the cameras and points from the pixels the photos

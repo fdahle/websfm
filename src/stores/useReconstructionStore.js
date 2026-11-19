@@ -156,6 +156,11 @@ export const useReconstructionStore = registerProjectStore(
     // "did that tweak help?" across runs (WS5). Summaries only — cheap JSON, no cloud
     // diffing. Persisted in reconstruction.json; absent on legacy docs ⇒ empty.
     const summaryHistory = ref([])
+    // The georeferenced model's accuracy after each fit (core/eval/accuracySnapshot.js),
+    // saved with the project, and what last changed the model (a sparse run or a model
+    // edit), named in the next snapshot.
+    const accuracyHistory = ref([])
+    const lastModelChange = ref(null)
     const SUMMARY_HISTORY_MAX = 5
 
     // Monotonic counter bumped whenever something the Quality Report overview derives
@@ -332,6 +337,7 @@ export const useReconstructionStore = registerProjectStore(
       selectedCloudId,
       summary,
       summaryHistory,
+      accuracyHistory,
       withPreviewUrl,
     })
 
@@ -695,6 +701,7 @@ export const useReconstructionStore = registerProjectStore(
 
     // Crop / filter / merge / select and the other Tools-tab edits (reconstruction/cloudEdits.js).
     const { editClouds, addDerivedMesh } = createCloudEdits({
+      lastModelChange,
       clouds,
       healthDirty,
       imagesStore,
@@ -753,6 +760,8 @@ export const useReconstructionStore = registerProjectStore(
       coregistration,
       healthDirty,
       modelStamp: () => (mainSparseCloud.value ? [mainSparseCloud.value.id, mainSparseCloud.value.createdAt] : null),
+      accuracyHistory,
+      lastModelChange,
       heldFrame: () => mainSparseCloud.value?.heldFrame ?? null,
       restoring: projectRestoring,
       poses: () => posesStore.poses,
@@ -860,6 +869,7 @@ export const useReconstructionStore = registerProjectStore(
     // Reconstruct and the survey constraints it shares with gradual selection
     // (reconstruction/sparseRun.js).
     const { surveyConstraintInput, reconstruct } = createSparseRun({
+      lastModelChange,
       SUMMARY_HISTORY_MAX,
       clouds,
       frameModelFor,
@@ -932,6 +942,7 @@ export const useReconstructionStore = registerProjectStore(
       denseSummary,
       depthSummary,
       summaryHistory,
+      accuracyHistory,
       healthDirty,
       dem,
       demSource,

@@ -56,6 +56,7 @@ export function createPersistence({
   selectedCloudId,
   summary,
   summaryHistory,
+  accuracyHistory = null,
   withPreviewUrl,
 }) {
   // Bumped by anything that makes an in-flight restore stale (a new restore,
@@ -110,6 +111,8 @@ export function createPersistence({
       denseSummary: denseSummary.value,
       depthSummary: depthSummary.value,
       summaryHistory: summaryHistory.value,
+      // How accurate the model was after each fit (core/eval/accuracySnapshot.js).
+      accuracyHistory: accuracyHistory?.value ?? [],
     }
   }
 
@@ -227,6 +230,7 @@ export function createPersistence({
     denseSummary.value = null
     depthSummary.value = null
     summaryHistory.value = []
+    if (accuracyHistory) accuracyHistory.value = []
     if (purge && isPersisting()) {
       opfs.deleteReconstruction(projects.currentProjectId).catch(() => {})
       opfs.deleteProducts(projects.currentProjectId).catch(() => {})
@@ -365,6 +369,8 @@ export function createPersistence({
     denseSummary.value = data.denseSummary ?? null
     depthSummary.value = data.depthSummary ?? null
     summaryHistory.value = Array.isArray(data.summaryHistory) ? data.summaryHistory : []
+    // Absent in a project saved before it was kept: no history yet.
+    if (accuracyHistory) accuracyHistory.value = Array.isArray(data.accuracyHistory) ? data.accuracyHistory : []
     // The render + watcher flush these assignments queued (sidebar, 3D layers, map
     // frame) — timed on its own, since it is not part of reading or decoding.
     await nextTick()

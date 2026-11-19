@@ -604,3 +604,88 @@ it('reports where the georeferenced model puts a point without coordinates', asy
   expect(row.dTotal).toBeNull()
   scope.stop()
 })
+
+it('records the accuracy after each fit, once per change, with the value before in the log', async () => {
+  const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
+  const cams = new Map([
+    ['a', { R, t: [0, 0, 0], K }],
+    ['b', { R, t: [-1, 0, 0], K }],
+    ['c', { R, t: [0, -1, 0], K }],
+  ])
+  const mark = (X) =>
+    ['a', 'b', 'c'].map((id) => {
+      const p = projectPoint(cams.get(id), ...X)
+      return { imageId: id, px: p.u, py: p.v }
+    })
+  // Model points and where the survey puts them: a similarity of scale 2, shifted.
+  const toCrs = ([x, y, z]) => [1000 + 2 * x, 2000 + 2 * y, 2 * z]
+  const point = (id, role, X, err = [0, 0, 0]) => {
+    const [x, y, z] = toCrs(X)
+    return {
+      id,
+      name: id,
+      role,
+      x: x + err[0],
+      y: y + err[1],
+      z: z + err[2],
+      accuracyX: 0.01,
+      accuracyY: 0.01,
+      accuracyZ: 0.01,
+      observations: mark(X),
+    }
+  }
+  const controls = ref([
+    point('A', 'control', [0.3, 0.2, 5]),
+    point('B', 'control', [-0.4, 0.1, 6]),
+    point('C', 'control', [0.1, -0.5, 5.5]),
+    point('K', 'check', [-0.2, -0.3, 4.5], [0.03, 0, 0.04]),
+  ])
+  const scope = effectScope()
+  const accuracyHistory = ref([])
+  const lastModelChange = ref('Optimize cameras: refined the full lens')
+  const log = vi.fn()
+  const api = scope.run(() =>
+    createGeoreferencing({
+      sparseCameras: ref(cams),
+      images: ref(['a', 'b', 'c'].map((id) => ({ id, uuid: id }))),
+      georef: ref(null),
+      healthDirty: ref(0),
+      poses: () => [],
+      gcps: () => controls.value,
+      currentCrs: () => 'EPSG:32632',
+      modelStamp: () => 'm',
+      save: vi.fn(),
+      log,
+      accuracyHistory,
+      lastModelChange,
+    }),
+  )
+  const settle = () => vi.waitFor(() => expect(log.mock.calls.some(([m]) => m.startsWith('Accuracy after'))).toBe(true))
+  await api.georeference()
+  await settle()
+  expect(accuracyHistory.value).toHaveLength(1)
+  const first = accuracyHistory.value[0]
+  expect(first).toMatchObject({ method: 'gcps', change: 'Optimize cameras: refined the full lens', independent: true })
+  expect(first.checkpoints.n).toBe(1)
+  // Close to the error put on it; the UTM fit's local metric frame moves it by millimetres.
+  expect(first.checkpoints.h).toBeCloseTo(0.03, 2)
+  expect(first.checkpoints.v).toBeCloseTo(0.04, 2)
+  expect(lastModelChange.value).toBeNull()
+  // A refit that changed nothing adds nothing.
+  log.mockClear()
+  await api.georeference()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(accuracyHistory.value).toHaveLength(1)
+  // The checkpoint surveyed again, closer: a new entry, and the log says what it was.
+  controls.value[3] = point('K', 'check', [-0.2, -0.3, 4.5], [0.01, 0, 0.01])
+  await api.georeference()
+  await settle()
+  expect(accuracyHistory.value).toHaveLength(2)
+  const line = log.mock.calls.find(([m]) => m.startsWith('Accuracy after'))
+  expect(line[0]).toMatch(/^Accuracy after the fit: checkpoints \(1\) H [\d.]+ \/ V [\d.]+ m, was [\d.]+ \/ [\d.]+ m$/)
+  const [a, b] = accuracyHistory.value
+  expect(b.checkpoints.h).toBeLessThan(a.checkpoints.h)
+  expect(b.checkpoints.v).toBeLessThan(a.checkpoints.v)
+  expect(line[1]).toBe('info')
+  scope.stop()
+})

@@ -5,6 +5,7 @@ import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 import { ref, computed, onMounted, shallowRef, watch } from 'vue'
 import StatTiles from '../ui/StatTiles.vue'
 import DataTable from '../ui/DataTable.vue'
+import AccuracyHistory from './AccuracyHistory.vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useGcpsStore } from '../../../stores/useGcpsStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
@@ -456,6 +457,7 @@ const demColumns = [
   <template v-if="tab === 'gcps'">
     <div v-if="gcpLoading" class="eval-loading">Computing residuals…</div>
     <template v-else>
+      <AccuracyHistory />
       <StatTiles :tiles="gcpTiles" />
       <DataTable :columns="gcpColumns" :rows="gcpRows" sort-key="dTotal" sort-dir="desc" empty-text="No GCPs.">
         <template #cell-enabled="{ row }">
