@@ -222,6 +222,12 @@ Notable changes to WebSfM. The format follows
   keypoints and matches stay as they are, and the turn lasts for the session in every
   pair the photo is in. Without a sparse model the status bar now counts the pair's
   matches, which it showed doubled before.
+- **Keypoints and matches exported as JSON import too.** Import ▸ Keypoints and Import ▸
+  Matches read the JSON files the keypoint and match exports write, as they already read
+  the CSV, so a project's features move to another whichever format they were saved in.
+  The export's pair list alone holds no matches, and the import says so. A unit test
+  exports keypoints and matches in both formats and reads them back to the same images,
+  positions and pairs.
 
 ### Changed
 - **Import mirrors Export.** The Import tab has a Features group like Export's (Image
@@ -356,6 +362,11 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Photo names with spaces or commas in keypoint and match CSV files.** Import ▸
+  Keypoints and Import ▸ Matches split a name such as `IMG 1.jpg` or a quoted `"B,2.jpg"`
+  into two cells, so the CSV the export writes did not read back for such photos. A
+  file's delimiter is now the comma, semicolon or tab its first line holds (else spaces),
+  and a quoted cell is one cell.
 - **Exported meshes show their colours in other programs.** A GLB without a texture had no
   material, so viewers drew it with glTF's default, which is fully metallic and turned the
   vertex colours near black. It now has an unlit material for vertex colours (a plain grey,

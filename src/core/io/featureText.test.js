@@ -104,3 +104,54 @@ describe('validMatchIndices', () => {
 it('imageNameOfFile strips the file extension only', () => {
   expect(imageNameOfFile('dir/IMG_1.JPG.txt')).toBe('IMG_1.JPG')
 })
+
+describe('readFeatureFile: cells and JSON', () => {
+  it('keeps a quoted name, or one with spaces, as one cell', () => {
+    const r = readFeatureFile('image,x,y\n"B,2.jpg",1,2\nIMG 1.jpg,3,4\n"say ""hi"".jpg",5,6\n', 'kps.csv')
+    expect(r.images.map((i) => [i.name, i.x[0]])).toEqual([
+      ['B,2.jpg', 1],
+      ['IMG 1.jpg', 3],
+      ['say "hi".jpg', 5],
+    ])
+  })
+
+  it('reads keypoints and matches JSON, orientation when given', () => {
+    const k = readFeatureFile(
+      JSON.stringify([{ image: 'A.jpg', keypoints: [{ x: 1, y: 2, orientation: 0.5 }] }]),
+      'k.json',
+    )
+    expect(k.kind).toBe('keypoints')
+    expect([k.images[0].name, k.images[0].x[0], k.images[0].angle[0], k.images[0].scale]).toEqual([
+      'A.jpg',
+      1,
+      0.5,
+      null,
+    ])
+    const m = readFeatureFile(
+      JSON.stringify([
+        { imageA: 'A.jpg', imageB: 'B.jpg', matches: [[3, 4]] },
+        { imageA: 'A.jpg', imageB: 'C.jpg', matches: [] },
+      ]),
+      'm.json',
+    )
+    expect(m.pairs.map((p) => [p.a, p.b, [...p.idx]])).toEqual([
+      ['A.jpg', 'B.jpg', [3, 4]],
+      ['A.jpg', 'C.jpg', []],
+    ])
+  })
+
+  it('names what is wrong with a JSON file it cannot read', () => {
+    expect(() => readFeatureFile('[{"image": "A.jpg", "keypoints": [', 'k.json')).toThrow(/k\.json: not valid JSON/)
+    expect(() => readFeatureFile('[]', 'k.json')).toThrow(/empty/)
+    expect(() => readFeatureFile('{"a": 1}', 'k.json')).toThrow(/a list of images or of image pairs/)
+    expect(() => readFeatureFile('[{"image": "A.jpg", "keypoints": [{"x": 1}]}]', 'k.json')).toThrow(
+      /entry 1, keypoint 1: no x and y/,
+    )
+    expect(() => readFeatureFile('[{"imageA": "A", "imageB": "B", "matches": [[1, -2]]}]', 'm.json')).toThrow(
+      /entry 1, match 1/,
+    )
+    expect(() => readFeatureFile('[{"imageA": "A", "imageB": "B", "inlierCount": 4}]', 'p.json')).toThrow(
+      /without their matches/,
+    )
+  })
+})

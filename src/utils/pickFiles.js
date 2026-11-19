@@ -40,7 +40,7 @@ export const FILE_PICKERS = {
   metashapeProject: { accept: '.psz' },
   sfmFiles: { accept: '.db,.sqlite,.txt,.bin,.zip', multiple: true },
   sfmOtherFiles: { accept: '.out,.txt,.nvm,.json', multiple: true },
-  features: { accept: '.txt,.csv,.tsv,.key,.matches,text/*', multiple: true },
+  features: { accept: '.txt,.csv,.tsv,.key,.matches,.json,application/json,text/*', multiple: true },
   sfmFolder: { directory: true, multiple: true },
   cloud: { accept: '.ply,.las,.laz,.xyz,.pts' },
   raster: { accept: '.tif,.tiff' },

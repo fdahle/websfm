@@ -61,3 +61,71 @@ describe('doExportMatches', () => {
     expect(await saved.at(-1).blob.text()).toBe('image_a,image_b,raw_count,inlier_count\r\nA.jpg,B.jpg,9,2\r\n')
   })
 })
+
+// What Export ▸ Keypoints and Export ▸ Matches write, Import ▸ Keypoints / Matches reads
+// back (core/io/featureText.js), in either format: the same images, positions and pairs.
+describe('keypoints and matches read back', async () => {
+  const { readFeatureFile } = await import('../../core/io/featureText.js')
+  // Values a Float32Array holds exactly, so the comparison needs no tolerance.
+  const kps = {
+    a: { x: [10.5, 200.25, 0], y: [20.75, 3, 479.5], scale: [1.5, 2, 6.25], response: [0.01, 0.5, 0.25] },
+    b: { x: [5, 6.5], y: [7, 8.25], scale: [3, 4], response: [0.1, 0.2] },
+  }
+  const images = ref([
+    { uuid: 'a', name: 'IMG 1.jpg', kpStatus: 'done', kpCount: 3 },
+    { uuid: 'b', name: 'B,2.jpg', kpStatus: 'done', kpCount: 2 },
+  ])
+  const imagesStore = {
+    readKeypoints: async (img) => {
+      const k = kps[img.uuid]
+      return {
+        length: k.x.length,
+        x: (i) => k.x[i],
+        y: (i) => k.y[i],
+        scale: (i) => k.scale[i],
+        response: (i) => k.response[i],
+      }
+    },
+  }
+  const pair = { idA: 'a', idB: 'b', status: 'done', nMatches: 2, rawCount: 5, inlierCount: 2 }
+  const m = new Uint32Array([0, 1, 2, 0])
+  const matchStore = ref(new Map([['a--b', pair]]))
+  const matchesStore = { streamPairMatches: async (list, onPair) => list.forEach((e) => onPair(e, m)) }
+  const ex = createTabularExports({
+    images,
+    imagesStore,
+    matchStore,
+    matchesStore,
+    log: () => {},
+    projectBase: () => 'site',
+  })
+  const read = async () => readFeatureFile(await saved.at(-1).blob.text(), saved.at(-1).name)
+
+  for (const format of ['json', 'csv']) {
+    it(`keypoints as ${format}`, async () => {
+      await ex.doExportKeypoints({ format })
+      const r = await read()
+      expect(r.kind).toBe('keypoints')
+      expect(
+        r.images.map((im) => ({ name: im.name, x: [...im.x], y: [...im.y], scale: [...im.scale], angle: im.angle })),
+      ).toEqual([
+        { name: 'IMG 1.jpg', x: kps.a.x, y: kps.a.y, scale: kps.a.scale, angle: null },
+        { name: 'B,2.jpg', x: kps.b.x, y: kps.b.y, scale: kps.b.scale, angle: null },
+      ])
+    })
+
+    it(`matches as ${format}`, async () => {
+      await ex.doExportMatches({ format })
+      const r = await read()
+      expect(r.kind).toBe('matches')
+      expect(r.pairs.map((p) => ({ a: p.a, b: p.b, idx: [...p.idx] }))).toEqual([
+        { a: 'IMG 1.jpg', b: 'B,2.jpg', idx: [...m] },
+      ])
+    })
+  }
+
+  it('says the pair list alone holds no matches to import', async () => {
+    await ex.doExportMatches({ format: 'json', content: 'pairs' })
+    await expect(read()).rejects.toThrow(/without their matches/)
+  })
+})

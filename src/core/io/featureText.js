@@ -15,18 +15,53 @@
 //   • a table `imageA,imageB,indexA,indexB`, one row per match;
 //   • a table `imageA,xA,yA,imageB,xB,yB`: matched points by position, for a matcher
 //     that writes no keypoints; the keypoints are then the matched points.
-// Delimiters are commas, semicolons, tabs or spaces; `#` starts a comment line.
+// And WebSfM's own JSON exports (composables/exports/tabular.js), so a project's
+// features read back whichever format they were saved in:
+//   • keypoints: `[{ image, keypoints: [{ x, y, scale, response }] }]`;
+//   • matches: `[{ imageA, imageB, matches: [[indexA, indexB], …] }]`. The pair list
+//     alone (`[{ imageA, imageB, rawCount, inlierCount }]`) holds no matches to read.
+// A file's delimiter is the comma, semicolon or tab its first line holds, else any run
+// of spaces; a quoted cell ("IMG 1.jpg", "B,2.jpg") is one cell, as CSV writes it.
+// `#` starts a comment line.
 
 import { IMAGE_COLUMN, stem } from './nameMatch.js'
 
-const SPLIT = /[\s,;]+/
 const isNum = (s) => s !== '' && Number.isFinite(Number(s))
 
 function lines(text) {
   return String(text).replace(/^﻿/, '').split(/\r?\n/)
 }
 
-const tokens = (line) => line.trim().split(SPLIT).filter(Boolean)
+// The cells of a line, split as the file's first data line says (see above); empty
+// cells at the end of a line (a trailing delimiter) are dropped.
+function splitterFor(firstLine) {
+  const delim = [',', ';', '\t'].find((d) => firstLine.includes(d))
+  if (!delim) return (line) => line.trim().split(/\s+/).filter(Boolean)
+  return (line) => {
+    const out = []
+    let cell = '',
+      quoted = false
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]
+      if (quoted) {
+        if (c !== '"') cell += c
+        else if (line[i + 1] === '"') {
+          cell += '"'
+          i++
+        } else quoted = false
+      } else if (c === '"' && !cell.trim()) {
+        cell = ''
+        quoted = true
+      } else if (c === delim) {
+        out.push(cell.trim())
+        cell = ''
+      } else cell += c
+    }
+    out.push(cell.trim())
+    while (out.length && out.at(-1) === '') out.pop()
+    return out
+  }
+}
 const isComment = (line) => /^\s*#/.test(line)
 
 // A per-image file names its image: `IMG_0001.jpg.txt` → IMG_0001.jpg, `IMG_0001.key` →
@@ -116,7 +151,7 @@ function groupKeypoints(rows, imageCol, xCol, yCol, scaleCol, angleCol) {
 }
 
 // COLMAP's custom-match text: blocks of "nameA nameB" then "i j" lines.
-function readMatchBlocks(all, fileName) {
+function readMatchBlocks(all, fileName, tokens) {
   const pairs = []
   let cur = null
   for (let k = 0; k < all.length; k++) {
@@ -178,9 +213,12 @@ const MATCH_HEADERS = {
  */
 export function readFeatureFile(text, fileName = 'file') {
   if (/\.key$/i.test(fileName)) return { kind: 'keypoints', images: [readLoweKey(text, fileName)] }
+  if (/\.json$/i.test(fileName) || /^\uFEFF?\s*[[{]/.test(String(text).slice(0, 64)))
+    return readFeatureJson(text, fileName)
   const all = lines(text)
   const data = all.filter((l) => l.trim() && !isComment(l))
   if (!data.length) throw new Error(`${fileName}: the file is empty`)
+  const tokens = splitterFor(data[0])
   const first = tokens(data[0])
   // Lowe's header ("N 128") followed by a four-number keypoint line.
   if (first.length === 2 && first.every(isNum) && data[1] && tokens(data[1]).length === 4 && Number(first[1]) >= 16)
@@ -189,7 +227,7 @@ export function readFeatureFile(text, fileName = 'file') {
   const xyHeader = first.length === 2 && KEY_COLUMNS.x.test(first[0]) && KEY_COLUMNS.y.test(first[1])
   const second = data[1] ? tokens(data[1]) : []
   if (first.length === 2 && !first.some(isNum) && !xyHeader && second.length === 2 && second.every(isNum))
-    return { kind: 'matches', pairs: readMatchBlocks(all, fileName) }
+    return { kind: 'matches', pairs: readMatchBlocks(all, fileName, tokens) }
 
   const hasHeader = !first.some(isNum)
   const head = hasHeader ? first : null
@@ -217,6 +255,68 @@ export function readFeatureFile(text, fileName = 'file') {
   if (pattern === 'snnsnn') return { kind: 'point-matches', pairs: groupPairs(rows, [0, 1, 2, 3, 4, 5], true) }
   if (/^s?nn(n|nn)?$/.test(pattern)) return { kind: 'keypoints', images: readKeypointTable(rows, null, fileName) }
   throw new Error(`${fileName}: neither keypoints (x y) nor matches (imageA imageB indexA indexB) in its rows`)
+}
+
+// WebSfM's JSON exports: a list of images with their keypoints, or of pairs with their
+// matches (keypoint indices into each image's keypoints).
+function readFeatureJson(text, fileName) {
+  let doc
+  try {
+    doc = JSON.parse(String(text).replace(/^\uFEFF/, ''))
+  } catch (err) {
+    throw new Error(`${fileName}: not valid JSON (${err?.message ?? err})`)
+  }
+  if (!Array.isArray(doc)) throw new Error(`${fileName}: expected a list of images or of image pairs`)
+  if (!doc.length) throw new Error(`${fileName}: the file is empty`)
+  const first = doc[0] ?? {}
+  if (Array.isArray(first.keypoints))
+    return { kind: 'keypoints', images: doc.map((e, k) => jsonKeypoints(e, `${fileName}, entry ${k + 1}`)) }
+  if ('imageA' in first && 'imageB' in first) {
+    if (!doc.some((e) => Array.isArray(e?.matches)))
+      throw new Error(
+        `${fileName}: a list of image pairs without their matches (the export's pair list alone); ` +
+          'export the matches themselves to import them',
+      )
+    return { kind: 'matches', pairs: doc.map((e, k) => jsonPair(e, `${fileName}, entry ${k + 1}`)) }
+  }
+  throw new Error(`${fileName}: neither keypoints ({ image, keypoints }) nor matches ({ imageA, imageB, matches })`)
+}
+
+function jsonKeypoints(e, where) {
+  if (typeof e?.image !== 'string' || !Array.isArray(e.keypoints))
+    throw new Error(`${where}: an image name and its keypoints expected`)
+  const list = e.keypoints,
+    n = list.length
+  const x = new Float32Array(n),
+    y = new Float32Array(n)
+  const hasScale = list.some((p) => Number.isFinite(p?.scale)),
+    hasAngle = list.some((p) => Number.isFinite(p?.angle ?? p?.orientation))
+  const scale = hasScale ? new Float32Array(n) : null,
+    angle = hasAngle ? new Float32Array(n) : null
+  for (let i = 0; i < n; i++) {
+    const p = list[i]
+    if (!Number.isFinite(p?.x) || !Number.isFinite(p?.y)) throw new Error(`${where}, keypoint ${i + 1}: no x and y`)
+    x[i] = p.x
+    y[i] = p.y
+    if (scale) scale[i] = Number(p.scale) || 0
+    if (angle) angle[i] = Number(p.angle ?? p.orientation) || 0
+  }
+  return { name: e.image, x, y, scale, angle }
+}
+
+function jsonPair(e, where) {
+  if (typeof e?.imageA !== 'string' || typeof e?.imageB !== 'string')
+    throw new Error(`${where}: two image names expected`)
+  const list = Array.isArray(e.matches) ? e.matches : []
+  const idx = new Uint32Array(list.length * 2)
+  for (let k = 0; k < list.length; k++) {
+    const m = list[k]
+    if (!Array.isArray(m) || !Number.isInteger(m[0]) || !Number.isInteger(m[1]) || m[0] < 0 || m[1] < 0)
+      throw new Error(`${where}, match ${k + 1}: two keypoint indices expected`)
+    idx[2 * k] = m[0]
+    idx[2 * k + 1] = m[1]
+  }
+  return { a: e.imageA, b: e.imageB, idx }
 }
 
 /**

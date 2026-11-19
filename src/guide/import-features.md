@@ -9,16 +9,17 @@ order: 14
 the sparse model can be built from them: a learned matcher run outside the browser,
 matches checked by hand, or keypoints from a detector WebSfM does not have. Both open the
 same dialog, which takes keypoint and match files together. Load the photos first, then
-pick one or more `.txt`, `.csv` or `.key` files. The dialog shows how many images,
-keypoints, pairs and matches it found, and what to import. The CSV files the
-keypoint and match exports write read back as they are, so features move between
-projects this way too.
+pick one or more `.txt`, `.csv`, `.key` or `.json` files. The dialog shows how many
+images, keypoints, pairs and matches it found, and what to import. The files the
+keypoint and match exports write, CSV or JSON, read back as they are, so features move
+between projects this way too; the export's pair list alone holds no matches to import.
 
 ## Keypoints
 Pixel positions with the origin at the image's top-left corner, as COLMAP writes them:
 a table with `image,x,y` columns (scale and orientation optional), one file per image
 named after it (`IMG_0001.txt` with `x y` rows), or Lowe's SIFT `.key` files as Bundler
-and VisualSFM use. Importing replaces an image's keypoints and removes its matches. The
+and VisualSFM use. A name with spaces or commas is one cell when quoted, as CSV writes
+it. Importing replaces an image's keypoints and removes its matches. The
 files carry no descriptors, so Match Features cannot match these images: import their
 matches too.
 
