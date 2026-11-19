@@ -89,3 +89,36 @@ describe('file references in the documentation', () => {
     }
   })
 })
+
+// A long document opens with a `## Contents` list of its `##` and `###` headings
+// (docs/METHODS.md). It must list every heading, in order, each linked to the anchor
+// GitHub gives it, so a section added or renamed lands in the list too. On a failure,
+// the diff shows the list to paste.
+const githubAnchor = (h) =>
+  h
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
+    .replace(/ /g, '-')
+
+describe('a document’s Contents list', () => {
+  for (const doc of docs) {
+    const text = readFileSync(new URL(doc, root), 'utf8')
+    if (!/^## Contents$/m.test(text)) continue
+    it(`${doc} lists every section`, () => {
+      const lines = text.split('\n')
+      const start = lines.indexOf('## Contents')
+      let end = start + 1
+      while (end < lines.length && !/^#{1,6} |^---$/.test(lines[end])) end++
+      const listed = lines.slice(start + 1, end).filter((l) => l.trim())
+      let fence = false
+      const expected = []
+      for (const [i, line] of lines.entries()) {
+        if (/^```/.test(line)) fence = !fence
+        const m = !fence && i !== start && /^(##|###) (.+)$/.exec(line)
+        if (m) expected.push(`${m[1] === '###' ? '  ' : ''}- [${m[2].trim()}](#${githubAnchor(m[2])})`)
+      }
+      expect(listed).toEqual(expected)
+    })
+  }
+})
