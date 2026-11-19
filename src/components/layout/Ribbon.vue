@@ -156,6 +156,7 @@ const VIEW_KEYS = new Set([
   'selectLasso',
   'mapModelFrame',
   'turntable',
+  'ortho',
 ])
 
 // A count on the button (What's New: entries shipped since it was last opened), and

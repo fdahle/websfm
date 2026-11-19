@@ -26,6 +26,9 @@ To bring one cloud or mesh into view, right-click it in the sidebar and choose
   from **Tools ▸ Model ▾ ▸ Orient model**). **Reset View** returns to the oblique
   overview. The number keys do the same: **7** top, **1** front, **3** right, **9** the
   opposite side of the last one, **0** the overview.
+- **Orthographic** (key **5**) shows the scene without perspective: heights and distances
+  read the same everywhere in the view, as in a plan, a profile or a façade drawing.
+  Scroll zooms; the presets frame the whole scene. Press **5** again for perspective.
 - **Save Image** saves the view as a PNG, as it is on screen.
 - **Cameras**, **Grid** and **Legend** show or hide the camera frustums, the ground
   grid and the colour legend. The two steppers set the point size and the size of

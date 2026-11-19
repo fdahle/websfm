@@ -94,6 +94,12 @@ const TABLE = [
     does: 'Look from the opposite side (top ↔ bottom, front ↔ back, right ↔ left)',
   },
   { id: 'view3d.reset', group: 'view3d', keys: ['0'], does: 'Back to the oblique overview' },
+  {
+    id: 'view3d.ortho',
+    group: 'view3d',
+    keys: ['5'],
+    does: 'Switch between the perspective and the orthographic view',
+  },
   { id: 'view3d.undo', group: 'view3d', keys: ['Mod+Z'], does: 'Undo the last point edit (delete, keep, classify)' },
   { id: 'view3d.redo', group: 'view3d', keys: ['Mod+Shift+Z', 'Mod+Y'], does: 'Redo the point edit just undone' },
   {

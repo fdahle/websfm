@@ -19,6 +19,7 @@ product or an imported raster is open in front.
 | View ▸ Inspect | Control & Markers | GCPs, checkpoints and markers: their coordinates, marks and residuals. |  |
 | View ▸ Inspect | Matches | Every image pair and its matches; leave a pair out of the reconstruction. |  |
 | View ▸ Camera | Top, Bottom, Left, Right, Front, Back, Reset View, Turntable | Move around the model, frame it with the view presets, and let it turn on its own — or record one turn as a video. | [The 3D View](../src/guide/3d-view.md) |
+| View ▸ Camera | Orthographic | A parallel view without perspective: heights and distances read the same everywhere in it. | [The 3D View](../src/guide/3d-view.md) |
 | View ▸ Camera | Save Image | Save the 3D view as a PNG image, as it is on screen. | [The 3D View](../src/guide/3d-view.md) |
 | View ▸ Scene | Cameras, Grid, Legend, Points | Move around the model, frame it with the view presets, and let it turn on its own — or record one turn as a video. | [The 3D View](../src/guide/3d-view.md) |
 | View ▸ Map | Fit View, Layers, Grid, Cameras, GCPs, Model Frame |  |  |

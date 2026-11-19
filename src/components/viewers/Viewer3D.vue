@@ -77,7 +77,8 @@ const props = defineProps({
 // apply through the store's non-destructive cloud-edit path. `select-tool` reports
 // the active selection tool (null | 'rect' | 'lasso') so the ribbon's View ▸ Select
 // toggles can show it — the same up-reporting raster measuring uses. `turntable`
-// reports the turntable on or off, for View ▸ Camera ▸ Turntable.
+// reports the turntable on or off, for View ▸ Camera ▸ Turntable, and `ortho` the
+// orthographic view, for View ▸ Camera ▸ Orthographic.
 const emit = defineEmits([
   'command',
   'edit-selection',
@@ -86,6 +87,7 @@ const emit = defineEmits([
   'measure-tool',
   'region-change',
   'turntable',
+  'ortho',
 ])
 
 const container = ref(null)
@@ -94,6 +96,9 @@ const container = ref(null)
 // take the whole UI down with the 3D view.
 const glError = ref('')
 let renderer, scene, camera, controls, animationId, resizeObserver, grid
+// The two cameras (View ▸ Camera ▸ Orthographic): `camera` is the one in use.
+let perspCamera = null,
+  orthoCamera = null
 
 // Independent cloud layers and shared camera frustums
 const cloudLayers = new Map()
@@ -408,7 +413,7 @@ function init() {
   scene = new THREE.Scene()
   scene.background = new THREE.Color(backgroundColor())
 
-  camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 10000)
+  camera = perspCamera = new THREE.PerspectiveCamera(60, w / h, 0.1, 10000)
   // Z-up scene (elevation along +Z, matching the SfM/geospatial convention).
   camera.up.set(0, 0, 1)
   camera.position.set(3, -3, 2.5)
@@ -836,6 +841,7 @@ function onViewKey(e) {
           : null
   if (dir) setView(dir)
   else if (matches(e, 'view3d.reset')) resetView()
+  else if (matches(e, 'view3d.ortho')) setOrtho(!ortho.value)
   else return false
   e.preventDefault()
   return true
@@ -908,6 +914,7 @@ function setView(dir) {
   syncControlsUp()
   controls.target.copy(sceneCenter)
   camera.position.copy(sceneCenter).addScaledVector(dirVec, d)
+  fitOrthoFrame(sceneRadius)
   camera.updateProjectionMatrix()
   controls.update()
   requestRender()
@@ -927,10 +934,67 @@ function resetView() {
     .addScaledVector(fwd, -sceneRadius * 1.8)
     .addScaledVector(right, sceneRadius * 1.2)
     .addScaledVector(up, sceneRadius * 1.2)
+  fitOrthoFrame(sceneRadius)
   camera.updateProjectionMatrix()
   controls.update()
   requestRender()
 }
+
+// ── Orthographic view (View ▸ Camera ▸ Orthographic, key 5) ─────────────────
+// A parallel projection: no perspective, so heights and distances read the same across
+// the view (a façade, a profile, a plan). Picking, selection, measuring and the
+// level-of-detail layers work in either (they ask the camera, not its kind). The
+// switch keeps what is in view: the orthographic frame is as tall as the perspective
+// view is at the orbit centre, and back again the camera stands where that frame
+// is as tall. The orthographic camera stands well back of the scene: a parallel view
+// does not change with distance, and everything stays in front of it.
+const ortho = ref(false)
+function orthoAspect() {
+  const el = container.value
+  return el?.clientWidth && el?.clientHeight ? el.clientWidth / el.clientHeight : 1
+}
+// The orthographic frame `halfHeight` tall each side of the centre, unzoomed.
+function setOrthoFrame(cam, halfHeight) {
+  const a = orthoAspect()
+  cam.top = halfHeight
+  cam.bottom = -halfHeight
+  cam.left = -halfHeight * a
+  cam.right = halfHeight * a
+  cam.zoom = 1
+}
+// A preset or Reset View in the orthographic view: the frame takes in the scene.
+function fitOrthoFrame(radius) {
+  if (camera?.isOrthographicCamera) setOrthoFrame(camera, radius * 1.1)
+}
+function setOrtho(on) {
+  if (!renderer || !controls || !!on === ortho.value) return
+  const target = controls.target.clone()
+  const away = camera.position.clone().sub(target)
+  const toward = away.lengthSq() > 0 ? away.clone().normalize() : upAxis.clone().normalize()
+  const fovTan = Math.tan(THREE.MathUtils.degToRad(perspCamera.fov) / 2)
+  let next
+  if (on) {
+    orthoCamera ??= new THREE.OrthographicCamera()
+    next = orthoCamera
+    setOrthoFrame(next, away.length() * fovTan)
+    next.position.copy(target).addScaledVector(toward, Math.max(away.length(), sceneRadius * 3))
+  } else {
+    next = perspCamera
+    const halfHeight = (camera.top - camera.bottom) / 2 / camera.zoom
+    next.aspect = orthoAspect()
+    next.position.copy(target).addScaledVector(toward, halfHeight / fovTan)
+  }
+  next.up.copy(camera.up)
+  next.lookAt(target)
+  next.updateProjectionMatrix()
+  camera = next
+  syncControlsUp()
+  ortho.value = !!on
+  emit('ortho', ortho.value)
+  updateClipping()
+  requestRender()
+}
+const toggleOrtho = () => setOrtho(!ortho.value)
 
 // Leave selecting and measuring (a run's live view keeps orbit and zoom only).
 function exitTools() {
@@ -948,6 +1012,7 @@ defineExpose({
   toggleMeasureTool,
   exitTools,
   toggleTurntable,
+  toggleOrtho,
   snapshot,
 })
 
@@ -959,7 +1024,11 @@ function onResize() {
   // A tab hidden under v-show measures 0×0; keep the last real size (the observer
   // fires again, with the real size, when the tab comes back to the front).
   if (!w || !h) return
-  camera.aspect = w / h
+  if (camera.isOrthographicCamera) {
+    const halfHeight = camera.top
+    camera.left = -halfHeight * (w / h)
+    camera.right = halfHeight * (w / h)
+  } else camera.aspect = w / h
   camera.updateProjectionMatrix()
   renderer.setSize(w, h)
   requestRender()

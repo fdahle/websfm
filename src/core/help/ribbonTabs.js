@@ -1346,6 +1346,15 @@ export const CAMERA_GROUP = {
     // The camera circles the scene; its toolbox holds the speed and the recording.
     { id: 'view-toggle-turntable', guide: '3d-view', label: 'Turntable', icon: 'turntable', activeKey: 'turntable' },
     {
+      id: 'view-toggle-ortho',
+      guide: '3d-view',
+      label: 'Ortho-\ngraphic',
+      icon: 'cube',
+      activeKey: 'ortho',
+      tip: 'A parallel view without perspective: heights and distances read the same everywhere in it',
+      shortcut: 'view3d.ortho',
+    },
+    {
       id: 'view-save-image',
       guide: '3d-view',
       label: 'Save\nImage',

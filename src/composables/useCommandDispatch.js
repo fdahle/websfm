@@ -471,6 +471,9 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'view-toggle-turntable':
         viewerRef.value?.toggleTurntable()
         break
+      case 'view-toggle-ortho':
+        viewerRef.value?.toggleOrtho()
+        break
       case 'view-save-image':
         saveViewImage()
         break

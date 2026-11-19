@@ -75,6 +75,7 @@ const {
   mapLayersPanel,
   selectTool3d,
   turntable3d,
+  ortho3d,
   mapGcpEdit,
   rasterGcpEdit,
   mapLayers,
@@ -321,6 +322,11 @@ watch(activeTabId, (id) => {
         @turntable="
           (on) => {
             turntable3d = on
+          }
+        "
+        @ortho="
+          (on) => {
+            ortho3d = on
           }
         "
         :region-box="viewerRegionBox"

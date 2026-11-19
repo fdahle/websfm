@@ -73,3 +73,60 @@ test('Save Image downloads the view as a PNG', async ({ page }) => {
   expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   expect(bytes.length).toBeGreaterThan(1000)
 })
+
+test('5 switches to the orthographic view, where picking and the presets still work', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await setup(page)
+  const kind = () => page.locator('.viewer').evaluate((el) => el.__vueParentComponent.setupState.camera.type)
+  await page.keyboard.press('5')
+  await expect.poll(kind).toBe('OrthographicCamera')
+  await page.getByRole('button', { name: 'View', exact: true }).click()
+  await expect(page.locator('.ribbon .cmd.active', { hasText: 'Ortho' })).toHaveCount(1)
+
+  // From the top, every point is in the frame.
+  await page.keyboard.press('7')
+  const onScreen = await page.locator('.viewer').evaluate((el) => {
+    const s = el.__vueParentComponent.setupState
+    s.camera.updateMatrixWorld()
+    const pts = [
+      [0, 0, 0],
+      [10, 0, 0],
+      [-10, 0, 0],
+      [0, 10, 0],
+      [0, -10, 1],
+    ]
+    return pts.every(([x, y, z]) => {
+      const p = s.upAxis.clone().set(x, y, z).project(s.camera)
+      return Math.abs(p.x) < 1 && Math.abs(p.y) < 1
+    })
+  })
+  expect(onScreen).toBe(true)
+
+  // A selection over the whole view takes all five points.
+  const selected = await page.locator('.viewer').evaluate((el) => {
+    const s = el.__vueParentComponent.setupState
+    s.toggleSelectTool('rect')
+    s.applySelectionShape({ kind: 'rect', x0: -1, y0: -1, x1: 1, y1: 1 }, 'replace')
+    const n = s.selectionCount
+    s.exitSelection()
+    return n
+  })
+  expect(selected).toBe(5)
+
+  // A double-click still finds the point under the pointer.
+  const at = await page.locator('.viewer').evaluate((el) => {
+    const s = el.__vueParentComponent.setupState
+    s.camera.updateMatrixWorld()
+    const p = s.upAxis.clone().set(0, 10, 0).project(s.camera)
+    return { x: ((p.x + 1) / 2) * el.clientWidth, y: ((1 - p.y) / 2) * el.clientHeight }
+  })
+  await page.locator('.viewer').dblclick({ position: at })
+  await expect
+    .poll(() => page.locator('.viewer').evaluate((el) => el.__vueParentComponent.setupState.controls.target.toArray()))
+    .toEqual([0, 10, 0])
+
+  await page.keyboard.press('5')
+  await expect.poll(kind).toBe('PerspectiveCamera')
+  expect(errors).toEqual([])
+})
