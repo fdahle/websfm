@@ -120,7 +120,6 @@ export const I18N_PENDING = [
   'src/components/modals/project/SaveProjectModal.vue',
   'src/components/viewers/AlignPairsToolbox.vue',
   'src/components/viewers/CloudLegend.vue',
-  'src/components/viewers/GcpToolbar.vue',
   'src/components/viewers/ImageContextMenu.vue',
   'src/components/viewers/MaskToolbar.vue',
   'src/components/viewers/OrientToolbox.vue',

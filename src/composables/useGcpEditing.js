@@ -213,6 +213,8 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // Map coordinates are already in the project CRS (= GCP storage CRS), so a click /
   // drag sets X/Y directly. Z has no top-down axis and is left to the table.
   function setGcpGroundPosition({ id, x, y }) {
+    // A marker has no ground position (useGcpsStore.addPoint).
+    if (gcps.value.find((gg) => gg.id === id)?.role === 'marker') return
     setGcpPosition(id, 'x', x)
     setGcpPosition(id, 'y', y)
     selectedGcpId.value = id
@@ -355,9 +357,11 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // guide the moment its GCP is marked on this image.
   watch(gcps, queueGcpGuidesRefresh, { deep: true })
 
-  // Just [{ id, name }] of every GCP — the image viewer's right-click "assign to
-  // existing" submenu.
-  const allGcpsBrief = computed(() => gcps.value.map((g) => ({ id: g.id, name: g.name })))
+  // [{ id, name, role, enabled }] of every GCP: the image viewer's right-click
+  // "assign to existing" submenu and the Points toolbox, which groups by role.
+  const allGcpsBrief = computed(() =>
+    gcps.value.map((g) => ({ id: g.id, name: g.name, role: g.role, enabled: g.enabled !== false })),
+  )
 
   return {
     gcpReport,

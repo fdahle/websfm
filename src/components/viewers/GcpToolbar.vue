@@ -1,5 +1,8 @@
 <script setup>
+import { computed } from 'vue'
 import FloatingToolbox from './FloatingToolbox.vue'
+import { t } from '../../composables/useI18n.js'
+import { pointGroups } from '../../core/gcpGroups.js'
 
 // Floating point-editing toolbar shown over the image viewport while the tab is in
 // point-edit mode — the click-to-mark counterpart of MaskToolbar. It also owns the
@@ -11,8 +14,11 @@ import FloatingToolbox from './FloatingToolbox.vue'
 // The create row is TWO explicit actions (control vs marker), never one action
 // plus a role edit afterwards: a point created as control and re-roled keeps the
 // coordinates it was born with (see useGcpsStore.addPoint / core/io/gcp.js).
-defineProps({
-  // Every point in the project [{ id, name, role }], for the target list.
+//
+// On the map a click sets a ground position, which a marker does not have: there
+// the list leaves markers out (and says how many) and only a control point is new.
+const props = defineProps({
+  // Every point in the project [{ id, name, role, enabled }], for the target list.
   allGcps: { type: Array, default: () => [] },
   // Id of the currently-selected point (a click marks it), or null for "new".
   selectedId: { type: String, default: null },
@@ -21,60 +27,88 @@ defineProps({
   // Ids of points already marked on this image (shown with a dot).
   markedIds: { type: Array, default: () => [] },
   // What a click acts on — 'image' (mark a pixel observation) or 'map' (set the
-  // GCP's ground position). Only changes the instruction wording.
+  // GCP's ground position).
   noun: { type: String, default: 'image' },
 })
 
 const emit = defineEmits(['close', 'select', 'delete', 'select-new'])
+
+const onMap = computed(() => props.noun === 'map')
+// The list in role groups (control, checkpoints, markers); on the map without markers.
+const list = computed(() => pointGroups(props.allGcps, { onMap: onMap.value }))
+const groups = computed(() => list.value.groups)
+const hiddenMarkers = computed(() => list.value.hiddenMarkers)
+const listed = computed(() => groups.value.reduce((n, grp) => n + grp.items.length, 0))
+
+const selected = computed(() => props.allGcps.find((g) => g.id === props.selectedId) ?? null)
+const instruction = computed(() => {
+  if (selected.value)
+    return t(onMap.value ? 'gcps.toolbox.placeMap' : 'gcps.toolbox.markImage', { name: selected.value.name })
+  return onMap.value ? t('gcps.toolbox.addMap') : t('gcps.toolbox.addImage', { role: props.newRole })
+})
+const isNew = (role) => props.selectedId == null && (onMap.value ? role === 'control' : props.newRole === role)
+
+function dotTitle(g) {
+  const on = props.markedIds.includes(g.id)
+  if (onMap.value) return t(on ? 'gcps.toolbox.placedMap' : 'gcps.toolbox.unplacedMap')
+  return t(on ? 'gcps.toolbox.markedImage' : 'gcps.toolbox.unmarkedImage')
+}
+const pickTitle = (g) => (g.enabled === false ? t('gcps.toolbox.disabled', { name: g.name }) : g.name)
 </script>
 
 <template>
   <FloatingToolbox
     :id="`points-${noun}`"
-    title="Points"
-    :width="180"
-    close-title="Exit point editing"
+    :title="t('gcps.toolbox.title')"
+    :width="200"
+    :close-title="t('gcps.toolbox.close')"
     close-key="app.escape"
     @close="emit('close')"
   >
     <div>
-      <div class="gt-line">
-        {{
-          selectedId != null
-            ? `Click the ${noun} to ${noun === 'map' ? 'set its position' : 'mark'}:`
-            : `Click the ${noun} to add a new ${newRole === 'marker' ? 'marker' : 'control point'}`
-        }}
+      <div class="gt-line">{{ instruction }}</div>
+
+      <!-- Drop back to create mode so you can keep adding after one is placed. -->
+      <div class="gt-new-row">
+        <button
+          class="gt-new"
+          :class="{ active: isNew('control') }"
+          :title="t('gcps.toolbox.newControlTip')"
+          @click="emit('select-new', 'control')"
+        >
+          {{ t('gcps.toolbox.newControl') }}
+        </button>
+        <button
+          v-if="!onMap"
+          class="gt-new"
+          :class="{ active: isNew('marker') }"
+          :title="t('gcps.toolbox.newMarkerTip')"
+          @click="emit('select-new', 'marker')"
+        >
+          {{ t('gcps.toolbox.newMarker') }}
+        </button>
       </div>
 
       <div class="gt-list">
-        <!-- Drop back to create mode so you can keep adding after one is placed. -->
-        <button
-          class="gt-new"
-          :class="{ active: selectedId == null && newRole === 'control' }"
-          title="A surveyed point that constrains georeferencing"
-          @click="emit('select-new', 'control')"
-        >
-          ＋ New control
-        </button>
-        <button
-          class="gt-new"
-          :class="{ active: selectedId == null && newRole === 'marker' }"
-          title="A scale-bar endpoint: image marks, no surveyed position"
-          @click="emit('select-new', 'marker')"
-        >
-          ＋ New marker
-        </button>
+        <template v-for="grp in groups" :key="grp.role">
+          <div class="gt-group">{{ t(`gcps.toolbox.group.${grp.role}`, { n: grp.items.length }) }}</div>
+          <div
+            v-for="g in grp.items"
+            :key="g.id"
+            class="gt-item"
+            :class="{ active: g.id === selectedId, off: g.enabled === false }"
+          >
+            <button class="gt-pick" :title="pickTitle(g)" @click="emit('select', g.id)">
+              <span class="gt-dot" :class="{ on: markedIds.includes(g.id) }" :title="dotTitle(g)"></span>
+              <span class="gt-name">{{ g.name }}</span>
+            </button>
+            <button class="gt-del" :title="t('gcps.toolbox.delete')" @click.stop="emit('delete', g.id)">×</button>
+          </div>
+        </template>
 
-        <div v-for="g in allGcps" :key="g.id" class="gt-item" :class="{ active: g.id === selectedId }">
-          <button class="gt-pick" :title="g.name" @click="emit('select', g.id)">
-            <span class="gt-dot" :class="{ on: markedIds.includes(g.id) }"></span>
-            <span class="gt-name">{{ g.name }}</span>
-          </button>
-          <button class="gt-del" title="Delete this point" @click.stop="emit('delete', g.id)">×</button>
-        </div>
-
-        <div v-if="!allGcps.length" class="gt-empty">No points yet — click to add one.</div>
+        <div v-if="!listed && !hiddenMarkers" class="gt-empty">{{ t('gcps.toolbox.empty') }}</div>
       </div>
+      <div v-if="hiddenMarkers" class="gt-empty">{{ t('gcps.toolbox.markersHidden', { n: hiddenMarkers }) }}</div>
     </div>
   </FloatingToolbox>
 </template>
@@ -85,12 +119,35 @@ const emit = defineEmits(['close', 'select', 'delete', 'select-new'])
   color: var(--text);
   margin-bottom: 6px;
 }
+.gt-new-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+}
+/* Long lists scroll; the header and the ＋ rows stay in view. */
 .gt-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 220px;
+  max-height: min(320px, 50vh);
   overflow-y: auto;
+}
+.gt-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  padding: 6px 6px 2px;
+}
+.gt-item.off .gt-name {
+  opacity: 0.5;
+  text-decoration: line-through;
 }
 .gt-item {
   display: flex;

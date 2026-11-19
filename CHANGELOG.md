@@ -368,6 +368,13 @@ Notable changes to WebSfM. The format follows
   renaming it or editing a checkpoint dropped the georeference before, which marked every
   DEM and orthophoto built in it as outdated until Georeference ran again. Projects saved
   before keep their georeference on reopen.
+- **The Points toolbox tells control, checkpoints and markers apart.** Its list is grouped
+  by role, a disabled point is struck through, and the line at the top names the point
+  your next click marks or places. On the map, **＋ New control** did nothing (a click
+  then moved the selected point instead of adding one) and **＋ New marker** was offered
+  though a marker has no ground position: the first now starts a new point, the second is
+  gone, markers are left out of the map's list (it says how many), and a marker selected
+  elsewhere is never given a map position. The list scrolls under its group headings.
 - **A new GCP no longer sits at (0, 0).** A GCP added in a photo, from the GCP table or
   in the console now has no coordinates until you type them or place it on the map, so
   the map no longer zooms out to the CRS origin to show it; a marker made a control point

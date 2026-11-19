@@ -138,7 +138,15 @@ const emit = defineEmits([
 // turns map clicks into position edits. Entered from the ribbon (View ▸ Map ▸ Edit
 // GCPs), left from there or the toolbox's ×, so App owns it (v-model:gcp-edit).
 const editMode = defineModel('gcpEdit', { type: Boolean, default: false })
-const allGcpsBrief = computed(() => props.gcps.map((g) => ({ id: g.id, name: g.name })))
+const allGcpsBrief = computed(() =>
+  props.gcps.map((g) => ({ id: g.id, name: g.name, role: g.role, enabled: g.enabled !== false })),
+)
+// The selected point, when a map click can place it: a marker has no ground
+// position, so with one selected a click adds a new control point instead.
+const placeableSelectedId = computed(() => {
+  const g = props.gcps.find((p) => p.id === props.selectedGcpId)
+  return g && g.role !== 'marker' ? g.id : null
+})
 const positionedGcpIds = computed(() =>
   props.gcps.filter((g) => Number.isFinite(g.x) && Number.isFinite(g.y)).map((g) => g.id),
 )
@@ -574,7 +582,7 @@ function onMapClick(e) {
   // Empty-map click while editing: place the selected GCP here, or add a new one.
   if (editMode.value) {
     const [x, y] = e.coordinate
-    if (props.selectedGcpId) emit('set-gcp-position', { id: props.selectedGcpId, x, y })
+    if (placeableSelectedId.value) emit('set-gcp-position', { id: placeableSelectedId.value, x, y })
     else emit('add-gcp-at', { x, y })
   }
 }
@@ -824,9 +832,10 @@ defineExpose({
         v-if="editMode"
         noun="map"
         :all-gcps="allGcpsBrief"
-        :selected-id="selectedGcpId"
+        :selected-id="placeableSelectedId"
         :marked-ids="positionedGcpIds"
         @select="(id) => emit('select-gcp', id)"
+        @select-new="emit('select-gcp', null)"
         @delete="(id) => emit('delete-gcp', id)"
         @close="editMode = false"
       />
