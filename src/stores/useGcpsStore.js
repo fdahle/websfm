@@ -355,13 +355,11 @@ export const useGcpsStore = registerProjectStore(
     // Manually create a blank reference point (no import needed). Observations are
     // marked interactively via setObservation. Returns the new point's id.
     //
-    // A **control/check** point seeds x/y at the CRS origin — the historical
-    // behaviour, since a surveyed point is about to have its coordinates typed in —
-    // while elevation stays explicitly missing (zero is a valid sea-level Z, never
-    // a missing-value sentinel).
-    // A **marker** seeds all THREE coordinates null, for the same reason: it has no
-    // surveyed position at all, and `x:0, y:0` would be a finite coordinate, i.e. a
-    // control point sitting at the CRS origin.
+    // Every kind seeds all three coordinates null: no position yet. (0, 0) would be
+    // a finite coordinate, a point at the CRS origin, which the map then zooms out
+    // to show; zero is a valid sea-level Z, never a missing-value sentinel. A
+    // control point is ground control only once X, Y and Z are typed in
+    // (isGroundControl), and the map draws it once X and Y are.
     //
     // Never create a control point and mutate its role afterwards — that is exactly
     // how a marker ends up carrying coordinates.
@@ -374,8 +372,8 @@ export const useGcpsStore = registerProjectStore(
         id,
         name: name?.trim() || (marker ? `Marker ${n}` : `GCP ${n}`),
         role: kind,
-        x: marker ? null : 0,
-        y: marker ? null : 0,
+        x: null,
+        y: null,
         z: null,
         accuracyX: null,
         accuracyY: null,
@@ -416,15 +414,8 @@ export const useGcpsStore = registerProjectStore(
       if (!g) return
       const next = normalizeGcpRole(role)
       if (g.role === next) return
-      const wasMarker = g.role === 'marker'
+      // A marker made control keeps its null coordinates: no position until typed.
       g.role = next
-      // Promoting a marker to control/check gives it a *position* it never had, so
-      // seed the horizontal coordinates the way addPoint would rather than leaving
-      // nulls that read as "surveyed but blank".
-      if (wasMarker && next !== 'marker') {
-        if (g.x == null) g.x = 0
-        if (g.y == null) g.y = 0
-      }
       log(`${g.name} is now a ${ROLE_NOUNS[next]}`, 'info', 'Georeferencing', {
         channel: 'activity',
         command: editCommand('gcp role', [g.name, next]),
@@ -531,9 +522,15 @@ export const useGcpsStore = registerProjectStore(
       let filled = 0,
         skippedHasZ = 0,
         skippedNoData = 0,
+        skippedNoPosition = 0,
         refused = 0
 
       for (const g of targets) {
+        // A marker, or a point with no X/Y yet, has nowhere to sample.
+        if (g.role === 'marker' || !Number.isFinite(g.x) || !Number.isFinite(g.y)) {
+          skippedNoPosition++
+          continue
+        }
         // Null means missing; zero is a valid measured sea-level elevation.
         const hasZ = hasGcpElevation(g)
         if (hasZ && !overwrite) {
@@ -598,12 +595,13 @@ export const useGcpsStore = registerProjectStore(
         `Fill Z from reference DEM: ${filled} filled` +
           `${skippedHasZ ? `, ${skippedHasZ} already had Z` : ''}` +
           `${skippedNoData ? `, ${skippedNoData} outside/nodata` : ''}` +
+          `${skippedNoPosition ? `, ${skippedNoPosition} without X/Y` : ''}` +
           `${refused ? `, ${refused} refused (no declared vertical accuracy)` : ''}`,
         filled ? 'success' : 'warn',
         'Georeferencing',
       )
       if (filled) save()
-      return { filled, skippedHasZ, skippedNoData, refused }
+      return { filled, skippedHasZ, skippedNoData, skippedNoPosition, refused }
     }
 
     // A ground position read off a reference raster (A-5, useExternalStore
@@ -661,7 +659,10 @@ export const useGcpsStore = registerProjectStore(
     // anything. Feeds the Quality Report's reference-DEM section (A-6).
     // → [{ gcpId, name, x, y, gcpZ, demZ, dz, datum, rasterName }]
     async function checkZAgainstReferenceDem(sampleDem, { ids = null } = {}) {
-      const targets = gcps.value.filter((g) => (ids ? ids.includes(g.id) : true))
+      // Only points with a ground position: a marker, or one with no X/Y yet, has none.
+      const targets = gcps.value.filter(
+        (g) => (ids ? ids.includes(g.id) : true) && g.role !== 'marker' && Number.isFinite(g.x) && Number.isFinite(g.y),
+      )
       const rows = []
       for (const g of targets) {
         const hit = await sampleDem(g.x, g.y, { datum: g.verticalDatum })

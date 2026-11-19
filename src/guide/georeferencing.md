@@ -56,7 +56,8 @@ Keep some as checkpoints for an honest accuracy test.
 image marks (image name, pixel x/y). Check the columns it guessed before importing. To
 mark points, open an image and choose **Reconstruct ▸ Georeferencing ▸ Edit GCPs**; with
 the 2D map in front, the same button places the surveyed points on the map. Right-click adds a
-point directly.
+point directly. A point added in a photo has no coordinates until you type them in the GCP
+table or place it on the map; until then it is not used as control.
 
 ## Method
 <!-- param: method  default: Adjust with GCPs when three are marked -->

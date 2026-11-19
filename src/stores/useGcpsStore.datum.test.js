@@ -17,6 +17,10 @@ function twoGcps() {
   const store = useGcpsStore()
   const a = store.addGcp(),
     b = store.addGcp()
+  for (const id of [a, b]) {
+    store.setGcpPosition(id, 'x', 500000)
+    store.setGcpPosition(id, 'y', 1200000)
+  }
   store.setGcpVerticalDatum(a, 'ellipsoidal')
   return { store, a, b, gcp: (id) => store.gcps.find((g) => g.id === id) }
 }
@@ -49,4 +53,27 @@ it('converts heights only between datums it can convert, and leaves the rest', a
   expect(gcp(b)).toMatchObject({ z: 20, verticalDatum: 'orthometric' })
   // A datum outside the vocabulary is refused outright.
   expect(await store.convertGcpHeights('NAVD88', shiftAt)).toEqual({ converted: 0, skipped: 0 })
+})
+
+it('a new point has no position, and Fill Z leaves a point without X/Y alone', async () => {
+  const store = useGcpsStore()
+  const id = store.addGcp()
+  // No position until one is typed: (0, 0) would be a real point at the CRS origin.
+  expect(store.gcps.find((g) => g.id === id)).toMatchObject({ x: null, y: null, z: null })
+  const asked = []
+  const sampleDem = async (x, y) => {
+    asked.push([x, y])
+    return { z: 100, accuracy: 2, datum: 'geoid:EGM2008', rasterName: 'cop30' }
+  }
+  const res = await store.fillZFromReferenceDem(sampleDem)
+  expect(asked).toEqual([])
+  expect(res).toMatchObject({ filled: 0, skippedNoPosition: 1 })
+  expect(await store.checkZAgainstReferenceDem(sampleDem)).toEqual([])
+})
+
+it('a marker made a control point keeps no position', () => {
+  const store = useGcpsStore()
+  const id = store.addPoint({ role: 'marker' })
+  store.setGcpRole(id, 'control')
+  expect(store.gcps.find((g) => g.id === id)).toMatchObject({ role: 'control', x: null, y: null })
 })

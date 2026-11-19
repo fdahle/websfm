@@ -362,6 +362,11 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **A new GCP no longer sits at (0, 0).** A GCP added in a photo, from the GCP table or
+  in the console now has no coordinates until you type them or place it on the map, so
+  the map no longer zooms out to the CRS origin to show it; a marker made a control point
+  stays without coordinates too. Fill Z from reference DEM and the DEM check skip a
+  point without X/Y instead of sampling at the origin.
 - **Photo names with spaces or commas in keypoint and match CSV files.** Import ▸
   Keypoints and Import ▸ Matches split a name such as `IMG 1.jpg` or a quoted `"B,2.jpg"`
   into two cells, so the CSV the export writes did not read back for such photos. A
