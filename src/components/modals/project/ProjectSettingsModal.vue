@@ -3,10 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import CrsPicker from '../../controls/CrsPicker.vue'
 import CrsSuggestion from '../ui/CrsSuggestion.vue'
 import ModalShell from '../ui/ModalShell.vue'
+import SegmentedControl from '../ui/SegmentedControl.vue'
 import { formatBytes, ARCHIVE_DERIVED_DIRS } from '../../../core/io/projectArchive.js'
-import { FOLDER_BROWSERS, folderLabel, isFolderProject } from '../../../core/io/folderProject.js'
+import { FOLDER_BROWSERS, isFolderProject } from '../../../core/io/folderProject.js'
+import { msg } from '../../../core/i18n/index.js'
 import * as opfs from '../../../utils/opfs.js'
 import { confirmDialog } from '../../../composables/useConfirmations.js'
+import { useI18n } from '../../../composables/useI18n.js'
 import { version as appVersion } from '../../../../package.json'
 
 const props = defineProps({
@@ -17,22 +20,35 @@ const props = defineProps({
   crsSuggestion: { type: Object, default: null },
   // Chromium-only (showDirectoryPicker): moving between browser storage and a folder.
   folderSupported: { type: Boolean, default: false },
+  // A run is in flight (App's workInFlight): the capture type, which runs read, waits.
+  busy: { type: Boolean, default: false },
 })
 const emit = defineEmits([
   'close',
   'rename',
   'set-crs',
+  'set-scene-type',
   'apply-crs-suggestion',
   'move-to-folder',
   'move-to-browser',
   'export-file',
 ])
+const { t, tx, locale } = useI18n()
 const inFolder = computed(() => isFolderProject(props.project))
+const sceneType = computed(() => (props.project.sceneType === 'object' ? 'object' : 'aerial'))
+const sceneOptions = computed(() =>
+  ['aerial', 'object'].map((id) => ({
+    id,
+    label: msg(`projectSettings.capture.${id}`),
+    disabled: props.busy && id !== sceneType.value,
+    reason: msg('projectSettings.capture.busy'),
+  })),
+)
 // The project file it was last written to (useProjectsStore exportProject), its backup.
 const lastExported = computed(() => {
   const d = props.project.lastExportedAt ? new Date(props.project.lastExportedAt) : null
   return d && !Number.isNaN(d.getTime())
-    ? d.toLocaleString(undefined, {
+    ? d.toLocaleString(locale.value, {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
@@ -45,26 +61,30 @@ const lastExported = computed(() => {
 const name = ref(props.project.name || '')
 const measuring = ref(true)
 const clearing = ref(false)
-const error = ref('')
+// The last failure, a message; null when there is none.
+const error = ref(null)
 const sections = ref([])
 const totalBytes = computed(() => sections.value.reduce((sum, row) => sum + row.bytes, 0))
 const derivedBytes = computed(() =>
   sections.value.filter((row) => ARCHIVE_DERIVED_DIRS.includes(row.id)).reduce((sum, row) => sum + row.bytes, 0),
 )
 
-const LABELS = {
-  'images': 'Source images',
-  'images-derived': 'Image previews & transcodes',
-  'keypoints': 'Keypoints',
-  'matches': 'Matches',
-  'depthmaps': 'Depth maps',
-  'products': 'DEM & orthophoto products',
-  'project': 'Project metadata',
+// A project folder's catalogue key; a folder without one shows by its own name.
+const SECTION_KEYS = {
+  'images': 'images',
+  'images-derived': 'imagesDerived',
+  'keypoints': 'keypoints',
+  'matches': 'matches',
+  'depthmaps': 'depthmaps',
+  'products': 'products',
+  'project': 'project',
 }
+const sectionLabel = (id) => (SECTION_KEYS[id] ? t(`projectSettings.storage.section.${SECTION_KEYS[id]}`) : id)
+const errorText = (err) => String(err?.message ?? err)
 
 async function measure() {
   measuring.value = true
-  error.value = ''
+  error.value = null
   try {
     const totals = new Map()
     for await (const { relPath, file } of opfs.walkProjectFiles(props.project.id)) {
@@ -72,11 +92,9 @@ async function measure() {
       const id = parts.length > 1 ? parts[0] : 'project'
       totals.set(id, (totals.get(id) || 0) + file.size)
     }
-    sections.value = [...totals.entries()]
-      .map(([id, bytes]) => ({ id, label: LABELS[id] || id, bytes }))
-      .sort((a, b) => b.bytes - a.bytes)
+    sections.value = [...totals.entries()].map(([id, bytes]) => ({ id, bytes })).sort((a, b) => b.bytes - a.bytes)
   } catch (err) {
-    error.value = `Could not inspect project storage: ${err?.message ?? err}`
+    error.value = msg('projectSettings.storage.measureFailed', { error: errorText(err) })
   } finally {
     measuring.value = false
   }
@@ -95,19 +113,19 @@ async function onClearDerived() {
   if (!derivedBytes.value) return
   if (
     !(await confirmDialog({
-      title: 'Clear derived data?',
-      message: `Clear ${formatBytes(derivedBytes.value)} of derived data? Depth maps and raster products will need to be recomputed; source data and reconstructions are kept.`,
-      confirmLabel: 'Clear',
+      title: t('projectSettings.storage.confirmTitle'),
+      message: t('projectSettings.storage.confirmMessage', { size: formatBytes(derivedBytes.value) }),
+      confirmLabel: t('projectSettings.storage.confirmLabel'),
     }))
   )
     return
   clearing.value = true
-  error.value = ''
+  error.value = null
   try {
     await props.clearDerived()
     await measure()
   } catch (err) {
-    error.value = `Could not clear derived data: ${err?.message ?? err}`
+    error.value = msg('projectSettings.storage.clearFailed', { error: errorText(err) })
   } finally {
     clearing.value = false
   }
@@ -118,71 +136,82 @@ onMounted(measure)
 
 <template>
   <!-- Flush: each section carries its own padding and divider. -->
-  <ModalShell
-    class="project-settings"
-    title="Project Settings"
-    aria-label="Project settings"
-    width="520px"
-    flush
-    @close="emit('close')"
-  >
+  <ModalShell class="project-settings" :title="t('projectSettings.title')" width="520px" flush @close="emit('close')">
     <div class="sections">
       <section class="section">
-        <h3>Project</h3>
+        <h3>{{ t('projectSettings.project') }}</h3>
         <label class="field">
-          <span>Name</span>
+          <span>{{ t('projectSettings.name') }}</span>
           <input v-model="name" maxlength="80" @change="commitName" @keydown.enter="commitName" />
         </label>
-        <div class="readout-row">
-          <span>Capture type</span>
-          <strong>{{ project.sceneType === 'object' ? 'Object capture' : 'Aerial / mapping' }}</strong>
+        <div class="capture">
+          <div class="readout-row">
+            <span>{{ t('projectSettings.capture.label') }}</span>
+            <SegmentedControl
+              :model-value="sceneType"
+              :options="sceneOptions"
+              @update:model-value="(v) => v !== sceneType && emit('set-scene-type', v)"
+            />
+          </div>
+          <p>{{ t('projectSettings.capture.desc') }}</p>
         </div>
         <div class="readout-row">
-          <span>Created with</span>
-          <strong>{{ project.createdWithVersion ? `WebSfM v${project.createdWithVersion}` : 'Unknown' }}</strong>
+          <span>{{ t('projectSettings.createdWith') }}</span>
+          <strong>{{
+            project.createdWithVersion
+              ? t('projectSettings.version', { version: project.createdWithVersion })
+              : t('projectSettings.unknown')
+          }}</strong>
         </div>
         <div class="readout-row">
-          <span>Current app</span>
-          <strong>WebSfM v{{ appVersion }}</strong>
+          <span>{{ t('projectSettings.currentApp') }}</span>
+          <strong>{{ t('projectSettings.version', { version: appVersion }) }}</strong>
         </div>
       </section>
 
       <!-- Where the project is kept, and the ways to change that: the one place a
            user looks for it, so the move lives here as well as in the ⋯ menu. -->
       <section class="section">
-        <h3>Where it is saved</h3>
+        <h3>{{ t('projectSettings.saved.title') }}</h3>
         <div class="readout-row">
-          <span>Location</span>
-          <strong>{{ inFolder ? folderLabel(project) : 'This browser' }}</strong>
+          <span>{{ t('projectSettings.saved.location') }}</span>
+          <strong>{{
+            !inFolder
+              ? t('projectSettings.saved.thisBrowser')
+              : project.folderName
+                ? t('projectSettings.saved.locationFolder', { name: project.folderName })
+                : t('projectSettings.saved.locationFolderUnnamed')
+          }}</strong>
         </div>
         <div class="readout-row">
-          <span>Last exported</span>
-          <strong>{{ lastExported ?? 'Never' }}</strong>
+          <span>{{ t('projectSettings.saved.lastExported') }}</span>
+          <strong>{{ lastExported ?? t('projectSettings.saved.never') }}</strong>
         </div>
-        <p v-if="inFolder">
-          WebSfM saves into this folder on your disk as you work. The folder is the project: back it up as a whole,
-          while the project is closed.
-        </p>
+        <p v-if="inFolder">{{ t('projectSettings.saved.folder') }}</p>
         <p v-else>
-          WebSfM saves into this browser's private storage as you work. It belongs to this browser profile: clearing the
-          site's data deletes it.
-          <template v-if="folderSupported">Move it to a folder to keep it on your disk.</template>
-          <template v-else>{{ FOLDER_BROWSERS }} can keep it in a folder on your disk instead.</template>
+          {{ t('projectSettings.saved.browser') }}
+          {{
+            folderSupported
+              ? t('projectSettings.saved.canMove')
+              : t('projectSettings.saved.otherBrowsers', { browsers: FOLDER_BROWSERS })
+          }}
         </p>
         <div class="action-row">
           <template v-if="folderSupported">
-            <button v-if="!inFolder" class="btn" @click="emit('move-to-folder')">Move to folder…</button>
-            <button v-else class="btn" @click="emit('move-to-browser')">Move to browser storage</button>
+            <button v-if="!inFolder" class="btn" @click="emit('move-to-folder')">
+              {{ t('projectSettings.saved.moveToFolder') }}
+            </button>
+            <button v-else class="btn" @click="emit('move-to-browser')">
+              {{ t('projectSettings.saved.moveToBrowser') }}
+            </button>
           </template>
-          <button class="btn" @click="emit('export-file')">Export project file…</button>
+          <button class="btn" @click="emit('export-file')">{{ t('projectSettings.saved.exportFile') }}</button>
         </div>
       </section>
 
       <section v-if="project.sceneType !== 'object'" class="section">
-        <h3>Coordinate system</h3>
-        <p>
-          Working CRS for maps, GCPs, footprints, and camera positions. Changing it reprojects existing spatial data.
-        </p>
+        <h3>{{ t('projectSettings.crs.title') }}</h3>
+        <p>{{ t('projectSettings.crs.desc') }}</p>
         <CrsPicker :model-value="project.crs || 'EPSG:4326'" @update:model-value="emit('set-crs', $event)" />
         <CrsSuggestion
           v-if="crsSuggestion"
@@ -196,42 +225,46 @@ onMounted(measure)
       <section class="section">
         <div class="section-heading">
           <div>
-            <h3>Project storage</h3>
-            <p>Files owned by this project only.</p>
+            <h3>{{ t('projectSettings.storage.title') }}</h3>
+            <p>{{ t('projectSettings.storage.desc') }}</p>
           </div>
           <strong v-if="!measuring">{{ formatBytes(totalBytes) }}</strong>
         </div>
-        <div v-if="measuring" class="muted">Calculating…</div>
+        <div v-if="measuring" class="muted">{{ t('projectSettings.storage.calculating') }}</div>
         <div v-else class="breakdown">
           <div v-for="row in sections" :key="row.id" class="breakdown-row">
-            <span>{{ row.label }}</span>
+            <span>{{ sectionLabel(row.id) }}</span>
             <span>{{ formatBytes(row.bytes) }}</span>
           </div>
-          <div v-if="!sections.length" class="muted">No stored project files found.</div>
+          <div v-if="!sections.length" class="muted">{{ t('projectSettings.storage.none') }}</div>
         </div>
         <div class="clear-row">
           <div>
-            <span>Recomputable data</span>
-            <small>Image transcodes, depth maps, DEMs, and orthophotos.</small>
+            <span>{{ t('projectSettings.storage.recomputable') }}</span>
+            <small>{{ t('projectSettings.storage.recomputableDesc') }}</small>
           </div>
           <button
             class="btn danger"
             :disabled="clearing || measuring || !derivedBytes"
             :title="
               clearing
-                ? 'Clearing…'
+                ? t('projectSettings.storage.clearing')
                 : measuring
-                  ? 'Still measuring the storage'
+                  ? t('projectSettings.storage.measuring')
                   : !derivedBytes
-                    ? 'Nothing to clear'
+                    ? t('projectSettings.storage.nothing')
                     : null
             "
             @click="onClearDerived"
           >
-            Clear {{ derivedBytes ? formatBytes(derivedBytes) : '' }}
+            {{
+              derivedBytes
+                ? t('projectSettings.storage.clear', { size: formatBytes(derivedBytes) })
+                : t('projectSettings.storage.confirmLabel')
+            }}
           </button>
         </div>
-        <div v-if="error" class="error" aria-live="polite">{{ error }}</div>
+        <div v-if="error" class="error" aria-live="polite">{{ tx(error) }}</div>
       </section>
     </div>
   </ModalShell>
@@ -333,6 +366,10 @@ p {
 }
 .clear-row {
   margin-top: 12px;
+}
+/* The capture type: its switch on the row, what it changes under it. */
+.capture p {
+  margin: 0 0 6px;
 }
 .action-row {
   display: flex;

@@ -13,6 +13,7 @@ through an example drone survey.
 ## 1 · Create a project
 Choose **Aerial survey** for maps, real-world coordinates, DEMs and orthophotos, and
 **Object capture** for an object or local scene (scale it later with a known distance).
+**Project Settings ▸ Capture type** changes it later; the defaults that depend on it follow.
 Projects live in browser storage, or on Chromium in a folder on your disk; see
 [Projects & storage](guide:projects-storage) and [Working Offline](guide:offline).
 

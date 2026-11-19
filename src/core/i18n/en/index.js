@@ -13,6 +13,7 @@ import importSfm from './importSfm.js'
 import mapLayers from './mapLayers.js'
 import matchList from './matchList.js'
 import optimizeCameras from './optimizeCameras.js'
+import projectSettings from './projectSettings.js'
 import quality from './quality.js'
 import readText from './readText.js'
 import rebuild from './rebuild.js'
@@ -35,6 +36,7 @@ export default {
   mapLayers,
   matchList,
   optimizeCameras,
+  projectSettings,
   quality,
   readText,
   rebuild,

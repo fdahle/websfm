@@ -232,3 +232,36 @@ test('settings export to a file, reset to their defaults, and come back from the
   expect(await page.evaluate(() => localStorage.getItem('gridZ'))).toBe('max')
   expect(errors).toEqual([])
 })
+
+test('Project Settings changes the capture type, and the project keeps it', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  const openProjectSettings = async () => {
+    await page.evaluate(async () => {
+      const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+      useModalsStore().projectSettingsOpen = true
+    })
+    return page.getByRole('dialog', { name: 'Project Settings', exact: true })
+  }
+  let dialog = await openProjectSettings()
+  await expect(dialog.getByRole('heading', { name: 'Coordinate system' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Object capture', exact: true }).click()
+  // An object capture has no map and no coordinate system.
+  await expect(dialog.getByRole('heading', { name: 'Coordinate system' })).toHaveCount(0)
+  await expect(page.locator('.tab').filter({ hasText: /^2D$/ })).toHaveCount(0)
+
+  await page.reload()
+  await page.locator('.project-main').first().click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  expect(
+    await page.evaluate(
+      async () => (await import('/src/stores/useProjectsStore.js')).useProjectsStore().currentSceneType,
+    ),
+  ).toBe('object')
+
+  dialog = await openProjectSettings()
+  await dialog.getByRole('button', { name: 'Aerial survey', exact: true }).click()
+  await expect(page.locator('.tab').filter({ hasText: /^2D$/ })).toHaveCount(1)
+  expect(errors).toEqual([])
+})

@@ -28,7 +28,7 @@ const WorkflowBuilderModal = defineAsyncComponent(() => import('./pipeline/Workf
 // pipeline progress bar. The workflow builder comes first in DOM order: an
 // interactive workflow block opens its own dialog above it, then returns here.
 const { currentProject, currentProjectId, currentProjectName, projects } = storeToRefs(useProjectsStore())
-const { folderSupported, renameProject } = useProjectsStore()
+const { folderSupported, renameProject, setSceneType } = useProjectsStore()
 const {
   activeId: activeWorkflowId,
   runs: workflowRuns,
@@ -295,6 +295,8 @@ const progressSpotlight = computed(() =>
       :clear-derived="clearCurrentProjectDerived"
       @close="projectSettingsOpen = false"
       @rename="(name) => renameProject(currentProjectId, name)"
+      :busy="workInFlight"
+      @set-scene-type="(type) => setSceneType(currentProjectId, type)"
       :crs-suggestion="crsSuggestion"
       @set-crs="handleSetCrs"
       @apply-crs-suggestion="applyCrsSuggestion"

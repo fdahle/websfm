@@ -26,6 +26,10 @@ import {
 } from '../core/io/folderProject.js'
 import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../utils/handleStore.js'
 import { useLog } from '../composables/useLog.js'
+import { editCommand } from '../core/help/consoleEdits.js'
+
+// A project's capture types (setSceneType); what a project lacking one is: aerial.
+export const SCENE_TYPES = ['aerial', 'object']
 import { version as appVersion } from '../../package.json'
 import {
   PROJECT_FORMAT_VERSION,
@@ -273,6 +277,23 @@ export const useProjectsStore = defineStore('projects', () => {
     }
     requestDurableOnce()
     return data
+  }
+
+  // The capture type: 'aerial' (mapping, with a CRS and the map) or 'object'. It sets
+  // the defaults that depend on it (detection resolution, depth-map consistent views,
+  // the dense cloud's position, the aerial-only tools); results made before are kept.
+  async function setSceneType(id, sceneType) {
+    const p = projects.value.find((p) => p.id === id)
+    if (!p || !SCENE_TYPES.includes(sceneType) || p.sceneType === sceneType) return false
+    p.sceneType = sceneType
+    p.lastModified = new Date().toISOString()
+    await opfs.updateProject(id, (data) => ({ ...data, sceneType }))
+    await saveIndex()
+    log(`Capture type set to ${sceneType === 'object' ? 'object capture' : 'aerial survey'}`, 'info', 'Project', {
+      channel: 'activity',
+      command: editCommand('project type', [sceneType]),
+    })
+    return true
   }
 
   async function renameProject(id, newName) {
@@ -742,6 +763,7 @@ export const useProjectsStore = defineStore('projects', () => {
     setProjectCrs,
     switchProject,
     takeFormatNotes,
+    setSceneType,
     renameProject,
     deleteProjectById,
     folderSupported,

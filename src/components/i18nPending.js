@@ -114,7 +114,6 @@ export const I18N_PENDING = [
   'src/components/modals/products/TerrainModal.vue',
   'src/components/modals/project/FolderReconnectModal.vue',
   'src/components/modals/project/NewProjectModal.vue',
-  'src/components/modals/project/ProjectSettingsModal.vue',
   'src/components/modals/project/SaveProjectModal.vue',
   'src/components/viewers/AlignPairsToolbox.vue',
   'src/components/viewers/CloudLegend.vue',

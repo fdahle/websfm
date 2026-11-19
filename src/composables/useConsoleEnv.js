@@ -12,6 +12,7 @@ import { useWorkflowsStore } from '../stores/useWorkflowsStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { useScaleBarsStore } from '../stores/useScaleBarsStore.js'
+import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { tuningOverrides, setTuningOverride } from '../stores/tuningOverrides.js'
 import { useLog } from './useLog.js'
 import { useI18n } from './useI18n.js'
@@ -32,6 +33,7 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
   const { images } = storeToRefs(imagesStore)
   const matchesStore = useMatchesStore()
   const recon = useReconstructionStore()
+  const projectsStore = useProjectsStore()
   const gcps = useGcpsStore()
   const measurements = useMeasurementsStore()
   const workflows = useWorkflowsStore()
@@ -166,6 +168,9 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
     },
     template: {
       save: ([w]) => void workflows.saveTemplate(w.id),
+    },
+    project: {
+      type: ([sceneType]) => void projectsStore.setSceneType(projectsStore.currentProjectId, sceneType),
     },
   }
 

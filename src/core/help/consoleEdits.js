@@ -21,6 +21,17 @@
 //   fields   key=value pairs (a value is a number, true/false, or text)
 export const EDITS = [
   {
+    noun: 'project',
+    needs: ['project'],
+    actions: {
+      type: {
+        args: ['choice'],
+        options: ['aerial', 'object'],
+        help: 'Set the capture type, aerial survey or object capture: the defaults that depend on it follow',
+      },
+    },
+  },
+  {
     noun: 'image',
     list: 'images',
     needs: ['images'],
