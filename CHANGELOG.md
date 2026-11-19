@@ -383,6 +383,9 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **The GCP view centres very large photos right.** A photo past the canvas limit is shown
+  from a reduced copy, which the view drew at the copy's own size, so its crosshair sat
+  off the mark; every photo is now drawn at its full pixel size, the size marks are in.
 - **Adding a GCP no longer outdates the DEM and orthophoto.** The georeference is kept
   until a GCP it can use changes: an enabled control point with X, Y, Z, accuracies and
   marks in two photos. Adding a point, typing its coordinates, marking it in one photo,

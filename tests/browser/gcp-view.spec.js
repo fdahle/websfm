@@ -104,3 +104,36 @@ test('the GCP view shows a likely place, marks it, and moves a mark by dragging'
   for (const name of Object.keys(before)) if (name !== 'DSC00306.JPG') expect(after[name]).toEqual(before[name])
   expect(errors).toEqual([])
 })
+
+// A likely square's photo loads though it was never shown: before loading, an image has
+// no size, and centring the point moved its empty box thousands of px off the square, so
+// Chrome's lazy loading never fetched it (at zoom 16 here; at zoom 2 with a 24 MP photo).
+test('the likely squares load photos never shown before, at any zoom', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'one browser is enough')
+  test.setTimeout(120_000)
+  await openFixture(page)
+  const id = await page.evaluate(async () => {
+    const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
+    const store = useGcpsStore()
+    const a = store.gcps[0]
+    const id = store.addPoint({ role: 'marker', name: 'Copy' })
+    const o = a.observations[0]
+    store.setObservation(id, o.imageId, o.imageName, o.px, o.py, null)
+    document.querySelector('#app').__vue_app__._instance.setupState.openGcpView(id)
+    return id
+  })
+  await page.waitForTimeout(1500)
+  await page.locator('.gcp-view').evaluate((el) => {
+    el.__vueParentComponent.setupState.zoom = 16
+  })
+  await page.evaluate(async (id) => {
+    const { useGcpsStore } = await import('/src/stores/useGcpsStore.js')
+    const store = useGcpsStore()
+    const o = store.gcps[0].observations[1]
+    store.setObservation(id, o.imageId, o.imageName, o.px, o.py, null)
+  }, id)
+  const loaded = () =>
+    page.locator('.gcp-panel.likely img').evaluateAll((els) => els.map((e) => e.complete && e.naturalWidth > 0))
+  await expect.poll(async () => (await loaded()).length).toBeGreaterThan(0)
+  await expect.poll(async () => (await loaded()).every(Boolean)).toBe(true)
+})

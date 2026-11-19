@@ -54,6 +54,12 @@ const imageById = computed(() => {
 // A dead blob: URL is healed from the OPFS copy (CLAUDE.md: every <img> on img.url).
 const imagesStore = useImagesStore()
 
+// The photo's pixel size, given to its <img> before it loads: an unloaded image is
+// 0 × 0, and centring the mark moves that empty box thousands of px off the square, so
+// a lazy image would count as out of view and never load (a photo seen before came from
+// the cache, which skips the check).
+const sizeOf = (img) => ({ w: img.meta?.width ?? null, h: img.meta?.height ?? null })
+
 function reprojFor(imageId) {
   return props.report?.observations?.find((o) => o.imageId === imageId)?.reprojPx ?? null
 }
@@ -69,6 +75,7 @@ const panels = computed(() => {
       imageId: obs.imageId,
       name: img.name,
       url: img.url,
+      ...sizeOf(img),
       px: obs.px,
       py: obs.py,
       reprojPx: reprojFor(obs.imageId),
@@ -142,7 +149,17 @@ const likelyAll = computed(() =>
     .flatMap((p) => {
       const img = imageById.value.get(p.imageId)
       return img
-        ? [{ key: `l:${p.imageId}`, imageId: p.imageId, name: img.name, url: img.url, px: p.px, py: p.py }]
+        ? [
+            {
+              key: `l:${p.imageId}`,
+              imageId: p.imageId,
+              name: img.name,
+              url: img.url,
+              ...sizeOf(img),
+              px: p.px,
+              py: p.py,
+            },
+          ]
         : []
     }),
 )
@@ -266,6 +283,7 @@ function imgStyle(p) {
   const s = zoom.value
   return {
     transform: `translate(${-p.px * s}px, ${-p.py * s}px) scale(${s})`,
+    ...(p.w && p.h ? { width: `${p.w}px`, height: `${p.h}px` } : {}),
   }
 }
 
@@ -408,7 +426,7 @@ const estimateText = computed(() => {
                 :style="imgStyle(p)"
                 draggable="false"
                 decoding="async"
-                loading="lazy"
+                :loading="p.w && p.h ? 'lazy' : 'eager'"
                 @error="imagesStore.reportImageLoadError(p.imageId)"
               />
               <div class="panel-crosshair" :style="crosshairStyle(p)">
