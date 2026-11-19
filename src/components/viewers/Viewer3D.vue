@@ -1415,7 +1415,33 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </template>
-      <div v-else class="tb-hint">
+      <div v-if="reconStore.cloudHistory.undo || reconStore.cloudHistory.redo" class="tb-row">
+        <button
+          class="tb-textbtn"
+          :disabled="!reconStore.cloudHistory.undo"
+          :title="
+            reconStore.cloudHistory.undo
+              ? `Undo: ${reconStore.cloudHistory.undo} (${keyLabel('view3d.undo')})`
+              : 'Nothing to undo'
+          "
+          @click="reconStore.undoCloudEdit()"
+        >
+          Undo
+        </button>
+        <button
+          class="tb-textbtn"
+          :disabled="!reconStore.cloudHistory.redo"
+          :title="
+            reconStore.cloudHistory.redo
+              ? `Redo: ${reconStore.cloudHistory.redo} (${keyLabel('view3d.redo')})`
+              : 'Nothing to redo'
+          "
+          @click="reconStore.redoCloudEdit()"
+        >
+          Redo
+        </button>
+      </div>
+      <div v-if="!selectionCount" class="tb-hint">
         {{
           selectableLayers().length
             ? `Drag a ${selectTool === 'lasso' ? 'lasso' : 'rectangle'} over dense-cloud points · ${keyLabel('select3d.add')} adds · ${keyLabel('select3d.subtract')} subtracts · ${keyLabel('select3d.clear')} exits`

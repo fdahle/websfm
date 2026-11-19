@@ -913,6 +913,12 @@ export const PROJECT_FILE_TUNING = {
 
 // Tools ▸ Cloud and Mesh edits (stores/reconstruction/cloudEdits.js).
 export const CLOUD_EDIT_TUNING = {
+  // Undo of point edits in the 3D view (core/editHistory.js): at most this many steps
+  // back, holding at most this many bytes of replaced points between them (the last step
+  // is always kept). A step of a 25 M-point cloud holds ~400 MB, so the bytes bind first
+  // on dense clouds and the steps on small ones.
+  undoSteps: 10,
+  undoBytes: 2 ** 30,
   // A crop of a streamed cloud becomes a resident one: at most this many points.
   streamedCropMaxPoints: 25_000_000,
   // From this many points the outlier filter and normals split the cloud into slabs over

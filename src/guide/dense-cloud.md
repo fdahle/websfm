@@ -89,7 +89,9 @@ clears; selected points turn pink. **Delete** or **Keep only** acts on them, and
 **Assign class** gives them a LAS class instead. Selection goes through the cloud, so
 rotate first if you only want the front layer; hidden points are never selected. The
 first edit makes an "(edited)" copy and hides the original; later edits refine that
-copy.
+copy. **Ctrl+Z** in the 3D view (or **Undo** in the selection toolbox) takes the last
+edits back, **Ctrl+Shift+Z** redoes them, for as long as the project is open. The edits
+of a cloud streamed from storage can't be taken back yet.
 
 ## Saved depth maps and memory
 Fusion reads the saved depth maps a few at a time rather than holding them all. It

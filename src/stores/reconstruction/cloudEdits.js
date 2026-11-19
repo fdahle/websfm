@@ -1,5 +1,6 @@
 import { isStreamed, streamedRefusal, anyCloudBounds, STREAMED_ICP_SAMPLE_POINTS } from '../../core/lod/streamed.js'
-import { markRaw, toRaw } from 'vue'
+import { markRaw, ref, toRaw, watch } from 'vue'
+import { createEditHistory } from '../../core/editHistory.js'
 import { rawTexture } from './meshTexture.js'
 import { facePages, regroupByPage } from '../../core/products/texture/carry.js'
 import { isFisheyeModel, hasDistortion } from '../../core/sfm/distortion.js'
@@ -17,6 +18,7 @@ import { planCloudSlabs, gatherPoints } from '../../core/products/cloudSlabs.js'
 import { planMeshBlocks, blockMesh, joinBlocks, BLOCK_HEADROOM } from '../../core/products/meshBlocks.js'
 import { cloudBounds, estimateSpacing } from '../../core/products/cloudEdit.js'
 import { CLOUD_EDIT_TUNING } from '../../core/tuning.js'
+import { editCommand } from '../../core/help/consoleEdits.js'
 
 // Sizes that decide how an edit runs (core/tuning.js CLOUD_EDIT_TUNING says why).
 const {
@@ -26,6 +28,8 @@ const {
   decimateSplitMinTriangles: DECIMATE_SPLIT_MIN_TRIANGLES,
   splitTrianglesPerWorker: SPLIT_TRIANGLES_PER_WORKER,
   streamedReferenceMaxPoints: STREAMED_REFERENCE_MAX_POINTS,
+  undoSteps: CLOUD_UNDO_STEPS,
+  undoBytes: CLOUD_UNDO_BYTES,
 } = CLOUD_EDIT_TUNING
 // Edits a streamed cloud takes as it is (core/lod/transform.js); the rest need a crop.
 const STREAMED_EDIT_MODES = new Set(['crop', 'mask', 'classify', 'filter', 'classify-ground', 'transform'])
@@ -84,6 +88,95 @@ export function createCloudEdits({
   carryFrameStamps = null,
   editStreamedCloud = null,
 }) {
+  // ── Undo and redo of point edits (core/editHistory.js) ───────────────────────
+  // A selection edit in the 3D view (delete, keep, classify) can be undone: an edit of
+  // a working copy keeps the points it replaced ('replace'), the first edit of a
+  // computed or imported cloud the copy it made ('fork': undoing removes the copy and
+  // shows the source again). For this session, within the history's memory cap; the
+  // edits of a streamed cloud are not kept. A restored cloud has no octree: it is built
+  // again, as after any edit (cloudLod.js).
+  const history = createEditHistory({ maxEntries: CLOUD_UNDO_STEPS, maxBytes: CLOUD_UNDO_BYTES })
+  // { undo, redo }: what the next step each way would undo or redo, or null.
+  const cloudHistory = ref({ undo: null, redo: null })
+  const syncHistory = () => {
+    history.filter((e) => clouds.value.some((c) => c.id === e.cloudId) || e.kind === 'unfork')
+    cloudHistory.value = history.peek()
+  }
+  watch(
+    () => projects?.currentProjectId,
+    () => {
+      history.clear()
+      syncHistory()
+    },
+  )
+  watch(() => clouds.value.length, syncHistory)
+  const heavyBytes = (c) =>
+    [c.pos, c.col, c.nrm, ...Object.values(c.attributes ?? {})].reduce((n, a) => n + (a?.byteLength ?? 0), 0)
+  const withoutLod = (c) => {
+    const { lod: _lod, ...rest } = c
+    return rest
+  }
+  const flatOf = (c) => ({ count: c.count, pos: c.pos, col: c.col, nrm: c.nrm, attributes: c.attributes })
+  const editLabel = (mode, keepSelected) =>
+    mode === 'classify' ? 'classify points' : keepSelected ? 'keep the selected points' : 'delete the selected points'
+
+  // Undo (or redo, the same swap) one step. → the cloud now shown, or null.
+  async function stepCloudHistory(direction) {
+    const entry = direction === 'undo' ? history.takeUndo() : history.takeRedo()
+    if (!entry) return null
+    const back = direction === 'undo' ? (e) => history.undone(e) : (e) => history.redone(e)
+    let shown = null
+    if (entry.kind === 'replace') {
+      const current = clouds.value.find((c) => c.id === entry.cloudId)
+      if (current) {
+        shown = replaceDerivedCloud(current, flatOf(entry.cloud))
+        back({ ...entry, cloud: current, bytes: heavyBytes(current) })
+      }
+    } else if (entry.kind === 'fork') {
+      const copy = clouds.value.find((c) => c.id === entry.cloudId)
+      const source = clouds.value.find((c) => c.id === entry.sourceId)
+      if (copy) {
+        clouds.value = clouds.value.filter((c) => c !== copy)
+        if (source) source.visible = true
+        selectedCloudId.value = source?.id ?? clouds.value[0]?.id ?? null
+        shown = source ?? null
+        back({
+          kind: 'unfork',
+          cloud: withoutLod(copy),
+          sourceId: entry.sourceId,
+          label: entry.label,
+          bytes: heavyBytes(copy),
+        })
+      }
+    } else if (entry.kind === 'unfork') {
+      const source = clouds.value.find((c) => c.id === entry.sourceId)
+      const copy = { ...entry.cloud, createdAt: Date.now(), visible: true }
+      clouds.value = [...clouds.value, copy]
+      if (source) source.visible = false
+      selectedCloudId.value = copy.id
+      shown = copy
+      back({ kind: 'fork', cloudId: copy.id, sourceId: entry.sourceId, label: entry.label, bytes: 0 })
+    }
+    syncHistory()
+    if (!shown) {
+      log(`Nothing to ${direction}: the cloud was removed`, 'warn', 'Products')
+      return null
+    }
+    log(
+      `${direction === 'undo' ? 'Undid' : 'Redid'}: ${entry.label} ("${shown.name}", ${shown.count.toLocaleString('en')} points)`,
+      'info',
+      'Products',
+      {
+        channel: 'activity',
+        command: direction === 'undo' ? editCommand('cloud undo', []) : editCommand('cloud redo', []),
+      },
+    )
+    await save()
+    return shown
+  }
+  const undoCloudEdit = () => stepCloudHistory('undo')
+  const redoCloudEdit = () => stepCloudHistory('redo')
+
   // ── Cloud editing (crop / filter / merge) ────────────────────────────────────
 
   // Add a cloud produced by an edit. Always a NEW cloud — editing is
@@ -1019,7 +1112,16 @@ export function createCloudEdits({
         // edits refine it in place — repeated cleanup must not stack one full copy
         // per stroke in memory and OPFS. Computed and imported clouds stay
         // untouched: their first selection edit forks a derived copy (below).
+        const before = clouds.value.find((c) => c.id === sources[0].id)
         cloud = replaceDerivedCloud(sources[0], edited)
+        if (cloud && before)
+          history.record({
+            kind: 'replace',
+            cloudId: cloud.id,
+            cloud: before,
+            label: editLabel(mode, settings.keepSelected),
+            bytes: heavyBytes(before),
+          })
         if (!cloud) {
           log('Selection edit: the cloud was removed while the edit ran', 'warn', 'Products')
           reconStatus.value = 'done'
@@ -1059,6 +1161,14 @@ export function createCloudEdits({
         // Show the edit in place of its source; the source stays one visibility
         // toggle away for comparison or to start over.
         if (mode === 'mask' || mode === 'classify' || REPLACES_SOURCE_VIEW.has(mode)) sources[0].visible = false
+        if (mode === 'mask' || mode === 'classify')
+          history.record({
+            kind: 'fork',
+            cloudId: cloud.id,
+            sourceId: sources[0].id,
+            label: editLabel(mode, settings.keepSelected),
+            bytes: 0,
+          })
         log(
           `Cloud edit: added "${cloud.name}" — ${
             cloud.kind === 'mesh'
@@ -1070,6 +1180,7 @@ export function createCloudEdits({
         )
       }
       reconStatus.value = 'done'
+      syncHistory()
       await save()
       return cloud
     } catch (err) {
@@ -1080,6 +1191,9 @@ export function createCloudEdits({
   }
 
   return {
+    cloudHistory,
+    undoCloudEdit,
+    redoCloudEdit,
     addDerivedCloud,
     addDerivedMesh,
     replaceDerivedCloud,

@@ -141,9 +141,9 @@ describe('shortcutSections', () => {
   })
   it('filters by what a shortcut does or by its keys, dropping empty groups', () => {
     const undo = shortcutSections('undo')
-    expect(undo.map((g) => g.id)).toEqual(['mask'])
+    expect(undo.map((g) => g.id)).toEqual(['mask', 'view3d'])
     const ctrl = shortcutSections('ctrl+z')
-    expect(ctrl.flatMap((g) => g.shortcuts.map((s) => s.id))).toEqual(['mask.undo'])
+    expect(ctrl.flatMap((g) => g.shortcuts.map((s) => s.id))).toEqual(['mask.undo', 'view3d.undo'])
     expect(shortcutSections('zzzz')).toEqual([])
   })
 })

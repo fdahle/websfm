@@ -169,6 +169,10 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
     template: {
       save: ([w]) => void workflows.saveTemplate(w.id),
     },
+    cloud: {
+      undo: () => void recon.undoCloudEdit(),
+      redo: () => void recon.redoCloudEdit(),
+    },
     project: {
       type: ([sceneType]) => void projectsStore.setSceneType(projectsStore.currentProjectId, sceneType),
     },

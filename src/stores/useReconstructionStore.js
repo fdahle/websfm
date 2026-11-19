@@ -700,7 +700,7 @@ export const useReconstructionStore = registerProjectStore(
     })
 
     // Crop / filter / merge / select and the other Tools-tab edits (reconstruction/cloudEdits.js).
-    const { editClouds, addDerivedMesh } = createCloudEdits({
+    const { editClouds, addDerivedMesh, cloudHistory, undoCloudEdit, redoCloudEdit } = createCloudEdits({
       lastModelChange,
       clouds,
       healthDirty,
@@ -985,6 +985,10 @@ export const useReconstructionStore = registerProjectStore(
       addMergedModel,
       importCloud,
       editClouds,
+      // Undo and redo of point edits in the 3D view (reconstruction/cloudEdits.js).
+      cloudHistory,
+      undoCloudEdit,
+      redoCloudEdit,
       textureMesh,
       buildCloudLod,
       openCloudLod,

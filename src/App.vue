@@ -608,6 +608,16 @@ onMounted(async () => {
       e.preventDefault()
       shortcutsOpen.value = true
     } else if (
+      (matches(e, 'view3d.undo') || matches(e, 'view3d.redo')) &&
+      activeTab.value?.id === 'viewer' &&
+      viewerMayHandleKey(e)
+    ) {
+      // Point edits in the 3D view (reconstruction/cloudEdits.js); a photo's tab has its
+      // own undo, the mask editor's.
+      e.preventDefault()
+      if (matches(e, 'view3d.redo')) reconstructionStore.redoCloudEdit()
+      else reconstructionStore.undoCloudEdit()
+    } else if (
       (matches(e, 'picture.next') || matches(e, 'picture.prev')) &&
       activeTab.value?.type === 'image' &&
       viewerMayHandleKey(e)

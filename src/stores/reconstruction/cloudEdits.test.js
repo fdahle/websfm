@@ -149,3 +149,74 @@ describe('an alignment of a streamed source', () => {
     expect(clouds.value[0].visible).toBe(false)
   })
 })
+
+describe('undo and redo of point edits', () => {
+  const setup = (cloud) => {
+    const clouds = ref([cloud])
+    const logs = []
+    let saves = 0
+    const edits = createCloudEdits({
+      clouds,
+      selectedCloudId: ref(null),
+      reconStatus: ref('idle'),
+      log: (m, l, s, o) => logs.push([m, l, o?.command ?? null]),
+      makeCloudId: () => 'copy',
+      save: async () => void saves++,
+    })
+    return { clouds, logs, edits, saves: () => saves }
+  }
+  const mask = (n) => ({ mask: new Uint8Array(n).fill(1), keepSelected: false })
+
+  it('puts a working copy’s points back, and the edit again', async () => {
+    const pos = Float32Array.from([0, 0, 0, 1, 1, 1])
+    const { clouds, logs, edits } = setup({ id: 'd', name: 'Mine', kind: 'dense', derived: true, count: 2, pos })
+    await edits.editClouds({ mode: 'mask', sourceIds: ['d'], settings: mask(2) })
+    const edited = clouds.value[0].pos
+    expect(edited).not.toBe(pos)
+    expect(edits.cloudHistory.value).toEqual({ undo: 'delete the selected points', redo: null })
+
+    await edits.undoCloudEdit()
+    expect(clouds.value).toHaveLength(1)
+    expect(clouds.value[0].pos).toBe(pos)
+    expect(edits.cloudHistory.value).toEqual({ undo: null, redo: 'delete the selected points' })
+    expect(logs.at(-1)).toEqual([expect.stringMatching(/^Undid: delete the selected points/), 'info', 'cloud undo'])
+
+    await edits.redoCloudEdit()
+    expect(clouds.value[0].pos).toBe(edited)
+    expect(edits.cloudHistory.value).toEqual({ undo: 'delete the selected points', redo: null })
+  })
+
+  it('removes the copy a first edit made and shows the source, and brings the copy back', async () => {
+    const source = { id: 'c', name: 'Dense', kind: 'dense', count: 2, pos: new Float32Array(6), visible: true }
+    const { clouds, edits } = setup(source)
+    await edits.editClouds({ mode: 'mask', sourceIds: ['c'], settings: mask(2) })
+    expect(clouds.value.map((c) => [c.id, c.visible !== false])).toEqual([
+      ['c', false],
+      ['copy', true],
+    ])
+    await edits.undoCloudEdit()
+    expect(clouds.value.map((c) => [c.id, c.visible !== false])).toEqual([['c', true]])
+    await edits.redoCloudEdit()
+    expect(clouds.value.map((c) => [c.id, c.visible !== false])).toEqual([
+      ['c', false],
+      ['copy', true],
+    ])
+  })
+
+  it('has nothing to undo once the cloud is removed', async () => {
+    const { clouds, edits } = setup({
+      id: 'd',
+      name: 'Mine',
+      kind: 'dense',
+      derived: true,
+      count: 2,
+      pos: new Float32Array(6),
+    })
+    await edits.editClouds({ mode: 'mask', sourceIds: ['d'], settings: mask(2) })
+    clouds.value = []
+    await Promise.resolve()
+    await new Promise((r) => setTimeout(r))
+    expect(edits.cloudHistory.value).toEqual({ undo: null, redo: null })
+    expect(await edits.undoCloudEdit()).toBeNull()
+  })
+})

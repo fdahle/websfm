@@ -144,6 +144,15 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
   // The edit ran behind the progress dialog; while any dialog is up the viewer
   // leaves keys to it (utils/keyRouting.js), so Escape waits for it to close.
   await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(0)
+
+  // Undo the Keep only (Ctrl+Z in the 3D view), then redo it from the toolbox.
+  const count = async () => (await clouds()).find((c) => c.id === editedId)?.count
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(count).toBe(60)
+  await page.getByRole('toolbar', { name: 'Select points' }).getByRole('button', { name: 'Redo', exact: true }).click()
+  await expect.poll(count).toBe(6)
+  expect(await clouds()).toHaveLength(2)
+
   await page.keyboard.press('Escape')
   await expect(page.getByRole('toolbar', { name: 'Select points' })).toHaveCount(0)
 

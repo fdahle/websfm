@@ -21,6 +21,14 @@
 //   fields   key=value pairs (a value is a number, true/false, or text)
 export const EDITS = [
   {
+    noun: 'cloud',
+    needs: ['project'],
+    actions: {
+      undo: { args: [], help: 'Undo the last point edit in the 3D view (delete, keep, classify)' },
+      redo: { args: [], help: 'Redo the point edit just undone' },
+    },
+  },
+  {
     noun: 'project',
     needs: ['project'],
     actions: {
