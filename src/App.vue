@@ -23,6 +23,7 @@ import UpdatePrompt from './components/layout/UpdatePrompt.vue'
 import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
+import { useTabMemory } from './composables/useTabMemory.js'
 import { useImageViewSettings } from './composables/useImageViewSettings.js'
 import { useUiSettings } from './composables/useUiSettings.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
@@ -121,7 +122,7 @@ const {
 const { imageViewPrefs, setImageViewPrefs, patchImageView } = useImageViewSettings()
 
 // The floating bug-report button can be hidden (Settings ▸ General ▸ Notices).
-const { showBugButton } = useUiSettings()
+const { showBugButton, openLastProject } = useUiSettings()
 
 // ── Sidebar resize ──────────────────────────────────────────────────────────────
 const { sidebarWidth, startSidebarResize } = useSidebarResize()
@@ -244,10 +245,7 @@ const { addPoses } = posesStore
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 const {
-  projectPickerOpen,
   projectSettingsOpen,
-  newProjectOpen,
-  newProjectCanCancel,
   poseTableOpen,
   sensorTableOpen,
   gcpTableOpen,
@@ -486,6 +484,7 @@ const {
 // `.websfm` save+load, and the blocking load overlay they all share. Tabs and the
 // 3D scene live here, so those two resets are injected.
 const {
+  openOnStart,
   projectLoading,
   projectLoadingProgress,
   projectLoadingLabel,
@@ -513,8 +512,35 @@ const {
   resetToViewer,
   clearViewerScene: () => viewerRef.value?.clearReconstructionData(),
   isBusy,
-  onProjectOpened: (id) => offerStoppedRuns(id),
+  onProjectOpened: (id) => {
+    restoreTabs(id)
+    offerStoppedRuns(id)
+  },
   onExampleOpened: () => ribbonRef.value?.showTab('reconstruct'),
+})
+// The tabs each project had open come back with it: after a reload, an update, or a
+// switch to another project and back (composables/useTabMemory.js). Each kept tab
+// reopens through its own opener, and only while what it shows still exists.
+const sameId = (id) => (x) => String(x.id) === id
+const { restoreTabs } = useTabMemory({
+  tabs,
+  activeTabId,
+  activateTab,
+  currentProjectId: computed(() => projectsStore.currentProjectId),
+  projectIds: computed(() => projects.value.map((p) => p.id)),
+  projectLoading,
+  reopen: ({ type, id }) => {
+    if (type === 'image') {
+      const img = imagesStore.images.find(sameId(id))
+      if (img) openImageTab(img.id, img.name)
+    } else if (type === 'gcp') {
+      const gcp = gcpsStore.gcps.find(sameId(id))
+      if (gcp) openGcpTab(gcp.id, gcp.name)
+    } else if (type === 'product') {
+      const product = reconstructionStore.rasterProducts.find(sameId(id))
+      if (product) openProductTab(product)
+    } else if (type === 'raster') openRasterTab(id)
+  },
 })
 const ribbonRef = ref(null)
 
@@ -569,15 +595,9 @@ onMounted(async () => {
   }
 
   await loadIndex()
-
-  if (projects.value.length === 0) {
-    // Nothing saved yet — force creation of a first project.
-    newProjectCanCancel.value = false
-    newProjectOpen.value = true
-  } else {
-    // Let the user pick an existing project or create a new one.
-    projectPickerOpen.value = true
-  }
+  // The first project's dialog, the last project (Settings ▸ General ▸ On start), or
+  // the project list.
+  await openOnStart({ openLast: openLastProject.value })
 })
 
 // ── Import (dropped / picked files) ──────────────────────────────────────────────

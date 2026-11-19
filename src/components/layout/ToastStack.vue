@@ -61,6 +61,11 @@ import { toasts, clickToast } from '../../composables/useToasts.js'
   background: color-mix(in srgb, #3f9e5a 16%, var(--panel));
 }
 
+/* A notice: neither a result nor a failure. */
+.toast.info {
+  border-color: var(--panel-border);
+}
+
 .toast.error {
   border-color: #c05252;
   background: color-mix(in srgb, #c05252 16%, var(--panel));

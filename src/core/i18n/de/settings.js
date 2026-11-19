@@ -9,6 +9,7 @@ export default {
   },
   group: {
     appearance: 'Darstellung',
+    startup: 'Beim Start',
     help: 'Hilfe',
     editing: 'Bearbeiten',
     notices: 'Hinweise',
@@ -44,6 +45,10 @@ export default {
     descFull: 'Die Sprache von Menüs, Dialogen und Hilfe. Protokoll und Konsolenbefehle bleiben englisch.',
     descPartial:
       'Teilweise übersetzt: Was noch nicht übersetzt ist, erscheint englisch. Protokoll und Konsolenbefehle bleiben englisch.',
+  },
+  openLast: {
+    label: 'Beim Start das letzte Projekt öffnen',
+    desc: 'Beim Start von WebSfM das zuletzt bearbeitete Projekt mit seinen offenen Tabs öffnen statt der Projektliste. Ein Projekt, das beim letzten Mal nicht fertig geöffnet wurde, wird nicht erneut geöffnet.',
   },
   glossary: {
     label: 'Glossarbegriffe',

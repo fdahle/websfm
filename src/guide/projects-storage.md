@@ -13,6 +13,12 @@ The project list shows under each name where the project is kept (a folder or br
 icon), its CRS, its size and when it was edited. **Project settings ▸ Where it is
 saved** has the buttons to move or export it.
 
+When WebSfM starts, it opens the project you had open last, with its open tabs: photos,
+GCPs, DEMs, orthophotos and reference rasters. Each project keeps its own tabs, so
+switching back to one brings them back too. A project that did not finish opening the
+last time (the tab crashed while it loaded) is not opened again; the list shows instead.
+Turn this off in **Settings ▸ General ▸ On start** to see the list every time.
+
 ## In this browser
 The default is the browser's private storage: fast and needs no file handling, but tied
 to this browser profile and site. Clearing site data or switching browsers loses it, so

@@ -30,6 +30,7 @@ import { EXAMPLES, downloadExample } from '../core/examples.js'
 import { useGuideStore } from '../stores/useGuideStore.js'
 import { preloadDialogSettings } from './useDialogSettings.js'
 import { releaseIdleWorkers } from '../workers/computeClient.js'
+import { startupChoice } from '../core/startupMemory.js'
 
 // Everything that opens, creates, switches, moves, saves or deletes a project,
 // lifted out of App.vue. Owns the blocking load overlay (`projectLoading` +
@@ -916,6 +917,69 @@ export function useProjectLifecycle({
     )
   }
 
+  // ── On start ────────────────────────────────────────────────────────────────
+  // The project open last, kept in this browser so the next start can open it again
+  // (Settings ▸ General ▸ On start). OPENING_KEY is set while that opening runs and
+  // cleared when it returns: still set at the next start, the opening never finished
+  // (the tab crashed or was closed), and the project list shows instead.
+  const LAST_PROJECT_KEY = 'websfm.ui.lastProject'
+  const OPENING_KEY = 'websfm.ui.openingProject'
+  const readKey = (key) => {
+    try {
+      return localStorage.getItem(key)
+    } catch {
+      return null
+    }
+  }
+  const writeKey = (key, value) => {
+    try {
+      if (value == null) localStorage.removeItem(key)
+      else localStorage.setItem(key, value)
+    } catch {
+      // Storage blocked: the next start shows the project list.
+    }
+  }
+  watch(currentProjectId, (id) => id && writeKey(LAST_PROJECT_KEY, id))
+
+  // What the app shows once the project index is loaded: the first project's dialog,
+  // the last project, or the project list (core/startupMemory.js startupChoice).
+  async function openOnStart({ openLast }) {
+    const interruptedId = readKey(OPENING_KEY)
+    writeKey(OPENING_KEY, null)
+    const choice = startupChoice({
+      openLast,
+      lastId: readKey(LAST_PROJECT_KEY),
+      projectIds: projects.value.map((p) => p.id),
+      interruptedId,
+    })
+    if (choice.action === 'new') {
+      newProjectCanCancel.value = false
+      newProjectOpen.value = true
+      return
+    }
+    if (choice.action === 'open') {
+      const name = projects.value.find((p) => p.id === choice.id)?.name ?? choice.id
+      log(`Opening the last project, "${name}" (Settings ▸ General ▸ On start)`, 'info', 'Project')
+      writeKey(OPENING_KEY, choice.id)
+      let opened = false
+      try {
+        opened = await openProject(choice.id)
+      } finally {
+        writeKey(OPENING_KEY, null)
+      }
+      // A folder project waiting for its permission has its own prompt, which falls
+      // back to the list when cancelled.
+      if (opened || folderPrompt.value) return
+    }
+    if (choice.reason === 'interrupted') {
+      const name = projects.value.find((p) => p.id === choice.id)?.name ?? choice.id
+      const why = `"${name}" did not finish opening the last time, so it was not opened again.`
+      log(`${why} Open it from the project list.`, 'warn', 'Project')
+      showToast(why, { kind: 'info', ms: 8000 })
+    }
+    projectPickerOpen.value = true
+  }
+
   // ── Project picker actions ──────────────────────────────────────────────────
   async function handleSwitchProject(id) {
     if (id === currentProjectId.value) {
@@ -953,6 +1017,7 @@ export function useProjectLifecycle({
   }
 
   return {
+    openOnStart,
     projectLoading,
     projectLoadingProgress,
     projectLoadingLabel,

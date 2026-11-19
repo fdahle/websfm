@@ -23,9 +23,15 @@ export const test = base.extend({
   },
   // Firefox and WebKit show the "In this browser" warning in the bottom-right corner, over
   // whatever a test clicks there (the image viewer's zoom readout, above the console).
-  // No test is about the warning, so every page starts with it dismissed.
+  // No test is about the warning, so every page starts with it dismissed. Most tests
+  // reload into the project list and pick a project from it, so the last project is
+  // not opened on start unless a test turns it on (startup.spec.js).
   page: async ({ page }, use) => {
-    await page.addInitScript(() => localStorage.setItem('browserWarningDismissed', 'true'))
+    await page.addInitScript(() => {
+      localStorage.setItem('browserWarningDismissed', 'true')
+      if (localStorage.getItem('websfm.ui.openLastProject') == null)
+        localStorage.setItem('websfm.ui.openLastProject', 'false')
+    })
     await use(page)
   },
 })

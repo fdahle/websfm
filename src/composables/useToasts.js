@@ -23,7 +23,7 @@ export function dismissToast(id) {
   toasts.value.splice(i, 1)
 }
 
-// kind: 'success' (default) | 'error'. `onClick` runs when the toast is clicked,
+// kind: 'success' (default) | 'error' | 'info' (a neutral notice). `onClick` runs when the toast is clicked,
 // before it is dismissed (an error toast opens the console); `action` is the text
 // that says so.
 export function showToast(title, { detail = '', kind = 'success', ms = DEFAULT_MS, onClick = null, action = '' } = {}) {

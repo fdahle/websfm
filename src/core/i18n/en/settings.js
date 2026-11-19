@@ -10,6 +10,7 @@ export default {
   },
   group: {
     appearance: 'Appearance',
+    startup: 'On start',
     help: 'Help',
     editing: 'Editing',
     notices: 'Notices',
@@ -47,6 +48,10 @@ export default {
     descFull: 'The language of menus, dialogs and help. Logs and console commands stay in English.',
     descPartial:
       'Partly translated: what is not translated yet shows in English. Logs and console commands stay in English.',
+  },
+  openLast: {
+    label: 'Open the last project on start',
+    desc: 'Open the project you worked on last when WebSfM starts, with the tabs it had open, instead of the project list. A project that did not finish opening the last time is not opened again.',
   },
   glossary: {
     label: 'Glossary terms',

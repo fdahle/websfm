@@ -63,6 +63,8 @@ const {
   setNotifyWhenDone,
   showBugButton,
   setShowBugButton,
+  openLastProject,
+  setOpenLastProject,
 } = useUiSettings()
 const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
 // Why the notification switch stayed off, when the browser said no.
@@ -276,6 +278,23 @@ onMounted(() => {
               </option>
             </optgroup>
           </select>
+        </div>
+
+        <h3 class="group-head">{{ t('settings.group.startup') }}</h3>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ t('settings.openLast.label') }}</span>
+            <span class="setting-desc">{{ t('settings.openLast.desc') }}</span>
+          </div>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="openLastProject"
+              :aria-label="t('settings.openLast.label')"
+              @change="setOpenLastProject($event.target.checked)"
+            />
+            <span class="slider"></span>
+          </label>
         </div>
 
         <h3 class="group-head">{{ t('settings.group.help') }}</h3>

@@ -21,7 +21,7 @@ test('Settings hides the bug-report button, and it stays hidden after a reload',
   await page.getByRole('button', { name: 'Other', exact: true }).click()
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
-  await expect(settings.locator('.group-head')).toHaveText(['Appearance', 'Help', 'Editing', 'Notices'])
+  await expect(settings.locator('.group-head')).toHaveText(['Appearance', 'On start', 'Help', 'Editing', 'Notices'])
   const row = settings.locator('.setting-row').filter({ hasText: 'Bug report button' })
   await row.locator('.slider').click()
   await expect(page.locator('.bug-report-fab')).toHaveCount(0)

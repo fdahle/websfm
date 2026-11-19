@@ -110,6 +110,8 @@ test('cloud layers, symbology, legend and point attributes survive project reloa
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
   const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
   await settings.getByRole('tab', { name: 'Map & 3D', exact: true }).click()
+  // The near clipping distance is an advanced row.
+  await settings.getByLabel('Show advanced settings').check()
   const clipping = settings.getByLabel('3D near clipping distance', { exact: true })
   await clipping.fill('0.002')
   await clipping.press('Tab')

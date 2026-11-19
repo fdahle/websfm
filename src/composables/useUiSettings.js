@@ -42,6 +42,11 @@ const notifyWhenDone = ref(
 const BUG_BUTTON_KEY = 'websfm.ui.showBugButton'
 const showBugButton = ref(localStorage.getItem(BUG_BUTTON_KEY) !== 'false')
 
+// openLastProject: on start, open the project that was open last instead of showing the
+// project list (useProjectLifecycle openOnStart, core/startupMemory.js). Default on.
+const OPEN_LAST_KEY = 'websfm.ui.openLastProject'
+const openLastProject = ref(localStorage.getItem(OPEN_LAST_KEY) !== 'false')
+
 applyUiPreferences()
 
 export function useUiSettings() {
@@ -62,6 +67,10 @@ export function useUiSettings() {
   function setShowBugButton(v) {
     showBugButton.value = !!v
     localStorage.setItem(BUG_BUTTON_KEY, String(!!v))
+  }
+  function setOpenLastProject(v) {
+    openLastProject.value = !!v
+    localStorage.setItem(OPEN_LAST_KEY, String(!!v))
   }
   function setKeepAwake(v) {
     keepAwake.value = !!v
@@ -96,5 +105,7 @@ export function useUiSettings() {
     setConfirmRemoveMark,
     showBugButton,
     setShowBugButton,
+    openLastProject,
+    setOpenLastProject,
   }
 }
