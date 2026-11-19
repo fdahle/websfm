@@ -27,7 +27,7 @@ far fewer iterations than point-to-point, often a few where point-to-point needs
 dozens (on a noisy dense cloud, a few tens against a hundred or more), but it needs
 normals on the reference.
 
-<!-- TODO(image): assets/icp-point-to-plane.svg - two offset, differently sampled copies of one curved surface; left, point-to-point pairs pulling sideways along the surface; right, point-to-plane residuals measured along the reference normals; below, the moving cloud over three iterations. -->
+![A reference surface sampled in blue and an offset, differently sampled moving cloud in gold. Left, point-to-point pairs pull along the surface; right, point-to-plane residuals measured along the reference's normals. Below, the moving cloud at the start and after one, two and three point-to-plane iterations, settling onto the reference.](assets/icp-point-to-plane.svg)
 
 In WebSfM (**Tools ▸ Point Cloud ▸ Align to reference**) each iteration takes a
 fixed random sample of the moving cloud (50,000 points by default) and pairs every

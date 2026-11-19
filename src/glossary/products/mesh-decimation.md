@@ -25,7 +25,7 @@ a collapse costs almost nothing; across a ridge or a corner it costs a lot. Taki
 the cheapest edges first therefore removes triangles from flat areas and keeps them
 where the surface bends.
 
-<!-- TODO(image): assets/mesh-decimation.svg - one edge before and after collapse, the two removed triangles shaded, the planes of the surrounding faces drawn; next to it a terrain mesh decimated to a quarter, with large triangles on flat ground and small ones along a ridge. -->
+![Left, one edge collapse: a fan of triangles around the edge v1 to v2, the two triangles on the edge shaded red, and after it one merged vertex v̄ placed where the summed squared distance to the faces' planes is least. Right, a terrain mesh decimated from 512 triangles to 110: large triangles on flat ground, small ones along a ridge.](assets/mesh-decimation.svg)
 
 In WebSfM, **Tools ▸ Mesh ▸ Decimate** reduces to a share of the triangles (a
 quarter by default) or to a set count. A collapse that would fold a triangle over or

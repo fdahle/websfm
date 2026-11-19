@@ -28,6 +28,6 @@ belief propagation), as in Waechter, Moehrle and Goesele (2014). The weight $\la
 the **Seam penalty** setting: higher means fewer, larger charts in the
 [texture atlas](help:texture-atlas).
 
-<!-- TODO(image): assets/view-selection.svg - a mesh coloured by chosen photo: confetti with no seam penalty, large patches with it. -->
+![A triangle mesh coloured by the photo each triangle takes its texture from, twice. With no seam penalty the colours are confetti, 137 seam edges; with a seam penalty they form large patches around each photo's nadir point, 44 seam edges.](assets/view-selection.svg)
 
 See [Texture Mesh](guide:texture-mesh).

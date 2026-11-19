@@ -2550,6 +2550,327 @@ def graphcut():
     b += text(350, 392, 'the cut splits the pixels: those left with A take label A, the rest B', GREY, 11, 'middle')
     svg('graph-cut.svg', W, H, b)
 
+def solve(A, y):
+    # Gaussian elimination for a small dense system
+    n = len(A); M = [row[:] + [y[i]] for i, row in enumerate(A)]
+    for c in range(n):
+        p = max(range(c, n), key=lambda r: abs(M[r][c])); M[c], M[p] = M[p], M[c]
+        for r in range(n):
+            if r != c:
+                f = M[r][c] / M[c][c]
+                M[r] = [a - f * bb for a, bb in zip(M[r], M[c])]
+    return [M[i][n] / M[i][i] for i in range(n)]
+
+# ── poisson-mesh.svg ─────────────────────────────────────────────────────────
+def poisson():
+    W, H = 720, 300
+    rnd = random.Random(3)
+    surf = lambda x: 120 + 18 * math.sin(x / 22) + 8 * math.sin(x / 9)
+    gap = (78, 112)                                      # nothing sampled here
+    xs = [x for x in [rnd.uniform(6, 154) for _ in range(46)] if not (gap[0] < x < gap[1])]
+    pts = sorted((x, surf(x) + rnd.gauss(0, 1)) for x in xs)
+    def normal(x):
+        d = (surf(x + 0.5) - surf(x - 0.5)); n = v_norm((d, -1)); return n
+    b = ''
+    titles = ['1. oriented points', '2. octree around them', '3. closed isosurface', '4. after trimming']
+    for k in range(4):
+        ox = 10 + k * 178
+        b += rect(ox, 40, 168, 210, DIM, sw=1, rx=6) + text(ox + 84, 270, titles[k], FG, 12, 'middle')
+        if k < 3: b += arrow(ox + 170, 145, ox + 186, 145, GREY, 1.4, 6)
+    P = lambda k, x, y: (10 + k * 178 + 4 + x, 40 + 10 + y)
+    # 1
+    for x, y in pts:
+        n = normal(x); p = P(0, x, y)
+        b += arrow(*p, p[0] + 14 * n[0], p[1] + 14 * n[1], BLUE, 1.1, 4) + circ(*p, 2.4, GOLD)
+    # 2: subdivide every cell holding a point, to depth 5
+    def quad(x, y, s, d):
+        nonlocal b
+        inside = [p for p in pts if x <= p[0] < x + s and y <= p[1] < y + s]
+        b += rect(*P(1, x, y), s, s, DIM, sw=0.6)
+        if inside and d < 5:
+            h = s / 2
+            for dx in (0, h):
+                for dy in (0, h): quad(x + dx, y + dy, h, d + 1)
+    quad(0, 20, 160, 0)
+    for x, y in pts: b += circ(*P(1, x, y), 1.8, GOLD)
+    # 3: the isosurface: through the points, ballooning over the gap and closed underneath
+    top = [(x, surf(x)) for x in range(4, 157, 3) if not (gap[0] < x < gap[1])]
+    def closed(k, balloon):
+        left = [P(k, x, y) for x, y in top if x <= gap[0]]; right = [P(k, x, y) for x, y in top if x >= gap[1]]
+        a, c = left[-1], right[0]
+        mid = ((a[0] + c[0]) / 2, min(a[1], c[1]) - balloon)
+        d = 'M ' + ' L '.join(f'{f2(p[0])} {f2(p[1])}' for p in left)
+        d += f' Q {f2(mid[0])} {f2(mid[1])} {f2(c[0])} {f2(c[1])} L ' + ' L '.join(f'{f2(p[0])} {f2(p[1])}' for p in right)
+        return d, left, right
+    d, left, right = closed(2, 34)
+    bot = P(2, 156, 186); bot2 = P(2, 4, 186)
+    b += path(d + f' Q {f2(bot[0] + 6)} {f2(bot[1] - 40)} {f2(bot[0])} {f2(bot[1])} L {f2(bot2[0])} {f2(bot2[1])} Q {f2(bot2[0] - 6)} {f2(bot2[1] - 40)} {f2(left[0][0])} {f2(left[0][1])} Z', GREEN, fill=GREEN, w=1.8, op=0.25)
+    b += path(d + f' Q {f2(bot[0] + 6)} {f2(bot[1] - 40)} {f2(bot[0])} {f2(bot[1])} L {f2(bot2[0])} {f2(bot2[1])} Q {f2(bot2[0] - 6)} {f2(bot2[1] - 40)} {f2(left[0][0])} {f2(left[0][1])} Z', GREEN, w=1.8)
+    gm = P(2, (gap[0] + gap[1]) / 2, 0)
+    b += text(gm[0], 72, 'balloon over the gap', RED, 10, 'middle')
+    b += text(10 + 2 * 178 + 84, 232, 'closed below as well', RED, 10, 'middle')
+    # 4: trimmed where the points are sparse
+    b += poly(left := [P(3, x, y) for x, y in top if x <= gap[0]], GREEN, w=2) + poly([P(3, x, y) for x, y in top if x >= gap[1]], GREEN, w=2)
+    for x, y in pts: b += circ(*P(3, x, y), 1.6, GOLD)
+    b += text(P(3, (gap[0] + gap[1]) / 2, 0)[0], 92, 'left open', GREY, 10, 'middle')
+    b += text(10 + 3 * 178 + 84, 232, 'cut where no points support it', GREY, 10, 'middle')
+    b += text(360, 22, 'screened Poisson in a cross-section: the points’ normals define a closed surface, then it is trimmed', GREY, 11, 'middle')
+    svg('poisson-mesh.svg', W, H, b)
+
+# ── mesh-decimation.svg ──────────────────────────────────────────────────────
+def decimate():
+    W, H = 700, 340
+    b = ''
+    # one edge collapse, top view: a fan around v1–v2
+    v1, v2 = (90, 150), (150, 150)
+    ring = [(60, 100), (120, 85), (180, 100), (195, 150), (180, 200), (120, 215), (60, 200), (45, 150)]
+    def tris(vs, centre_pairs):
+        out = ''
+        for a, c, d in centre_pairs: out += poly([a, c, d], GREY, fill=RAISED, w=1.2, closed=True)
+        return out
+    fan1 = [(v1, ring[7], ring[0]), (v1, ring[0], ring[1]), (v1, ring[5], ring[6]), (v1, ring[6], ring[7]),
+            (v2, ring[1], ring[2]), (v2, ring[2], ring[3]), (v2, ring[3], ring[4]), (v2, ring[4], ring[5])]
+    gone = [(v1, v2, ring[1]), (v1, v2, ring[5])]
+    b += tris(None, fan1)
+    for t in gone: b += poly(list(t), RED, fill=RED, w=1.2, op=0.35, closed=True)
+    b += line(*v1, *v2, RED, 2.6)
+    b += circ(*v1, 4.5, BLUE) + circ(*v2, 4.5, BLUE) + text(v1[0] - 6, v1[1] - 8, 'v1', BLUE, 12, 'end') + text(v2[0] + 6, v2[1] - 8, 'v2', BLUE, 12)
+    b += text(120, 40, 'one edge collapse', FG, 13, 'middle')
+    b += text(120, 240, 'the two triangles', RED, 11, 'middle') + text(120, 254, 'on the edge (red) go', RED, 11, 'middle')
+    b += arrow(205, 150, 235, 150, GREY, 1.6, 7)
+    # after: merged vertex
+    off = 170
+    vm = (off + 122, 152)
+    for a, c in zip(ring, ring[1:] + ring[:1]):
+        b += poly([vm, (a[0] + off, a[1]), (c[0] + off, c[1])], GREY, fill=RAISED, w=1.2, closed=True)
+    b += circ(*vm, 5, GREEN) + text(vm[0], vm[1] - 10, 'v̄', GREEN, 13, 'middle')
+    b += text(off + 122, 240, 'v̄: least summed squared', GREEN, 11, 'middle') + text(off + 122, 254, 'distance to the faces’ planes', GREEN, 11, 'middle')
+    # right: a terrain mesh simplified by error: big triangles on flat ground, small on the ridge
+    zf = lambda x, y: 60 * math.exp(-((x - y * 0.6 - 0.25) / 0.08) ** 2) + 4 * math.sin(6 * x) * math.sin(5 * y)
+    N = 16
+    full = 2 * N * N
+    def err(x, y, s):  # how far the square's flat interpolation is from the terrain
+        c = [zf(x, y), zf(x + s, y), zf(x, y + s), zf(x + s, y + s)]
+        return max(abs(zf(x + s * u, y + s * v) - ((1 - u) * (1 - v) * c[0] + u * (1 - v) * c[1] + (1 - u) * v * c[2] + u * v * c[3])) for u in (0.25, 0.5, 0.75) for v in (0.25, 0.5, 0.75))
+    def build(tol):
+        sq = []
+        def rec(x, y, s):
+            if s > 1 / N + 1e-9 and err(x, y, s) > tol: [rec(x + dx, y + dy, s / 2) for dx in (0, s / 2) for dy in (0, s / 2)]
+            else: sq.append((x, y, s))
+        rec(0, 0, 1)
+        return sq
+    tol = 0.3
+    for _ in range(40):
+        sq = build(tol)
+        if 2 * len(sq) <= full / 4: break
+        tol *= 1.25
+    ox, oy, S = 420, 60, 240
+    zs = [zf(x / 40, y / 40) for x in range(41) for y in range(41)]; zlo, zhi = min(zs), max(zs)
+    for (x, y, s) in sq:
+        c = ramp((zf(x + s / 2, y + s / 2) - zlo) / (zhi - zlo))
+        a, bb, cc, dd = (ox + x * S, oy + y * S), (ox + (x + s) * S, oy + y * S), (ox + (x + s) * S, oy + (y + s) * S), (ox + x * S, oy + (y + s) * S)
+        b += poly([a, bb, cc], DIM, fill=c, w=0.6, closed=True) + poly([a, cc, dd], DIM, fill=c, w=0.6, closed=True)
+    b += text(ox + S / 2, 40, f'a terrain mesh: {full:,} triangles to {2 * len(sq):,}', FG, 13, 'middle')
+    b += text(ox + S / 2, oy + S + 20, 'large triangles on flat ground,', GREY, 11, 'middle') + text(ox + S / 2, oy + S + 34, 'small ones along the ridge', GREY, 11, 'middle')
+    svg('mesh-decimation.svg', W, H, b)
+
+# ── texture-atlas.svg ────────────────────────────────────────────────────────
+def atlas():
+    W, H = 700, 330
+    rnd = random.Random(8)
+    def tex(kind, w=24, h=24):
+        px = []
+        for j in range(h):
+            row = []
+            for i in range(w):
+                if kind == 'top': t = 0.5 + 0.2 * math.sin(i / 2.5) * math.cos(j / 3) + rnd.gauss(0, 0.06); row.append((80 + 60 * t, 120 + 60 * t, 70 + 30 * t))
+                else:
+                    mortar = j % 6 == 0 or (i + (6 if (j // 6) % 2 else 0)) % 12 == 0
+                    base = (178, 92, 70) if kind == 'side1' else (160, 84, 66)
+                    row.append((205, 200, 190) if mortar else tuple(c + rnd.gauss(0, 8) for c in base))
+            px.append(row)
+        return px
+    T = {k: tex(k) for k in ('top', 'side1', 'side2')}
+    def mapped(px, o, u, v):
+        # the unit square onto the parallelogram o + s·u + t·v
+        uri = png_uri(px)
+        return f'  <image width="1" height="1" preserveAspectRatio="none" style="image-rendering:pixelated" transform="matrix({f2(u[0])} {f2(u[1])} {f2(v[0])} {f2(v[1])} {f2(o[0])} {f2(o[1])})" href="{uri}"/>\n'
+    b = ''
+    # the box, in an oblique view
+    O = (80, 140); ux, uy, uz = (110, 30), (-50, 34), (0, -80)
+    top_o = (O[0] + uz[0], O[1] + uz[1])
+    b += mapped(T['top'], top_o, ux, uy)
+    b += mapped(T['side1'], (top_o[0] + uy[0], top_o[1] + uy[1]), ux, (-uz[0], -uz[1]))
+    right_o = (top_o[0] + ux[0], top_o[1] + ux[1])          # the faces at the nearest corner show
+    b += mapped(T['side2'], right_o, uy, (-uz[0], -uz[1]))
+    for o_, a_, c_ in ((top_o, ux, uy), ((top_o[0] + uy[0], top_o[1] + uy[1]), ux, (0, 80)), (right_o, uy, (0, 80))):
+        b += poly([o_, (o_[0] + a_[0], o_[1] + a_[1]), (o_[0] + a_[0] + c_[0], o_[1] + a_[1] + c_[1]), (o_[0] + c_[0], o_[1] + c_[1])], FG, w=1.2, closed=True)
+    # one triangle on the top face: its corners in (s, t) of that chart
+    tri = [(0.2, 0.25), (0.75, 0.3), (0.45, 0.8)]
+    onbox = [(top_o[0] + s * ux[0] + t * uy[0], top_o[1] + s * ux[1] + t * uy[1]) for s, t in tri]
+    b += poly(onbox, GOLD, w=2, closed=True)
+    for k, p in enumerate(onbox): b += circ(*p, 3.5, GOLD) + text(p[0] + 5, p[1] - 5, str(k + 1), GOLD, 11)
+    b += text(110, 36, 'a textured box', FG, 13, 'middle')
+    # the atlas page
+    ax, ay, A = 400, 50, 240
+    b += rect(ax, ay, A, A, DIM, fill=RAISED, sw=1)
+    charts = {'top': (ax + 8, ay + 8, 120, 120), 'side1': (ax + 136, ay + 8, 96, 150), 'side2': (ax + 8, ay + 136, 120, 90)}
+    for k, (x, y, w_, h_) in charts.items():
+        b += image(x, y, w_, h_, T[k], smooth=False) + rect(x, y, w_, h_, FG, sw=1.2)
+    x, y, w_, h_ = charts['top']
+    onpage = [(x + s * w_, y + t * h_) for s, t in tri]
+    b += poly(onpage, GOLD, w=2, closed=True)
+    for k, p in enumerate(onpage): b += circ(*p, 3.5, GOLD) + text(p[0] + 5, p[1] - 5, str(k + 1), GOLD, 11)
+    b += text(ax + A / 2, 36, 'one atlas page: the charts packed side by side', FG, 13, 'middle')
+    b += text(ax + A + 8, ay + 70, 'top', GREY, 11) + text(ax + A + 8, ay + 150, 'sides', GREY, 11)
+    b += curve((onbox[1][0] + 10, onbox[1][1] - 6), (onpage[0][0] - 8, onpage[0][1]), -40, GOLD, 1.2, '4 3')
+    b += text(350, 320, 'each corner carries UV coordinates: where on the page its colour comes from', GREY, 11, 'middle')
+    svg('texture-atlas.svg', W, H, b)
+
+# ── view-selection.svg ───────────────────────────────────────────────────────
+def viewsel():
+    W, H = 700, 330
+    rnd = random.Random(2)
+    n = 14
+    # triangles of a grid mesh; five photos, each best near its own nadir, plus per-triangle noise
+    nadirs = [(0.2, 0.25), (0.75, 0.2), (0.5, 0.55), (0.2, 0.8), (0.8, 0.8)]
+    cols = [BLUE, GOLD, GREEN, RED, GREY]
+    tris = []
+    for j in range(n):
+        for i in range(n):
+            for half in (0, 1):
+                cx = (i + (0.66 if half else 0.33)) / n; cy = (j + (0.33 if half else 0.66)) / n
+                tris.append((i, j, half, cx, cy))
+    cost = [[min(1, math.dist((t[3], t[4]), nd) * 1.6) + rnd.uniform(0, 0.55) for nd in nadirs] for t in tris]
+    idx = {(t[0], t[1], t[2]): k for k, t in enumerate(tris)}
+    def nbrs(t):
+        i, j, h = t[0], t[1], t[2]
+        out = [(i, j, 1 - h)]
+        out += [(i, j - 1, 0)] if h else [(i, j + 1, 1)]
+        out += [(i + 1, j, 0)] if h else [(i - 1, j, 1)]
+        return [idx[q] for q in out if q in idx]
+    N = [nbrs(t) for t in tris]
+    lab0 = [min(range(5), key=lambda k: c[k]) for c in cost]
+    lab = lab0[:]
+    lam = 0.35
+    for _ in range(12):  # iterated conditional modes: each triangle takes its best label given its neighbours
+        for k in range(len(tris)):
+            lab[k] = min(range(5), key=lambda L: cost[k][L] + lam * sum(1 for m in N[k] if lab[m] != L))
+    seams = lambda L: sum(1 for k in range(len(tris)) for m in N[k] if m > k and L[k] != L[m])
+    b = ''
+    for pi, (L, title) in enumerate(((lab0, 'no seam penalty: confetti'), (lab, 'with a seam penalty: large patches'))):
+        ox, oy, S = 30 + pi * 350, 50, 230
+        for k, (i, j, h, _, _) in enumerate(tris):
+            a, c_, d, e = (ox + i * S / n, oy + j * S / n), (ox + (i + 1) * S / n, oy + j * S / n), (ox + (i + 1) * S / n, oy + (j + 1) * S / n), (ox + i * S / n, oy + (j + 1) * S / n)
+            pts = [a, c_, d] if h else [a, d, e]
+            b += poly(pts, BG, fill=cols[L[k]], w=0.4, closed=True)
+        for nd, c in zip(nadirs, cols): b += cross(ox + nd[0] * S, oy + nd[1] * S, FG, 5, 2)
+        b += text(ox + S / 2, 36, title, FG, 13, 'middle')
+        b += text(ox + S / 2, oy + S + 20, f'{seams(L)} seam edges', GREY, 11, 'middle')
+    b += text(350, 318, 'each colour: the photo a triangle takes its texture from; crosses: the photos’ nadir points', GREY, 11, 'middle')
+    svg('view-selection.svg', W, H, b)
+
+# ── icp-point-to-plane.svg ───────────────────────────────────────────────────
+def icp():
+    W, H = 700, 400
+    rnd = random.Random(6)
+    f = lambda x: 40 * math.sin(x / 45) + 12 * math.sin(x / 13)
+    ref = [(x, f(x)) for x in range(0, 301, 12)]
+    def nrm(x):
+        d = f(x + 0.5) - f(x - 0.5); return v_norm((-d, 1))
+    true_mov = [(x, f(x)) for x in [6 + 11.5 * k + rnd.uniform(-2, 2) for k in range(25)]]
+    th, t0 = math.radians(5), (14, -10)
+    moved = [(lambda q: (q[0] + t0[0], q[1] + t0[1]))(rot2(p, th, (150, 0))) for p in true_mov]
+    b = ''
+    def draw_panel(ox, oy, mode):
+        nonlocal b
+        S = lambda p: (ox + p[0], oy - p[1])
+        b += poly([S((x, f(x))) for x in range(0, 301, 3)], DIM, w=1, dash='3 3')
+        for p in ref:
+            b += circ(*S(p), 2.6, BLUE)
+            if mode == 'plane': n = nrm(p[0]); b += line(*S(p), *S((p[0] + 12 * n[0], p[1] + 12 * n[1])), BLUE, 0.9)
+        for q in moved:
+            r = min(ref, key=lambda p: math.dist(p, q))
+            if mode == 'point':
+                b += line(*S(q), *S(r), RED, 1.2)
+            else:
+                n = nrm(r[0]); d = (q[0] - r[0]) * n[0] + (q[1] - r[1]) * n[1]
+                foot = (q[0] - d * n[0], q[1] - d * n[1])
+                b += line(*S(q), *S(foot), GREEN, 1.4)
+            b += circ(*S(q), 2.6, GOLD)
+    draw_panel(20, 140, 'point'); draw_panel(370, 140, 'plane')
+    b += text(170, 36, 'point to point: pairs pull along the surface', FG, 12, 'middle')
+    b += text(520, 36, 'point to plane: only the offset off it counts', FG, 12, 'middle')
+    b += text(170, 214, 'blue: reference · gold: moving cloud', GREY, 11, 'middle')
+    b += text(520, 214, 'residual along the reference’s normal', GREEN, 11, 'middle')
+    # point-to-plane ICP, run for three iterations
+    cur = moved[:]
+    states = [cur]
+    for it in range(3):
+        A = [[0.0] * 3 for _ in range(3)]; y = [0.0] * 3
+        cx = sum(p[0] for p in cur) / len(cur); cy = sum(p[1] for p in cur) / len(cur)
+        for q in cur:
+            r = min(ref, key=lambda p: math.dist(p, q)); n = nrm(r[0])
+            # small rotation θ about the centroid, then shift: residual n·(q + θ·perp(q−c) + t − r)
+            px, py = -(q[1] - cy), q[0] - cx
+            J = [n[0] * px + n[1] * py, n[0], n[1]]; e = (q[0] - r[0]) * n[0] + (q[1] - r[1]) * n[1]
+            for i in range(3):
+                y[i] -= J[i] * e
+                for k in range(3): A[i][k] += J[i] * J[k]
+        thv, tx, ty = solve(A, y)
+        cur = [(lambda q: (q[0] + tx, q[1] + ty))(rot2(p, thv, (cx, cy))) for p in cur]
+        states.append(cur)
+    b += line(20, 228, 680, 228, DIM, 1, '2 4')
+    for k, st in enumerate(states):
+        ox, oy = 25 + k * 166, 330
+        S = lambda p: (ox + p[0] * 0.5, oy - p[1] * 0.5)
+        b += poly([S((x, f(x))) for x in range(0, 301, 4)], BLUE, w=1.2)
+        for q in st: b += circ(*S(q), 1.8, GOLD)
+        rms = math.sqrt(sum(((q[0] - min(ref, key=lambda p: math.dist(p, q))[0]) * nrm(q[0])[0] + (q[1] - f(q[0])) * nrm(q[0])[1]) ** 2 for q in st) / len(st))
+        b += text(ox + 75, 384, 'start' if k == 0 else f'iteration {k}', FG, 11, 'middle')
+    b += text(350, 250, 'point to plane, iteration by iteration: the moving cloud settles onto the reference', GREY, 11, 'middle')
+    svg('icp-point-to-plane.svg', W, H, b)
+
+# ── 3d-tiles.svg ─────────────────────────────────────────────────────────────
+def tiles3d():
+    W, H = 700, 360
+    ox, oy, S = 30, 40, 300                              # the root tile, 2,000 m across
+    cam = (0.18, 0.86); cam_h = 120.0                   # camera position (fraction) and height (m)
+    root_m, ge0, thresh, k_px = 2000.0, 64.0, 16.0, 1000.0
+    tiles = []
+    def rec(x, y, s, d):
+        cxm, cym = (x + s / 2) * root_m, (y + s / 2) * root_m
+        dist = math.sqrt((cxm - cam[0] * root_m) ** 2 + (cym - cam[1] * root_m) ** 2 + cam_h ** 2)
+        dist = max(dist - s * root_m * 0.7, cam_h)      # to the tile's near side, roughly
+        ge = ge0 / 2 ** d; sse = ge * k_px / dist
+        if sse > thresh and d < 5:
+            for dx in (0, s / 2):
+                for dy in (0, s / 2): rec(x + dx, y + dy, s / 2, d + 1)
+        else: tiles.append((x, y, s, d, sse, ge))
+    rec(0, 0, 1, 0)
+    b = ''
+    shades = [RAISED, BLUE, GREEN, GOLD, RED, RED]
+    for (x, y, s, d, sse, ge) in tiles:
+        b += rect(ox + x * S, oy + y * S, s * S, s * S, DIM, fill=shades[d], sw=0.8, op=None if d == 0 else 0.22 + 0.06 * d)
+        b += rect(ox + x * S, oy + y * S, s * S, s * S, DIM, sw=0.8)
+        if s * S >= 36: b += text(ox + (x + s / 2) * S, oy + (y + s / 2) * S + 4, f'{sse:.0f} px', FG, 11 if s * S > 60 else 9, 'middle')
+    # the camera and its view
+    cx, cy = ox + cam[0] * S, oy + cam[1] * S
+    b += poly([(cx, cy), (cx + 190, cy - 230), (cx + 300, cy - 120)], BLUE, fill=BLUE, w=1, op=0.10, closed=True)
+    b += poly([(cx + 190, cy - 230), (cx, cy), (cx + 300, cy - 120)], BLUE, w=1.2, dash='4 3')
+    b += cam2d(cx, cy, math.atan2(-175, 245), size=16)
+    b += text(cx - 8, cy + 22, 'camera', BLUE, 11, 'middle')
+    # key
+    kx = 370
+    b += text(kx, 70, 'a tile is split when its geometric error,', FG, 12) + text(kx, 86, 'seen from the camera, exceeds 16 px', FG, 12)
+    for d in range(5):
+        y = 120 + d * 28
+        b += rect(kx, y, 18, 18, DIM, fill=shades[d], sw=0.8, op=None if d == 0 else 0.22 + 0.06 * d)
+        b += text(kx + 28, y + 14, f'level {d}: {2000 / 2 ** d:,.0f} m tile, geometric error {64 / 2 ** d:g} m', GREY, 11)
+    b += text(kx, 280, 'numbers: each drawn tile’s error on screen', GREY, 11)
+    b += text(kx, 296, 'far tiles stay coarse; near ones refine', GREY, 11)
+    svg('3d-tiles.svg', W, H, b)
+
 FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning,
            volume, gauge, lowe, track, cog, mgraph, pose,
            kpmatch, fmatrix, homog, cheir, pnp, incsfm,
@@ -2557,7 +2878,8 @@ FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, 
            siftscale, siftdesc, sharp, imask, fiducial, depthmap,
            photocost, geocons, pmatch, mvs, sparsedense,
            georef, gcpmark, scalebar, crspolar, demcoreg, clouddist,
-           orthopersp, orthoseams, seamlines, multiband, seamlevel, graphcut]
+           orthopersp, orthoseams, seamlines, multiband, seamlevel, graphcut,
+           poisson, decimate, atlas, viewsel, icp, tiles3d]
 only = set(sys.argv[2:])
 for f in FIGURES:
     if not only or f.__name__ in only: f()

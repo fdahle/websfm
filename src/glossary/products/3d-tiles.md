@@ -10,7 +10,7 @@ read by CesiumJS, Cesium for Unreal and Unity, ArcGIS, deck.gl and others. A
 box, optional content (here a glTF model: points or triangles) and children that
 describe the same space in more detail.
 
-<!-- TODO(image): assets/3d-tiles.svg - a quadtree of terrain tiles, the coarse root over the whole area and finer tiles only near the camera, with each tile's geometric error projected to pixels. -->
+![A quadtree of terrain tiles in plan view with a camera near one corner: tiles far from the camera stay large, tiles near it are split to finer levels, each drawn tile labelled with its geometric error projected to pixels; a tile splits when that exceeds 16 px.](assets/3d-tiles.svg)
 
 Every tile states its **geometric error**: how far, in metres, drawing this tile
 without its children stands from the full detail. The viewer projects that length onto

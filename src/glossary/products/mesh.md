@@ -23,7 +23,7 @@ its own orientation ambiguity. WebSfM instead reuses the surface normals that
 [PatchMatch](help:patchmatch) already fitted per pixel — they are consistently
 oriented toward the camera that saw them by construction.
 
-<!-- TODO(image): assets/poisson-mesh.svg - oriented input points with normal arrows, the octree subdivision around the surface, the extracted isosurface, and the same mesh after trimming - with the untrimmed version showing the balloon-like closure over an unsampled region. -->
+![Screened Poisson meshing in a cross-section, in four panels: points with their normal arrows, with an unsampled gap in the middle; the octree subdivided finely around the points; the closed isosurface, which balloons over the gap and closes underneath; and the surface after trimming, kept only where points support it, the gap left open.](assets/poisson-mesh.svg)
 
 Poisson always produces a *closed* surface that is defined everywhere. It will
 balloon a smooth hull across regions nothing observed, and it wraps every small

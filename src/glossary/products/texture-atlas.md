@@ -16,7 +16,7 @@ called charts, packed side by side onto one or more square pages. A chart is a p
 connected triangles that share one stretch of image. Between charts the UVs jump, and
 the vertices on that border are stored twice, once for each chart.
 
-<!-- TODO(image): assets/texture-atlas.svg - a small textured box on the left; on the right one atlas page with its charts (top, sides) packed as rectangles, one triangle's three UVs marked on both. -->
+![Left, a box with a grass top and brick sides, one triangle on the top marked with its corners 1, 2, 3. Right, one atlas page with the top and side charts packed side by side, and the same triangle's three UV corners marked on the top chart.](assets/texture-atlas.svg)
 
 How the charts are made differs between programs. A general unwrapper cuts the
 surface into pieces that lie flat with little distortion and then paints them. WebSfM,
