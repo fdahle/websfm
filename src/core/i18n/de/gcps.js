@@ -28,9 +28,26 @@ export default {
       'Gelände. {n, plural, one {Ihn} other {Sie}} auf einem Foto markieren.',
   },
   table: {
+    status: 'Status',
+    statusTip:
+      'Was dem Punkt noch fehlt, bevor er verwendet wird: X, Y und Z, eine Genauigkeit und Markierungen auf zwei Fotos',
+    datum: 'Höhenbezug',
+    datumTip:
+      'Worauf sich die Z-Werte beziehen. RTK- und GNSS-Empfänger liefern ellipsoidische Höhen, wenn kein Geoid ' +
+      'eingestellt ist; Höhen „über dem Meer“ aus einem Vermessungsblatt oder Landessystem sind Anderes Geoid / ' +
+      'national. Es ändert weder die Zahlen noch, ob der Punkt verwendet wird; es erlaubt, Höhen verschiedener ' +
+      'Quellen umzurechnen (Höhen umrechnen in…).',
+    accuracy: 'Genauigkeit',
+    accuracyTip:
+      'Wie gut die Koordinaten bekannt sind, als σ in X/Y und Z: die Messmethode. Setzt die Genauigkeit in X, Y ' +
+      'und Z (für andere Werte eintippen). Ohne sie bestimmt der Punkt die Georeferenzierung nicht.',
+    summary: '{ready, number} von {control, plural, one {# Passpunkt} other {# Passpunkten}} verwendbar.',
+    summaryFirst: '„{name}“: {needs}{more, plural, =0 {} other { (# weitere nicht bereit)}}.',
+    needThree: 'Die Georeferenzierung braucht drei.',
     estimateTip:
       'Grau: wo das georeferenzierte Modell diesen Punkt sieht, als Hilfe beim Suchen. Den vermessenen Wert ' +
       'eintragen; bis dahin wird der Punkt nicht als Passpunkt verwendet.',
+    customTip: 'Erscheint, wenn die Genauigkeit eingetippt wurde: σ X/Y/Z eintippen, um sie zu ändern',
   },
   view: {
     fallbackName: 'GCP',
@@ -70,5 +87,35 @@ export default {
     place: 'Hier markieren: am Fadenkreuz ({key} für das hervorgehobene)',
     dismiss: 'Nicht auf diesem Foto: ausblenden ({key} für das hervorgehobene)',
     showMore: '{n, number} weitere zeigen',
+  },
+  need: {
+    xy: 'kein X/Y',
+    z: 'kein Z',
+    accuracy: 'keine Genauigkeit (σ)',
+    marks: 'auf {n, number} von 2 Fotos markiert',
+  },
+  status: {
+    ready: { control: '✓ verwendet', check: '✓ gemessen', marker: '✓ markiert' },
+    off: 'deaktiviert',
+  },
+  datum: {
+    unknown: 'Nicht gesetzt',
+    ellipsoidal: 'Ellipsoidisch (WGS 84)',
+    geoidEGM2008: 'Geoid EGM2008',
+    geoidEGM96: 'Geoid EGM96',
+    orthometric: 'Anderes Geoid / national',
+    local: 'Lokal',
+  },
+  accuracy: {
+    'unknown': 'Nicht gesetzt',
+    'rtk-fixed': 'RTK fixed',
+    'rtk-float': 'RTK float',
+    'total-station': 'Totalstation',
+    'map-picked': 'Von Karte oder Orthophoto abgegriffen',
+    'custom': 'Benutzerdefiniert',
+    'withValues': '{name} · {xy, number} / {z, number} m',
+  },
+  sidebar: {
+    notReady: 'Noch nicht verwendet: {needs}. In Ansicht ▸ GCPs & Marker ergänzen.',
   },
 }

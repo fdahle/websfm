@@ -90,3 +90,21 @@ it('clearing a coordinate leaves it empty, never 0', () => {
   store.setGcpPosition(id, 'y', 'abc')
   expect(store.gcps.find((g) => g.id === id).y).toBe(12)
 })
+
+it('an accuracy preset sets σ X/Y/Z and says which it was; Not set clears them', () => {
+  const store = useGcpsStore()
+  const id = store.addGcp()
+  const g = () => store.gcps.find((x) => x.id === id)
+  expect(store.setGcpAccuracyPreset(id, 'rtk-fixed')).toBe(true)
+  // EPSG:3031 is in metres: the preset's values as they are.
+  expect(g()).toMatchObject({ accuracyX: 0.02, accuracyY: 0.02, accuracyZ: 0.05, accuracyStatus: 'preset:rtk-fixed' })
+  // A typed axis makes it the user's own.
+  store.setGcpAccuracy(id, 'z', 0.1)
+  expect(g().accuracyStatus).toBe('declared')
+  expect(store.setGcpAccuracyPreset(id, 'unknown')).toBe(true)
+  expect(g()).toMatchObject({ accuracyX: null, accuracyY: null, accuracyZ: null, accuracyStatus: 'unknown' })
+  // Custom is what typing gives, not a preset to apply; a marker has no ground accuracy.
+  expect(store.setGcpAccuracyPreset(id, 'custom')).toBe(false)
+  expect(store.setGcpAccuracyPreset(id, 'nonsense')).toBe(false)
+  expect(store.setGcpAccuracyPreset(store.addPoint({ role: 'marker' }), 'rtk-fixed')).toBe(false)
+})

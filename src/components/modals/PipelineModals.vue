@@ -1,4 +1,5 @@
 <script setup>
+import { controlReadiness } from '../../core/gcpReadiness.js'
 import { computed, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import { isGroundControl } from '../../core/io/gcp.js'
@@ -216,6 +217,7 @@ const { poses } = storeToRefs(usePosesStore())
 const controlCount = computed(
   () => gcps.value.filter((g) => isGroundControl(g, { precision: precisionFromGcp })).length,
 )
+const controlNotReady = computed(() => controlReadiness(gcps.value).notReady)
 const georefPlaces = computed(() =>
   [...poses.value.filter((p) => p.enabled !== false), ...gcps.value]
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
@@ -433,6 +435,7 @@ const exportingFootprints = computed(
       :can-transform="canGeoreference"
       :has-matches="matchSummaries.length > 0"
       :control-count="controlCount"
+      :control-not-ready="controlNotReady"
       :pose-count="poses.length"
       :project-crs="currentCrs"
       :references="referenceDems"

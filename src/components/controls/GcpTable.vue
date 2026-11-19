@@ -1,17 +1,14 @@
 <script setup>
 import { VERTICAL_DATUMS, isConvertible } from '../../core/verticalDatum.js'
-import { ref } from 'vue'
+import { GCP_ACCURACY_PRESETS } from '../../core/gcpAccuracy.js'
+import { gcpReadiness, controlReadiness } from '../../core/gcpReadiness.js'
+import { computed, ref } from 'vue'
 import { t } from '../../composables/useI18n.js'
 
-// Short labels for the cramped per-row datum select (core/verticalDatum.js ids).
-const DATUM_SHORT = [
-  { id: 'unknown', label: 'datum?' },
-  { id: 'ellipsoidal', label: 'ellipsoid' },
-  { id: 'geoid:EGM2008', label: 'EGM2008' },
-  { id: 'geoid:EGM96', label: 'EGM96' },
-  { id: 'orthometric', label: 'geoid (other)' },
-  { id: 'local', label: 'local' },
-]
+// The height datums, "Not set" first (core/verticalDatum.js ids; labels gcps.datum.*).
+const DATUM_IDS = ['unknown', ...VERTICAL_DATUMS.map((d) => d.id).filter((id) => id !== 'unknown')]
+// The accuracy presets (core/gcpAccuracy.js), "Not set" first and Custom last.
+const PRESET_IDS = ['unknown', ...Object.keys(GCP_ACCURACY_PRESETS).filter((id) => id !== 'unknown' && id !== 'custom')]
 const CONVERTIBLE = VERTICAL_DATUMS.filter((d) => isConvertible(d.id))
 const props = defineProps({
   gcps: { type: Array, required: true },
@@ -38,6 +35,7 @@ const emit = defineEmits([
   'add',
   'update-role',
   'update-vertical-datum',
+  'update-accuracy-preset',
   'fill-z',
   'check-z',
   'convert-heights',
@@ -52,7 +50,7 @@ function toggleObs(id) {
   if (obsExpanded.value[id]) delete obsExpanded.value[id]
   else obsExpanded.value[id] = true
 }
-const COLUMN_COUNT = 15
+const COLUMN_COUNT = 17
 
 function reprojFor(gcp, imageId) {
   return reportFor(gcp)?.observations?.find((o) => o.imageId === imageId)?.reprojPx ?? null
@@ -101,6 +99,46 @@ function obsCount(gcp) {
 // Commit an edited accuracy value back to the parent.
 function onAccuracyInput(gcp, kind, e) {
   emit('update-accuracy', { id: gcp.id, kind, value: e.target.value })
+}
+
+// What each point still needs before it is used (core/gcpReadiness.js), and the line
+// above the table that counts the control points the georeference can use.
+const readiness = computed(() => new Map(props.gcps.map((g) => [g.id, gcpReadiness(g)])))
+const summary = computed(() => controlReadiness(props.gcps))
+const needText = (r) =>
+  r.needs.map((k) => (k === 'marks' ? t('gcps.need.marks', { n: r.marks }) : t(`gcps.need.${k}`))).join(' · ')
+function statusText(gcp) {
+  const r = readiness.value.get(gcp.id)
+  if (!r.enabled) return t('gcps.status.off')
+  if (r.ready) return t(`gcps.status.ready.${r.role}`)
+  return `⚠ ${needText(r)}`
+}
+const summaryText = computed(() => {
+  const s = summary.value
+  if (!s.control) return ''
+  const first = s.notReady[0]
+  return [
+    t('gcps.table.summary', { ready: s.ready, control: s.control }),
+    first
+      ? t('gcps.table.summaryFirst', { name: first.name, needs: needText(first), more: s.notReady.length - 1 })
+      : '',
+    s.ready < 3 ? t('gcps.table.needThree') : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+})
+
+// Which preset a point's accuracy is: the one it was set from, Not set, or Custom.
+function presetOf(gcp) {
+  const st = gcp.accuracyStatus ?? 'unknown'
+  if (st.startsWith('preset:') && GCP_ACCURACY_PRESETS[st.slice(7)]) return st.slice(7)
+  return [gcp.accuracyX, gcp.accuracyY, gcp.accuracyZ].some((v) => v != null) ? 'custom' : 'unknown'
+}
+// A preset's label with its σ, in the project's units ("RTK fixed · 0.02 / 0.05").
+function presetLabel(id) {
+  const p = GCP_ACCURACY_PRESETS[id]
+  const name = t(`gcps.accuracy.${id}`)
+  return p?.x != null ? t('gcps.accuracy.withValues', { name, xy: p.x, z: p.z }) : name
 }
 
 function onNameInput(gcp, e) {
@@ -182,15 +220,18 @@ function onPositionInput(gcp, axis, e) {
         </select>
       </template>
     </div>
+    <div v-if="summaryText" class="ready-summary" :class="{ short: summary.ready < 3 }">{{ summaryText }}</div>
     <table v-if="gcps.length">
       <thead>
         <tr>
           <th>Name</th>
           <th title="Controls constrain the solution; checkpoints only measure independent accuracy">Role</th>
-          <th title="Accuracy provenance and vertical height datum">Uncertainty</th>
+          <th :title="t('gcps.table.statusTip')">{{ t('gcps.table.status') }}</th>
           <th>X</th>
           <th>Y</th>
           <th>Z</th>
+          <th :title="t('gcps.table.datumTip')">{{ t('gcps.table.datum') }}</th>
+          <th :title="t('gcps.table.accuracyTip')">{{ t('gcps.table.accuracy') }}</th>
           <th :title="crs ? `X-axis ground accuracy in ${crs} units` : 'X-axis ground accuracy in CRS units'">
             X accuracy
           </th>
@@ -227,32 +268,21 @@ function onPositionInput(gcp, axis, e) {
               </select>
             </td>
             <td
+              class="status-cell"
+              :class="{
+                ready: readiness.get(gcp.id).ready && readiness.get(gcp.id).enabled,
+                off: !readiness.get(gcp.id).enabled,
+              }"
+            >
+              {{ statusText(gcp) }}
+            </td>
+            <td
               v-if="isMarker(gcp)"
               class="marker-note"
-              colspan="7"
+              colspan="8"
               title="A marker has no surveyed position — it exists to give a scale bar a reproducible endpoint"
             >
               no surveyed position
-            </td>
-            <td
-              v-if="!isMarker(gcp)"
-              class="uncertainty-cell"
-              :class="{ unknown: !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' }"
-              :title="`Ground accuracy: ${gcp.accuracyStatus || 'unknown'}; height datum: ${gcp.verticalDatum || 'unknown'}`"
-            >
-              {{
-                !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown'
-                  ? '⚠ unknown'
-                  : gcp.accuracyStatus.replace('preset:', '')
-              }}
-              <select
-                class="datum-select"
-                :value="gcp.verticalDatum || 'unknown'"
-                @click.stop
-                @change="emit('update-vertical-datum', { id: gcp.id, verticalDatum: $event.target.value })"
-              >
-                <option v-for="d in DATUM_SHORT" :key="d.id" :value="d.id">{{ d.label }}</option>
-              </select>
             </td>
             <td v-if="!isMarker(gcp)" class="num">
               <input
@@ -286,6 +316,35 @@ function onPositionInput(gcp, axis, e) {
                 :title="estimateHint(gcp, 2) ? t('gcps.table.estimateTip') : undefined"
                 @change="onPositionInput(gcp, 'z', $event)"
               />
+            </td>
+            <td v-if="!isMarker(gcp)">
+              <select
+                class="row-select"
+                :class="{ unset: !gcp.verticalDatum || gcp.verticalDatum === 'unknown' }"
+                :value="gcp.verticalDatum || 'unknown'"
+                :title="t('gcps.table.datumTip')"
+                @click.stop
+                @change="emit('update-vertical-datum', { id: gcp.id, verticalDatum: $event.target.value })"
+              >
+                <option v-for="id in DATUM_IDS" :key="id" :value="id">
+                  {{ t(`gcps.datum.${id.replace(':', '')}`) }}
+                </option>
+              </select>
+            </td>
+            <td v-if="!isMarker(gcp)">
+              <select
+                class="row-select"
+                :class="{ unset: presetOf(gcp) === 'unknown' }"
+                :value="presetOf(gcp)"
+                :title="t('gcps.table.accuracyTip')"
+                @click.stop
+                @change="emit('update-accuracy-preset', { id: gcp.id, preset: $event.target.value })"
+              >
+                <option v-for="id in PRESET_IDS" :key="id" :value="id">{{ presetLabel(id) }}</option>
+                <option value="custom" disabled :title="t('gcps.table.customTip')">
+                  {{ t('gcps.accuracy.custom') }}
+                </option>
+              </select>
             </td>
             <td v-if="!isMarker(gcp)" class="acc-cell">
               <input
@@ -658,27 +717,40 @@ tbody tr.obs-row > td {
   font-style: italic;
 }
 
-.uncertainty-cell {
-  max-width: 90px;
-  font-size: 10px;
-  color: var(--text-dim);
-}
-.uncertainty-cell.unknown {
+.status-cell {
+  min-width: 120px;
+  max-width: 170px;
+  white-space: normal;
+  line-height: 1.3;
+  font-size: 11px;
   color: #e0a030;
 }
-.uncertainty-cell small {
-  display: block;
-  font-size: 9px;
-  opacity: 0.75;
+.status-cell.ready {
+  color: var(--success, #3fbf6f);
 }
-.datum-select {
-  display: block;
-  max-width: 78px;
-  margin-top: 2px;
-  font-size: 9px;
-  color: var(--text);
+.status-cell.off {
+  color: var(--text-dim);
+}
+/* The datum and accuracy selects: as tall as the role select beside them. */
+.row-select {
+  padding: 3px 6px;
   background: var(--bg);
   border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.row-select.unset {
+  color: #e0a030;
+}
+.ready-summary {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.ready-summary.short {
+  color: #e0a030;
 }
 
 .action-cell {

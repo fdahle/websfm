@@ -16,7 +16,15 @@ describe('georeferenceReasons', () => {
     expect(unmatched.adjust).toMatch(/Match features/)
     expect(unmatched.dem).toMatch(/Match features/)
     expect(unmatched.transform).toBeNull()
-    expect(georeferenceReasons({ ...ready, adjustReady: false }).adjust).toMatch(/two aligned photos/)
+    expect(georeferenceReasons({ ...ready, adjustReady: false }).adjust).toMatch(/two aligned photos\.$/)
+    // It names what the first point that cannot be used lacks.
+    const notReady = [
+      { name: 'GCP 1', needs: ['z', 'accuracy'], marks: 2 },
+      { name: 'GCP 2', needs: ['marks'], marks: 1 },
+    ]
+    expect(georeferenceReasons({ ...ready, adjustReady: false, notReady }).adjust).toMatch(
+      /two aligned photos\. “GCP 1”: no Z, no accuracy \(σ\) \(1 more not ready\)\.$/,
+    )
     expect(georeferenceReasons({ ...ready, gcps: 2, poses: 2 }).dem).toMatch(/three or more/)
     expect(georeferenceReasons({ ...ready, transformReady: false }).transform).toMatch(/sparse model/)
   })
@@ -35,7 +43,7 @@ describe('georeferenceSource', () => {
   it('reads out the CRS and the control', () => {
     expect(georeferenceSource({ crs: 'EPSG:32632', crsName: 'UTM zone 32N (WGS 84)', gcps: 1, poses: 42 })).toEqual({
       crs: 'EPSG:32632 · UTM zone 32N (WGS 84)',
-      control: '1 GCP with coordinates · 42 camera positions',
+      control: '1 GCP ready · 42 camera positions',
     })
     expect(georeferenceSource({ crs: 'EPSG:9999', crsName: 'EPSG:9999' }).crs).toBe('EPSG:9999')
     expect(georeferenceSource().crs).toBe('Not set')

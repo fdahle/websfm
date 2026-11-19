@@ -59,8 +59,15 @@ const imagesStore = useImagesStore()
 const { images, selectedId } = storeToRefs(imagesStore)
 const { selectImage } = imagesStore
 const { importDefaults: gcpImportDefaults, gcps } = storeToRefs(useGcpsStore())
-const { addPoint, setGcpAccuracy, setGcpName, setGcpPosition, setGcpVerticalDatum, setObservationAccuracy } =
-  useGcpsStore()
+const {
+  addPoint,
+  setGcpAccuracy,
+  setGcpAccuracyPreset,
+  setGcpName,
+  setGcpPosition,
+  setGcpVerticalDatum,
+  setObservationAccuracy,
+} = useGcpsStore()
 const { sensors } = storeToRefs(useSensorsStore())
 const { applyFilmFormat, assignSensor, setFiducialMarks, splitSensor, toggleSensorFixed, updateSensor, importSensors } =
   useSensorsStore()
@@ -539,6 +546,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       @update-name="({ id, name }) => setGcpName(id, name)"
       @update-role="changeGcpRole"
       @update-vertical-datum="({ id, verticalDatum }) => setGcpVerticalDatum(id, verticalDatum)"
+      @update-accuracy-preset="({ id, preset }) => setGcpAccuracyPreset(id, preset)"
       @update-position="({ id, axis, value }) => setGcpPosition(id, axis, value)"
       @refresh-report="refreshGcpReport"
       @select="selectGcp"

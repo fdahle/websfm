@@ -93,7 +93,12 @@ export const EDITS = [
         options: ['control', 'check', 'marker'],
         help: 'Add a GCP (control, the default), a checkpoint (check) or a marker',
       },
-      set: { args: ['item', 'fields'], help: 'Set a GCP position: x=, y=, z= (z= with no value clears Z)' },
+      set: {
+        args: ['item', 'fields'],
+        help:
+          'Set a GCP: x=, y=, z= (no value clears it), accuracy= a preset (rtk-fixed, rtk-float, ' +
+          'total-station, map-picked, unknown), datum= (ellipsoidal, geoid:EGM2008, geoid:EGM96, orthometric, local, unknown)',
+      },
       role: {
         args: ['item', 'choice'],
         options: ['control', 'check', 'marker'],

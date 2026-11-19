@@ -6,6 +6,9 @@ import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import ContextMenu from './ContextMenu.vue'
 import { useSidebar } from './sidebarContext.js'
 import { pluralize } from '../../../core/textFormat.js'
+import { gcpReadiness, controlReadiness } from '../../../core/gcpReadiness.js'
+import { t } from '../../../composables/useI18n.js'
+import { computed } from 'vue'
 
 defineProps({
   open: { type: Boolean, default: true },
@@ -31,6 +34,22 @@ const ROLE_BADGES = {
   },
 }
 const roleBadge = (gcp) => ROLE_BADGES[gcp.role] ?? ROLE_BADGES.control
+
+// What a point still needs before it is used (core/gcpReadiness.js): a ⚠ on its row
+// says what, and one on the header counts the control points the georeference can use.
+const readiness = computed(() => new Map(gcps.value.map((g) => [g.id, gcpReadiness(g)])))
+const needText = (r) =>
+  r.needs.map((k) => (k === 'marks' ? t('gcps.need.marks', { n: r.marks }) : t(`gcps.need.${k}`))).join(' · ')
+function notReadyTitle(gcp) {
+  const r = readiness.value.get(gcp.id)
+  return r && r.enabled && !r.ready ? t('gcps.sidebar.notReady', { needs: needText(r) }) : ''
+}
+const headerWarn = computed(() => {
+  const s = controlReadiness(gcps.value)
+  return s.control && s.ready < 3
+    ? t('gcps.table.summary', { ready: s.ready, control: s.control }) + ' ' + t('gcps.table.needThree')
+    : ''
+})
 const isMarker = (gcp) => gcp.role === 'marker'
 
 // Where the model puts a point in the SfM frame, from the accuracy report. For a
@@ -77,6 +96,7 @@ function reprojFor(gcpId, imageId) {
     <button class="section-hd" @click="emit('toggle')">
       <span class="chevron">{{ open ? '▾' : '▸' }}</span>
       <span class="section-name">Control &amp; Markers</span>
+      <span v-if="headerWarn" class="ready-warn" :title="headerWarn">⚠</span>
       <span v-if="gcps.length" class="badge">{{ gcps.length }}</span>
     </button>
     <ul v-if="open" class="item-list">
@@ -101,6 +121,7 @@ function reprojFor(gcpId, imageId) {
             :title="isExpanded(gcp.id) ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">{{ gcp.name }}</span>
+          <span v-if="notReadyTitle(gcp)" class="ready-warn" :title="notReadyTitle(gcp)">⚠</span>
           <span class="role-badge" :class="roleBadge(gcp).cls" :title="roleBadge(gcp).title">
             {{ roleBadge(gcp).text }}
           </span>
@@ -201,7 +222,15 @@ function reprojFor(gcpId, imageId) {
   </div>
 </template>
 
-<style scoped src="./sidebar-sections.css"></style>
+<style scoped src="./sidebar-sections.css">
+.ready-warn {
+  flex: none;
+  margin-right: 4px;
+  color: #e0a030;
+  font-size: 11px;
+  cursor: help;
+}
+</style>
 <style scoped>
 .list-item.selected {
   background: rgba(80, 200, 255, 0.1);
@@ -285,5 +314,12 @@ function reprojFor(gcpId, imageId) {
   color: var(--text-dim);
   font-style: italic;
   margin: 2px 0;
+}
+.ready-warn {
+  flex: none;
+  margin-right: 4px;
+  color: #e0a030;
+  font-size: 11px;
+  cursor: help;
 }
 </style>

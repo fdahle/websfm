@@ -2,11 +2,14 @@
 // the reconstruction with GCPs, hold it to a reference DEM (demHold.js), or only fit
 // a similarity into the project CRS (stores/reconstruction/georeferencing.js).
 import { plural } from './format.js'
+import { needWords } from '../gcpReadiness.js'
 
 // project: { crs (code), crsName, geographic (the CRS is in degrees), hasMatches,
-//   gcps (enabled control with coordinates), poses (camera positions),
+//   gcps (enabled control with X, Y, Z and an accuracy), poses (camera positions),
 //   adjustReady (≥ 3 of those GCPs each marked in two aligned photos),
-//   transformReady (a similarity can be fitted: those GCPs, or ≥ 3 aligned camera positions) }
+//   transformReady (a similarity can be fitted: those GCPs, or ≥ 3 aligned camera positions),
+//   notReady (the enabled control points that cannot be used yet, core/gcpReadiness.js
+//   controlReadiness: [{ name, needs, marks }]) }
 
 const DEGREES = 'The project CRS is in degrees: choose a projected CRS in Project Settings.'
 
@@ -18,13 +21,14 @@ export function georeferenceReasons({
   poses = 0,
   adjustReady = false,
   transformReady = false,
+  notReady = [],
 } = {}) {
   const adjust = geographic
     ? DEGREES
     : !hasMatches
       ? 'Match features first.'
       : !adjustReady
-        ? 'Needs three enabled GCPs with coordinates, each marked in two aligned photos.'
+        ? 'Needs three GCPs with X, Y, Z and an accuracy, each marked in two aligned photos.' + notReadyText(notReady)
         : null
   const dem = geographic
     ? DEGREES
@@ -39,6 +43,15 @@ export function georeferenceReasons({
       ? 'Needs a sparse model with three GCPs marked in two aligned photos each, or three aligned camera positions.'
       : null
   return { adjust, dem, transform }
+}
+
+// What the first control point that cannot be used lacks, and how many more there are:
+// " “GCP 2”: no Z, no accuracy (σ)." The table says it for every point.
+function notReadyText(notReady) {
+  const first = notReady?.[0]
+  if (!first) return ''
+  const more = notReady.length - 1
+  return ` “${first.name}”: ${needWords(first.needs, first.marks).join(', ')}${more ? ` (${more} more not ready)` : ''}.`
 }
 
 // The method cards: [{ id, label, blurb, disabled, reason }].
@@ -73,7 +86,7 @@ export function georeferenceMethods(project = {}) {
 export function georeferenceSource({ crs = '', crsName = '', gcps = 0, poses = 0 } = {}) {
   return {
     crs: crs ? (crsName && crsName !== crs ? `${crs} · ${crsName}` : crs) : 'Not set',
-    control: `${plural(gcps, 'GCP')} with coordinates · ${plural(poses, 'camera position')}`,
+    control: `${plural(gcps, 'GCP')} ready · ${plural(poses, 'camera position')}`,
   }
 }
 

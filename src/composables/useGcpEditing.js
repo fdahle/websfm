@@ -229,10 +229,13 @@ export function useGcpEditing({ activeTab, openImageTab, openGcpTab, closeTab })
   // A point placed on the map takes its Z from a reference DEM there, when one declares
   // its vertical accuracy (the rule of Fill Z and of a pick off a reference raster), in
   // the point's own height datum when the DEM's converts to it. Otherwise Z stays empty.
+  // Its accuracy is what a point picked off a map is worth (the map-picked preset), so
+  // with Z and two marks it is used; typed or surveyed values replace it.
   async function addGcpAtCoord({ x, y }) {
     const id = addGcp()
     setGcpPosition(id, 'x', x)
     setGcpPosition(id, 'y', y)
+    gcpsStore.setGcpAccuracyPreset(id, 'map-picked')
     selectedGcpId.value = id
     if (externalStore.hasReferenceDem) {
       const g = gcps.value.find((gg) => gg.id === id)

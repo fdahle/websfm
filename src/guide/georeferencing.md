@@ -46,8 +46,15 @@ orientation angles (omega, phi, kappa) imported with the positions; otherwise
 Georeference refuses and asks for GCPs or a second strip.
 
 ## Ground control points
-A GCP needs 3D coordinates and marks in at least two registered images; use at least
-three, spread over the area and its height range. With four or more as control,
+A GCP is used once it has X, Y and Z, an **Accuracy**, and marks in at least two
+registered images; use at least three, spread over the area and its height range. The
+GCP table's **Status** column, and a ⚠ in the sidebar, say what a point still lacks.
+**Accuracy** is how well the coordinates are known: pick how you measured them (RTK
+fixed, RTK float, total station, picked off a map), or type σ X/Y/Z. **Height datum**
+records what Z is measured from: *Ellipsoidal* for RTK or GNSS heights, unless the
+receiver was set to a geoid; *Other geoid / national* for heights above sea level from
+a survey sheet. It does not stop a point being used; it lets heights from different
+sources be converted. With four or more as control,
 **Adjust with GCPs** also refines the focal length and lens, which a nadir block cannot
 fix by itself; with three it keeps them, and heights can be off by the focal's error.
 Keep some as checkpoints for an honest accuracy test.

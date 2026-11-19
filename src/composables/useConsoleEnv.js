@@ -5,6 +5,8 @@ import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { pairCheckVerdicts } from '../core/sfm/pairAgreement.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
+import { GCP_ACCURACY_PRESETS } from '../core/gcpAccuracy.js'
+import { VERTICAL_DATUMS, isVerticalDatum } from '../core/verticalDatum.js'
 import { useMeasurementsStore } from '../stores/useMeasurementsStore.js'
 import { useWorkflowsStore } from '../stores/useWorkflowsStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
@@ -115,11 +117,21 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
     gcp: {
       add: ([name, role]) => void gcps.addPoint({ name, role: role ?? 'control' }),
       set([g, fields]) {
-        const bad = Object.keys(fields).filter((k) => !['x', 'y', 'z'].includes(k))
-        if (bad.length) return { text: `A GCP takes x=, y=, z=, not ${bad.join(', ')}`, level: 'error' }
-        for (const [axis, v] of Object.entries(fields)) gcps.setGcpPosition(g.id, axis, v)
+        const bad = Object.keys(fields).filter((k) => !['x', 'y', 'z', 'accuracy', 'datum'].includes(k))
+        if (bad.length)
+          return { text: `A GCP takes x=, y=, z=, accuracy=, datum=, not ${bad.join(', ')}`, level: 'error' }
+        if ('accuracy' in fields && !GCP_ACCURACY_PRESETS[fields.accuracy])
+          return {
+            text: `accuracy= is one of ${Object.keys(GCP_ACCURACY_PRESETS).join(', ')}`,
+            level: 'error',
+          }
+        if ('datum' in fields && !isVerticalDatum(fields.datum))
+          return { text: `datum= is one of ${VERTICAL_DATUMS.map((d) => d.id).join(', ')}`, level: 'error' }
+        for (const axis of ['x', 'y', 'z']) if (axis in fields) gcps.setGcpPosition(g.id, axis, fields[axis])
+        if ('accuracy' in fields) gcps.setGcpAccuracyPreset(g.id, fields.accuracy)
+        if ('datum' in fields) gcps.setGcpVerticalDatum(g.id, fields.datum)
         const r = g.ref
-        return `GCP ${g.name}: x ${r.x ?? '—'}, y ${r.y ?? '—'}, z ${r.z ?? '—'}`
+        return `GCP ${g.name}: x ${r.x ?? '—'}, y ${r.y ?? '—'}, z ${r.z ?? '—'}, accuracy ${r.accuracyStatus}, datum ${r.verticalDatum}`
       },
       role: ([g, role]) => void gcps.setGcpRole(g.id, role),
       enable: ([list]) => list.forEach((g) => gcps.setGcpEnabled(g.id, true)),

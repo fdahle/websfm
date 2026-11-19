@@ -32,9 +32,25 @@ export default {
   },
   // The Control & Markers table (components/controls/GcpTable.vue).
   table: {
+    status: 'Status',
+    statusTip: 'What the point still needs before it is used: X, Y and Z, an accuracy, and marks in two photos',
+    datum: 'Height datum',
+    datumTip:
+      'What the Z values are measured from. RTK and GNSS receivers give ellipsoidal heights unless set to a ' +
+      'geoid model; heights "above sea level" from a survey sheet or a national grid are Other geoid / national. ' +
+      'It does not change the numbers or stop the point being used; it lets heights from different sources be ' +
+      'converted (Convert heights to…).',
+    accuracy: 'Accuracy',
+    accuracyTip:
+      'How well the coordinates are known, as σ in X/Y and Z: the method you measured them with. It sets X, Y and ' +
+      'Z accuracy (type them for other values). Without one the point does not constrain the georeference.',
+    summary: '{ready, number} of {control, plural, one {# control point} other {# control points}} can be used.',
+    summaryFirst: '“{name}”: {needs}{more, plural, =0 {} other { (# more not ready)}}.',
+    needThree: 'The georeference needs three.',
     estimateTip:
       'Greyed: where the georeferenced model puts this point, to help you find it. Type the surveyed value; ' +
       'until then the point is not used as control.',
+    customTip: 'Shown when the accuracy was typed: type σ X/Y/Z to change it',
   },
   // The GCP view (components/viewers/ViewerGcp.vue): a square per photo around the mark.
   view: {
@@ -72,5 +88,36 @@ export default {
     place: 'Mark it here: at the crosshair ({key} on the highlighted one)',
     dismiss: 'Not in this photo: hide it ({key} on the highlighted one)',
     showMore: 'Show {n, plural, one {# more} other {# more}}',
+  },
+  // What a point still needs before it is used (core/gcpReadiness.js).
+  need: {
+    xy: 'no X/Y',
+    z: 'no Z',
+    accuracy: 'no accuracy (σ)',
+    marks: 'marked in {n, number} of 2 photos',
+  },
+  status: {
+    ready: { control: '✓ used', check: '✓ measured', marker: '✓ marked' },
+    off: 'disabled',
+  },
+  datum: {
+    unknown: 'Not set',
+    ellipsoidal: 'Ellipsoidal (WGS 84)',
+    geoidEGM2008: 'Geoid EGM2008',
+    geoidEGM96: 'Geoid EGM96',
+    orthometric: 'Other geoid / national',
+    local: 'Local',
+  },
+  accuracy: {
+    'unknown': 'Not set',
+    'rtk-fixed': 'RTK fixed',
+    'rtk-float': 'RTK float',
+    'total-station': 'Total station',
+    'map-picked': 'Picked off a map or orthophoto',
+    'custom': 'Custom',
+    'withValues': '{name} · {xy, number} / {z, number} m',
+  },
+  sidebar: {
+    notReady: 'Not used yet: {needs}. Fill them in View ▸ Control & Markers.',
   },
 }

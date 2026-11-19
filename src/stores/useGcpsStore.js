@@ -2,7 +2,12 @@ import { ref, watch, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, isGeographic, localMetricFrame, metresToCrsUnits, transform } from '../core/crs.js'
-import { confidenceToSigma, precisionFromGcp, reprojectGcpWithAccuracy } from '../core/gcpAccuracy.js'
+import {
+  GCP_ACCURACY_PRESETS,
+  confidenceToSigma,
+  precisionFromGcp,
+  reprojectGcpWithAccuracy,
+} from '../core/gcpAccuracy.js'
 import { hasGcpElevation, normalizeGcpRole } from '../core/io/gcp.js'
 import { isVerticalDatum } from '../core/verticalDatum.js'
 import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
@@ -476,6 +481,23 @@ export const useGcpsStore = registerProjectStore(
       save()
     }
 
+    // A GCP's ground accuracy from a preset of GCP_ACCURACY_PRESETS (core/gcpAccuracy.js,
+    // in metres, as the GCP import applies them): 'unknown' clears it, so the point no
+    // longer constrains the fit. 'custom' keeps the typed values. Returns false for an
+    // unknown preset or a marker, which has no ground position.
+    function setGcpAccuracyPreset(id, presetId) {
+      const g = gcps.value.find((x) => x.id === id)
+      const preset = GCP_ACCURACY_PRESETS[presetId]
+      if (!g || !preset || g.role === 'marker' || presetId === 'custom') return false
+      const crs = projects.currentCrs
+      g.accuracyX = preset.x == null ? null : metresToCrsUnits(preset.x, crs)
+      g.accuracyY = preset.y == null ? null : metresToCrsUnits(preset.y, crs)
+      g.accuracyZ = preset.z == null ? null : metresToCrsUnits(preset.z, crs)
+      g.accuracyStatus = presetId === 'unknown' ? 'unknown' : `preset:${presetId}`
+      save()
+      return true
+    }
+
     // Include/exclude a GCP from the georeference fit, BA anchoring and the
     // accuracy report. The visible, reversible way to drop a GCP the accuracy
     // table shows to be bad — see CLAUDE.md on why that report never rejects
@@ -879,6 +901,7 @@ export const useGcpsStore = registerProjectStore(
       setGcpVerticalDatum,
       setGcpPosition,
       setGcpAccuracy,
+      setGcpAccuracyPreset,
       setObservation,
       setObservationAccuracy,
       removeObservation,

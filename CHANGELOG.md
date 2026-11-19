@@ -383,6 +383,17 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **It says why a GCP is not used.** A GCP only constrains the georeference with X, Y, Z,
+  an accuracy and marks in two photos, but a point placed by hand had no accuracy and
+  nothing said so: the table showed a small "⚠ unknown" beside the datum, and Georeference
+  asked for three GCPs "with coordinates". The Control & Markers table now has a Status
+  column (what each point lacks, or ✓ used) and a line counting the usable control
+  points; the sidebar marks such a point with ⚠; Georeference names what the first one
+  lacks. Accuracy is a preset choice (RTK fixed, RTK float, total station, picked off a
+  map) beside σ X/Y/Z, a GCP placed on the map starts with the map-picked one (2 m, 5 m),
+  and the height datum has its own column and full names ("Not set" for "datum?"). The
+  table's Convert heights to… did nothing; it converts again. `gcp set` takes `accuracy=`
+  and `datum=`.
 - **The GCP view centres very large photos right.** A photo past the canvas limit is shown
   from a reduced copy, which the view drew at the copy's own size, so its crosshair sat
   off the mark; every photo is now drawn at its full pixel size, the size marks are in.

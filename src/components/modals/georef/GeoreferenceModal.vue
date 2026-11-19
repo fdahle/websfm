@@ -27,6 +27,8 @@ const props = defineProps({
   hasMatches: { type: Boolean, default: false },
   // Enabled ground control with coordinates (the frame of a DEM hold).
   controlCount: { type: Number, default: 0 },
+  // The enabled control points that cannot be used yet, and why (core/gcpReadiness.js).
+  controlNotReady: { type: Array, default: () => [] },
   poseCount: { type: Number, default: 0 },
   projectCrs: { type: String, default: '' },
   // Imported reference DEMs, polygon layers for stable ground, and the camera
@@ -64,6 +66,7 @@ const project = computed(() => ({
   gcps: props.controlCount,
   poses: props.poseCount,
   adjustReady: props.canAdjustWithGcps,
+  notReady: props.controlNotReady,
   transformReady: props.canTransform,
 }))
 const methods = computed(() => georeferenceMethods(project.value))

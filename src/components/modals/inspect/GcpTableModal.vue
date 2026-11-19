@@ -20,6 +20,8 @@ const emit = defineEmits([
   'update-position',
   'update-role',
   'update-vertical-datum',
+  'update-accuracy-preset',
+  'convert-heights',
   'refresh-report',
   'select',
   'add',
@@ -56,6 +58,8 @@ const emit = defineEmits([
       @update-position="emit('update-position', $event)"
       @update-role="emit('update-role', $event)"
       @update-vertical-datum="emit('update-vertical-datum', $event)"
+      @update-accuracy-preset="emit('update-accuracy-preset', $event)"
+      @convert-heights="emit('convert-heights', $event)"
       @select="emit('select', $event)"
       @add="emit('add', $event)"
     />
