@@ -26,7 +26,7 @@ everything unmasked is used. A mask acts on:
 A mask takes effect the next time a stage runs. Changing a mask does not alter
 results that already exist, so rerun detection, or the dense stages, afterwards.
 
-<!-- TODO(image): assets/image-mask.svg - a drone photo with the sky and a landing leg painted red, the detected keypoints shown only on the unmasked ground, and the same photo's depth map with the masked areas empty. -->
+![A drone photo with the sky and a landing leg painted red, gold keypoint circles only on the unmasked ground; beside it the photo's depth map, near ground yellow to far ground blue, with the sky and the leg left empty.](assets/image-mask.svg)
 
 **Making masks.** In the image viewer, paint with a brush, erase, draw rectangles, or
 use **Smart Select**: click an object and a segmentation model (SAM2) outlines it.

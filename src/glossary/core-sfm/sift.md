@@ -19,7 +19,7 @@ sub-pixel accuracy; the scale at which it fired becomes the keypoint's own
 scale, and that is what makes the subsequent [Descriptor](help:descriptor)
 scale-invariant.
 
-<!-- TODO(image): assets/sift-scale-space.svg - the octave/blur-level pyramid on the left, the DoG stack obtained by subtracting adjacent levels in the middle, and the 3x3x3 neighbourhood extremum test on the right. -->
+![Left, the Gaussian scale space: one photo blurred more and more, in two octaves, the second at half the size. Middle, the differences of adjacent blur levels, where blob-like structure lights up red or blue at its own scale. Right, three stacked 3×3 grids for the scale above, this scale and the scale below: the centre cell is a keypoint when it is larger or smaller than all 26 neighbours.](assets/sift-scale-space.svg)
 
 Two filters keep the output honest. Low-contrast extrema are discarded, and
 extrema lying along an edge — where the position is well-determined across the

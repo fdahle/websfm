@@ -26,7 +26,7 @@ on resolution, because the Laplacian works per pixel, so every image is first
 resampled to the same analysis size (1,024 px on the long side). Cameras of
 different resolution are then comparable.
 
-<!-- TODO(image): assets/image-sharpness.svg - the same image patch sharp and motion-blurred, each with its Laplacian response beside it, and a histogram of Laplacian values that is wide for the sharp patch and narrow for the blurred one. -->
+![The same patch sharp and motion-blurred, each beside its Laplacian: busy for the sharp patch, faint for the blurred one. A histogram of the Laplacian values is wide for the sharp patch (variance 1.00) and narrow for the blurred one (variance 0.10).](assets/image-sharpness.svg)
 
 In WebSfM, **Tools ▸ Images ▸ Image quality** scores every image. Pixels under an
 [image mask](help:image-mask) are left out, so the edge of a mask cannot read as

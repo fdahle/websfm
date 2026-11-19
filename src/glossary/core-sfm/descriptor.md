@@ -18,7 +18,7 @@ gradient orientation, and accumulates gradient directions into a 4×4 grid of
 contrast change leaves them unmoved. Two descriptors are then compared by plain
 Euclidean distance: small distance, similar appearance.
 
-<!-- TODO(image): assets/sift-descriptor.svg - one keypoint patch rotated to its dominant orientation, the 4x4 cell grid over it, and one cell expanded into its 8-bin gradient histogram, with the 4x4x8 = 128 arithmetic called out. -->
+![A keypoint's patch with a 4×4 grid turned to its dominant orientation, one cell highlighted; that cell's gradient directions summed into 8 bins, drawn as a rose of arrows and as a bar chart. 4 × 4 cells × 8 bins = 128 numbers.](assets/sift-descriptor.svg)
 
 **Descriptor width is per-detector, not a universal constant.** WebSfM ships four
 detectors: SIFT, DISK and ALIKED at 128 dimensions, and SuperPoint at 256 (ALIKED,

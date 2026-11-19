@@ -1315,10 +1315,390 @@ def sensors():
     b += text(340, 350, 'within a group only the pose (blue) differs from photo to photo', GREY, 11, 'middle')
     svg('sensor-grouping.svg', W, H, b)
 
+# ── raster images: computed small, embedded as PNG ───────────────────────────
+# Image content (a photo, a depth map, a filter response) is computed at a few dozen
+# pixels and embedded as a PNG data URI, far smaller than one rect per pixel. Its
+# colours are data, the same in both themes.
+import zlib, struct, base64
+def png_uri(px):
+    # px: rows of (r, g, b) or None (transparent)
+    h, w = len(px), len(px[0])
+    raw = b''.join(b'\x00' + b''.join(bytes((0, 0, 0, 0)) if p is None else bytes((*(max(0, min(255, round(v))) for v in p), 255)) for p in row) for row in px)
+    def chunk(t, d): return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    data = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b'')
+    return 'data:image/png;base64,' + base64.b64encode(data).decode()
+def image(x, y, w, h, px, smooth=True, op=None):
+    st = '' if smooth else ' style="image-rendering:pixelated"'
+    o = f' opacity="{op}"' if op is not None else ''
+    return f'  <image x="{f2(x)}" y="{f2(y)}" width="{f2(w)}" height="{f2(h)}" preserveAspectRatio="none"{st}{o} href="{png_uri(px)}"/>\n'
+def gray_px(img, lo=None, hi=None):
+    vals = [v for row in img for v in row if v is not None]
+    lo = min(vals) if lo is None else lo; hi = max(vals) if hi is None else hi
+    return [[None if v is None else (lambda g: (g, g, g))(255 * (v - lo) / ((hi - lo) or 1)) for v in row] for row in img]
+def map_px(img, colour):
+    return [[None if v is None else tuple(int(colour(v)[k:k + 2], 16) for k in (1, 3, 5)) for v in row] for row in img]
+def conv1(img, k, axis):
+    h, w = len(img), len(img[0]); r = len(k) // 2
+    out = [[0.0] * w for _ in range(h)]
+    for j in range(h):
+        for i in range(w):
+            s = 0.0
+            for t, kv in enumerate(k):
+                if axis == 0: ii = min(w - 1, max(0, i + t - r)); s += kv * img[j][ii]
+                else: jj = min(h - 1, max(0, j + t - r)); s += kv * img[jj][i]
+            out[j][i] = s
+    return out
+def gauss(img, sigma):
+    if sigma <= 0: return [row[:] for row in img]
+    r = max(1, int(3 * sigma)); k = [math.exp(-(t * t) / (2 * sigma * sigma)) for t in range(-r, r + 1)]; S = sum(k); k = [v / S for v in k]
+    return conv1(conv1(img, k, 0), k, 1)
+def laplacian(img):
+    h, w = len(img), len(img[0]); g = lambda j, i: img[min(h - 1, max(0, j))][min(w - 1, max(0, i))]
+    return [[g(j - 1, i) + g(j + 1, i) + g(j, i - 1) + g(j, i + 1) - 4 * g(j, i) for i in range(w)] for j in range(h)]
+def scene_img(w, h, seed=1):
+    # A textured aerial-ish scene: smooth terrain shading, fields with edges, a few blobs.
+    r = random.Random(seed)
+    waves = [(r.uniform(0.05, 0.3), r.uniform(0.05, 0.3), r.uniform(0, 6), r.uniform(0.05, 0.15)) for _ in range(5)]
+    blobs = [(r.uniform(0, w), r.uniform(0, h), r.uniform(1.2, 3.5), r.choice((-0.35, 0.35))) for _ in range(14)]
+    rects = [(r.uniform(0, w * 0.8), r.uniform(0, h * 0.8), r.uniform(6, 16), r.uniform(5, 12), r.uniform(-0.2, 0.2)) for _ in range(4)]
+    img = []
+    for j in range(h):
+        row = []
+        for i in range(w):
+            v = 0.5 + sum(a * math.sin(fx * i + fy * j + ph) for fx, fy, ph, a in waves)
+            for (x0, y0, rw, rh, dv) in rects:
+                if x0 <= i < x0 + rw and y0 <= j < y0 + rh: v += dv
+            for (bx, by, br, dv) in blobs:
+                if (i - bx) ** 2 + (j - by) ** 2 < br * br: v += dv
+            v += r.gauss(0, 0.025)
+            row.append(v)
+        img.append(row)
+    return img
+
+# ── sift-scale-space.svg ─────────────────────────────────────────────────────
+def siftscale():
+    W, H = 700, 360
+    base = scene_img(40, 40, 3)
+    b = ''
+    sig = [1.0, 1.6, 2.6, 4.1]
+    rows = []
+    for o, size in enumerate((96, 48)):
+        src = base if o == 0 else [row[::2] for row in base[::2]]
+        levels = [gauss(src, s / (1 if o == 0 else 1)) for s in sig]
+        rows.append((size, levels))
+    b += text(110, 26, 'Gaussian scale space', FG, 13, 'middle') + text(360, 26, 'difference of Gaussians', FG, 13, 'middle') + text(590, 26, 'extremum test', FG, 13, 'middle')
+    y0 = 50
+    for o, (size, levels) in enumerate(rows):
+        oy = y0 + (0 if o == 0 else 170)
+        for k, lev in enumerate(levels):
+            x = 20 + k * 14; y = oy + 30 - k * 10
+            b += image(x, y, size, size, gray_px(lev, 0.1, 0.95)) + rect(x, y, size, size, DIM, sw=0.8)
+        b += text(20, oy + size + 52 if o == 0 else oy + size + 50, f'octave {o + 1}' + (': half the size' if o else ''), GREY, 11)
+        dogs = [[[a - c for a, c in zip(ra, rc)] for ra, rc in zip(levels[k + 1], levels[k])] for k in range(3)]
+        m = max(abs(v) for d in dogs for row in d for v in row)
+        for k, d in enumerate(dogs):
+            x = 290 + k * 14; y = oy + 30 - k * 10
+            b += image(x, y, size, size, map_px(d, lambda v: ramp((v / m + 1) / 2, DIVERGE))) + rect(x, y, size, size, DIM, sw=0.8)
+        b += arrow(150 if o == 0 else 100, oy + 30 + size / 2, 280, oy + 30 + size / 2, GREY, 1.4, 7)
+        b += text(215, oy + 22 + size / 2, 'subtract', GREY, 11, 'middle') if o == 0 else ''
+    # the 3×3×3 neighbourhood: three layers in a skewed view
+    cx, cy, c = 560, 110, 24
+    for li, (lab, dy) in enumerate((('scale above', -68), ('this scale', 0), ('scale below', 68))):
+        for j in range(3):
+            for i in range(3):
+                x = cx + i * c + j * 14; y = cy + dy + 44 + j * 14
+                pts = [(x, y), (x + c, y), (x + c + 14, y + 14), (x + 14, y + 14)]
+                centre = li == 1 and i == 1 and j == 1
+                b += poly(pts, BLUE, fill=GOLD if centre else BLUE, w=1, op=1 if centre else 0.35, closed=True) + poly(pts, BLUE, w=1, closed=True)
+        b += text(cx - 8, cy + dy + 66, lab, GREY, 11, 'end')
+    b += text(590, 330, 'a keypoint: larger (or smaller)', GOLD, 12, 'middle') + text(590, 346, 'than all 26 neighbours', GOLD, 12, 'middle')
+    b += text(360, 330, 'blob-like structure lights up', GREY, 11, 'middle') + text(360, 346, 'at its own scale', GREY, 11, 'middle')
+    svg('sift-scale-space.svg', W, H, b)
+
+# ── sift-descriptor.svg ──────────────────────────────────────────────────────
+def siftdesc():
+    W, H = 700, 330
+    n = 32
+    ang0 = math.radians(28)  # the patch's dominant orientation
+    # a patch: a bright corner turned by ang0, with some texture
+    r = random.Random(4)
+    img = []
+    for j in range(n):
+        row = []
+        for i in range(n):
+            u, v = rot2((i - n / 2 + 0.5, j - n / 2 + 0.5), -ang0)
+            val = 0.25 + (0.55 if (u > -3 and v > -6) else 0) + 0.12 * math.sin(0.9 * u) * (v < -6) + r.gauss(0, 0.03)
+            row.append(val)
+        img.append(row)
+    img = gauss(img, 0.8)
+    b = ''
+    S = 200; px0, py0 = 30, 70
+    b += image(px0, py0, S, S, gray_px(img, 0.1, 0.95))
+    c0 = (px0 + S / 2, py0 + S / 2)
+    # the 4×4 grid, turned to the dominant orientation
+    half = S * 0.34
+    for k in range(5):
+        t = -half + k * half / 2
+        p1, p2 = rot2((c0[0] + t, c0[1] - half), ang0, c0), rot2((c0[0] + t, c0[1] + half), ang0, c0)
+        q1, q2 = rot2((c0[0] - half, c0[1] + t), ang0, c0), rot2((c0[0] + half, c0[1] + t), ang0, c0)
+        b += line(*p1, *p2, BLUE, 1.2) + line(*q1, *q2, BLUE, 1.2)
+    e = rot2((c0[0] + half + 18, c0[1]), ang0, c0)
+    b += arrow(*c0, *e, GOLD, 2.2, 9) + circ(*c0, 4, GOLD)
+    b += text(px0 + S / 2, 52, 'the patch at the keypoint’s scale,', GREY, 11, 'middle') + text(px0 + S / 2, 290, 'grid turned to its dominant orientation (gold)', GREY, 11, 'middle')
+    # gradients per cell (in the patch's own frame), one cell picked
+    gx = [[(img[j][min(n - 1, i + 1)] - img[j][max(0, i - 1)]) / 2 for i in range(n)] for j in range(n)]
+    gy = [[(img[min(n - 1, j + 1)][i] - img[max(0, j - 1)][i]) / 2 for i in range(n)] for j in range(n)]
+    def hist(ci, cj):
+        h = [0.0] * 8
+        for j in range(n):
+            for i in range(n):
+                u, v = rot2((i - n / 2 + 0.5, j - n / 2 + 0.5), -ang0)
+                cu, cv = int((u + half * n / S) // (half * n / S / 2)), int((v + half * n / S) // (half * n / S / 2))
+                if (cu, cv) != (ci, cj): continue
+                a = (math.atan2(gy[j][i], gx[j][i]) - ang0) % (2 * math.pi)
+                h[int(a / (math.pi / 4)) % 8] += math.hypot(gx[j][i], gy[j][i])
+        return h
+    pick = (1, 1)
+    # highlight the picked cell
+    corners = [(-half + pick[0] * half / 2, -half + pick[1] * half / 2), (-half + (pick[0] + 1) * half / 2, -half + pick[1] * half / 2),
+               (-half + (pick[0] + 1) * half / 2, -half + (pick[1] + 1) * half / 2), (-half + pick[0] * half / 2, -half + (pick[1] + 1) * half / 2)]
+    cc = [rot2((c0[0] + u, c0[1] + v), ang0, c0) for u, v in corners]
+    b += poly(cc, GOLD, fill=GOLD, w=2, op=0.35, closed=True) + poly(cc, GOLD, w=2, closed=True)
+    hh = hist(*pick); m = max(hh) or 1
+    # the cell's histogram as a rose of 8 arrows, and as bars
+    rx, ry = 340, 170
+    b += line(cc[1][0], cc[1][1], rx - 70, ry - 40, GOLD, 1, '3 3') + line(cc[2][0], cc[2][1], rx - 70, ry + 40, GOLD, 1, '3 3')
+    for k in range(8):
+        a = k * math.pi / 4; L = 12 + 52 * hh[k] / m
+        b += arrow(rx, ry, rx + L * math.cos(a), ry + L * math.sin(a), GOLD, 2, 7)
+    b += circ(rx, ry, 3, GOLD)
+    b += text(rx, 82, 'one cell: gradient directions', GREY, 11, 'middle') + text(rx, 96, 'summed into 8 bins', GREY, 11, 'middle')
+    bx, by = 440, 120
+    for k in range(8):
+        hgt = 90 * hh[k] / m
+        b += rect(bx + k * 16, by + 100 - hgt, 12, hgt, fill=GOLD)
+    b += line(bx - 4, by + 100, bx + 130, by + 100, GREY, 1)
+    b += text(bx + 62, by + 118, '8 bins', GREY, 11, 'middle')
+    b += text(550, 286, '4 × 4 cells × 8 bins = 128 numbers', FG, 14, 'middle')
+    b += text(550, 306, 'normalised: brightness and contrast drop out', GREY, 11, 'middle')
+    svg('sift-descriptor.svg', W, H, b)
+
+# ── image-sharpness.svg ──────────────────────────────────────────────────────
+def sharp():
+    W, H = 700, 340
+    img = scene_img(44, 44, 8)
+    k = [1 / 7] * 7
+    blur = conv1(img, k, 0)                                 # motion blur: along x
+    L1, L2 = laplacian(img), laplacian(blur)
+    var = lambda L: (lambda v: sum((x - sum(v) / len(v)) ** 2 for x in v) / len(v))([x for row in L for x in row])
+    v1, v2 = var(L1), var(L2)
+    m = max(abs(x) for row in L1 for x in row) * 0.7
+    b = ''
+    S = 110
+    for ri, (lab, im, L, c) in enumerate((('sharp', img, L1, BLUE), ('motion-blurred', blur, L2, GOLD))):
+        y = 50 + ri * 140
+        b += image(30, y, S, S, gray_px(im, 0.0, 1.0)) + rect(30, y, S, S, c, sw=2)
+        b += image(170, y, S, S, map_px(L, lambda v: ramp((max(-1, min(1, v / m)) + 1) / 2, GRAYS))) + rect(170, y, S, S, c, sw=2)
+        b += text(30, y - 8, lab, c, 12)
+        b += arrow(144, y + S / 2, 166, y + S / 2, GREY, 1.2, 5)
+    b += text(225, 40, 'Laplacian', GREY, 11, 'middle')
+    # histograms of the Laplacian values
+    hx, hy, hw, hh_ = 340, 60, 330, 200
+    nb = 31
+    def histo(L):
+        h = [0] * nb
+        for row in L:
+            for x in row:
+                k_ = int((max(-1, min(0.999, x / m)) + 1) / 2 * nb); h[k_] += 1
+        return h
+    h1, h2 = histo(L1), histo(L2)
+    top = max(h1 + h2)
+    bw = hw / nb
+    for h, c in ((h2, GOLD), (h1, BLUE)):
+        pts = [(hx, hy + hh_)] + [(hx + (k_ + 0.5) * bw, hy + hh_ - hh_ * h[k_] / top) for k_ in range(nb)] + [(hx + hw, hy + hh_)]
+        b += poly(pts, c, fill=c, w=1.6, op=0.35, closed=True) + poly(pts, c, w=1.8)
+    b += line(hx, hy + hh_, hx + hw, hy + hh_, GREY, 1) + line(hx + hw / 2, hy + hh_, hx + hw / 2, hy + hh_ + 5, GREY, 1)
+    b += text(hx + hw / 2, hy + hh_ + 18, '0', GREY, 11, 'middle') + text(hx + hw / 2, hy + hh_ + 34, 'Laplacian value', GREY, 11, 'middle')
+    b += text(hx + hw, hy + 20, f'sharp: wide, variance {v1 / v1:.2f}', BLUE, 12, 'end')
+    b += text(hx + hw, hy + 38, f'blurred: narrow, variance {v2 / v1:.2f}', GOLD, 12, 'end')
+    b += text(350, 330, 'blur removes fine detail, so the Laplacian’s spread drops: that spread is the sharpness score', GREY, 11, 'middle')
+    svg('image-sharpness.svg', W, H, b)
+
+# ── image-mask.svg ───────────────────────────────────────────────────────────
+def imask():
+    W, H = 700, 320
+    w, h = 96, 64
+    hz = 22                                                  # horizon row
+    tex = scene_img(w, h, 12)
+    leg = lambda i, j: 0 <= (i - 70) - (j - 40) * 0.6 <= 9 and j >= 36
+    sky = lambda i, j: j < hz + 2 * math.sin(i / 9)
+    photo, mask, depth = [], [], []
+    for j in range(h):
+        pr, mr, dr = [], [], []
+        for i in range(w):
+            if leg(i, j): v = (40, 40, 44); m = True; d = None
+            elif sky(i, j): g = 205 - j * 1.5; v = (g * 0.8, g * 0.88, g); m = True; d = None
+            else:
+                t = tex[j][i]; v = (90 + 80 * t, 95 + 70 * t, 70 + 50 * t); m = False
+                d = ((h - j) / (h - hz)) ** 1.4
+            pr.append(v); mr.append(m); dr.append(d)
+        photo.append(pr); mask.append(mr); depth.append(dr)
+    S = 3  # px per image pixel on screen
+    b = ''
+    x1, y1 = 30, 50
+    b += image(x1, y1, w * S, h * S, photo)
+    b += image(x1, y1, w * S, h * S, [[(239, 111, 108) if m else None for m in row] for row in mask], op=0.7)
+    # keypoints where the texture has contrast, kept only off the mask
+    L = laplacian(gauss(tex, 0.7))
+    cand = sorted(((abs(L[j][i]), i, j) for j in range(2, h - 2) for i in range(2, w - 2)), reverse=True)
+    kept, dropped = [], []
+    for s, i, j in cand:
+        if any(abs(i - a) < 6 and abs(j - c) < 6 for _, a, c in kept + dropped): continue
+        (dropped if mask[j][i] else kept).append((s, i, j))
+        if len(kept) >= 34: break
+    for _, i, j in kept: b += circ(x1 + (i + 0.5) * S, y1 + (j + 0.5) * S, 4, GOLD, fill=False, w=1.4)
+    b += rect(x1, y1, w * S, h * S, DIM, sw=1)
+    b += text(x1 + w * S / 2, 36, 'photo: sky and landing leg masked (red)', FG, 12, 'middle')
+    b += text(x1 + w * S / 2, y1 + h * S + 20, 'keypoints (gold) only on the unmasked ground', GOLD, 11, 'middle')
+    x2 = 380
+    dmax = max(d for row in depth for d in row if d is not None)
+    b += rect(x2, y1, w * S, h * S, DIM, fill=RAISED, sw=1)
+    b += image(x2, y1, w * S, h * S, map_px([[None if d is None else d / dmax for d in row] for row in depth],
+                                         lambda t: ramp(t, ((0, (238, 214, 120)), (0.5, (96, 162, 146)), (1, (66, 76, 150))))))
+    b += rect(x2, y1, w * S, h * S, DIM, sw=1)
+    b += text(x2 + w * S / 2, 36, 'its depth map', FG, 12, 'middle')
+    b += text(x2 + w * S / 2, y1 + h * S + 20, 'near (yellow) to far (blue); masked pixels get no depth', GREY, 11, 'middle')
+    svg('image-mask.svg', W, H, b)
+
+# ── fiducial-marks.svg ───────────────────────────────────────────────────────
+def fiducial():
+    W, H = 700, 360
+    b = ''
+    FW = 230                                               # frame size on screen (230 mm → 1 px/mm)
+    marks = [(-1, -1), (1, -1), (1, 1), (-1, 1), (0, -1), (1, 0), (0, 1), (-1, 0)]
+    def fmark(x, y, c, corner):
+        if corner: return line(x - 6, y, x + 6, y, c, 1.6) + line(x, y - 6, x, y + 6, c, 1.6) + circ(x, y, 9, c, fill=False, w=1)
+        return poly([(x - 5, y - 5), (x + 5, y - 5), (x, y + 3)], c, fill=c, w=1, closed=True) if y < 0 else circ(x, y, 4, c)
+    # left: the scan, frame turned 3° and shifted on the scanner bed
+    ox, oy = 30, 50
+    b += rect(ox, oy, 300, 280, DIM, fill='none', sw=1, dash='4 3')
+    b += text(ox + 4, oy + 274, 'scanner bed (scan pixels)', GREY, 10)
+    c = (ox + 160, oy + 135); ang = math.radians(-3.5); sc = 0.98
+    corners = [rot2((c[0] + sx * FW / 2 * sc, c[1] + sy * FW / 2 * sc), ang, c) for sx, sy in [(-1, -1), (1, -1), (1, 1), (-1, 1)]]
+    b += poly(corners, DIM, fill=RAISED, w=1.2, closed=True)
+    hill = [rot2((c[0] + x * sc, c[1] + y * sc), ang, c) for x, y in [(-110, 40), (-60, 0), (-10, 25), (40, -15), (110, 20), (110, 110), (-110, 110)]]
+    b += poly(hill, DIM, fill=DIM, w=0.5, op=0.6, closed=True)
+    for (sx, sy) in marks:
+        p = rot2((c[0] + sx * (FW / 2 - 8) * sc, c[1] + sy * (FW / 2 - 8) * sc), ang, c)
+        b += circ(*p, 4, GOLD) + circ(*p, 9, GOLD, fill=False, w=1.2)
+    b += text(ox + 150, 34, 'scan: frame turned and offset', FG, 12, 'middle')
+    b += curve((345, 170), (395, 170), -22, GREY, 1.8)
+    b += text(370, 140, 'affine fit', GREY, 11, 'middle')
+    # right: the frame in the camera's mm system, fiducials on their certified places
+    ox2, oy2 = 410, 55
+    c2 = (ox2 + FW / 2 + 15, oy2 + FW / 2 + 20)
+    b += rect(c2[0] - FW / 2, c2[1] - FW / 2, FW, FW, DIM, fill=RAISED, sw=1.2)
+    for k in range(-5, 6):
+        g = k * 20
+        if abs(g) <= FW / 2:
+            b += line(c2[0] + g, c2[1] - FW / 2, c2[0] + g, c2[1] + FW / 2, DIM, 0.6) + line(c2[0] - FW / 2, c2[1] + g, c2[0] + FW / 2, c2[1] + g, DIM, 0.6)
+    b += poly([(c2[0] + x, c2[1] + y) for x, y in [(-110, 40), (-60, 0), (-10, 25), (40, -15), (110, 20), (110, 110), (-110, 110)]], DIM, fill=DIM, w=0.5, op=0.45, closed=True)
+    for (sx, sy) in marks:
+        p = (c2[0] + sx * (FW / 2 - 8), c2[1] + sy * (FW / 2 - 8))
+        b += circ(*p, 9, GOLD, fill=False, w=1.2) + circ(p[0] + 0.6, p[1] - 0.5, 2.5, GREEN)
+    pp = (c2[0] + 2.5, c2[1] - 1.5)
+    b += line(pp[0] - 9, pp[1], pp[0] + 9, pp[1], RED, 2) + line(pp[0], pp[1] - 9, pp[0], pp[1] + 9, RED, 2)
+    b += text(pp[0] + 12, pp[1] - 8, 'principal point', RED, 11)
+    b += text(c2[0] - FW / 2, c2[1] + FW / 2 + 16, '−115', GREY, 10, 'middle') + text(c2[0] + FW / 2, c2[1] + FW / 2 + 16, '+115 mm', GREY, 10, 'middle')
+    b += text(c2[0], 34, 'camera frame (mm): axes aligned', FG, 12, 'middle')
+    b += text(c2[0], c2[1] + FW / 2 + 34, 'green: measured marks, landing on their certified places', GREY, 11, 'middle')
+    svg('fiducial-marks.svg', W, H, b)
+
+# ── depth-map.svg ────────────────────────────────────────────────────────────
+def depthmap():
+    W, H = 700, 400
+    # A scene ray-cast through one camera: textured ground (z = 0) and a box.
+    C = (0.0, -6.0, 3.2); R = look_at(C, (0.0, 2.0, 0.0)); w, h = 96, 64; f = 70
+    box = ((-1.0, 0.0, 0.0), (1.4, 2.2, 1.6))
+    tex = scene_img(64, 64, 15)
+    sun = v_norm((-0.4, -0.6, 0.7))
+    def cast(i, j):
+        d = v_norm(v_add(v_add(v_mul(R[0], (i + 0.5 - w / 2) / f), v_mul(R[1], (j + 0.5 - h / 2) / f)), R[2]))
+        best = (1e9, None, None)
+        # slab test for the box
+        t0, t1, n0 = -1e9, 1e9, None
+        for a in range(3):
+            if abs(d[a]) < 1e-9:
+                if not (box[0][a] <= C[a] <= box[1][a]): t0, t1 = 1, 0
+                continue
+            ta, tb = (box[0][a] - C[a]) / d[a], (box[1][a] - C[a]) / d[a]
+            na = tuple((-1 if k == a else 0) * (1 if d[a] > 0 else -1) for k in range(3))
+            if ta > tb: ta, tb = tb, ta
+            if ta > t0: t0, n0 = ta, na
+            t1 = min(t1, tb)
+        if t0 <= t1 and t0 > 0: best = (t0, n0, 'box')
+        if d[2] < 0:
+            tg = -C[2] / d[2]
+            if tg < best[0]: best = (tg, (0, 0, 1), 'ground')
+        return best, d
+    photo, depth = [], []
+    for j in range(h):
+        pr, dr = [], []
+        for i in range(w):
+            (t, n, what), d = cast(i, j)
+            if what is None: pr.append((150, 170, 196)); dr.append(None); continue
+            X = v_add(C, v_mul(d, t))
+            lit = 0.45 + 0.55 * max(0, v_dot(n, sun))
+            if what == 'ground':
+                tv = tex[int(X[1] * 4) % 64][int(X[0] * 4 + 32) % 64]
+                base = (90 + 70 * tv, 100 + 60 * tv, 72 + 40 * tv)
+            else: base = (190, 178, 160)
+            pr.append(tuple(v * lit for v in base)); dr.append(t)
+        photo.append(pr); depth.append(dr)
+    ds = sorted(t for row in depth for t in row if t is not None)
+    lo, hi = ds[0], ds[int(0.95 * len(ds))]   # the far ground would flatten the ramp: clamp at the 90th percentile
+    S = 3; y0 = 50
+    xA, xB = 20, 330
+    b = image(xA, y0, w * S, h * S, photo) + rect(xA, y0, w * S, h * S, DIM, sw=1)
+    b += rect(xB, y0, w * S, h * S, DIM, fill=RAISED, sw=1)
+    DEPTH = ((0, (238, 214, 120)), (0.5, (96, 162, 146)), (1, (66, 76, 150)))
+    # a log scale, as a depth viewer would use: the near half of the ramp for the near ground and the box
+    dl = lambda t: min(1, math.log(t / lo) / math.log(hi / lo))
+    b += image(xB, y0, w * S, h * S, map_px([[None if t is None else dl(t) for t in row] for row in depth], lambda u: ramp(u, DEPTH)))
+    b += rect(xB, y0, w * S, h * S, DIM, sw=1)
+    # the colour key
+    for k in range(40):
+        b += rect(xB + w * S + 14, y0 + k * h * S / 40, 12, h * S / 40 + 0.5, fill=ramp(k / 39, DEPTH))
+    b += text(xB + w * S + 30, y0 + 10, f'{lo:.0f} m', GREY, 10) + text(xB + w * S + 30, y0 + h * S, f'{hi:.0f} m +', GREY, 10) + text(xB + w * S + 20, y0 + h * S + 16, 'log scale', GREY, 10, 'middle')
+    b += text(xA + w * S / 2, 36, 'photo', FG, 12, 'middle') + text(xB + w * S / 2, 36, 'its depth map: distance per pixel', FG, 12, 'middle')
+    # one pixel traced: on the box's front face
+    pi_, pj = 56, 30
+    (t, n, what), d = cast(pi_, pj)
+    for xx in (xA, xB):
+        b += circ(xx + (pi_ + 0.5) * S, y0 + (pj + 0.5) * S, 5, RED, fill=False, w=2)
+    # side view of the same ray (y forward, z up)
+    sx, sy, sk = 90, 360, 28
+    P = lambda Y, Z: (sx + sk * (Y - C[1]), sy - sk * Z)
+    b += line(*P(-6.2, 0), *P(5, 0), GREY, 2)
+    b += poly([P(box[0][1], 0), P(box[0][1], box[1][2]), P(box[1][1], box[1][2]), P(box[1][1], 0)], GREY, fill=RAISED, w=1.6)
+    X = v_add(C, v_mul(d, t))
+    b += line(*P(C[1], C[2]), *P(X[1], X[2]), RED, 1.8)
+    b += cam2d(*P(C[1], C[2]), math.atan2(-(R[2][2]), R[2][1]), size=14)
+    hx, hy = P(X[1], X[2])
+    b += circ(hx, hy, 4, RED)
+    nn = (n[1], -n[2])
+    b += arrow(hx, hy, hx + 30 * nn[0], hy + 30 * nn[1], GREEN, 1.8, 7)
+    b += text(hx + 30 * nn[0] - 4, hy + 30 * nn[1] - 8, 'normal', GREEN, 11, 'end')
+    mx, my = (P(C[1], C[2])[0] + hx) / 2, (P(C[1], C[2])[1] + hy) / 2
+    b += text(mx + 8, my - 10, f'depth {t:.1f} m', RED, 12)
+    b += text(540, 316, 'side view of the traced pixel (red):', GREY, 11, 'middle') + text(540, 332, 'the depth map stores the length of its ray,', GREY, 11, 'middle') + text(540, 348, 'a normal plane the surface direction', GREY, 11, 'middle')
+    svg('depth-map.svg', W, H, b)
+
 FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning,
            volume, gauge, lowe, track, cog, mgraph, pose,
            kpmatch, fmatrix, homog, cheir, pnp, incsfm,
-           bundle, selfcal, cycle, presel, mdensity, sensors]
+           bundle, selfcal, cycle, presel, mdensity, sensors,
+           siftscale, siftdesc, sharp, imask, fiducial, depthmap]
 only = set(sys.argv[2:])
 for f in FIGURES:
     if not only or f.__name__ in only: f()

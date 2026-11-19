@@ -18,7 +18,7 @@ since 1970. Without correction, none of the reconstruction's assumptions hold â€
 the [principal point](help:principal-point) is unknown and the effective
 [focal length](help:focal-length) in pixels is unknown.
 
-<!-- TODO(image): assets/fiducial-marks.svg - a scanned film frame slightly rotated and offset on the scanner bed, with four corner and four side fiducials marked; arrows to a second panel showing the same frame after the affine fit, axes now aligned and the principal point at the calibrated location, with the mm grid overlaid. -->
+![Left, a scanned film frame turned and offset on the scanner bed, its eight fiducial marks circled. An arrow marked affine fit leads to the right panel: the same frame in the camera's millimetre grid, axes aligned, the measured marks landing on their certified places and the principal point marked.](assets/fiducial-marks.svg)
 
 Measuring the fiducials in the scan gives the correspondence that fixes this.
 Each mark supplies a scan-pixel position paired with its certified mm position,

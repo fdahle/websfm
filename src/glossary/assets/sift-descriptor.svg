@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 330" font-family="sans-serif" font-size="13">
+  <rect width="700" height="330" fill="#1b1f27"/>
+  <image x="30" y="70" width="200" height="200" preserveAspectRatio="none" href="data:image/png;base64,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"/>
+  <line x1="101.9" y1="78" x2="38" y2="198.1" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="101.9" y1="78" x2="222" y2="141.9" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="131.9" y1="94" x2="68.1" y2="214.1" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="85.9" y1="108.1" x2="206" y2="171.9" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="161.9" y1="110" x2="98.1" y2="230" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="70" y1="138.1" x2="190" y2="201.9" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="191.9" y1="125.9" x2="128.1" y2="246" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="54" y1="168.1" x2="174.1" y2="231.9" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="222" y1="141.9" x2="158.1" y2="262" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="38" y1="198.1" x2="158.1" y2="262" stroke="#5aa9e6" stroke-width="1.2"/>
+  <line x1="130" y1="170" x2="198" y2="206.1" stroke="#e6b84f" stroke-width="2.2"/>
+  <polygon points="199.9,202.6 205.9,210.4 196.1,209.7" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <circle cx="130" cy="170" r="4" fill="#e6b84f"/>
+  <text x="130" y="52" fill="#9ca3af" font-size="11" text-anchor="middle">the patch at the keypoint’s scale,</text>
+  <text x="130" y="290" fill="#9ca3af" font-size="11" text-anchor="middle">grid turned to its dominant orientation (gold)</text>
+  <polygon points="115.9,124 146,140 130,170 100,154" fill="#e6b84f" stroke="#e6b84f" stroke-width="2" opacity="0.35"/>
+  <polygon points="115.9,124 146,140 130,170 100,154" fill="none" stroke="#e6b84f" stroke-width="2"/>
+  <line x1="146" y1="140" x2="270" y2="130" stroke="#e6b84f" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="130" y1="170" x2="270" y2="210" stroke="#e6b84f" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="340" y1="170" x2="397" y2="170" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="397,166.8 404,170 397,173.2" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <line x1="340" y1="170" x2="345.7" y2="175.7" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="347.9,173.4 350.6,180.6 343.4,177.9" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <line x1="340" y1="170" x2="340" y2="175" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="343.1,175 340,182 336.9,175" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <line x1="340" y1="170" x2="336.4" y2="173.6" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="338.6,175.9 331.4,178.6 334.1,171.4" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <line x1="340" y1="170" x2="334.8" y2="170" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="334.8,173.2 327.8,170 334.8,166.8" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <line x1="340" y1="170" x2="336.5" y2="166.5" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="334.2,168.7 331.5,161.5 338.7,164.2" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <line x1="340" y1="170" x2="340" y2="164.6" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="336.9,164.6 340,157.6 343.1,164.6" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <line x1="340" y1="170" x2="352.4" y2="157.6" stroke="#e6b84f" stroke-width="2"/>
+  <polygon points="350.1,155.4 357.3,152.7 354.6,159.9" fill="#e6b84f" stroke="#e6b84f" stroke-width="1"/>
+  <circle cx="340" cy="170" r="3" fill="#e6b84f"/>
+  <text x="340" y="82" fill="#9ca3af" font-size="11" text-anchor="middle">one cell: gradient directions</text>
+  <text x="340" y="96" fill="#9ca3af" font-size="11" text-anchor="middle">summed into 8 bins</text>
+  <rect x="440" y="130" width="12" height="90" fill="#e6b84f"/>
+  <rect x="456" y="214.8" width="12" height="5.2" fill="#e6b84f"/>
+  <rect x="472" y="220" width="12" height="0" fill="#e6b84f"/>
+  <rect x="488" y="219.8" width="12" height="0.2" fill="#e6b84f"/>
+  <rect x="504" y="219.7" width="12" height="0.3" fill="#e6b84f"/>
+  <rect x="520" y="220" width="12" height="0" fill="#e6b84f"/>
+  <rect x="536" y="219.4" width="12" height="0.6" fill="#e6b84f"/>
+  <rect x="552" y="198.4" width="12" height="21.6" fill="#e6b84f"/>
+  <line x1="436" y1="220" x2="570" y2="220" stroke="#9ca3af" stroke-width="1"/>
+  <text x="502" y="238" fill="#9ca3af" font-size="11" text-anchor="middle">8 bins</text>
+  <text x="550" y="286" fill="#c9d1d9" font-size="14" text-anchor="middle">4 × 4 cells × 8 bins = 128 numbers</text>
+  <text x="550" y="306" fill="#9ca3af" font-size="11" text-anchor="middle">normalised: brightness and contrast drop out</text>
+</svg>

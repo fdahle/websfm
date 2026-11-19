@@ -18,7 +18,7 @@ plane (the orientation of the small surface patch that won at that pixel). The
 normals are reused later as the input to meshing, so they are not a debug
 by-product.
 
-<!-- TODO(image): assets/depth-map.svg - a source photo next to its depth map rendered in a near-to-far colour ramp, with a single pixel traced along its viewing ray to the surface, the ray length labelled as the stored depth, and the fitted surface patch normal drawn at the hit point. -->
+![A photo of a box on textured ground beside its depth map, near yellow to far blue on a log scale, one pixel circled on the box in both. Below, a side view of that pixel's ray from the camera to the box face: its length, 6.5 m, is the stored depth, and an arrow at the hit point shows the surface normal.](assets/depth-map.svg)
 
 **Depth maps are cleaned before they are used.** Three passes run in order: a
 median/speckle filter that removes isolated wrong depths within one map; a
