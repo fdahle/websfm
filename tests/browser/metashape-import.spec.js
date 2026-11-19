@@ -47,12 +47,11 @@ test('imports calibration, poses and markers from a Metashape export', async ({ 
   await openFixture(page)
 
   await page.getByRole('button', { name: 'Import', exact: true }).click()
-  await page.locator('.ribbon').getByRole('button', { name: 'Metashape', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'SfM Project', exact: true }).click()
+  const source = page.getByRole('dialog', { name: 'Import SfM Project' })
+  await source.getByRole('button', { name: 'Metashape', exact: true }).click()
   const chooser = page.waitForEvent('filechooser')
-  await page
-    .getByRole('dialog', { name: 'Import from Metashape' })
-    .getByRole('button', { name: /Cameras or markers XML/ })
-    .click()
+  await source.getByRole('button', { name: /Cameras or markers XML/ }).click()
   await (await chooser).setFiles(METASHAPE)
 
   const dialog = page.getByRole('dialog', { name: 'Import from Metashape' })
@@ -223,12 +222,11 @@ test('imports the tie points, sparse model and mesh of a Metashape project', asy
     .toBe(6)
 
   await page.getByRole('button', { name: 'Import', exact: true }).click()
-  await page.locator('.ribbon').getByRole('button', { name: 'Metashape', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'SfM Project', exact: true }).click()
+  const source = page.getByRole('dialog', { name: 'Import SfM Project' })
+  await source.getByRole('button', { name: 'Metashape', exact: true }).click()
   const chooser = page.waitForEvent('filechooser')
-  await page
-    .getByRole('dialog', { name: 'Import from Metashape' })
-    .getByRole('button', { name: /Project file/ })
-    .click()
+  await source.getByRole('button', { name: /Project file/ }).click()
   await (
     await chooser
   ).setFiles(fileURLToPath(new URL('../fixtures/metashape/aukerman-tiepoints.psz', import.meta.url)))

@@ -5,9 +5,10 @@ summary: Reads keypoints and matches from text or CSV files written by another d
 category: Reconstruction pipeline
 order: 14
 ---
-**Import ▸ Keypoints & Matches** reads the features another tool found, so the sparse
-model can be built from them: a learned matcher run outside the browser, matches checked
-by hand, or keypoints from a detector WebSfM does not have. Load the photos first, then
+**Import ▸ Keypoints** and **Import ▸ Matches** read the features another tool found, so
+the sparse model can be built from them: a learned matcher run outside the browser,
+matches checked by hand, or keypoints from a detector WebSfM does not have. Both open the
+same dialog, which takes keypoint and match files together. Load the photos first, then
 pick one or more `.txt`, `.csv` or `.key` files. The dialog shows how many images,
 keypoints, pairs and matches it found, and what to import. The CSV files the
 keypoint and match exports write read back as they are, so features move between

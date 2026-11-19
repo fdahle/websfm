@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures.js'
 
-// Import ▸ Keypoints & Matches (composables/useFeatureImport.js) and Import ▸ Other SfM
+// Import ▸ Matches (composables/useFeatureImport.js) and Import ▸ SfM Project on Other SfM
 // with a Bundler bundle.out, against the full app. Two photos and a two-view geometry
 // made up here: 3D points seen by two cameras, written out as the files another tool
 // would write.
@@ -85,7 +85,7 @@ test('matched points from a CSV become keypoints and verified matches', async ({
 
   await page.getByRole('button', { name: 'Import', exact: true }).click()
   const chooser = page.waitForEvent('filechooser')
-  await page.locator('.ribbon').getByRole('button', { name: 'Keypoints & Matches' }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Matches', exact: true }).click()
   await (await chooser).setFiles({ name: 'matches.csv', mimeType: 'text/csv', buffer: Buffer.from(rows.join('\n')) })
 
   const dialog = page.getByRole('dialog', { name: 'Import Keypoints & Matches' })
@@ -162,8 +162,9 @@ test('a Bundler bundle.out with its list.txt imports as a sparse model', async (
   }
 
   await page.getByRole('button', { name: 'Import', exact: true }).click()
-  await page.locator('.ribbon').getByRole('button', { name: 'Other SfM' }).click()
-  const source = page.getByRole('dialog', { name: 'Import from another SfM tool' })
+  await page.locator('.ribbon').getByRole('button', { name: 'SfM Project', exact: true }).click()
+  const source = page.getByRole('dialog', { name: 'Import SfM Project' })
+  await source.getByRole('button', { name: 'Other SfM' }).click()
   const chooser = page.waitForEvent('filechooser')
   await source.getByRole('button', { name: /Files or ZIP/ }).click()
   await (

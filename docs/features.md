@@ -35,18 +35,17 @@ product or an imported raster is open in front.
 | --- | --- | --- | --- |
 | Import ▸ Images | Images | Add photos to the project. | [Getting Started](../src/guide/getting-started.md) |
 | Import ▸ Images | Video | Turn a video into sharp, overlapping frames that reconstruct like photos. | [Import Video](../src/guide/video-import.md) |
-| Import ▸ Images | Image Fiducials | Fiducial marks measured on each film scan, from a CSV or text file. | [Film Scans & Fiducials](../src/guide/film-fiducials.md) |
 | Import ▸ Cameras | Camera Poses | Camera positions and orientations (GNSS, RTK or another tool) from a CSV or text file. | [Export Camera Poses](../src/guide/export-camera-poses.md) |
 | Import ▸ Cameras | Calibration | Camera calibration from a CSV or text file, as Export ▸ Calibration writes it. | [Export Calibration](../src/guide/export-calibration.md) |
 | Import ▸ Cameras | Camera Fiducials | A film camera's calibrated fiducial positions, from its calibration certificate. | [Film Scans & Fiducials](../src/guide/film-fiducials.md) |
+| Import ▸ Features | Image Fiducials | Fiducial marks measured on each film scan, from a CSV or text file. | [Film Scans & Fiducials](../src/guide/film-fiducials.md) |
+| Import ▸ Features | Keypoints | Keypoints from text or CSV files: another detector's, or the CSV this project's export writes. | [Import Keypoints & Matches](../src/guide/import-features.md) |
+| Import ▸ Features | Matches | Matches from text or CSV files: another matcher's, or the CSV this project's export writes. | [Import Keypoints & Matches](../src/guide/import-features.md) |
 | Import ▸ Ground Control | GCP File | Ground control points and their coordinates, from a CSV or text file. Aerial projects only. | [Georeferencing & Scale](../src/guide/georeferencing.md) |
 | Import ▸ Reference Data | Reference DEM / Ortho | A DEM or orthophoto to compare with, find GCPs in, or co-register to. | [Co-register DEM](../src/guide/coregister-dem.md) |
 | Import ▸ Reference Data | Point Cloud / Mesh | A point cloud or mesh from another tool, to edit, mesh, compare or align with. | [Distance to Reference](../src/guide/cloud-distance.md) |
 | Import ▸ Interoperability | WebSfM Project | Another WebSfM project's photos, features and matches, into this one. | [Import Project](../src/guide/import-project.md) |
-| Import ▸ Interoperability | COLMAP | A COLMAP database, sparse model or workspace: cameras, keypoints, matches, the sparse model. | [Import from COLMAP and other SfM tools](../src/guide/import-sfm.md) |
-| Import ▸ Interoperability | Metashape | Metashape cameras or markers XML: calibration, camera poses, markers and scale bars. | [Import from Metashape](../src/guide/import-metashape.md) |
-| Import ▸ Interoperability | Other SfM | Bundler, VisualSFM NVM, OpenMVG, OpenSfM or transforms.json: cameras and the sparse model. | [Import from COLMAP and other SfM tools](../src/guide/import-sfm.md) |
-| Import ▸ Interoperability | Keypoints & Matches | Keypoints and matches from text or CSV files, such as another detector or matcher writes. | [Import Keypoints & Matches](../src/guide/import-features.md) |
+| Import ▸ Interoperability | SfM Project | Cameras, keypoints, matches and the sparse model from COLMAP, Metashape, Bundler, VisualSFM, OpenMVG, OpenSfM or NeRF tools. | [Import an SfM project](../src/guide/import-sfm.md) |
 
 ## Reconstruct
 
@@ -140,7 +139,7 @@ product or an imported raster is open in front.
 | Export ▸ Cameras | Camera Fiducials | The film cameras' fiducial positions as CSV or text. | [Film Scans & Fiducials](../src/guide/film-fiducials.md) |
 | Export ▸ Cameras | Footprints | The ground each photo covers, as GeoJSON or KML. | [Footprints from Poses](../src/guide/footprints-from-poses.md) |
 | Export ▸ Features | Image Fiducials | The fiducial marks measured on each scan, as CSV or text. | [Film Scans & Fiducials](../src/guide/film-fiducials.md) |
-| Export ▸ Features | Key points | Every photo's keypoints as JSON or CSV. |  |
+| Export ▸ Features | Keypoints | Every photo's keypoints as JSON or CSV. |  |
 | Export ▸ Features | Matches | The verified matches of every pair as JSON or CSV. |  |
 | Export ▸ Reconstruction | Model JSON | Cameras and tracks as JSON, or transforms.json for NeRF and Gaussian splatting. |  |
 | Export ▸ Geometry | Point Cloud | A point cloud as PLY, LAS, LAZ, COPC or XYZ. | [Point Cloud Tools](../src/guide/point-cloud-tools.md) |
@@ -148,7 +147,7 @@ product or an imported raster is open in front.
 | Export ▸ Products | DEM | A DEM as GeoTIFF, Cloud-Optimized GeoTIFF, ESRI ASCII grid or hillshade PNG. Aerial projects only. | [Build DEM](../src/guide/dem.md) |
 | Export ▸ Products | Ortho | An orthophoto as GeoTIFF, Cloud-Optimized GeoTIFF, PNG or JPEG, MBTiles or XYZ tiles. Aerial projects only. | [Build Orthophoto](../src/guide/orthophoto.md) |
 | Export ▸ Products | Measurements | Saved measurements as CSV or GeoJSON. | [Build DEM](../src/guide/dem.md) |
-| Export ▸ Interoperability | SfM Project | The cameras, features and sparse model for COLMAP, OpenMVG, VisualSFM, Metashape or NeRF tools. | [Import from COLMAP and other SfM tools](../src/guide/import-sfm.md) |
+| Export ▸ Interoperability | SfM Project | The cameras, features and sparse model for COLMAP, OpenMVG, VisualSFM, Metashape or NeRF tools. | [Import an SfM project](../src/guide/import-sfm.md) |
 | Export ▸ Interoperability | Undistorted Images | The photos with the lens distortion removed, as JPEG or PNG. |  |
 | Export ▸ Interoperability | 3D Tiles | A point cloud or mesh as Cesium 3D Tiles. | [Export 3D Tiles](../src/guide/export-3d-tiles.md) |
 | Export ▸ Interoperability | Allmaps | Each aligned photo georeferenced for Allmaps and other IIIF viewers, from your IIIF image server. | [Export to Allmaps](../src/guide/export-allmaps.md) |

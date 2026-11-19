@@ -1,4 +1,4 @@
-// Keypoints and matches from plain text or CSV (Import ▸ Keypoints & Matches): what
+// Keypoints and matches from plain text or CSV (Import ▸ Keypoints, Import ▸ Matches): what
 // another detector or matcher writes, without its own project format. Pure: text in,
 // plain arrays out; the import (composables/useFeatureImport.js) matches the names to
 // the project's images and checks the indices.

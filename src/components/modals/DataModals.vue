@@ -197,6 +197,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       v-if="sfmSourceOpen"
       :kind="typeof sfmSourceOpen === 'string' ? sfmSourceOpen : 'colmap'"
       @close="sfmSourceOpen = false"
+      @update:kind="(k) => (sfmSourceOpen = k)"
       @choose="pickInteropSource"
     />
   </Teleport>

@@ -1,62 +1,53 @@
 <script setup>
 import { computed } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
-// Import ▸ COLMAP, Other SfM and Metashape: where the files are. COLMAP and Other SfM
-// lead to InteropImportModal, Metashape to MetashapeImportModal; each shows what the
-// files hold and asks what of it to import. Emits `choose` with the choice's id.
+import SegmentedControl from '../ui/SegmentedControl.vue'
+import { useI18n } from '../../../composables/useI18n.js'
+// Import ▸ SfM Project: which tool the files come from, and where they are. COLMAP and
+// Other SfM lead to InteropImportModal, Metashape to MetashapeImportModal; each shows
+// what the files hold and asks what of it to import. `kind` is the format ('colmap',
+// 'metashape', 'other'); emits `update:kind` when it changes and `choose` with the
+// choice's id.
 const props = defineProps({ kind: { type: String, default: 'colmap' } })
-defineEmits(['close', 'choose'])
-const SOURCES = {
-  colmap: {
-    title: 'Import from COLMAP',
-    hint: 'Choose a project ZIP or loose files, or a whole COLMAP workspace folder.',
-    choices: [
-      {
-        id: 'files',
-        title: 'Files or ZIP',
-        text: 'database.db, cameras / images / points3D (.txt or .bin), or a ZIP of them',
-      },
-      { id: 'folder', title: 'Folder', text: 'database, images/ and sparse/ together' },
-    ],
-  },
-  other: {
-    title: 'Import from another SfM tool',
-    hint: 'Bundler needs its bundle.out and the list.txt that names the images: pick both, or their folder.',
-    choices: [
-      {
-        id: 'files',
-        title: 'Files or ZIP',
-        text: 'Bundler bundle.out + list.txt, VisualSFM .nvm, OpenMVG sfm_data.json, OpenSfM reconstruction.json, transforms.json',
-      },
-      { id: 'folder', title: 'Folder', text: 'a Bundler output folder (bundle/bundle.out and list.txt)' },
-    ],
-  },
-  metashape: {
-    title: 'Import from Metashape',
-    hint: 'A project brings its tie points (keypoints, matches, the sparse model) and mesh as well; load the photos first.',
-    choices: [
-      { id: 'xml', title: 'Cameras or markers XML', text: 'File ▸ Export ▸ Export Cameras or Export Markers' },
-      { id: 'psz', title: 'Project file', text: 'a .psz, the project in one file' },
-      { id: 'folder', title: 'Project folder', text: 'the folder that holds the .psx and its .files folder' },
-    ],
-  },
-}
-const source = computed(() => SOURCES[props.kind] ?? SOURCES.colmap)
+defineEmits(['close', 'choose', 'update:kind'])
+const { t } = useI18n()
+const FORMATS = ['colmap', 'metashape', 'other']
+const CHOICES = { colmap: ['files', 'folder'], metashape: ['xml', 'psz', 'folder'], other: ['files', 'folder'] }
+const format = computed(() => (FORMATS.includes(props.kind) ? props.kind : 'colmap'))
+const formats = computed(() => FORMATS.map((id) => ({ id, label: t(`importSfm.format.${id}`) })))
+const choices = computed(() =>
+  CHOICES[format.value].map((id) => ({
+    id,
+    title: t(`importSfm.${format.value}.${id}Title`),
+    text: t(`importSfm.${format.value}.${id}`),
+  })),
+)
 </script>
 
 <template>
-  <ModalShell :title="source.title" @close="$emit('close')">
-    <p class="hint">{{ source.hint }}</p>
-    <div class="choices" :style="{ gridTemplateColumns: `repeat(${source.choices.length}, 1fr)` }">
-      <button v-for="c in source.choices" :key="c.id" class="choice" type="button" @click="$emit('choose', c.id)">
+  <ModalShell :title="t('importSfm.title')" @close="$emit('close')">
+    <SegmentedControl
+      class="formats"
+      :model-value="format"
+      :options="formats"
+      @update:model-value="$emit('update:kind', $event)"
+    />
+    <p class="hint">{{ t(`importSfm.${format}.hint`) }}</p>
+    <div class="choices" :style="{ gridTemplateColumns: `repeat(${choices.length}, 1fr)` }">
+      <button v-for="c in choices" :key="c.id" class="choice" type="button" @click="$emit('choose', c.id)">
         <strong>{{ c.title }}</strong><span>{{ c.text }}</span>
       </button>
     </div>
-    <template #footer><button class="btn" @click="$emit('close')">Cancel</button></template>
+    <template #footer
+      ><button class="btn" @click="$emit('close')">{{ t('common.cancel') }}</button></template
+    >
   </ModalShell>
 </template>
 <style scoped src="../ui/modal.css"></style>
 <style scoped>
+.formats {
+  margin-bottom: 12px;
+}
 .hint {
   color: var(--text-dim);
   font-size: 13px;

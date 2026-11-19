@@ -214,10 +214,9 @@ export const CONSOLE_NAMES = {
   'view-camera-scale': ['camera size'],
   'import-images': ['import'],
   'import-video': ['import video', 'video'],
-  'import-colmap': ['import colmap', 'colmap-import'],
-  'import-sfm-other': ['import bundler', 'import nvm', 'import openmvg', 'import opensfm'],
-  'import-features': ['import keypoints', 'import matches'],
-  'import-metashape': ['import metashape', 'metashape', 'agisoft'],
+  'import-sfm': ['import sfm', 'import sfm project'],
+  'import-keypoints': ['import keypoints', 'import features'],
+  'import-matches': ['import matches'],
   'import-project': ['import project', 'merge projects', 'merge blocks'],
   'eval-overview': ['report', 'quality'],
   'open-project-settings': ['project settings', 'project properties'],
@@ -232,6 +231,25 @@ export const CONSOLE_NAMES = {
 
 // Dispatch ids the console reaches that have no ribbon button of their own.
 const CONSOLE_ONLY_DISPATCH = [
+  // Import ▸ SfM Project, opened on one format.
+  {
+    dispatch: 'import-sfm:colmap',
+    names: ['import colmap', 'colmap-import'],
+    group: 'Import',
+    help: 'Import ▸ SfM Project, on COLMAP',
+  },
+  {
+    dispatch: 'import-sfm:metashape',
+    names: ['import metashape', 'metashape', 'agisoft'],
+    group: 'Import',
+    help: 'Import ▸ SfM Project, on Metashape',
+  },
+  {
+    dispatch: 'import-sfm:other',
+    names: ['import bundler', 'import nvm', 'import openmvg', 'import opensfm', 'import other sfm'],
+    group: 'Import',
+    help: 'Import ▸ SfM Project, on Other SfM (Bundler, NVM, OpenMVG, OpenSfM, transforms.json)',
+  },
   { dispatch: 'view-viewer', names: ['viewer', '3d'], help: 'Switch to the 3D viewer' },
   { dispatch: 'view-map', names: ['map', '2d'], help: 'Switch to the map view' },
   {
@@ -369,7 +387,7 @@ function buildCommands() {
       name: c.names[0],
       aliases: c.names.slice(1),
       dispatch: c.dispatch,
-      group: 'View',
+      group: c.group ?? 'View',
       help: c.help,
       short: true,
     })

@@ -7,6 +7,7 @@ import consolePanel from './console.js'
 import dialog from './dialog.js'
 import exportDialog from './export.js'
 import filterCloud from './filterCloud.js'
+import importSfm from './importSfm.js'
 import mapLayers from './mapLayers.js'
 import matchList from './matchList.js'
 import quality from './quality.js'
@@ -23,6 +24,7 @@ export default {
   dialog,
   export: exportDialog,
   filterCloud,
+  importSfm,
   mapLayers,
   matchList,
   quality,

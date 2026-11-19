@@ -4,7 +4,7 @@ import ModalShell from '../ui/ModalShell.vue'
 import { pluralize } from '../../../core/textFormat.js'
 import { useFeatureImport } from '../../../composables/useFeatureImport.js'
 
-// Import ▸ Keypoints & Matches: what the files hold, and what of it to import
+// Import ▸ Keypoints or Matches: what the files hold, and what of it to import
 // (composables/useFeatureImport.js).
 const { featureImportSession: session, closeFeatureImport, commitFeatureImport } = useFeatureImport()
 const s = computed(() => session.value)

@@ -1,4 +1,4 @@
-// Import ▸ Metashape ▸ Project: the files of a Metashape project, read into what
+// Import ▸ SfM Project ▸ Metashape ▸ Project file: the files of a Metashape project, read into what
 // MetashapeImportModal shows (core/io/metashapeProject.js does the reading of their
 // contents). A .psz is one zip with doc.xml and every asset at its top; a .psx folder
 // has <name>.psx beside <name>.files/, a zip per part. Only the tie points and the mesh

@@ -269,17 +269,6 @@ export const TABS = [
             label: 'Video',
             icon: 'video',
           },
-          // Scan-pixel mark positions per image (a row per mark, or a row per image
-          // with x/y columns per position); rows match images by name, so
-          // (unlike GCPs) the images must be there first.
-          {
-            id: 'import-image-fiducials',
-            guide: 'film-fiducials',
-            tip: 'Fiducial marks measured on each film scan, from a CSV or text file',
-            label: 'Image\nFiducials',
-            icon: 'target',
-            needs: ['images'],
-          },
         ],
       },
       {
@@ -309,6 +298,41 @@ export const TABS = [
             label: 'Camera\nFiducials',
             icon: 'camera',
             needs: ['sensors'],
+          },
+        ],
+      },
+      // What was measured in the photos, as Export ▸ Features writes it.
+      {
+        label: 'Features',
+        commands: [
+          // Scan-pixel mark positions per image (a row per mark, or a row per image
+          // with x/y columns per position); rows match images by name, so
+          // (unlike GCPs) the images must be there first.
+          {
+            id: 'import-image-fiducials',
+            guide: 'film-fiducials',
+            tip: 'Fiducial marks measured on each film scan, from a CSV or text file',
+            label: 'Image\nFiducials',
+            icon: 'target',
+            needs: ['images'],
+          },
+          // Plain text or CSV from another detector or matcher (core/io/featureText.js).
+          // Both open the one dialog, which takes keypoint and match files together.
+          {
+            id: 'import-keypoints',
+            guide: 'import-features',
+            label: 'Key-\npoints',
+            icon: 'keypoints',
+            needs: ['images'],
+            tip: "Keypoints from text or CSV files: another detector's, or the CSV this project's export writes",
+          },
+          {
+            id: 'import-matches',
+            guide: 'import-features',
+            label: 'Matches',
+            icon: 'link',
+            needs: ['images'],
+            tip: "Matches from text or CSV files: another matcher's, or the CSV this project's export writes",
           },
         ],
       },
@@ -364,40 +388,16 @@ export const TABS = [
             needs: ['project'],
             tip: "Another WebSfM project's photos, features and matches, into this one",
           },
-          // Each opens a dialog that shows what the file holds and asks what of it to bring in.
+          // One button for every SfM tool, as Export ▸ SfM Project: its dialog
+          // (InteropSourceModal.vue) starts with the format, COLMAP, Metashape or Other
+          // SfM (Bundler, NVM, OpenMVG, OpenSfM, transforms.json; core/io/sfmInterop.js),
+          // then shows what the files hold and asks what of it to bring in.
           {
-            id: 'import-colmap',
+            id: 'import-sfm',
             guide: 'import-sfm',
-            label: 'COLMAP',
+            label: 'SfM\nProject',
             icon: 'cube',
-            tip: 'A COLMAP database, sparse model or workspace: cameras, keypoints, matches, the sparse model',
-          },
-          // Calibration, camera poses and markers from Metashape's XML exports
-          // (core/io/metashapeXml.js, components/modals/import/MetashapeImportModal.vue).
-          {
-            id: 'import-metashape',
-            guide: 'import-metashape',
-            label: 'Metashape',
-            icon: 'camera',
-            tip: 'Metashape cameras or markers XML: calibration, camera poses, markers and scale bars',
-          },
-          // Bundler, NVM, OpenMVG, OpenSfM, transforms.json (core/io/sfmInterop.js), through
-          // the same dialog as COLMAP.
-          {
-            id: 'import-sfm-other',
-            guide: 'import-sfm',
-            label: 'Other\nSfM',
-            icon: 'sparse-model',
-            tip: 'Bundler, VisualSFM NVM, OpenMVG, OpenSfM or transforms.json: cameras and the sparse model',
-          },
-          // Plain text or CSV from another detector or matcher (core/io/featureText.js).
-          {
-            id: 'import-features',
-            guide: 'import-features',
-            label: 'Keypoints\n& Matches',
-            icon: 'keypoints',
-            needs: ['images'],
-            tip: 'Keypoints and matches from text or CSV files, such as another detector or matcher writes',
+            tip: 'Cameras, keypoints, matches and the sparse model from COLMAP, Metashape, Bundler, VisualSFM, OpenMVG, OpenSfM or NeRF tools',
           },
         ],
       },
@@ -1110,7 +1110,7 @@ export const TABS = [
           {
             id: 'export-keypoints',
             tip: "Every photo's keypoints as JSON or CSV",
-            label: 'Key\npoints',
+            label: 'Key-\npoints',
             icon: 'keypoints',
             needs: ['imagesReady', 'keypoints'],
           },

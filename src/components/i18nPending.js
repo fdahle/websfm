@@ -81,7 +81,6 @@ export const I18N_PENDING = [
   'src/components/modals/import/ImportRasterModal.vue',
   'src/components/modals/import/ImportVideoModal.vue',
   'src/components/modals/import/InteropImportModal.vue',
-  'src/components/modals/import/InteropSourceModal.vue',
   'src/components/modals/import/MetashapeImportModal.vue',
   'src/components/modals/inspect/CameraPoseTableModal.vue',
   'src/components/modals/inspect/GcpTableModal.vue',

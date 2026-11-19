@@ -64,7 +64,7 @@ export const useModalsStore = defineStore('modals', () => {
   const footprintImportData = ref(null) // { features, propertyKeys, detectedCrs, fileName }
   const footprintFromPosesOpen = ref(false)
   const cameraImportOpen = ref(false)
-  // Import ▸ Metashape Cameras: { fileName, doc } (core/io/metashapeXml.js), or null.
+  // Import ▸ SfM Project ▸ Metashape, cameras XML: { fileName, doc } (core/io/metashapeXml.js), or null.
   const metashapeImportData = ref(null)
   const cameraImportText = ref('')
   const cameraImportName = ref('')
@@ -94,9 +94,14 @@ export const useModalsStore = defineStore('modals', () => {
   // Symbology for a computed DEM / ortho or a cloud (its id).
   const symbologyProductId = ref(null)
   const symbologyCloudId = ref(null)
-  // Import ▸ SfM project: choose files or a folder before the import session opens.
-  // Import ▸ COLMAP ('colmap'), Other SfM ('other') or Metashape ('metashape'): which source dialog is open; false when none.
+  // Import ▸ SfM Project: choose files or a folder before the import session opens.
+  // The format the source dialog shows, COLMAP ('colmap'), Other SfM ('other') or
+  // Metashape ('metashape'); false when it is closed. It opens on the format last shown.
   const sfmSourceOpen = ref(false)
+  const sfmSourceLast = ref('colmap')
+  watch(sfmSourceOpen, (k) => {
+    if (typeof k === 'string') sfmSourceLast.value = k
+  })
   // Import ▸ Project into this project: choose which other project (useProjectMerge).
   const importProjectOpen = ref(false)
   // The sidebar's Detect features… / Match features… on a selection: the image ids the
@@ -197,6 +202,7 @@ export const useModalsStore = defineStore('modals', () => {
     symbologyProductId,
     symbologyCloudId,
     sfmSourceOpen,
+    sfmSourceLast,
     importProjectOpen,
     detectOnlyIds,
     matchOnlyIds,

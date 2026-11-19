@@ -159,8 +159,13 @@ describe('console parity', () => {
     const ribbonIds = new Set(leaves.map((c) => c.id))
     // Verbs App.vue handles that are not ribbon buttons.
     const appOnly = new Set(['view-viewer', 'view-map', 'toggle-theme'])
+    // A ribbon command opened on one of its choices: 'import-sfm:colmap'.
+    const onChoice = (d) => d.includes(':') && ribbonIds.has(d.slice(0, d.indexOf(':')))
     for (const cmd of COMMANDS) {
-      if (!cmd.verb) expect(ribbonIds.has(cmd.dispatch) || appOnly.has(cmd.dispatch), cmd.dispatch).toBe(true)
+      if (!cmd.verb)
+        expect(ribbonIds.has(cmd.dispatch) || appOnly.has(cmd.dispatch) || onChoice(cmd.dispatch), cmd.dispatch).toBe(
+          true,
+        )
     }
   })
 

@@ -113,6 +113,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     infoImageId,
     symbologyProductId,
     sfmSourceOpen,
+    sfmSourceLast,
     importProjectOpen,
     reseauOpen,
     panoramicOpen,
@@ -145,7 +146,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       onColmapPick(e)
     })
   }
-  // A choice in the Import ▸ COLMAP / Other SfM / Metashape source dialog.
+  // A choice in the Import ▸ SfM Project dialog, for the format it shows.
   function pickInteropSource(choice) {
     if (sfmSourceOpen.value !== 'metashape') return choice === 'folder' ? pickSfmFolder() : pickSfmFiles()
     const done = (fn) => (e) => {
@@ -296,6 +297,11 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       setMapBasemap(id.slice('map-basemap:'.length))
       return
     }
+    // Import ▸ SfM Project on one format: the console's "import colmap", "import bundler" …
+    if (id.startsWith('import-sfm:')) {
+      sfmSourceOpen.value = id.slice('import-sfm:'.length)
+      return
+    }
     // DEM of difference: the DEM's Volume tool with a reference DEM as the base, on
     // the DEM whose tab is open, else the main one.
     if (id === 'dem-difference') {
@@ -353,17 +359,13 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'import-camera-fiducials':
         pickFiles(FILE_PICKERS.cameraFiducials, onFiducialMarksPick)
         break
-      case 'import-colmap':
-        sfmSourceOpen.value = 'colmap'
+      case 'import-sfm':
+        sfmSourceOpen.value = sfmSourceLast.value
         break
-      case 'import-sfm-other':
-        sfmSourceOpen.value = 'other'
-        break
-      case 'import-features':
+      // Keypoints and matches are read by one dialog, which takes files of both kinds.
+      case 'import-keypoints':
+      case 'import-matches':
         pickFiles(FILE_PICKERS.features, (e) => openFeatureImport(e.target.files))
-        break
-      case 'import-metashape':
-        sfmSourceOpen.value = 'metashape'
         break
       case 'import-project':
         importProjectOpen.value = true

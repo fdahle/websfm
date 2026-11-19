@@ -188,21 +188,17 @@ export default {
       label: 'WebSfM-\nProjekt',
       tip: 'Fotos, Features und Matches eines anderen WebSfM-Projekts in dieses übernehmen',
     },
-    'import-colmap': {
-      label: 'COLMAP',
-      tip: 'Eine COLMAP-Datenbank, ein Sparse-Modell oder ein Workspace: Kameras, Keypoints, Matches, das Sparse-Modell',
+    'import-sfm': {
+      label: 'SfM-\nProjekt',
+      tip: 'Kameras, Keypoints, Matches und das Sparse-Modell aus COLMAP, Metashape, Bundler, VisualSFM, OpenMVG, OpenSfM oder NeRF-Werkzeugen',
     },
-    'import-metashape': {
-      label: 'Metashape',
-      tip: 'Metashape-Kameras oder -Marker als XML: Kalibrierung, Kameraposen, Marker und Maßstäbe',
+    'import-keypoints': {
+      label: 'Key-\npoints',
+      tip: 'Keypoints aus Text- oder CSV-Dateien: die eines anderen Detektors, oder die CSV, die der Export schreibt',
     },
-    'import-sfm-other': {
-      label: 'Andere\nSfM',
-      tip: 'Bundler, VisualSFM NVM, OpenMVG, OpenSfM oder transforms.json: Kameras und das Sparse-Modell',
-    },
-    'import-features': {
-      label: 'Keypoints\n& Matches',
-      tip: 'Keypoints und Matches aus Text- oder CSV-Dateien, wie ein anderer Detektor oder Matcher sie schreibt',
+    'import-matches': {
+      label: 'Matches',
+      tip: 'Matches aus Text- oder CSV-Dateien: die eines anderen Matchers, oder die CSV, die der Export schreibt',
     },
     'workflow-builder': {
       label: 'Workflow-\nBuilder',

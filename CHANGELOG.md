@@ -224,6 +224,13 @@ Notable changes to WebSfM. The format follows
   matches, which it showed doubled before.
 
 ### Changed
+- **Import mirrors Export.** The Import tab has a Features group like Export's (Image
+  Fiducials, Keypoints, Matches), and one SfM Project button whose dialog starts with
+  the format: COLMAP, Metashape or Other SfM. Keypoints and Matches open the same dialog
+  as the old Keypoints & Matches button, which still takes both kinds of file at once.
+  The dialog opens on the format last used, and the console's `import colmap`,
+  `import metashape` and `import bundler` still open it on theirs. The guide follows: its
+  Metashape article is now a section of Import an SfM project.
 - **Build Mesh textures the mesh from the photos.** A new Texture step, on by default,
   bakes the photo texture onto the mesh the run makes, so one run gives a textured mesh
   instead of a vertex-coloured one and a second copy from Tools ▸ Mesh ▸ Texture. It runs

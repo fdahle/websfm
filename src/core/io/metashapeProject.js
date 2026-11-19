@@ -1,4 +1,4 @@
-// A whole Agisoft Metashape project (Import ▸ Metashape ▸ Project): a .psz file (one
+// A whole Agisoft Metashape project (Import ▸ SfM Project ▸ Metashape ▸ Project file): a .psz file (one
 // zip: doc.xml and every asset beside it) or a .psx with its .files folder (a zip per
 // part: project.zip → <n>/chunk.zip → <n>/<f>/frame.zip → point_cloud/point_cloud.zip,
 // model/model.zip …). Pure: the composable (composables/metashapeProjectFiles.js) reads

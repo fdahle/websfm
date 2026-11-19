@@ -14,7 +14,7 @@ import { mapConcurrent } from '../utils/concurrency.js'
 import { pluralize } from '../core/textFormat.js'
 import { useLog } from './useLog.js'
 
-// Import ▸ Keypoints & Matches: text and CSV files from another detector or matcher
+// Import ▸ Keypoints or Matches: text and CSV files from another detector or matcher
 // (core/io/featureText.js says which layouts). Reading the files only fills the
 // session the dialog shows; the stores change in commit, with the user's choices.
 //
