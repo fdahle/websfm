@@ -8,18 +8,58 @@
 // name dropped the georeference of every project placed by a position or marker file
 // that names the photos in another case or without the extension, on every reopen.
 //
+// Only the GCPs the fit can use count (fitGcps): an enabled control point with X, Y
+// and Z and marks in two photos. Adding a point, marking it once, typing its name or
+// editing a checkpoint changes nothing the fit read, so it keeps the georeference
+// (and the DEM and orthophoto built in it).
+//
 // Pure: plain data in, a string out.
+
+import { isGroundControl } from '../io/gcp.js'
+import { precisionFromGcp } from '../gcpAccuracy.js'
 
 const withoutNames = (key, value) => (key === 'imageName' ? undefined : value)
 
-export const georefEvidenceKey = (evidence) => JSON.stringify(evidence, withoutNames)
+// Fields of a GCP the fit does not read: its name, the status derived from its
+// accuracies, and whether a mark was placed by hand or detected (an accepted
+// detection stays where it was).
+const GCP_UNREAD = new Set(['name', 'accuracyStatus'])
+const MARK_UNREAD = new Set(['source', 'score'])
+const pick = (record, unread) => Object.fromEntries(Object.entries(record).filter(([k]) => !unread.has(k)))
+const marked = (o) => o?.px != null && o?.py != null
 
-// A key saved before the names were left out, in the form georefEvidenceKey gives now
-// (a JSON round trip writes the same string as the first serialisation did).
+/**
+ * The GCPs a georeference can be fitted on, with only the fields the fit reads: ground
+ * control (core/io/gcp.js isGroundControl, as the fit gates it) marked in two photos or
+ * more. Applying it twice gives the same list.
+ * @param {object[]|undefined} gcps
+ * @returns {object[]|undefined}
+ */
+export function fitGcps(gcps) {
+  if (!Array.isArray(gcps)) return gcps
+  return gcps
+    .filter((g) => isGroundControl(g, { precision: precisionFromGcp }))
+    .filter((g) => (g.observations ?? []).filter(marked).length >= 2)
+    .map((g) => ({
+      ...pick(g, GCP_UNREAD),
+      observations: (g.observations ?? []).filter(marked).map((o) => pick(o, MARK_UNREAD)),
+    }))
+}
+
+const keyOf = (evidence) =>
+  JSON.stringify(
+    evidence && 'gcps' in evidence ? { ...evidence, gcps: fitGcps(evidence.gcps) } : evidence,
+    withoutNames,
+  )
+
+export const georefEvidenceKey = (evidence) => keyOf(evidence)
+
+// A key saved in an older form (with the names, or with every GCP), in the form
+// georefEvidenceKey gives now: what that evidence would key as today.
 export function currentEvidenceKey(key) {
   if (typeof key !== 'string') return key
   try {
-    return JSON.stringify(JSON.parse(key), withoutNames)
+    return keyOf(JSON.parse(key))
   } catch {
     return key
   }

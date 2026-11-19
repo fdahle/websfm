@@ -7,6 +7,76 @@ const R = [
   [0, 0, 1],
 ]
 
+// A GCP the fit can use: control with X, Y, Z, accuracies and two marks.
+const usableControl = {
+  id: 'control',
+  role: 'control',
+  x: 1,
+  y: 2,
+  z: 3,
+  accuracyX: 0.02,
+  accuracyY: 0.02,
+  accuracyZ: 0.05,
+  observations: [
+    { imageId: 'a', px: 10, py: 10 },
+    { imageId: 'b', px: 20, py: 20 },
+  ],
+}
+
+function poseFit() {
+  const scope = effectScope()
+  const controls = ref([])
+  const georef = ref(null)
+  const log = vi.fn()
+  const R0 = R
+  const api = scope.run(() =>
+    createGeoreferencing({
+      sparseCameras: ref(
+        new Map([
+          ['a', { R: R0, t: [0, 0, 0] }],
+          ['b', { R: R0, t: [-1, 0, 0] }],
+          ['c', { R: R0, t: [0, -1, 0] }],
+        ]),
+      ),
+      images: ref(['a', 'b', 'c'].map((id) => ({ id, uuid: id }))),
+      georef,
+      healthDirty: ref(0),
+      poses: () => [
+        { imageId: 'a', x: 0, y: 0, z: 0 },
+        { imageId: 'b', x: 2, y: 0, z: 0 },
+        { imageId: 'c', x: 0, y: 2, z: 0 },
+      ],
+      gcps: () => controls.value,
+      currentCrs: () => 'EPSG:3031',
+      modelStamp: () => 'first',
+      save: vi.fn(),
+      log,
+    }),
+  )
+  return { scope, controls, georef, log, api }
+}
+
+it('keeps a fitted georeference while the GCPs it could use stay the same', async () => {
+  const { scope, controls, georef, log, api } = poseFit()
+  await api.georeference()
+  expect(georef.value).not.toBeNull()
+  // Added with no coordinates, then given them, marked once, renamed: still nothing
+  // the fit could use, so the georeference (and the products built in it) stays.
+  controls.value.push({ id: 'new', name: 'GCP 2', role: 'control', x: null, y: null, z: null, observations: [] })
+  Object.assign(controls.value[0], { x: 5, y: 6, z: 7, accuracyX: 0.02, accuracyY: 0.02, accuracyZ: 0.05 })
+  controls.value[0].observations.push({ imageId: 'a', px: 1, py: 1 })
+  controls.value[0].name = 'North pillar'
+  // A checkpoint marked twice is measured against the fit, not part of it.
+  controls.value.push({ ...usableControl, id: 'check', role: 'check' })
+  expect(georef.value).not.toBeNull()
+  expect(api.validGeoref.value).not.toBeNull()
+  expect(log.mock.calls.some(([m]) => m.startsWith('Georeference dropped,'))).toBe(false)
+  // Its second mark makes it usable: now the fit is out of date.
+  controls.value[0].observations.push({ imageId: 'b', px: 2, py: 2 })
+  expect(georef.value).toBeNull()
+  scope.stop()
+})
+
 it.each(['pose', 'control', 'model', 'camera', 'stale fit'])(
   'invalidates a fitted georeference after %s evidence changes',
   async (field) => {
@@ -49,7 +119,7 @@ it.each(['pose', 'control', 'model', 'camera', 'stale fit'])(
     expect(fitted.sim.scale).toBeCloseTo(2 / fitted.sim.local.k, 6)
     expect(api.validGeoref.value).not.toBeNull()
     if (field === 'pose') poses.value[1].x = 10
-    if (field === 'control') controls.value.push({ id: 'control', x: 1, y: 2, z: 3 })
+    if (field === 'control') controls.value.push(usableControl)
     if (field === 'model') model.value = 'replacement'
     if (field === 'camera') cameras.value.get('b').t[0] = -2
     // A fit for other evidence put in place (an older one restored), the evidence unchanged.

@@ -362,6 +362,12 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Adding a GCP no longer outdates the DEM and orthophoto.** The georeference is kept
+  until a GCP it can use changes: an enabled control point with X, Y, Z, accuracies and
+  marks in two photos. Adding a point, typing its coordinates, marking it in one photo,
+  renaming it or editing a checkpoint dropped the georeference before, which marked every
+  DEM and orthophoto built in it as outdated until Georeference ran again. Projects saved
+  before keep their georeference on reopen.
 - **A new GCP no longer sits at (0, 0).** A GCP added in a photo, from the GCP table or
   in the console now has no coordinates until you type them or place it on the map, so
   the map no longer zooms out to the CRS origin to show it; a marker made a control point

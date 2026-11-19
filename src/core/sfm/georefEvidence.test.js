@@ -6,7 +6,24 @@ const evidence = (o = {}) => ({
   model: 'm1',
   cameras: [['u1', { K: [5675.3, 0, 3000], R: new Float64Array([1, 0, 0, 0, 1, 0, 0, 0, 1]), t: [0, 0, -0] }]],
   images: [[1, 'u1']],
-  gcps: [{ name: 'G1', x: 1, y: 2, z: 3, observations: [{ imageId: 1, imageName: 'img_001', u: 10.5, v: 20.25 }] }],
+  gcps: [
+    {
+      id: 'g1',
+      name: 'G1',
+      role: 'control',
+      x: 1,
+      y: 2,
+      z: 3,
+      accuracyX: 0.02,
+      accuracyY: 0.02,
+      accuracyZ: 0.05,
+      accuracyStatus: 'declared',
+      observations: [
+        { imageId: 1, imageName: 'img_001', px: 10.5, py: 20.25 },
+        { imageId: 2, imageName: 'img_002', px: 30, py: 40 },
+      ],
+    },
+  ],
   poses: [
     { id: 'p1', imageId: 1, imageName: 'img_001', x: 414089.3216528354, y: 6635152.056354913, z: 225.157, omega: null },
   ],
@@ -18,7 +35,13 @@ describe('the evidence a georeference was fitted on', () => {
     const renamed = evidence({
       poses: [{ ...evidence().poses[0], imageName: 'IMG_001.JPG' }],
       gcps: [
-        { ...evidence().gcps[0], observations: [{ ...evidence().gcps[0].observations[0], imageName: 'IMG_001.JPG' }] },
+        {
+          ...evidence().gcps[0],
+          observations: [
+            { ...evidence().gcps[0].observations[0], imageName: 'IMG_001.JPG' },
+            evidence().gcps[0].observations[1],
+          ],
+        },
       ],
     })
     expect(georefEvidenceKey(renamed)).toBe(georefEvidenceKey(evidence()))
@@ -30,9 +53,52 @@ describe('the evidence a georeference was fitted on', () => {
     expect(georefEvidenceKey(evidence({ poses: [{ ...evidence().poses[0], imageId: 2 }] }))).not.toBe(base)
     const gcp = evidence().gcps[0]
     expect(
-      georefEvidenceKey(evidence({ gcps: [{ ...gcp, observations: [{ ...gcp.observations[0], u: 10.6 }] }] })),
+      georefEvidenceKey(
+        evidence({ gcps: [{ ...gcp, observations: [{ ...gcp.observations[0], px: 10.6 }, gcp.observations[1]] }] }),
+      ),
     ).not.toBe(base)
     expect(georefEvidenceKey(evidence({ model: 'm2' }))).not.toBe(base)
+  })
+
+  it('changes with a GCP the fit uses: its position, its accuracy, a third mark, its role', () => {
+    const base = georefEvidenceKey(evidence())
+    const gcp = evidence().gcps[0]
+    const withGcp = (g) => georefEvidenceKey(evidence({ gcps: [g] }))
+    expect(withGcp({ ...gcp, z: 3.1 })).not.toBe(base)
+    expect(withGcp({ ...gcp, accuracyZ: 0.1 })).not.toBe(base)
+    expect(withGcp({ ...gcp, observations: [...gcp.observations, { imageId: 3, px: 1, py: 2 }] })).not.toBe(base)
+    expect(withGcp({ ...gcp, role: 'check' })).not.toBe(base)
+    expect(withGcp({ ...gcp, enabled: false })).not.toBe(base)
+  })
+
+  it('does not change with a GCP the fit cannot use, or with what the fit does not read', () => {
+    const base = georefEvidenceKey(evidence())
+    const gcp = evidence().gcps[0]
+    const plus = (g) => georefEvidenceKey(evidence({ gcps: [gcp, g] }))
+    // A new point: no coordinates, no marks.
+    expect(plus({ id: 'g2', role: 'control', x: null, y: null, z: null, observations: [] })).toBe(base)
+    // Coordinates and one mark: it cannot be triangulated yet.
+    expect(plus({ ...gcp, id: 'g2', observations: [gcp.observations[0]] })).toBe(base)
+    // Marked twice, but no Z yet, no accuracy, a checkpoint, a marker.
+    expect(plus({ ...gcp, id: 'g2', z: null })).toBe(base)
+    expect(plus({ ...gcp, id: 'g2', accuracyZ: null })).toBe(base)
+    expect(plus({ ...gcp, id: 'g2', role: 'check' })).toBe(base)
+    expect(plus({ ...gcp, id: 'g2', role: 'marker', x: null, y: null, z: null })).toBe(base)
+    // A rename, and accepting a detected mark where it is.
+    expect(georefEvidenceKey(evidence({ gcps: [{ ...gcp, name: 'North pillar' }] }))).toBe(base)
+    const detected = {
+      ...gcp,
+      observations: [{ ...gcp.observations[0], source: 'detected', score: 0.9 }, gcp.observations[1]],
+    }
+    expect(georefEvidenceKey(evidence({ gcps: [detected] }))).toBe(base)
+  })
+
+  it('reads a key saved with every GCP as the evidence of the ones the fit used', () => {
+    const gcp = evidence().gcps[0]
+    const bare = { id: 'g2', name: 'GCP 2', role: 'control', x: 0, y: 0, z: null, observations: [] }
+    const saved = JSON.stringify(evidence({ gcps: [gcp, bare] })) // as keys were written before
+    expect(currentEvidenceKey(saved)).toBe(georefEvidenceKey(evidence()))
+    expect(currentEvidenceKey(currentEvidenceKey(saved))).toBe(currentEvidenceKey(saved))
   })
 
   it('reads a key saved with the names as the same evidence, whatever the names became', () => {
