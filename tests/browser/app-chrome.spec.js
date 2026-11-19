@@ -254,11 +254,12 @@ test('Project Settings changes the capture type, and the project keeps it', asyn
   await page.reload()
   await page.locator('.project-main').first().click()
   await expect(page.locator('.loading-overlay')).toHaveCount(0)
-  expect(
-    await page.evaluate(
-      async () => (await import('/src/stores/useProjectsStore.js')).useProjectsStore().currentSceneType,
-    ),
-  ).toBe('object')
+  // The overlay may not be up yet right after the click: wait for the project itself.
+  await expect
+    .poll(() =>
+      page.evaluate(async () => (await import('/src/stores/useProjectsStore.js')).useProjectsStore().currentSceneType),
+    )
+    .toBe('object')
 
   dialog = await openProjectSettings()
   await dialog.getByRole('button', { name: 'Aerial survey', exact: true }).click()
