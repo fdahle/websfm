@@ -531,6 +531,10 @@ export default {
       label: 'Ortho-\ngonal',
       tip: 'Eine Parallelansicht ohne Perspektive: Höhen und Abstände lesen sich überall gleich',
     },
+    'view-toggle-views': {
+      label: 'Ansichten',
+      tip: 'Den Kamerastandpunkt unter einem Namen speichern und später dorthin zurückkehren',
+    },
     'view-save-image': {
       label: 'Bild\nspeichern',
       tip: 'Die 3D-Ansicht als PNG-Bild speichern, wie sie auf dem Bildschirm ist',

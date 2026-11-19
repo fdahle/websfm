@@ -157,6 +157,7 @@ const VIEW_KEYS = new Set([
   'mapModelFrame',
   'turntable',
   'ortho',
+  'savedViews',
 ])
 
 // A count on the button (What's New: entries shipped since it was last opened), and

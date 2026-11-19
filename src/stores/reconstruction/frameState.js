@@ -1,7 +1,8 @@
 // The reconstruction store's frame state that is not a fit: the REGION box
 // (Tools ▸ Model ▾ ▸ Region, core/products/region.js) and the user ORIENTATION of
 // the local frame (Tools ▸ Model ▾ ▸ Orient model, core/products/orientation.js),
-// both stamped with the main sparse model and carried over by a model edit.
+// both stamped with the main sparse model and carried over by a model edit; and the
+// saved VIEWPOINTS of the 3D view (View ▸ Camera ▸ Views, core/savedViews.js).
 //
 // Moved verbatim from the store: what it shares comes in by name; names the store
 // defines further down come in late (late.js).
@@ -11,6 +12,7 @@ import { normalizeRegion, regionStatus, regionMask } from '../../core/products/r
 import { selectPoints } from '../../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../../core/products/orientation.js'
 import { editCommand } from '../../core/help/consoleEdits.js'
+import { makeView, nextViewName, renameView, viewName, viewStale } from '../../core/savedViews.js'
 
 export function createFrameState({ log, mainSparseCloud, save, validGeoref }) {
   // The reconstruction REGION (Tools ▸ Model ▾ ▸ Region, core/products/region.js):
@@ -126,7 +128,65 @@ export function createFrameState({ log, mainSparseCloud, save, validGeoref }) {
     save()
   }
 
+  // ── Saved viewpoints (View ▸ Camera ▸ Views) ──
+  // Where the 3D view's camera stood, by name, kept with the project; the viewer reads
+  // and sets the camera (Viewer3D.vue saveCurrentView / goToView). A view taken in a
+  // replaced main model is out of date (core/savedViews.js viewStale).
+  const savedViews = ref([])
+  const mainStamp = () => {
+    const c = mainSparseCloud.value
+    return c ? { id: c.id, createdAt: c.createdAt ?? null } : null
+  }
+  const savedViewStale = (view) => viewStale(view, mainStamp())
+  // A view of `camera` under `name` (the next "View n" when none is given); a view of
+  // that name already there is replaced. → the view, or null.
+  function saveView(name, camera) {
+    const n = viewName(name) ?? nextViewName(savedViews.value)
+    const existing = savedViews.value.find((v) => v.name === n)
+    const view = makeView({ id: existing?.id ?? crypto.randomUUID(), name: n, camera, model: mainStamp() })
+    if (!view) return null
+    savedViews.value = existing ? savedViews.value.map((v) => (v === existing ? view : v)) : [...savedViews.value, view]
+    log(`Saved the 3D view as "${n}"`, 'info', 'Viewer', {
+      channel: 'activity',
+      command: editCommand('view save', [n]),
+    })
+    save()
+    return view
+  }
+  // → null, or why not ('empty' | 'taken' | 'missing').
+  function renameSavedView(id, name) {
+    const before = savedViews.value.find((v) => v.id === id)
+    const res = renameView(savedViews.value, id, name)
+    if (res.error) return res.error
+    savedViews.value = res.views
+    const after = res.views.find((v) => v.id === id)
+    if (after.name !== before.name) {
+      log(`Renamed the saved view "${before.name}" to "${after.name}"`, 'info', 'Viewer', {
+        channel: 'activity',
+        command: editCommand('view rename', [before.name, after.name]),
+      })
+      save()
+    }
+    return null
+  }
+  function removeSavedView(id) {
+    const view = savedViews.value.find((v) => v.id === id)
+    if (!view) return false
+    savedViews.value = savedViews.value.filter((v) => v !== view)
+    log(`Removed the saved view "${view.name}"`, 'info', 'Viewer', {
+      channel: 'activity',
+      command: editCommand('view remove', [view.name]),
+    })
+    save()
+    return true
+  }
+
   return {
+    savedViews,
+    savedViewStale,
+    saveView,
+    renameSavedView,
+    removeSavedView,
     region,
     regionState,
     activeRegion,

@@ -11,6 +11,7 @@ import CloudLegend from './CloudLegend.vue'
 import Measure3dToolbox from './Measure3dToolbox.vue'
 import TurntableToolbox from './TurntableToolbox.vue'
 import SelectionToolbox from './SelectionToolbox.vue'
+import SavedViewsToolbox from './SavedViewsToolbox.vue'
 import { msg } from '../../core/i18n/msg.js'
 import { useI18n } from '../../composables/useI18n.js'
 import {
@@ -78,7 +79,7 @@ const props = defineProps({
 // the active selection tool (null | 'rect' | 'lasso') so the ribbon's View ▸ Select
 // toggles can show it — the same up-reporting raster measuring uses. `turntable`
 // reports the turntable on or off, for View ▸ Camera ▸ Turntable, and `ortho` the
-// orthographic view, for View ▸ Camera ▸ Orthographic.
+// orthographic view, for View ▸ Camera ▸ Orthographic; `saved-views` the Views toolbox.
 const emit = defineEmits([
   'command',
   'edit-selection',
@@ -88,6 +89,7 @@ const emit = defineEmits([
   'region-change',
   'turntable',
   'ortho',
+  'saved-views',
 ])
 
 const container = ref(null)
@@ -996,6 +998,48 @@ function setOrtho(on) {
 }
 const toggleOrtho = () => setOrtho(!ortho.value)
 
+// ── Saved views (View ▸ Camera ▸ Views; reconstruction/frameState.js) ──────────
+// The camera as a saved view keeps it, and a saved view put back: the camera kind,
+// where it stands and looks, and an orthographic frame's height.
+function cameraState() {
+  if (!camera || !controls) return null
+  return {
+    position: camera.position.toArray(),
+    target: controls.target.toArray(),
+    up: camera.up.toArray(),
+    ortho: !!camera.isOrthographicCamera,
+    halfHeight: camera.isOrthographicCamera ? (camera.top - camera.bottom) / 2 / camera.zoom : null,
+  }
+}
+function saveCurrentView(name) {
+  const state = cameraState()
+  return state ? reconStore.saveView(name, state) : null
+}
+function goToView(id) {
+  const view = reconStore.savedViews.find((v) => v.id === id)
+  if (!view || !camera || !controls) return false
+  setOrtho(view.ortho)
+  camera.up.fromArray(view.up)
+  camera.position.fromArray(view.position)
+  if (camera.isOrthographicCamera && view.halfHeight) setOrthoFrame(camera, view.halfHeight)
+  camera.updateProjectionMatrix()
+  syncControlsUp()
+  controls.target.fromArray(view.target)
+  camera.lookAt(controls.target)
+  controls.update()
+  lastPreset = null
+  updateClipping()
+  requestRender()
+  return true
+}
+// The Views toolbox, open or not; reported up for the ribbon like the turntable.
+const viewsOpen = ref(false)
+function setViewsOpen(on) {
+  viewsOpen.value = !!on
+  emit('saved-views', viewsOpen.value)
+}
+const toggleViews = () => setViewsOpen(!viewsOpen.value)
+
 // Leave selecting and measuring (a run's live view keeps orbit and zoom only).
 function exitTools() {
   exitSelection()
@@ -1013,6 +1057,9 @@ defineExpose({
   exitTools,
   toggleTurntable,
   toggleOrtho,
+  toggleViews,
+  saveCurrentView,
+  goToView,
   snapshot,
 })
 
@@ -1322,6 +1369,9 @@ onBeforeUnmount(() => {
     <!-- The turntable (View ▸ Camera ▸ Turntable): its speed, and one turn recorded as
          a video. -->
     <TurntableToolbox v-if="turntableOn" :tt="turntableBox" />
+
+    <!-- Saved viewpoints (View ▸ Camera ▸ Views). -->
+    <SavedViewsToolbox v-if="viewsOpen" :save-current="saveCurrentView" :go="goToView" @close="setViewsOpen(false)" />
 
     <!-- The selection tool's toolbox. The ribbon (View ▸ Select) chooses the tool;
          what you do with the selection lives here. -->

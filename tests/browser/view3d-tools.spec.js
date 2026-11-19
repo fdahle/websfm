@@ -130,3 +130,49 @@ test('5 switches to the orthographic view, where picking and the presets still w
   await expect.poll(kind).toBe('PerspectiveCamera')
   expect(errors).toEqual([])
 })
+
+test('a saved view brings the camera back, orthographic or not, and stays with the project', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await setup(page)
+  const kind = () => page.locator('.viewer').evaluate((el) => el.__vueParentComponent.setupState.camera.type)
+  await page.keyboard.press('7')
+  await page.getByRole('button', { name: 'View', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Views', exact: true }).click()
+  const box = page.getByRole('toolbar', { name: 'Views' })
+  await box.getByLabel('Name of the new view').fill('Plan')
+  await box.getByRole('button', { name: 'Save', exact: true }).click()
+
+  // An orthographic one, unnamed: it takes the next "View n".
+  await page.keyboard.press('1')
+  await page.keyboard.press('5')
+  await expect.poll(kind).toBe('OrthographicCamera')
+  await box.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(box.locator('.view-go')).toHaveText(['Plan', 'View 1ortho'])
+
+  // Elsewhere, perspective: Plan looks down again, View 1 is orthographic again.
+  await page.keyboard.press('5')
+  await page.keyboard.press('0')
+  await box.locator('.view-go', { hasText: 'Plan' }).click()
+  await expect.poll(() => lookDownness(page)).toBeCloseTo(1, 3)
+  await expect.poll(kind).toBe('PerspectiveCamera')
+  await box.locator('.view-go', { hasText: 'View 1' }).click()
+  await expect.poll(kind).toBe('OrthographicCamera')
+  await expect.poll(() => lookDownness(page)).toBeCloseTo(0, 3)
+
+  await page.evaluate(async () => (await import('/src/utils/persistence.js')).flushPersistence())
+  await page.reload()
+  await page.locator('.project-main').first().click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  const saved = () =>
+    page.evaluate(async () => {
+      const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+      return useReconstructionStore().savedViews.map((v) => [v.name, v.ortho])
+    })
+  // The overlay may not be up yet right after the click: wait for the views themselves.
+  await expect.poll(saved).toEqual([
+    ['Plan', false],
+    ['View 1', true],
+  ])
+  expect(errors).toEqual([])
+})

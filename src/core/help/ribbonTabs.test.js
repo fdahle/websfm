@@ -144,10 +144,13 @@ describe('command dispatch', () => {
       ...ribbon.map((c) => c.id),
       ...COMMANDS.map((c) => c.dispatch),
       // Emitted outside the ribbon tables: Ribbon.vue's project button, the
-      // image tab's own GCP-edit toggle, and the map's right-click on a footprint.
+      // image tab's own GCP-edit toggle, the map's right-click on a footprint, and
+      // the console's `view save` / `view go` (useConsoleEnv.js).
       'open-project-picker',
       'img-gcp-edit',
       'remove-footprints',
+      'view-save',
+      'view-go',
     ])
     expect([...ids].filter((id) => !reachable.has(id))).toEqual([])
   })

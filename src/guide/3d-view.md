@@ -29,6 +29,9 @@ To bring one cloud or mesh into view, right-click it in the sidebar and choose
 - **Orthographic** (key **5**) shows the scene without perspective: heights and distances
   read the same everywhere in the view, as in a plan, a profile or a façade drawing.
   Scroll zooms; the presets frame the whole scene. Press **5** again for perspective.
+- **Views** saves where the camera stands under a name, perspective or orthographic, and
+  brings it back with a click. Views stay with the project; one saved on an earlier sparse
+  model is shown in italics, as it may show another place now.
 - **Save Image** saves the view as a PNG, as it is on screen.
 - **Cameras**, **Grid** and **Legend** show or hide the camera frustums, the ground
   grid and the colour legend. The two steppers set the point size and the size of

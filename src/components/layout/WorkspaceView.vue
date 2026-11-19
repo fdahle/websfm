@@ -76,6 +76,7 @@ const {
   selectTool3d,
   turntable3d,
   ortho3d,
+  savedViews3d,
   mapGcpEdit,
   rasterGcpEdit,
   mapLayers,
@@ -327,6 +328,11 @@ watch(activeTabId, (id) => {
         @ortho="
           (on) => {
             ortho3d = on
+          }
+        "
+        @saved-views="
+          (on) => {
+            savedViews3d = on
           }
         "
         :region-box="viewerRegionBox"

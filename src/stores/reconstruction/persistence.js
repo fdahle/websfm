@@ -15,6 +15,7 @@ import { normalizeIiifImages } from '../../core/io/allmaps.js'
 import { normalizeMapOrder } from '../../core/products/mapOrder.js'
 import { normalizeImageLayer } from '../../core/products/imageOverlay.js'
 import { normalizeOrientation } from '../../core/products/orientation.js'
+import { normalizeSavedViews } from '../../core/savedViews.js'
 import { formatBytes } from '../../core/dense/memBudget.js'
 import { depthMapBytes } from '../../core/dense/depthMapCodec.js'
 import { serializeCloud, deserializeCloud } from './cloudSerde.js'
@@ -46,6 +47,7 @@ export function createPersistence({
   mapHidden,
   mapOrder,
   orientation,
+  savedViews = null,
   productLayers,
   projects,
   pruneLod,
@@ -100,6 +102,8 @@ export function createPersistence({
       coregistration: coregistration.value,
       region: region.value,
       orientation: orientation.value,
+      // Saved viewpoints of the 3D view (core/savedViews.js); [] when absent.
+      savedViews: savedViews?.value ?? [],
       productLayers: productLayers.value,
       mapOrder: mapOrder.value,
       mapHidden: mapHidden.value,
@@ -221,6 +225,7 @@ export function createPersistence({
     coregistration.value = null
     region.value = null
     orientation.value = null
+    if (savedViews) savedViews.value = []
     productLayers.value = {}
     mapOrder.value = []
     mapHidden.value = []
@@ -360,6 +365,7 @@ export function createPersistence({
     coregistration.value = data.coregistration ?? null // absent ⇒ none
     region.value = normalizeRegion(data.region) ?? null
     orientation.value = normalizeOrientation(data.orientation) ?? null
+    if (savedViews) savedViews.value = normalizeSavedViews(data.savedViews)
     productLayers.value = normalizeProductLayers(data.productLayers) // absent ⇒ nothing on the map
     mapOrder.value = normalizeMapOrder(data.mapOrder) // absent ⇒ the default stack
     mapHidden.value = normalizeMapOrder(data.mapHidden) // a list of ids, as the order

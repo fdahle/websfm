@@ -1355,6 +1355,14 @@ export const CAMERA_GROUP = {
       shortcut: 'view3d.ortho',
     },
     {
+      id: 'view-toggle-views',
+      guide: '3d-view',
+      label: 'Views',
+      icon: 'list',
+      activeKey: 'savedViews',
+      tip: 'Save where the camera stands under a name, and go back to it later',
+    },
+    {
       id: 'view-save-image',
       guide: '3d-view',
       label: 'Save\nImage',

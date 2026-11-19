@@ -41,6 +41,8 @@ export function useViewState({ mapMode, mapFrame }) {
   const turntable3d = ref(false)
   // The 3D view's orthographic camera (View ▸ Camera ▸ Orthographic), reported up too.
   const ortho3d = ref(false)
+  // Its Views toolbox (View ▸ Camera ▸ Views), open or not.
+  const savedViews3d = ref(false)
   const mapGcpEdit = ref(false)
   // GCP editing on an imported reference raster's tab (the one in front).
   const rasterGcpEdit = ref(false)
@@ -70,6 +72,7 @@ export function useViewState({ mapMode, mapFrame }) {
     selectLasso: selectTool3d.value === 'lasso',
     turntable: turntable3d.value,
     ortho: ortho3d.value,
+    savedViews: savedViews3d.value,
     mapGcpEdit: mapGcpEdit.value,
     rasterGcpEdit: rasterGcpEdit.value,
     mapBasemap: mapBasemap.value,
@@ -88,6 +91,7 @@ export function useViewState({ mapMode, mapFrame }) {
     selectTool3d,
     turntable3d,
     ortho3d,
+    savedViews3d,
     mapGcpEdit,
     rasterGcpEdit,
     setPointSize,

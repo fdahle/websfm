@@ -15,6 +15,7 @@ import { useScaleBarsStore } from '../stores/useScaleBarsStore.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { tuningOverrides, setTuningOverride } from '../stores/tuningOverrides.js'
 import { useLog } from './useLog.js'
+import { msg, render } from '../core/i18n/index.js'
 import { useI18n } from './useI18n.js'
 
 const SOURCE = 'Console'
@@ -52,6 +53,7 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
     gcps: () => named(gcps.gcps),
     scalebars: () => named(scaleBars.bars),
     workflows: () => named(workflows.workflows),
+    views: () => named(recon.savedViews),
   }
   const isRaster = (p) => p.ref.kind === 'dem' || p.ref.kind === 'ortho'
   const ids = (items) => items.map((i) => i.id)
@@ -168,6 +170,16 @@ export function useConsoleEnv({ dispatch, commandState, workflowRunner, matchSta
     },
     template: {
       save: ([w]) => void workflows.saveTemplate(w.id),
+    },
+    view: {
+      save: ([name]) => void dispatch('view-save', name ?? ''),
+      go: ([v]) => void dispatch('view-go', v.id),
+      // A refusal reads as its sentence (the console stays English).
+      rename: ([v, name]) => {
+        const error = recon.renameSavedView(v.id, name)
+        return error ? render(msg(`view3d.views.error.${error}`)) : undefined
+      },
+      remove: ([v]) => void recon.removeSavedView(v.id),
     },
     cloud: {
       undo: () => void recon.undoCloudEdit(),

@@ -6,6 +6,7 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Saved views of the 3D view.** View ▸ Camera ▸ Views keeps where the camera stands under a name, perspective or orthographic, and brings it back with a click; the views are saved with the project, and one saved on an earlier sparse model is marked. In the console: `view save`, `view go`, `view rename`, `view remove`.
 - **An orthographic 3D view.** View ▸ Camera ▸ Orthographic (key 5) shows the scene without perspective, so heights and distances read the same across the view: for checking a façade, a profile or a plan. Picking, selecting, measuring and the presets work in it as in the perspective view.
 - **Rename and delete dialog presets in one place.** Settings ▸ Storage ▸ Dialog presets lists the presets of every dialog, by dialog, to rename or delete them; an open dialog's Presets ▾ follows at once.
 - **Undo point edits.** Ctrl+Z in the 3D view (or Undo in the selection toolbox) takes back Delete, Keep only and Assign class, Ctrl+Shift+Z redoes them, for as long as the project is open: an edit of the "(edited)" copy puts its points back, the first edit removes the copy and shows the original again. Up to 10 steps, holding at most 1 GB of replaced points; for a cloud streamed from storage, the last 3, whose earlier versions stay on disk until then (undo puts them back without rebuilding). In the console: `cloud undo`, `cloud redo`.

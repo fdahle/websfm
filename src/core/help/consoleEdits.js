@@ -21,6 +21,17 @@
 //   fields   key=value pairs (a value is a number, true/false, or text)
 export const EDITS = [
   {
+    noun: 'view',
+    list: 'views',
+    needs: ['project'],
+    actions: {
+      save: { args: ['name?'], help: 'Save where the 3D view’s camera stands, under a name (View ▸ Camera ▸ Views)' },
+      go: { args: ['item'], help: 'Put the 3D view’s camera where a saved view has it' },
+      rename: { args: ['item', 'name'], help: 'Rename a saved view' },
+      remove: { args: ['item'], help: 'Remove a saved view' },
+    },
+  },
+  {
     noun: 'cloud',
     needs: ['project'],
     actions: {
@@ -188,6 +199,7 @@ export const LIST_NOUNS = {
   gcps: 'GCP',
   scalebars: 'scale bar',
   workflows: 'workflow',
+  views: 'saved view',
 }
 
 const typed = (kind) => kind.replace(/\?$/, '')

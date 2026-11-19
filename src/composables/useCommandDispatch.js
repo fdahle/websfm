@@ -474,6 +474,17 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
       case 'view-toggle-ortho':
         viewerRef.value?.toggleOrtho()
         break
+      case 'view-toggle-views':
+        viewerRef.value?.toggleViews()
+        break
+      // The console's `view save` / `view go` (core/help/consoleEdits.js): the viewer
+      // owns the camera.
+      case 'view-save':
+        viewerRef.value?.saveCurrentView(value ?? '')
+        break
+      case 'view-go':
+        viewerRef.value?.goToView(value)
+        break
       case 'view-save-image':
         saveViewImage()
         break
