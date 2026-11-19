@@ -6,6 +6,17 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Optimize Cameras can refine the whole lens.** Its Free parameters have a third choice,
+  **Full lens** (f, cx, cy, k1–k3, p1, p2; a fisheye's k1–k4), as Metashape's Optimize
+  Cameras: the lens is solved with the cameras and points from the pixels the photos
+  recorded, and the solved lens becomes the model's, so dense, the GCP marks and every
+  view of the photos use it. A model whose lens carries an earlier run's correction on
+  top of its sensor's is solved through both. On a synthetic block whose lens the model
+  lacked (k1 −0.08, p1 0.0008, 3 % wrong focal), Full lens recovered the lens to 0.001
+  and the residual fell to 0.00001 px, where Focal length left over 10× more. On the
+  five-photo Aukerman project the residual fell from 0.528 to 0.360 px (Focal length and
+  + principal point: 0.528 → 0.528 px); that is not yet a checkpoint measurement, so
+  Focal length stays the default.
 - **Rebuild what a changed model outdated.** After Optimize Cameras, gradual selection,
   Adjust with GCPs or a refit outdates the products, a message offers **Rebuild…**, and
   **Reconstruct ▸ Rebuild Outdated** does the same at any time: a workflow of exactly the

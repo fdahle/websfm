@@ -8,13 +8,16 @@ import SettingsGroup from '../ui/SettingsGroup.vue'
 import SettingsStep from '../ui/SettingsStep.vue'
 import WarnBox from '../ui/WarnBox.vue'
 import { optimizeCamerasEffects } from '../../../core/stepEffects/optimizeCameras.js'
+import { t } from '../../../composables/useI18n.js'
+import I18nText from '../../I18nText.vue'
 
 // Optimize Cameras (Tools ▸ Model ▾) — re-run bundle adjustment on the finished
 // sparse model with the focal length (and optionally the principal point) free,
 // shared per sensor, held to the GCPs and camera priors the reconstruction used
 // (core/sfm/gradualSelection.js `optimizeCameras`). The usual step after adding
-// control points or cleaning the tie points. Radial distortion stays as the
-// reconstruction calibrated it — refining it here would desynchronise dense.
+// control points or cleaning the tie points. Focal length (+ principal point) keep the
+// lens as calibrated; Full lens solves it too, and the solved lens becomes the model's
+// (stores/reconstruction/cloudEdits.js), so dense and the GCP marks follow it.
 const props = defineProps({
   // The main sparse model (the one downstream stages consume).
   cloud: { type: Object, default: null },
@@ -40,41 +43,39 @@ function run() {
 </script>
 
 <template>
-  <ModalShell title="Optimize Cameras" @close="emit('close')">
-    <WarnBox v-if="!cloud">Build the sparse model first.</WarnBox>
+  <ModalShell :title="t('optimizeCameras.title')" @close="emit('close')">
+    <WarnBox v-if="!cloud">{{ t('optimizeCameras.noModel') }}</WarnBox>
     <template v-else>
-      <SettingsGroup title="Source">
+      <SettingsGroup :title="t('optimizeCameras.source')">
         <p class="source-line">
           <strong>{{ cloud.name }}</strong>
         </p>
       </SettingsGroup>
-      <SettingsStep step="1" title="Re-adjust the cameras" :effect="effects.refine">
-        <SettingsField
-          label-for="opt-refine"
-          hint="The principal point needs a well-spread, strongly overlapping block."
-        >
-          <template #label><FieldHelp op="optimize-cameras" param="refine">Free parameters</FieldHelp></template>
+      <SettingsStep step="1" :title="t('optimizeCameras.step')" :effect="effects.refine">
+        <SettingsField label-for="opt-refine" :hint="t('optimizeCameras.hint')">
+          <template #label
+            ><FieldHelp op="optimize-cameras" param="refine">{{
+              t('optimizeCameras.freeParameters')
+            }}</FieldHelp></template
+          >
           <select id="opt-refine" v-model="refine" class="field-select">
-            <option value="f">Focal length</option>
-            <option value="f,cxcy">Focal length + principal point</option>
+            <option value="f">{{ t('optimizeCameras.refine.f') }}</option>
+            <option value="f,cxcy">{{ t('optimizeCameras.refine.fcxcy') }}</option>
+            <option value="full">{{ t('optimizeCameras.refine.full') }}</option>
           </select>
         </SettingsField>
       </SettingsStep>
-      <WarnBox>
-        The model is replaced in place, so everything computed from it is cleared as after a new reconstruction: depth
-        maps, the dense cloud and mesh, DEM and orthophoto, and the georeference and scale fit (both refit on demand).
-        Imported data and your edited copies are kept.
-      </WarnBox>
+      <WarnBox><I18nText k="optimizeCameras.replaces" /></WarnBox>
     </template>
     <template #footer>
-      <button class="btn" @click="emit('close')">Cancel</button>
+      <button class="btn" @click="emit('close')">{{ t('optimizeCameras.cancel') }}</button>
       <button
         class="btn btn-primary"
         :disabled="!cloud"
-        :title="cloud ? null : 'Needs a sparse model (Reconstruct ▸ Sparse Model)'"
+        :title="cloud ? null : t('optimizeCameras.needsModel')"
         @click="run"
       >
-        Optimize
+        {{ t('optimizeCameras.run') }}
       </button>
     </template>
   </ModalShell>

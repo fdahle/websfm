@@ -2,8 +2,8 @@ import { isStreamed, streamedRefusal, anyCloudBounds, STREAMED_ICP_SAMPLE_POINTS
 import { markRaw, toRaw } from 'vue'
 import { rawTexture } from './meshTexture.js'
 import { facePages, regroupByPage } from '../../core/products/texture/carry.js'
-import { isFisheyeModel } from '../../core/sfm/distortion.js'
-import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
+import { isFisheyeModel, hasDistortion } from '../../core/sfm/distortion.js'
+import { makeFrameModelResolver, calibrationSnapshot } from '../../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
 import {
   refineSparse as workerRefineSparse,
@@ -207,7 +207,8 @@ export function createCloudEdits({
   // set-as-main mid-run supersedes the edit and leaves the model as it was.
   //   run(packed, { gcps, cameraPriors, detectScaleFactor }) → worker result (packed)
   //   describe(result) → the log line's middle part
-  async function refineMainSparse({ label, sourceId, createdAt, run, describe }) {
+  //   calibrationOf(result) → the edited model's calibration, or null to keep the one it had
+  async function refineMainSparse({ label, sourceId, createdAt, run, describe, calibrationOf = null }) {
     const original = mainSparseCloud.value
     if (!original || original.id !== sourceId || original.createdAt !== createdAt) return null
     const projectId = projects.currentProjectId
@@ -236,12 +237,14 @@ export function createCloudEdits({
       }
       // An edit of the model, not a recompute: provenance and the user's
       // display choices carry over (a reconstruct deliberately clears `imported`).
+      const calibration = calibrationOf ? calibrationOf(result) : null
       upsertSparseCloud(result.cameras, result.points, {
         replaceId: original.id,
         asMain: true,
         name: original.name,
         imported: !!original.imported,
         secondary: !!original.secondary,
+        ...(calibration ? { calibration } : {}),
       })
       const edited = mainSparseCloud.value
       if (edited && original.style !== undefined) edited.style = original.style
@@ -301,6 +304,76 @@ export function createCloudEdits({
       if (dist?.fisheye) out[img.uuid] = { ...dist }
     }
     return out
+  }
+
+  // The main model's lens join, as dense and the GCP marks read it.
+  function currentFrameModel() {
+    const own = mainSparseCloud.value?.calibration
+    return makeFrameModelResolver({
+      calibration: own ? toRaw(own) : null,
+      summary: toRaw(summary.value),
+      sensors: sensors.value,
+    })
+  }
+
+  // Every registered camera's whole lens, for Optimize cameras ▸ Full lens: Brown
+  // (k1–k3, p1, p2) or a fisheye's; null for a camera without distortion. Throws for a
+  // lens the solve cannot fit: a rational one (k4–k6).
+  function modelLensByUuid() {
+    const cams = mainSparseCloud.value?.cameras
+    if (!cams) return {}
+    const frameModel = currentFrameModel()
+    const out = {}
+    for (const img of imagesStore.images) {
+      if (!cams.has(img.uuid)) continue
+      const { dist, selfCal } = frameModel(img)
+      if (dist && !dist.fisheye && (dist.k4 || dist.k5 || dist.k6))
+        throw new Error(`the lens of ${img.name} is a rational model (k4–k6), which this solve cannot refine`)
+      if (dist?.fisheye) {
+        out[img.uuid] = { ...dist }
+        continue
+      }
+      const brown = (d) => ({ k1: d?.k1 || 0, k2: d?.k2 || 0, k3: d?.k3 || 0, p1: d?.p1 || 0, p2: d?.p2 || 0 })
+      if (selfCal && hasDistortion(selfCal)) {
+        // An older run's radial correction on top of the sensor's lens: the recorded pixel
+        // is the view with the correction, then the lens, put back; the solve starts from
+        // their radial terms added and finds the one lens for both.
+        const a = brown(dist),
+          b = brown(selfCal)
+        out[img.uuid] = {
+          k1: a.k1 + b.k1,
+          k2: a.k2 + b.k2,
+          k3: a.k3 + b.k3,
+          p1: a.p1,
+          p2: a.p2,
+          layers: [b, ...(dist ? [a] : [])],
+        }
+      } else out[img.uuid] = dist ? brown(dist) : null
+    }
+    return out
+  }
+
+  // The main model's calibration with each camera's lens replaced by the solved one.
+  function calibrationWithLenses(lenses) {
+    const frameModel = currentFrameModel()
+    const cams = mainSparseCloud.value?.cameras
+    const refs = imagesStore.images
+      .filter((im) => cams?.has(im.uuid))
+      .map((im) => ({ uuid: im.uuid, sensorId: im.sensorId ?? null }))
+    const resolve = (im) => {
+      const fm = frameModel(im)
+      const lens = lenses?.[im.uuid]
+      return lens ? { ...fm, dist: hasDistortion(lens) ? lens : null, selfCal: null } : fm
+    }
+    return calibrationSnapshot({ resolve, images: refs, source: 'run' })
+  }
+
+  // The solved lens of the first camera group, for the log: "k1 −0.0812, k2 0.0119, …".
+  function lensLine(lenses) {
+    const lens = Object.values(lenses ?? {}).find(Boolean)
+    if (!lens) return 'lens unchanged'
+    const terms = lens.fisheye ? ['k1', 'k2', 'k3', 'k4'] : ['k1', 'k2', 'k3', 'p1', 'p2']
+    return `lens ${terms.map((k) => `${k} ${(lens[k] ?? 0).toPrecision(4)}`).join(', ')}`
   }
 
   // Images' sensor ids as small integers (BA groups shared intrinsics by them).
@@ -673,21 +746,38 @@ export function createCloudEdits({
       })
     }
     if (mode === 'optimize') {
+      const full = settings.refine === 'full'
+      let lensOfUuid
+      try {
+        lensOfUuid = full ? modelLensByUuid() : fisheyeLensByUuid()
+      } catch (err) {
+        log(`Optimize cameras stopped: ${err.message}`, 'error', 'Sparse')
+        return null
+      }
+      const what = full
+        ? 'focal length, principal point and lens'
+        : settings.refine === 'f,cxcy'
+          ? 'focal length and principal point'
+          : 'focal length'
       return refineMainSparse({
         label: 'Optimize cameras',
         sourceId: sourceIds[0],
         createdAt: settings.createdAt,
-        // Fisheye cameras solve in recorded pixels with the run's lens, and their
-        // observations are re-derived about the new K (gradualSelection.js).
+        // Fisheye cameras (and, for the full lens, every camera) solve in recorded
+        // pixels with their lens, and their observations are re-derived about the new
+        // K and lens (gradualSelection.js).
         run: (packed, survey) =>
           workerOptimizeSparse(
             packed,
-            { refine: settings.refine, sensorOfUuid: sensorIndexByUuid(), lensOfUuid: fisheyeLensByUuid() },
+            { refine: settings.refine, sensorOfUuid: sensorIndexByUuid(), lensOfUuid },
             survey,
           ),
         describe: (r) =>
-          `refined ${settings.refine === 'f,cxcy' ? 'focal length and principal point' : 'focal length'} (largest change ${((r.focalChange ?? 0) * 100).toFixed(2)}%)` +
+          `refined the ${what} (largest focal change ${((r.focalChange ?? 0) * 100).toFixed(2)}%)` +
+          (full ? `; ${lensLine(r.lenses)}` : '') +
           (r.removed ? `, dropped ${r.removed} points with fewer than two observations` : ''),
+        // The solved lens becomes the model's: dense, the GCP marks and the views use it.
+        calibrationOf: full ? (r) => calibrationWithLenses(r.lenses) : null,
       })
     }
     // Which kinds each slot accepts. Mesh ▾ tools read a mesh; the reference of an

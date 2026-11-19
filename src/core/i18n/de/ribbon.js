@@ -104,6 +104,7 @@ export default {
     fiducialMarks: 'Noch keine Fiducials der Kamera — in der Sensortabelle eingeben oder die Fiducials kalibrieren',
     crsMap: 'Die Karte zeigt den Modellrahmen, der keine CRS-Positionen hat — Modellrahmen ausschalten',
     imageView: 'Zuerst ein Bild öffnen',
+    outdated: 'Nichts ist veraltet: Alle Produkte sind auf dem aktuellen Modell gebaut',
     gcpView: 'Ein Foto, ein Referenzraster oder die Karte in einem CRS-Rahmen öffnen (nicht im Modellrahmen)',
     measureHost:
       'Die Karte, ein DEM oder ein Orthofoto öffnen (im Model Frame ein DEM oder Orthofoto auf der Karte zeigen)',
@@ -286,6 +287,10 @@ export default {
       tip: 'GCPs auf dem Foto im Vordergrund markieren, oder auf der Karte oder einem Referenzraster setzen',
     },
     'edit-gcps-tab': { label: 'GCPs\nbearbeiten' },
+    'rebuild-outdated': {
+      label: 'Veraltete\nneu erstellen',
+      tip: 'Die Produkte, die ein geändertes Modell veralten ließ, der Reihe nach mit ihren letzten Einstellungen neu erstellen',
+    },
     'menu-model': { label: 'Modell' },
     'optimize-cameras': {
       label: 'Kameras optimieren…',

@@ -364,3 +364,164 @@ it('optimizeCameras solves fisheye cameras in recorded pixels and re-derives the
   // ~1.5 k px here rounds to ~1e-4 px. A wrong K would miss by whole pixels.
   expect(worst).toBeLessThan(2e-4)
 })
+
+it('optimizeCameras with the full lens solves a lens the model did not have, and re-derives its view', async () => {
+  const { bundleAdjust } = await import('./reconstruction.js')
+  const { distortPixel, undistortPixel } = await import('./distortion.js')
+  // The photos were taken through this lens; the model was stored as if there were none,
+  // with a 3 % wrong focal and a shifted principal point.
+  const lens = { k1: -0.08, k2: 0.012, k3: 0, p1: 0.0008, p2: -0.0005 }
+  const trueK = { fx: 1000, fy: 1000, cx: 0, cy: 0 },
+    seedK = { fx: 970, fy: 970, cx: 6, cy: -4 }
+  const rot = (a, b) => {
+    const [ca, sa, cb, sb] = [Math.cos(a), Math.sin(a), Math.cos(b), Math.sin(b)]
+    // Turn about Y by a, then about X by b.
+    return [
+      [ca, sa * sb, sa * cb],
+      [0, cb, -sb],
+      [-sa, ca * sb, ca * cb],
+    ]
+  }
+  // Nine convergent views on a 3 × 3 grid, looking at a box of points 10 units away.
+  const cams = new Map()
+  for (let i = 0; i < 9; i++) {
+    const a = ((i % 3) - 1) * 0.2,
+      b = (Math.floor(i / 3) - 1) * 0.2
+    const R = rot(-a, b)
+    const C = [10 * Math.sin(a), -10 * Math.sin(b), 10 - 10 * Math.cos(a) * Math.cos(b)]
+    const t = R.map((row) => -(row[0] * C[0] + row[1] * C[1] + row[2] * C[2]))
+    cams.set(`b${i}`, { R, t, K: seedK })
+  }
+  const recorded = (cam, [x, y, z]) => {
+    const p = cam.R.map((row, k) => row[0] * x + row[1] * y + row[2] * z + cam.t[k])
+    return distortPixel((trueK.fx * p[0]) / p[2], (trueK.fy * p[1]) / p[2], trueK, lens)
+  }
+  let seed = 11
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const raw = new Map([...cams.keys()].map((id) => [id, []]))
+  const pts = SparsePoints.fromRecords(
+    Array.from({ length: 300 }, (_, j) => {
+      const w = [rnd() * 14 - 7, rnd() * 10 - 5, 10 + rnd() * 6 - 3]
+      const viewsPx = new Map(
+        [...cams].map(([id, c]) => {
+          const r = recorded(c, w)
+          raw.get(id)[j] = r
+          return [id, [r.x, r.y]] // no lens in the model: the view is the recorded pixel
+        }),
+      )
+      return { x: w[0], y: w[1], z: w[2], views: new Map([...cams.keys()].map((id) => [id, j])), viewsPx }
+    }),
+  )
+  const ids = [...cams.keys()]
+  const sensorOfUuid = Object.fromEntries(ids.map((id) => [id, 0]))
+  const result = await optimizeCameras(cams, pts, { refine: 'full', sensorOfUuid, lensOfUuid: {} }, bundleAdjust)
+  const K = result.cameras.get('b0').K
+  const got = result.lenses.b0
+  expect(Math.abs(K.fx / 1000 - 1)).toBeLessThan(0.005)
+  expect(got.k1).toBeCloseTo(lens.k1, 2)
+  expect(got.p1).toBeCloseTo(lens.p1, 3)
+  expect(result.costAfter).toBeLessThan(0.05)
+  expect(result.costAfter).toBeLessThan(result.costBefore / 10)
+  // Shared per sensor: one lens for all nine.
+  for (const id of ids) expect(result.lenses[id]).toEqual(got)
+  // The view is the recorded pixel undistorted with the new K and lens.
+  let worst = 0
+  for (let j = 0; j < result.points.length; j++) {
+    result.points.forEachPixel(j, (id, px, py) => {
+      const q = undistortPixel(raw.get(id)[j].x, raw.get(id)[j].y, result.cameras.get(id).K, got)
+      worst = Math.max(worst, Math.hypot(q.x - px, q.y - py))
+    })
+  }
+  expect(worst).toBeLessThan(5e-4)
+  // Focal only, on the same model: the lens it lacks stays in the residual.
+  const focal = await optimizeCameras(cams, pts, { refine: 'f', sensorOfUuid }, bundleAdjust)
+  expect(focal.lenses).toBeUndefined()
+  expect(focal.costAfter).toBeGreaterThan(10 * result.costAfter)
+})
+
+it('optimizeCameras with the full lens takes a view undistorted by two lenses back to the recorded pixels', async () => {
+  const { bundleAdjust } = await import('./reconstruction.js')
+  const { distortPixel, undistortPixel } = await import('./distortion.js')
+  // The photos were taken through this lens; the model was stored as if there were none,
+  // with a 3 % wrong focal and a shifted principal point.
+  const lens = { k1: -0.08, k2: 0.012, k3: 0, p1: 0.0008, p2: -0.0005 }
+  // What the model held: a sensor lens near it, and a radial correction on top.
+  const sensorLens = { k1: -0.06, k2: 0, k3: 0, p1: 0.0008, p2: -0.0005 },
+    correction = { k1: -0.015, k2: 0.01, k3: 0, p1: 0, p2: 0 }
+  const trueK = { fx: 1000, fy: 1000, cx: 0, cy: 0 },
+    seedK = { fx: 970, fy: 970, cx: 6, cy: -4 }
+  const rot = (a, b) => {
+    const [ca, sa, cb, sb] = [Math.cos(a), Math.sin(a), Math.cos(b), Math.sin(b)]
+    // Turn about Y by a, then about X by b.
+    return [
+      [ca, sa * sb, sa * cb],
+      [0, cb, -sb],
+      [-sa, ca * sb, ca * cb],
+    ]
+  }
+  // Nine convergent views on a 3 × 3 grid, looking at a box of points 10 units away.
+  const cams = new Map()
+  for (let i = 0; i < 9; i++) {
+    const a = ((i % 3) - 1) * 0.2,
+      b = (Math.floor(i / 3) - 1) * 0.2
+    const R = rot(-a, b)
+    const C = [10 * Math.sin(a), -10 * Math.sin(b), 10 - 10 * Math.cos(a) * Math.cos(b)]
+    const t = R.map((row) => -(row[0] * C[0] + row[1] * C[1] + row[2] * C[2]))
+    cams.set(`b${i}`, { R, t, K: seedK })
+  }
+  const recorded = (cam, [x, y, z]) => {
+    const p = cam.R.map((row, k) => row[0] * x + row[1] * y + row[2] * z + cam.t[k])
+    return distortPixel((trueK.fx * p[0]) / p[2], (trueK.fy * p[1]) / p[2], trueK, lens)
+  }
+  let seed = 11
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const raw = new Map([...cams.keys()].map((id) => [id, []]))
+  const pts = SparsePoints.fromRecords(
+    Array.from({ length: 300 }, (_, j) => {
+      // Inside a 1,400 × 1,000 px frame in every view, as a photo's points are: far past
+      // it two undistortions in turn no longer invert, which no real photo asks of them.
+      const w = [rnd() * 8 - 4, rnd() * 6 - 3, 10 + rnd() * 4 - 2]
+      const viewsPx = new Map(
+        [...cams].map(([id, c]) => {
+          const r = recorded(c, w)
+          raw.get(id)[j] = r
+          // The model's view: the sensor's lens taken out, then an older run's correction.
+          const a = undistortPixel(r.x, r.y, seedK, sensorLens)
+          const q = undistortPixel(a.x, a.y, seedK, correction)
+          return [id, [q.x, q.y]]
+        }),
+      )
+      return { x: w[0], y: w[1], z: w[2], views: new Map([...cams.keys()].map((id) => [id, j])), viewsPx }
+    }),
+  )
+  const ids = [...cams.keys()]
+  const sensorOfUuid = Object.fromEntries(ids.map((id) => [id, 0]))
+  const layered = {
+    k1: sensorLens.k1 + correction.k1,
+    k2: sensorLens.k2 + correction.k2,
+    k3: 0,
+    p1: sensorLens.p1,
+    p2: sensorLens.p2,
+    layers: [correction, sensorLens],
+  }
+  const lensOfUuid = Object.fromEntries(ids.map((id) => [id, layered]))
+  const result = await optimizeCameras(cams, pts, { refine: 'full', sensorOfUuid, lensOfUuid }, bundleAdjust)
+  const K = result.cameras.get('b0').K
+  const got = result.lenses.b0
+  expect(Math.abs(K.fx / 1000 - 1)).toBeLessThan(0.005)
+  expect(got.k1).toBeCloseTo(lens.k1, 2)
+  expect(got.p1).toBeCloseTo(lens.p1, 3)
+  expect(result.costAfter).toBeLessThan(0.05)
+  expect(result.costAfter).toBeLessThan(result.costBefore / 10)
+  // Shared per sensor: one lens for all nine.
+  for (const id of ids) expect(result.lenses[id]).toEqual(got)
+  // The view is the recorded pixel undistorted with the new K and lens.
+  let worst = 0
+  for (let j = 0; j < result.points.length; j++) {
+    result.points.forEachPixel(j, (id, px, py) => {
+      const q = undistortPixel(raw.get(id)[j].x, raw.get(id)[j].y, result.cameras.get(id).K, got)
+      worst = Math.max(worst, Math.hypot(q.x - px, q.y - py))
+    })
+  }
+  expect(worst).toBeLessThan(5e-4)
+})

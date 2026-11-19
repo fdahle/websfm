@@ -18,4 +18,8 @@ and the georeference.
 **Focal length** refines each camera group's focal length with the poses and points;
 distortion stays as calibrated. **Focal length + principal point** also frees the
 principal point, which needs a well-spread, strongly overlapping block with varied
-viewing angles; on a single strip it drifts.
+viewing angles; on a single strip it drifts. **Full lens** frees the focal length,
+principal point and distortion (k1–k3, p1, p2; a fisheye's k1–k4), as Metashape's
+default set, and the solved lens replaces the calibrated one for every later step. It
+needs the same strong block, and a lower residual alone does not prove it is better:
+check it against checkpoints.

@@ -11,6 +11,7 @@ import gcps from './gcps.js'
 import importSfm from './importSfm.js'
 import mapLayers from './mapLayers.js'
 import matchList from './matchList.js'
+import optimizeCameras from './optimizeCameras.js'
 import quality from './quality.js'
 import readText from './readText.js'
 import rebuild from './rebuild.js'
@@ -30,6 +31,7 @@ export default {
   importSfm,
   mapLayers,
   matchList,
+  optimizeCameras,
   quality,
   readText,
   rebuild,

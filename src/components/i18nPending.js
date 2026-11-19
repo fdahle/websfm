@@ -98,7 +98,6 @@ export const I18N_PENDING = [
   'src/components/modals/mesh/TextureMeshModal.vue',
   'src/components/modals/model/FootprintFromPosesModal.vue',
   'src/components/modals/model/GradualSelectionModal.vue',
-  'src/components/modals/model/OptimizeCamerasModal.vue',
   'src/components/modals/pipeline/DenseModal.vue',
   'src/components/modals/pipeline/DepthMapsModal.vue',
   'src/components/modals/pipeline/DetectFeaturesModal.vue',

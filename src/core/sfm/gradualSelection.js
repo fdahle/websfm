@@ -4,6 +4,16 @@ import { SFM_TUNING } from '../tuning.js'
 import { tieWeightOf } from './baObservations.js'
 import { distortPixel, undistortPixel } from './distortion.js'
 
+// A camera's view pixel → the pixel its lens recorded. A lens may carry `layers`, the
+// lenses its view was undistorted by, innermost last (an older run's radial correction
+// on top of its sensor's lens: [correction, sensor lens]); they are put back in turn.
+function recordedPixel(x, y, K, lens) {
+  if (!lens?.layers) return distortPixel(x, y, K, lens)
+  let p = { x, y }
+  for (const layer of lens.layers) p = distortPixel(p.x, p.y, K, layer)
+  return p
+}
+
 // points: SparsePoints. Per point, as columns (transferable, no object per point):
 //   error  RMS reprojection error in px (NaN: no stored observation; Infinity: behind a camera)
 //   track  views in the model's cameras;   angle  largest triangulation angle, degrees
@@ -130,8 +140,11 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
   })
   const constrained = !!(anchorSetup || priorSet)
   const lenses = entries.map(([id]) => lensOf?.(id) ?? null)
+  // A Brown lens solves in the pixels it recorded with the whole lens on K (bundle.rs
+  // `fullLens`, as bundleSession.js lensFrame): a camera without one gets a zero lens.
+  const fullLens = lenses.some((l) => l && !l.fisheye)
   const Ks = entries.map(([, c], i) =>
-    lenses[i]
+    lenses[i]?.fisheye
       ? {
           ...c.K,
           fisheye: true,
@@ -141,12 +154,21 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
           k3: lenses[i].k3,
           k4: lenses[i].k4,
         }
-      : c.K,
+      : fullLens
+        ? {
+            ...c.K,
+            k1: lenses[i]?.k1 || 0,
+            k2: lenses[i]?.k2 || 0,
+            k3: lenses[i]?.k3 || 0,
+            p1: lenses[i]?.p1 || 0,
+            p2: lenses[i]?.p2 || 0,
+          }
+        : c.K,
   )
   const toLensFrame = (o) => {
     const lens = lenses[o.camIdx]
     if (!lens) return o
-    const p = distortPixel(o.x, o.y, entries[o.camIdx][1].K, lens)
+    const p = recordedPixel(o.x, o.y, entries[o.camIdx][1].K, lens)
     return { ...o, x: p.x, y: p.y }
   }
   const allObs = anchorSetup ? [...observations, ...anchorSetup.observations] : observations
@@ -165,6 +187,7 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
       maxIters: 30,
       refineIntrinsics: 'none',
       ...baOpts,
+      ...(fullLens ? { fullLens: true } : {}),
       flatPoints: true,
       ...(anchorSetup ? { gcpAnchors: anchorSetup.anchors } : {}),
       ...(priorSet ? { cameraPriors: priorSet.priors } : {}),
@@ -224,17 +247,23 @@ export async function refineSparseSelection(cameras, points, settings, bundleAdj
 }
 
 // Optimize cameras (Tools ▸ Model ▾): re-run bundle adjustment on the finished
-// model with the focal length (and optionally the principal point) free, shared per
-// sensor, every point kept. The staple step after adding GCPs or cleaning points.
+// model with the focal length (and optionally the principal point, or the whole lens)
+// free, shared per sensor, every point kept. The staple step after adding GCPs or
+// cleaning points.
 //
-// Deliberately NOT the radial terms. The model is pinhole by invariant (CLAUDE.md
-// ▸ Pipelines ▸ 3): radial distortion is folded out of the observations and the
-// composed bag recorded in summary.selfCalDistortion for dense to reproduce. A
-// refined k1 here would have to be folded into the view pixels and recomposed into that
-// record, or dense would warp with a lens the sparse model no longer has.
+// The model is pinhole by invariant (CLAUDE.md ▸ Pipelines ▸ 3): its observations are
+// the recorded pixels with the lens taken out. 'f' and 'f,cxcy' solve in that view and
+// keep the lens. 'full' (Metashape's f, cx, cy, k1–k3, p1, p2) puts each camera's lens
+// back on its observations, as Sparse Model's solves do (bundleSession.js lensFrame),
+// solves the whole lens with the poses and points, and re-derives the view with the new
+// lens about the new K; the caller records the new lens in the model's calibration, so
+// dense, the GCP marks and every view of the photos use it.
 //
-// settings: { refine: 'f' | 'f,cxcy', sensorOfUuid: { [uuid]: int } }
-export const OPTIMIZE_REFINE_MODES = ['f', 'f,cxcy']
+// settings: { refine: 'f' | 'f,cxcy' | 'full', sensorOfUuid: { [uuid]: int },
+//   lensOfUuid: { [uuid]: lens } — the model's lens per camera: a fisheye's for every
+//   mode, a Brown one ({ k1, k2, k3, p1, p2 }) too for 'full', which may carry `layers`
+//   (recordedPixel) when its view was undistorted by more than one lens }
+export const OPTIMIZE_REFINE_MODES = ['f', 'f,cxcy', 'full']
 // A focal that moves more than this is a runaway, not a refinement (the B4 seed
 // went fx 2389 → 4796 while the cost fell): refuse rather than commit it.
 export const OPTIMIZE_MAX_FOCAL_CHANGE = 0.2
@@ -247,17 +276,20 @@ export async function optimizeCameras(cameras, points, settings, bundleAdjust, c
   if (kept.length < 6) throw new Error('The model needs at least six points with two or more observations')
   const sensorOf = settings.sensorOfUuid || {}
   const sensorOfCam = [...cameras.keys()].map((id) => (Number.isInteger(sensorOf[id]) ? sensorOf[id] : -1))
-  // settings.lensOfUuid: { [uuid]: fisheye lens bag } — the run's lens per fisheye camera.
+  const full = refine === 'full'
   const lensOfUuid = settings.lensOfUuid || {}
-  const lensOf = (id) => (lensOfUuid[id]?.fisheye ? lensOfUuid[id] : null)
+  const lensOf = (id) => (lensOfUuid[id]?.fisheye || (full && lensOfUuid[id]) ? lensOfUuid[id] : null)
+  const anyFisheye = [...cameras.keys()].some((id) => lensOfUuid[id]?.fisheye)
+  // The whole lens: Brown k1–k3 with p1, p2 (bit p), a fisheye's k1–k4.
+  const baRefine = full ? `f,cxcy,k1,k2,k3,p${anyFisheye ? ',k4' : ''}` : refine
   const {
     result,
     entries,
     constraints: held,
   } = await constrainedRefine(cameras, kept, bundleAdjust, constraints, {
     subject: { would: 'The model would' },
-    baOpts: { refineIntrinsics: refine, sensorOfCam },
-    lensOf,
+    baOpts: { refineIntrinsics: baRefine, sensorOfCam },
+    lensOf: full ? (id) => lensOf(id) ?? { k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 } : lensOf,
   })
   if (!Array.isArray(result.intrinsics) || result.intrinsics.length !== entries.length)
     throw new Error('Refinement returned no intrinsics; the original model is unchanged')
@@ -270,22 +302,41 @@ export async function optimizeCameras(cameras, points, settings, bundleAdjust, c
     throw new Error(
       `The focal length moved ${(worst * 100).toFixed(0)}% — a runaway, not a refinement; the original model is unchanged`,
     )
-  const withCxCy = refine.includes('cxcy')
+  const withCxCy = full || refine.includes('cxcy')
   const newK = new Map(
     entries.map(([id, c], i) => [
       id,
       { ...c.K, fx: intr[i].fx, fy: intr[i].fy, ...(withCxCy ? { cx: intr[i].cx, cy: intr[i].cy } : {}) },
     ]),
   )
-  // A fisheye camera's stored observations are its recorded pixels undistorted about
-  // its K; dense pairs the lens with the camera's K, so a moved focal / principal
-  // point re-derives them (old K → recorded pixel → new K), as selfCalFold.js does.
+  // The lens each camera has after the solve: the solved one for 'full', else its own.
+  const newLens = new Map(
+    entries.map(([id], i) => {
+      if (!full) return [id, lensOf(id)]
+      const r = intr[i]
+      return [
+        id,
+        r.fisheye
+          ? { fisheye: true, k1: r.k1 || 0, k2: r.k2 || 0, k3: r.k3 || 0, k4: r.k4 || 0 }
+          : { k1: r.k1 || 0, k2: r.k2 || 0, k3: r.k3 || 0, p1: r.p1 || 0, p2: r.p2 || 0 },
+      ]
+    }),
+  )
+  if (full) {
+    for (const lens of newLens.values())
+      if (!Object.values(lens).every((v) => v === true || Number.isFinite(v)))
+        throw new Error('The lens solve returned no finite terms; the original model is unchanged')
+  }
+  // A camera's stored observations are its recorded pixels undistorted about its K and
+  // lens; dense pairs the lens with the camera's K, so a moved K or a new lens re-derives
+  // them (old K and lens → recorded pixel → new K and lens), as selfCalFold.js does.
   const remapPixel = (id, x, y) => {
-    const lens = lensOf(id),
+    const lens0 = lensOf(id),
+      lens1 = newLens.get(id),
       K0 = cameras.get(id)?.K
-    if (!lens || !K0) return null
-    const raw = distortPixel(x, y, K0, lens)
-    const q = undistortPixel(raw.x, raw.y, newK.get(id), lens)
+    if ((!lens0 && !lens1) || !K0) return null
+    const raw = lens0 ? recordedPixel(x, y, K0, lens0) : { x, y }
+    const q = lens1 ? undistortPixel(raw.x, raw.y, newK.get(id), lens1) : raw
     return [q.x, q.y]
   }
   return {
@@ -300,8 +351,8 @@ export async function optimizeCameras(cameras, points, settings, bundleAdjust, c
         {
           ...c,
           ...result.cameras[i],
-          // Pinhole only: k1–k3 were not free, so nothing is folded or carried (a
-          // fisheye's lens stays the run's; its observations follow the new K below).
+          // The lens is not on K: it goes to the calibration ('full'), and the
+          // observations follow the new K and lens below.
           K: newK.get(id),
         },
       ]),
@@ -310,5 +361,7 @@ export async function optimizeCameras(cameras, points, settings, bundleAdjust, c
     // against the moved cameras, so they are dropped and counted, not kept.
     points: points.select(keptIdx, { pos: result.pos.slice(0, 3 * kept.length), pixel: remapPixel }),
     dropped: points.length - kept.length,
+    // 'full': the solved lens per camera, for the model's calibration.
+    ...(full ? { lenses: Object.fromEntries(newLens) } : {}),
   }
 }

@@ -74,7 +74,7 @@ export function makeSfmOps() {
     return packedResult
   }
   // Tools ▸ Model ▾ ▸ Optimize cameras: same disposable copy and survey constraints
-  // as refineSparse, with focal (+ principal point) free per sensor.
+  // as refineSparse, with focal (+ principal point, or the whole lens) free per sensor.
   async function optimizeSparse([packed, settings, constraints = {}]) {
     const model = unpackReconstructionResult(packed)
     const refined = await optimizeCameras(model.cameras, model.points, settings, bundleAdjust, constraints)
@@ -85,6 +85,8 @@ export function makeSfmOps() {
       costAfter: refined.costAfter,
       constraints: refined.constraints,
       focalChange: refined.focalChange,
+      // 'full': the solved lens per camera, for the model's calibration.
+      ...(refined.lenses ? { lenses: refined.lenses } : {}),
     })
     return packedResult
   }
