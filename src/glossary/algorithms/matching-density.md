@@ -23,7 +23,7 @@ every keypoint of a high-resolution image. WebSfM exposes the trade as two modes
   and it is what recovers fine structure on large scans where a few thousand
   keypoints spread across the whole frame leave gaps.
 
-<!-- TODO(image): assets/matching-density.svg - the same image pair matched twice, side by side. Left (Fast): a sparse scatter of correspondence lines concentrated on the strongest corners. Right (Full/tiled): a much denser field of lines covering the whole overlap, with a faint tile grid overlaid to show where the extra matches came from. -->
+![The same image pair matched twice. Fast: a few match lines on the strongest corners of the overlap. Full (tiled): many more lines over the whole overlap, with the tile grid the extra matches came from drawn faintly over both images.](assets/matching-density.svg)
 
 Density is not free quality. Every extra correspondence is another chance for a
 wrong match, so matching always feeds [geometric verification](help:ransac) — a

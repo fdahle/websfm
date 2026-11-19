@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 360" font-family="sans-serif" font-size="13">
+  <rect width="680" height="360" fill="#1b1f27"/>
+  <rect x="20" y="40" width="360" height="290" fill="none" stroke="#6b7280" stroke-width="1" rx="8"/>
+  <text x="200" y="62" fill="#c9d1d9" font-size="13" text-anchor="middle">sensor 1: drone camera</text>
+  <rect x="115" y="90" width="170" height="62" fill="#2a303b" stroke="#e6b84f" stroke-width="1.6" rx="5"/>
+  <text x="200" y="110" fill="#e6b84f" font-size="12" text-anchor="middle">shared: K, f = 3,650 px</text>
+  <text x="200" y="128" fill="#e6b84f" font-size="11" text-anchor="middle">principal point cx, cy</text>
+  <text x="200" y="144" fill="#e6b84f" font-size="11" text-anchor="middle">distortion k1 k2 k3 p1 p2</text>
+  <rect x="32" y="230" width="56" height="40" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="32,250.6 48.8,246.1 65.6,253.1 88,248.6 88,270 32,270" fill="#6b7280" stroke="#6b7280" stroke-width="0.5" opacity="0.6"/>
+  <circle cx="61.2" cy="260.9" r="3.2" fill="#9ca3af"/>
+  <circle cx="45.1" cy="262.1" r="3.2" fill="#9ca3af"/>
+  <line x1="60" y1="226" x2="160" y2="159.3" stroke="#e6b84f" stroke-width="1.1" opacity="0.8"/>
+  <polygon points="158.5,157.1 165,156 161.5,161.6" fill="#e6b84f" stroke="#e6b84f" stroke-width="1" opacity="0.8"/>
+  <text x="60" y="290" fill="#5aa9e6" font-size="12" text-anchor="middle">R1, t1</text>
+  <rect x="102" y="230" width="56" height="40" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="102,249.8 118.8,257.5 135.6,245.8 158,253.6 158,270 102,270" fill="#6b7280" stroke="#6b7280" stroke-width="0.5" opacity="0.6"/>
+  <circle cx="116.1" cy="260" r="3.2" fill="#9ca3af"/>
+  <circle cx="146.8" cy="259.7" r="3.2" fill="#9ca3af"/>
+  <line x1="130" y1="226" x2="178.9" y2="160.8" stroke="#e6b84f" stroke-width="1.1" opacity="0.8"/>
+  <polygon points="176.7,159.2 182.5,156 181.1,162.4" fill="#e6b84f" stroke="#e6b84f" stroke-width="1" opacity="0.8"/>
+  <text x="130" y="290" fill="#5aa9e6" font-size="12" text-anchor="middle">R2, t2</text>
+  <rect x="172" y="230" width="56" height="40" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="172,251.7 188.8,249.2 205.6,245.9 228,254.9 228,270 172,270" fill="#6b7280" stroke="#6b7280" stroke-width="0.5" opacity="0.6"/>
+  <circle cx="183.4" cy="262" r="3.2" fill="#9ca3af"/>
+  <circle cx="213.4" cy="258.6" r="3.2" fill="#9ca3af"/>
+  <line x1="200" y1="226" x2="200" y2="162" stroke="#e6b84f" stroke-width="1.1" opacity="0.8"/>
+  <polygon points="197.3,162 200,156 202.7,162" fill="#e6b84f" stroke="#e6b84f" stroke-width="1" opacity="0.8"/>
+  <text x="200" y="290" fill="#5aa9e6" font-size="12" text-anchor="middle">R3, t3</text>
+  <rect x="242" y="230" width="56" height="40" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="242,252.6 258.8,250 275.6,252.1 298,249.6 298,270 242,270" fill="#6b7280" stroke="#6b7280" stroke-width="0.5" opacity="0.6"/>
+  <circle cx="280.5" cy="264.6" r="3.2" fill="#9ca3af"/>
+  <circle cx="275.2" cy="259.3" r="3.2" fill="#9ca3af"/>
+  <line x1="270" y1="226" x2="221.1" y2="160.8" stroke="#e6b84f" stroke-width="1.1" opacity="0.8"/>
+  <polygon points="218.9,162.4 217.5,156 223.3,159.2" fill="#e6b84f" stroke="#e6b84f" stroke-width="1" opacity="0.8"/>
+  <text x="270" y="290" fill="#5aa9e6" font-size="12" text-anchor="middle">R4, t4</text>
+  <rect x="312" y="230" width="56" height="40" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="312,251.6 328.8,251.8 345.6,256.9 368,251.7 368,270 312,270" fill="#6b7280" stroke="#6b7280" stroke-width="0.5" opacity="0.6"/>
+  <circle cx="340.3" cy="262.7" r="3.2" fill="#9ca3af"/>
+  <circle cx="329.4" cy="262.1" r="3.2" fill="#9ca3af"/>
+  <line x1="340" y1="226" x2="240" y2="159.3" stroke="#e6b84f" stroke-width="1.1" opacity="0.8"/>
+  <polygon points="238.5,161.6 235,156 241.5,157.1" fill="#e6b84f" stroke="#e6b84f" stroke-width="1" opacity="0.8"/>
+  <text x="340" y="290" fill="#5aa9e6" font-size="12" text-anchor="middle">R5, t5</text>
+  <rect x="400" y="40" width="220" height="290" fill="none" stroke="#6b7280" stroke-width="1" rx="8"/>
+  <text x="510" y="62" fill="#c9d1d9" font-size="13" text-anchor="middle">sensor 2: film camera</text>
+  <rect x="425" y="90" width="170" height="62" fill="#2a303b" stroke="#e6b84f" stroke-width="1.6" rx="5"/>
+  <text x="510" y="110" fill="#e6b84f" font-size="12" text-anchor="middle">shared: K, f = 153.2 mm</text>
+  <text x="510" y="128" fill="#e6b84f" font-size="11" text-anchor="middle">principal point cx, cy</text>
+  <text x="510" y="144" fill="#e6b84f" font-size="11" text-anchor="middle">distortion k1 k2 · fiducials</text>
+  <rect x="412" y="230" width="56" height="40" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="412,252.2 428.8,255.3 445.6,257.4 468,250.3 468,270 412,270" fill="#6b7280" stroke="#6b7280" stroke-width="0.5" opacity="0.6"/>
+  <circle cx="448.9" cy="263.6" r="3.2" fill="#9ca3af"/>
+  <circle cx="445.4" cy="258.9" r="3.2" fill="#9ca3af"/>
+  <line x1="440" y1="226" x2="488.9" y2="160.8" stroke="#e6b84f" stroke-width="1.1" opacity="0.8"/>
+  <polygon points="486.7,159.2 492.5,156 491.1,162.4" fill="#e6b84f" stroke="#e6b84f" stroke-width="1" opacity="0.8"/>
+  <text x="440" y="290" fill="#5aa9e6" font-size="12" text-anchor="middle">R1, t1</text>
+  <rect x="482" y="230" width="56" height="40" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="482,249.5 498.8,253.3 515.6,248.7 538,249.6 538,270 482,270" fill="#6b7280" stroke="#6b7280" stroke-width="0.5" opacity="0.6"/>
+  <circle cx="509.6" cy="262" r="3.2" fill="#9ca3af"/>
+  <circle cx="509.3" cy="261.7" r="3.2" fill="#9ca3af"/>
+  <line x1="510" y1="226" x2="510" y2="162" stroke="#e6b84f" stroke-width="1.1" opacity="0.8"/>
+  <polygon points="507.3,162 510,156 512.7,162" fill="#e6b84f" stroke="#e6b84f" stroke-width="1" opacity="0.8"/>
+  <text x="510" y="290" fill="#5aa9e6" font-size="12" text-anchor="middle">R2, t2</text>
+  <rect x="552" y="230" width="56" height="40" fill="#2a303b" stroke="#6b7280" stroke-width="1"/>
+  <polygon points="552,253.4 568.8,255 585.6,251.3 608,252.1 608,270 552,270" fill="#6b7280" stroke="#6b7280" stroke-width="0.5" opacity="0.6"/>
+  <circle cx="576.4" cy="266" r="3.2" fill="#9ca3af"/>
+  <circle cx="572.9" cy="259.2" r="3.2" fill="#9ca3af"/>
+  <line x1="580" y1="226" x2="531.1" y2="160.8" stroke="#e6b84f" stroke-width="1.1" opacity="0.8"/>
+  <polygon points="528.9,162.4 527.5,156 533.3,159.2" fill="#e6b84f" stroke="#e6b84f" stroke-width="1" opacity="0.8"/>
+  <text x="580" y="290" fill="#5aa9e6" font-size="12" text-anchor="middle">R3, t3</text>
+  <text x="340" y="24" fill="#9ca3af" font-size="11" text-anchor="middle">one set of intrinsics per sensor, solved from all its photos</text>
+  <text x="340" y="350" fill="#9ca3af" font-size="11" text-anchor="middle">within a group only the pose (blue) differs from photo to photo</text>
+</svg>

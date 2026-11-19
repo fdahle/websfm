@@ -30,7 +30,7 @@ each needs:
   image with the images that look most like it ([image retrieval](help:image-retrieval)),
   from the features already detected.
 
-<!-- TODO(image): assets/preselection.svg - a grid of image thumbnails with the full N-by-N pair matrix faded in the background, and the sparse subset of actually-matched pairs highlighted: a narrow band near the diagonal for sequential, plus a few off-diagonal cells for loop closures. -->
+![The pair matrix of 16 images, every cell one pair: most cells faded, a band of blue cells beside the diagonal for each image's next three in capture order, and a few gold cells far from it for loop closures; 47 of 120 pairs are matched.](assets/preselection.svg)
 
 When matching stays **exhaustive**, a cheaper *subset gate* does the pruning instead: it matches a
 small, spatially-uniform sample of each pair's [keypoints](help:keypoint) first

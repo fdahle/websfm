@@ -1074,9 +1074,251 @@ def incsfm():
         b += arrow(10 + k * 172 + 164, 145, 10 + (k + 1) * 172 - 2, 145, GREY, 1.4, 6)
     svg('incremental-sfm.svg', W, H, b)
 
+def thumb(x, y, w, h, seed, c=DIM):
+    # A small photo: a hill line and a few blobs on a raised ground.
+    r = random.Random(seed)
+    b = rect(x, y, w, h, c, fill=RAISED, sw=1)
+    pts = [(x, y + h * r.uniform(0.45, 0.65))] + [(x + w * t, y + h * r.uniform(0.35, 0.7)) for t in (0.3, 0.6)] + [(x + w, y + h * r.uniform(0.45, 0.65)), (x + w, y + h), (x, y + h)]
+    b += poly(pts, DIM, fill=DIM, w=0.5, op=0.6, closed=True)
+    for _ in range(2): b += circ(x + w * r.uniform(0.2, 0.8), y + h * r.uniform(0.7, 0.9), min(w, h) * 0.08, GREY)
+    return b
+
+# ── bundle-adjustment.svg ────────────────────────────────────────────────────
+def bundle():
+    W, H = 760, 340
+    rnd = random.Random(3)
+    cams = [(70, 70), (150, 60), (230, 72)]
+    pts = [(40, 210), (85, 235), (130, 205), (175, 240), (215, 215), (255, 232)]
+    obs = [(i, j) for i in range(3) for j in range(6) if abs(cams[i][0] - pts[j][0]) < 120]
+    def proj(C, ang, X):
+        # where X lands on the camera's image line, as an offset along it (px)
+        n = (math.cos(ang), math.sin(ang)); t = (-n[1], n[0])
+        d = (X[0] - C[0], X[1] - C[1]); z = d[0] * n[0] + d[1] * n[1]; u = d[0] * t[0] + d[1] * t[1]
+        return 26 * u / z
+    angs = [math.pi / 2] * 3
+    b = ''
+    MAG = 4  # residuals drawn this many times longer, to be seen
+    for pi, (lab, ce, pe, mag) in enumerate([('before', 7, 9, 1), ('after', 0.4, 0.5, 1)]):
+        ox = pi * 275
+        rc = random.Random(30)
+        ecams = [(x + rc.gauss(0, ce), y + rc.gauss(0, ce)) for x, y in cams]
+        eangs = [a + rc.gauss(0, 0.05 * ce / 7) for a in angs]
+        epts = [(x + rc.gauss(0, pe), y + rc.gauss(0, pe)) for x, y in pts]
+        for (i, j) in obs:
+            b += line(ox + ecams[i][0], ecams[i][1], ox + epts[j][0], epts[j][1], BLUE, 0.6, op=0.35)
+        for i, C in enumerate(ecams):
+            a = eangs[i]; n = (math.cos(a), math.sin(a)); t = (-n[1], n[0])
+            P0 = (ox + C[0] + 26 * n[0], C[1] + 26 * n[1])
+            b += line(P0[0] - 32 * t[0], P0[1] - 32 * t[1], P0[0] + 32 * t[0], P0[1] + 32 * t[1], FG, 2)
+            for (ii, j) in obs:
+                if ii != i: continue
+                um = proj(cams[i], angs[i], pts[j])          # measured: the true point, true camera
+                ue = proj(C, a, epts[j])                     # projected: the current estimate
+                ue = um + MAG * (ue - um)
+                pm = (P0[0] + um * t[0], P0[1] + um * t[1]); pe_ = (P0[0] + ue * t[0], P0[1] + ue * t[1])
+                if abs(ue - um) > 3:
+                    b += arrow(pe_[0] - 9 * n[0], pe_[1] - 9 * n[1], pm[0] - 9 * n[0], pm[1] - 9 * n[1], RED, 1.3, 5)
+                b += circ(*pm, 2.6, GREEN)
+                b += circ(*pe_, 2.6, GOLD, fill=False, w=1.2)
+            b += cam2d(ox + C[0], C[1], a, size=12)
+        for X in epts: b += circ(ox + X[0], X[1], 4, GOLD)
+        b += text(ox + 150, 30, lab, FG, 13, 'middle')
+    b += text(150, 282, 'red: reprojection error, from where a point', GREY, 11, 'middle') + text(150, 296, 'projects (ring) to its keypoint (green)', GREY, 11, 'middle')
+    b += text(150, 310, f'(drawn {MAG}× longer)', GREY, 11, 'middle')
+    b += text(425, 282, 'cameras and points moved together:', GREY, 11, 'middle') + text(425, 296, 'the errors shrink everywhere', GREY, 11, 'middle')
+    b += line(285, 50, 285, 300, DIM, 1, '2 4') + line(565, 50, 565, 300, DIM, 1, '2 4')
+    # the Jacobian's sparsity: one row per observation, a camera block and a point block
+    jx, jy, cw, rh = 640, 70, 9, 9.5
+    b += text(jx + (3 * 1.6 + 6) * cw / 2, 30, 'Jacobian', FG, 13, 'middle')
+    camw, ptw = 1.6 * cw, cw
+    for r_, (i, j) in enumerate(obs):
+        y = jy + r_ * rh
+        b += rect(jx, y, 3 * camw + 6 * ptw, rh, fill=RAISED)
+        b += rect(jx + i * camw, y, camw, rh, fill=BLUE)
+        b += rect(jx + 3 * camw + j * ptw, y, ptw, rh, fill=GOLD)
+    hgt = len(obs) * rh
+    b += rect(jx, jy, 3 * camw + 6 * ptw, hgt, DIM, sw=1)
+    b += line(jx + 3 * camw, jy - 4, jx + 3 * camw, jy + hgt + 4, FG, 1)
+    b += text(jx + 1.5 * camw, jy - 8, 'cameras', BLUE, 10, 'middle') + text(jx + 3 * camw + 3 * ptw, jy - 8, 'points', GOLD, 10, 'middle')
+    b += text(jx - 6, jy + hgt / 2, 'observations', GREY, 10, 'end')
+    b += text(jx + 50, jy + hgt + 20, 'each row touches one camera', GREY, 10, 'middle') + text(jx + 50, jy + hgt + 33, 'and one point: the points are', GREY, 10, 'middle') + text(jx + 50, jy + hgt + 46, 'eliminated first (Schur)', GREY, 10, 'middle')
+    svg('bundle-adjustment.svg', W, H, b)
+
+# ── self-calibration.svg ─────────────────────────────────────────────────────
+def selfcal():
+    W, H = 680, 330
+    b = ''
+    rnd = random.Random(6)
+    xs = [30 + i * 9 for i in range(29)]
+    for pi, (lab, bow, col) in enumerate([('focal too short: the flat ground bends into a bowl', 38, RED), ('after self-calibration: flat', 0, GREEN)]):
+        ox = 10 + pi * 340
+        cams = [(ox + 50 + 50 * i, 70) for i in range(5)]
+        g = lambda x: 200 - bow * ((x - 156) / 126) ** 2
+        b += line(ox + 20, 200, ox + 280, 200, DIM, 1, '5 4')
+        pts = [(ox + x, g(x) + rnd.gauss(0, 1.5)) for x in xs]
+        for C in cams:
+            for X in pts[::4]:
+                if abs(X[0] - C[0]) < 70: b += line(*C, *X, BLUE, 0.5, op=0.35)
+        for X in pts: b += circ(*X, 2.8, GOLD)
+        for C in cams: b += cam2d(*C, math.pi / 2, size=11)
+        b += text(ox + 150, 30, lab, col if pi else FG, 12, 'middle')
+        # the residual pattern left in each image
+        fx, fy, fw, fh = ox + 95, 225, 110, 74
+        b += rect(fx, fy, fw, fh, DIM, fill=RAISED, sw=1)
+        cx, cy = fx + fw / 2, fy + fh / 2
+        for i in range(5):
+            for j in range(4):
+                x = fx + 11 + i * 22; y = fy + 10 + j * 18
+                dx, dy = (x - cx) / 55, (y - cy) / 55
+                r = math.hypot(dx, dy)
+                L = 16 * r ** 3 if pi == 0 else 0
+                if L > 2.5:
+                    b += arrow(x, y, x + L * dx / r, y + L * dy / r, RED, 1.1, 4)
+                else:
+                    b += circ(x, y, 1.4, GREY)
+        b += text(fx + fw / 2, fy + fh + 16, 'residuals in one image' if pi == 0 else 'residuals: noise only', GREY, 11, 'middle')
+    b += text(20, 196, 'true', GREY, 10)
+    svg('self-calibration.svg', W, H, b)
+
+# ── cycle-consistency.svg ────────────────────────────────────────────────────
+def cycle():
+    W, H = 680, 330
+    b = ''
+    def camtop(x, y, heading, c=BLUE):
+        # a camera from above: a small box and the way it faces
+        hx, hy = math.cos(heading), math.sin(heading)
+        return rect(x - 9, y - 9, 18, 18, c, fill=RAISED, sw=1.6, rx=3) + arrow(x, y, x + 24 * hx, y + 24 * hy, c, 1.8, 6)
+    for pi, ok in enumerate((True, False)):
+        ox = pi * 340
+        P = {'i': (ox + 80, 230), 'j': (ox + 170, 80), 'k': (ox + 260, 230)}
+        hd = {'i': -0.3, 'j': 0.9, 'k': 2.4}
+        for (a, c_, lab, bad) in (('i', 'j', 'R_ij', False), ('j', 'k', 'R_jk', not ok), ('i', 'k', 'R_ik', False)):
+            p, q = P[a], P[c_]
+            d = math.hypot(q[0] - p[0], q[1] - p[1]); u = ((q[0] - p[0]) / d, (q[1] - p[1]) / d)
+            p2 = (p[0] + 22 * u[0], p[1] + 22 * u[1]); q2 = (q[0] - 22 * u[0], q[1] - 22 * u[1])
+            bend = -16 if lab != 'R_ik' else 16
+            b += curve(p2, q2, bend, RED if bad else GREY, 3 if bad else 1.6)
+            mx, my = (p[0] + q[0]) / 2 + (u[1] * 30 if lab != 'R_ik' else -u[1] * 34), (p[1] + q[1]) / 2 - (u[0] * 30 if lab != 'R_ik' else -u[0] * 34)
+            b += text(mx, my + 4, lab, RED if bad else FG, 13, 'middle')
+        for nm, (x, y) in P.items():
+            b += camtop(x, y, hd[nm]) + text(x + (-22 if nm == 'i' else 22 if nm == 'k' else 0), y + (26 if nm != 'j' else -18), nm, BLUE, 14, 'middle')
+        x, y = P['i']
+        if ok:
+            b += path(f'M {x - 46} {y - 22} l 6 7 l 13 -15', GREEN, w=3)
+            b += text(ox + 170, 290, 'around the loop and back: the identity', GREEN, 12, 'middle')
+        else:
+            # the composed rotation returns turned away from i's own heading
+            r = 34; a0, a1 = hd['i'], hd['i'] + 0.6
+            b += arrow(x, y, x + 30 * math.cos(a1), y + 30 * math.sin(a1), RED, 1.6, 6, '4 3')
+            arc = [(x + r * math.cos(a0 + (a1 - a0) * t / 12), y + r * math.sin(a0 + (a1 - a0) * t / 12)) for t in range(13)]
+            b += poly(arc, RED, w=1.6)
+            b += text(x - 6, y + 46, 'residual turn', RED, 11, 'end')
+            b += text(ox + 170, 290, 'one pair is wrong: the loop does not close', RED, 12, 'middle')
+        b += text(ox + 170, 310, 'R_ik⁻¹ · R_jk · R_ij', GREY, 11, 'middle')
+    b += line(340, 40, 340, 310, DIM, 1, '2 4')
+    b += text(340, 24, 'compose the relative rotations around a loop of three images', GREY, 11, 'middle')
+    svg('cycle-consistency.svg', W, H, b)
+
+# ── preselection.svg ─────────────────────────────────────────────────────────
+def presel():
+    W, H = 680, 380
+    N, cell = 16, 17
+    ox, oy = 90, 80
+    b = ''
+    loops = {(0, 13), (1, 14), (2, 15), (0, 15), (5, 10)}
+    seq = 3
+    matched = 0
+    for i in range(N):
+        for j in range(i + 1, N):
+            x, y = ox + j * cell, oy + i * cell
+            if j - i <= seq: c = BLUE; matched += 1
+            elif (i, j) in loops: c = GOLD; matched += 1
+            else: c = None
+            b += rect(x + 1, y + 1, cell - 2, cell - 2, fill=c or RAISED, op=None if c else 0.8)
+    for i in range(N):
+        b += thumb(ox + i * cell + 1.5, oy - 22, cell - 3, 13, 100 + i)
+        b += thumb(ox - 22, oy + i * cell + 2, 15, cell - 4, 100 + i)
+    b += text(ox + N * cell / 2, oy - 32, 'image', GREY, 11, 'middle')
+    b += text(ox - 30, oy + N * cell / 2, 'image', GREY, 11, 'end')
+    total = N * (N - 1) // 2
+    lx = ox + N * cell + 40
+    b += rect(lx, 110, 14, 14, fill=RAISED) + text(lx + 22, 122, f'every pair: {total} for {N} images', GREY, 12)
+    b += rect(lx, 140, 14, 14, fill=BLUE) + text(lx + 22, 152, f'capture order: the next {seq} images', BLUE, 12)
+    b += rect(lx, 170, 14, 14, fill=GOLD) + text(lx + 22, 182, 'loop closures', GOLD, 12)
+    b += text(lx, 220, f'matched: {matched} of {total} pairs', FG, 13)
+    b += text(lx, 244, 'the count grows with N,', GREY, 11) + text(lx, 259, 'not with N²', GREY, 11)
+    b += text(340, 20, 'which pairs to match: the strip of neighbours, and a few where the flight comes back', GREY, 11, 'middle')
+    svg('preselection.svg', W, H, b)
+
+# ── matching-density.svg ─────────────────────────────────────────────────────
+def mdensity():
+    W, H = 680, 380
+    rnd = random.Random(21)
+    b = ''
+    # scene features: a few strong corners and many weaker ones over the overlap
+    strong = [(rnd.uniform(0.1, 0.9), rnd.uniform(0.1, 0.9)) for _ in range(7)]
+    weak = [(rnd.uniform(0.02, 0.98), rnd.uniform(0.02, 0.98)) for _ in range(170)]
+    for pi, (lab, sub) in enumerate([('Fast', 'one pass on the strongest keypoints'), ('Full (tiled)', 'coarse pass, then each tile in turn')]):
+        ox = 20 + pi * 330
+        fw, fh = 300, 110
+        I1, I2 = (ox, 60), (ox, 230)
+        sh = 0.28  # image 2 sees the scene shifted by this fraction of the width
+        for (fx, fy) in (I1, I2): b += rect(fx, fy, fw, fh, DIM, fill=RAISED, sw=1)
+        # the overlap: scene x in [sh, 1] of image 1 is [0, 1 - sh] of image 2
+        b += rect(I1[0] + sh * fw, I1[1], (1 - sh) * fw, fh, BLUE, sw=1, op=0.5, dash='4 3')
+        b += rect(I2[0], I2[1], (1 - sh) * fw, fh, BLUE, sw=1, op=0.5, dash='4 3')
+        if pi == 1:
+            for k in range(1, 4):
+                b += line(I1[0] + sh * fw + k * (1 - sh) * fw / 4, I1[1], I1[0] + sh * fw + k * (1 - sh) * fw / 4, I1[1] + fh, GREY, 0.8, '2 3')
+                b += line(I2[0] + k * (1 - sh) * fw / 4, I2[1], I2[0] + k * (1 - sh) * fw / 4, I2[1] + fh, GREY, 0.8, '2 3')
+            b += line(I1[0] + sh * fw, I1[1] + fh / 2, I1[0] + fw, I1[1] + fh / 2, GREY, 0.8, '2 3')
+            b += line(I2[0], I2[1] + fh / 2, I2[0] + (1 - sh) * fw, I2[1] + fh / 2, GREY, 0.8, '2 3')
+        if pi == 0:
+            feats = [(x, y) for (x, y) in strong for _ in range(1)] + [(x + rnd.gauss(0, 0.03), y + rnd.gauss(0, 0.05)) for (x, y) in strong for _ in range(3)]
+        else:
+            feats = strong + weak
+        n = 0
+        for (sx, sy) in feats:
+            # scene coordinates span image 1 x ∈ [0,1]; in image 2 the same point is at x − sh
+            x1 = sx; x2 = sx - sh
+            if not (sh + 0.01 < x1 < 0.99 and 0.01 < x2 < 1 - sh - 0.01 and 0.03 < sy < 0.97): continue
+            p = (I1[0] + x1 * fw, I1[1] + sy * fh); q = (I2[0] + x2 * fw, I2[1] + sy * fh)
+            b += line(*p, *q, GREEN, 0.7, op=0.6)
+            b += circ(*p, 1.8, GOLD) + circ(*q, 1.8, GOLD)
+            n += 1
+        b += text(ox + fw / 2, 34, lab, FG, 13, 'middle')
+        b += text(ox + fw / 2, 50, sub, GREY, 11, 'middle')
+        b += text(ox + fw / 2, 362, f'{n} matches', GREEN, 12, 'middle')
+        b += text(ox - 4, I1[1] + fh / 2, '1', GREY, 11, 'end') + text(ox - 4, I2[1] + fh / 2, '2', GREY, 11, 'end')
+    svg('matching-density.svg', W, H, b)
+
+# ── sensor-grouping.svg ──────────────────────────────────────────────────────
+def sensors():
+    W, H = 680, 360
+    b = ''
+    groups = [('sensor 1: drone camera', 5, 20, 'f = 3,650 px', 'k1 k2 k3 p1 p2'), ('sensor 2: film camera', 3, 400, 'f = 153.2 mm', 'k1 k2 · fiducials')]
+    for gi, (lab, n, ox, fl, dist) in enumerate(groups):
+        gw = n * 70 + 10
+        b += rect(ox, 40, gw, 290, DIM, sw=1, rx=8)
+        b += text(ox + gw / 2, 62, lab, FG, 13, 'middle')
+        bx, by, bw = ox + gw / 2 - 85, 90, 170
+        b += rect(bx, by, bw, 62, GOLD, fill=RAISED, sw=1.6, rx=5)
+        b += text(bx + bw / 2, by + 20, 'shared: K, ' + fl, GOLD, 12, 'middle')
+        b += text(bx + bw / 2, by + 38, 'principal point cx, cy', GOLD, 11, 'middle')
+        b += text(bx + bw / 2, by + 54, 'distortion ' + dist, GOLD, 11, 'middle')
+        for k in range(n):
+            tx = ox + 12 + k * 70
+            b += thumb(tx, 230, 56, 40, 7 + gi * 10 + k)
+            b += arrow(tx + 28, 226, bx + bw / 2 + (tx + 28 - (bx + bw / 2)) * 0.25, by + 66, GOLD, 1.1, 6, op=0.8)
+            b += text(tx + 28, 290, f'R{k + 1}, t{k + 1}', BLUE, 12, 'middle')
+    b += text(340, 24, 'one set of intrinsics per sensor, solved from all its photos', GREY, 11, 'middle')
+    b += text(340, 350, 'within a group only the pose (blue) differs from photo to photo', GREY, 11, 'middle')
+    svg('sensor-grouping.svg', W, H, b)
+
 FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning,
            volume, gauge, lowe, track, cog, mgraph, pose,
-           kpmatch, fmatrix, homog, cheir, pnp, incsfm]
+           kpmatch, fmatrix, homog, cheir, pnp, incsfm,
+           bundle, selfcal, cycle, presel, mdensity, sensors]
 only = set(sys.argv[2:])
 for f in FIGURES:
     if not only or f.__name__ in only: f()

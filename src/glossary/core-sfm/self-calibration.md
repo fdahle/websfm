@@ -19,7 +19,7 @@ all. Because intrinsics are shared across a [sensor](help:sensor) group, one
 focal length is constrained by every observation in the group, and there is
 genuinely enough evidence to recover it.
 
-<!-- TODO(image): assets/self-calibration.svg - a flat surface reconstructed with a too-short focal length (bowl-shaped, the classic dome artefact) beside the same surface after self-calibration recovers the correct focal, with the residual pattern shown as a radial arrow field in the before case. -->
+![Left, a block reconstructed with a focal length too short: the flat ground bends into a bowl above the true level, and the residuals in one image point outward, growing toward the corners. Right, after self-calibration: the ground lies flat and the residuals are noise.](assets/self-calibration.svg)
 
 **The danger is overfitting.** Every parameter freed is a parameter the solver can
 misuse to absorb noise, and some are badly correlated with each other — the

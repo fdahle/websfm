@@ -19,7 +19,7 @@ ratio-based gate passes; the pair looks healthy in isolation. Only when its
 relative rotation is checked against the rest of the [match graph](help:match-graph)
 does the contradiction show up.
 
-<!-- TODO(image): assets/cycle-consistency.svg - three camera icons i, j, k at the corners of a triangle with directed edges labelled R_ij, R_jk, R_ik. A consistent triangle shows the composed rotation returning to identity (a small check mark at i); an inconsistent one shows a residual rotation arrow at i, and the offending edge highlighted for removal. -->
+![Two triangles of cameras i, j, k joined by relative rotations R_ij, R_jk and R_ik. Left, composing them around the loop returns to i's own heading: a check mark. Right, the composed rotation comes back turned away from it, a residual turn, and the wrong pair's edge is drawn red.](assets/cycle-consistency.svg)
 
 The test is only as good as the pairwise rotations it composes, and that is the
 catch. Each one comes from decomposing a pair's essential matrix, which needs a
