@@ -1,9 +1,10 @@
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { DIALOGS_PATH } from '../core/projectLayout.js'
 import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useLog } from './useLog.js'
-import { normalizeSettings, changedSettings, presetName } from '../core/dialogSettings.js'
+import { normalizeSettings, changedSettings, presetName, withPreset, withoutPreset } from '../core/dialogSettings.js'
+import { dialogPresets, loadDialogPresets, writeDialogPresets } from './dialogPresets.js'
 
 // A processing dialog's settings, kept between runs (plan-after-0.7 ▸ PRE):
 // - the last run's settings per project (`dialogs.json` in the project folder, so they
@@ -24,17 +25,8 @@ import { normalizeSettings, changedSettings, presetName } from '../core/dialogSe
 //   source    'last' when the dialog opened on the last run's settings, a preset's name
 //             after one was applied, null otherwise
 
-// The named presets of this browser, by dialog; also read and written by Settings ▸
-// Storage ▸ Export / Import settings (useSettingsTransfer.js).
-export const PRESETS = 'dialog-presets.json'
 // internal/dialogs.json (core/projectLayout.js); at the folder's top before format version 3.
 const LAST = DIALOGS_PATH
-let presetsCache = null
-
-async function allPresets() {
-  if (!presetsCache) presetsCache = (await opfs.readAppJson(PRESETS).catch(() => null)) ?? {}
-  return presetsCache
-}
 
 async function readLastFile(projectId) {
   const file = await opfs.getProjectFile(projectId, LAST).catch(() => null)
@@ -65,7 +57,8 @@ export function useDialogSettings(op, defaults, { initial = null, exclude = [] }
   const projects = useProjectsStore()
   const { log } = useLog()
   const settings = ref({ ...defaults, ...(initial ?? {}) })
-  const presets = ref([])
+  // This dialog's presets, from the shared list (dialogPresets.js).
+  const presets = computed(() => dialogPresets.value?.[op] ?? [])
   const source = ref(null)
   // Anything the user changes before the saved settings arrive stays.
   let touched = false
@@ -85,10 +78,8 @@ export function useDialogSettings(op, defaults, { initial = null, exclude = [] }
   }
   // Preloaded: in place before the dialog's own watchers run.
   if (!initial && projectId && lastCache.projectId === projectId && lastCache.data) applyLast(lastCache.data)
-  if (presetsCache) presets.value = [...(presetsCache[op] ?? [])]
-
   ;(async () => {
-    presets.value = [...((await allPresets())[op] ?? [])]
+    await loadDialogPresets()
     if (initial || !projectId || source.value === 'last') return
     applyLast(await readLast(projectId))
   })()
@@ -110,14 +101,9 @@ export function useDialogSettings(op, defaults, { initial = null, exclude = [] }
   async function savePreset(name) {
     const n = presetName(name)
     if (!n) return false
-    const all = await allPresets()
-    const list = (all[op] ?? []).filter((p) => p.name !== n)
-    list.push({ name: n, settings: changedSettings(settings.value, kept) })
-    list.sort((a, b) => a.name.localeCompare(b.name))
-    all[op] = list
-    presets.value = [...list]
+    const all = await loadDialogPresets()
     source.value = n
-    await opfs.writeAppJson(PRESETS, all)
+    await writeDialogPresets(withPreset(all, op, n, changedSettings(settings.value, kept)))
     return true
   }
 
@@ -129,11 +115,8 @@ export function useDialogSettings(op, defaults, { initial = null, exclude = [] }
   }
 
   async function deletePreset(name) {
-    const all = await allPresets()
-    all[op] = (all[op] ?? []).filter((p) => p.name !== name)
-    presets.value = [...all[op]]
     if (source.value === name) source.value = null
-    await opfs.writeAppJson(PRESETS, all)
+    await writeDialogPresets(withoutPreset(await loadDialogPresets(), op, name))
   }
 
   function reset() {

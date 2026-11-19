@@ -186,6 +186,22 @@ export default {
     removed: 'Die heruntergeladenen KI-Modelle wurden entfernt.',
     failed: 'Das Entfernen der heruntergeladenen Modelle ist fehlgeschlagen: {error}',
   },
+  presets: {
+    label: 'Dialog-Presets',
+    desc: '{n, plural, one {# Preset} other {# Presets}}, gespeichert mit Presets ▾ in der Titelleiste eines Dialogs. Sie gehören zu diesem Browser; Exportieren nimmt sie mit.',
+    none: 'Noch keine gespeichert. Presets ▾ in der Titelleiste eines Dialogs speichert seine Einstellungen unter einem Namen.',
+    rename: 'Umbenennen',
+    delete: 'Löschen',
+    save: 'Speichern',
+    newName: 'Neuer Name des Presets',
+    deleteTitle: 'Preset löschen?',
+    deleteMessage: 'Das Preset „{name}“ löschen? Damit gemachte Läufe bleiben, wie sie sind.',
+    error: {
+      empty: 'Geben Sie dem Preset einen Namen',
+      taken: 'Dieser Dialog hat schon ein Preset mit diesem Namen',
+      missing: 'Das Preset gibt es nicht mehr',
+    },
+  },
   transfer: {
     label: 'Einstellungen und Presets',
     desc: 'Ihre Einstellungen, Dialog-Presets und Workflow-Vorlagen in eine Datei speichern, um sie in einen anderen Browser oder auf einen anderen Rechner mitzunehmen. Speichergrenze, Worker und GPU-Schalter bleiben bei diesem Rechner.',

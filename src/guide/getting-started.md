@@ -91,7 +91,8 @@ Dense Cloud, DEM, Orthophoto, Mesh, Reflectance) and the Tools that take the lon
 Lines, Co-register DEM, Align to Reference, Detect Targets) open on the settings of
 their last run in this project. **Presets ▾**
 in a dialog's title bar saves the current settings under a name, for the next project of
-the same kind, brings a saved set back, or resets to the defaults.
+the same kind, brings a saved set back, or resets to the defaults. **Settings ▸ Storage ▸
+Dialog presets** lists every saved preset, to rename or delete it.
 
 ## Supported browsers
 **Chrome and Edge** support everything; WebGPU (depth maps and matching on the graphics

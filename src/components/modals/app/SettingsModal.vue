@@ -11,6 +11,9 @@ import { useMobileWarning } from '../../../composables/useMobileWarning.js'
 import { useMapSettings } from '../../../composables/useMapSettings.js'
 import { useI18n } from '../../../composables/useI18n.js'
 import { useSettingsTransfer } from '../../../composables/useSettingsTransfer.js'
+import { dialogPresets, loadDialogPresets, writeDialogPresets } from '../../../composables/dialogPresets.js'
+import { renamePreset, withoutPreset } from '../../../core/dialogSettings.js'
+import { getGuideDoc } from '../../../core/help/guide.js'
 import { provideStepLayout } from '../../../composables/useStepLayout.js'
 import { BASEMAPS, SATELLITE } from '../../../core/basemaps.js'
 import { PLANNED_LANGUAGES, msg } from '../../../core/i18n/index.js'
@@ -239,7 +242,42 @@ async function onResetSettings() {
   }
 }
 
+// Settings ▸ Storage ▸ Dialog presets: every dialog's named presets (dialogPresets.js),
+// by dialog, named as its guide article, to rename or delete. Open dialogs follow.
+const presetGroups = computed(() =>
+  Object.entries(dialogPresets.value ?? {})
+    .filter(([, list]) => list?.length)
+    .map(([op, list]) => ({ op, title: getGuideDoc(op)?.title ?? op, list }))
+    .sort((a, b) => a.title.localeCompare(b.title)),
+)
+const presetCount = computed(() => presetGroups.value.reduce((n, g) => n + g.list.length, 0))
+// The preset being renamed: { op, from, name, error }, or null.
+const renaming = ref(null)
+function startPresetRename(op, from) {
+  renaming.value = { op, from, name: from, error: null }
+}
+async function commitPresetRename() {
+  const r = renaming.value
+  if (!r) return
+  const res = renamePreset(dialogPresets.value, r.op, r.from, r.name)
+  if (res.error) {
+    renaming.value = { ...r, error: res.error }
+    return
+  }
+  renaming.value = null
+  if (res.all !== dialogPresets.value) await writeDialogPresets(res.all)
+}
+async function deletePresetFromSettings(op, name) {
+  const ok = await confirmDialog({
+    title: t('settings.presets.deleteTitle'),
+    message: t('settings.presets.deleteMessage', { name }),
+    confirmLabel: t('settings.presets.delete'),
+  })
+  if (ok) await writeDialogPresets(withoutPreset(dialogPresets.value, op, name))
+}
+
 onMounted(() => {
+  loadDialogPresets()
   refreshStorage()
   refreshModels()
 })
@@ -777,6 +815,43 @@ onMounted(() => {
           </div>
         </div>
 
+        <div class="setting-row setting-row-stacked">
+          <div class="setting-info">
+            <span class="setting-label">{{ t('settings.presets.label') }}</span>
+            <span class="setting-desc">{{
+              presetCount ? t('settings.presets.desc', { n: presetCount }) : t('settings.presets.none')
+            }}</span>
+          </div>
+          <div v-for="g in presetGroups" :key="g.op" class="preset-group">
+            <div class="preset-dialog">{{ g.title }}</div>
+            <div v-for="p in g.list" :key="p.name" class="preset-row">
+              <template v-if="renaming?.op === g.op && renaming.from === p.name">
+                <input
+                  v-model="renaming.name"
+                  class="field-input preset-name-input"
+                  :aria-label="t('settings.presets.newName')"
+                  @keydown.enter.prevent="commitPresetRename"
+                  @keydown.esc.stop.prevent="renaming = null"
+                />
+                <button class="btn btn-compact" @click="commitPresetRename">{{ t('settings.presets.save') }}</button>
+                <button class="btn btn-compact" @click="renaming = null">{{ t('common.cancel') }}</button>
+                <span v-if="renaming.error" class="field-error">{{
+                  t(`settings.presets.error.${renaming.error}`)
+                }}</span>
+              </template>
+              <template v-else>
+                <span class="preset-name">{{ p.name }}</span>
+                <button class="btn btn-compact" @click="startPresetRename(g.op, p.name)">
+                  {{ t('settings.presets.rename') }}
+                </button>
+                <button class="btn btn-compact" @click="deletePresetFromSettings(g.op, p.name)">
+                  {{ t('settings.presets.delete') }}
+                </button>
+              </template>
+            </div>
+          </div>
+        </div>
+
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-label">{{ t('settings.transfer.resetLabel') }}</span>
@@ -834,6 +909,36 @@ onMounted(() => {
 .setting-row + .group-head {
   margin-top: 4px;
   border-top: 1px solid var(--panel-border);
+}
+/* Settings ▸ Storage ▸ Dialog presets: a dialog's name, then its presets. */
+.preset-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.preset-dialog {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+  font-size: 12px;
+}
+.preset-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.field-input.preset-name-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
 }
 /* The note under Advanced while its rows are hidden: a note, not a link. */
 .advanced-note {

@@ -281,3 +281,54 @@ test('Ctrl+S says everything is saved instead of saving the page', async ({ page
   await expect(page.locator('.toast', { hasText: 'All changes are saved' }).first()).toBeVisible()
   expect(downloads).toBe(0)
 })
+
+test('Settings lists the dialog presets, renames and deletes them', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  await page.evaluate(async () => {
+    const { writeDialogPresets } = await import('/src/composables/dialogPresets.js')
+    await writeDialogPresets({
+      'dem': [{ name: 'Fine', settings: { gsd: 0.05 } }],
+      'dense-cloud': [
+        { name: 'Fast', settings: {} },
+        { name: 'Mine', settings: {} },
+      ],
+    })
+  })
+  await page.getByRole('button', { name: 'Other', exact: true }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+  await settings.getByRole('tab', { name: 'Storage' }).click()
+  await expect(settings.getByText(/^3 presets/)).toBeVisible()
+
+  const row = (name) => settings.locator('.preset-row').filter({ hasText: name })
+  await row('Mine').getByRole('button', { name: 'Rename' }).click()
+  const field = settings.getByLabel('New name of the preset')
+  await field.fill('Fast')
+  await field.press('Enter')
+  await expect(settings.getByText('This dialog has a preset of that name already')).toBeVisible()
+  await field.fill('Arch sites')
+  await field.press('Enter')
+  await expect(row('Arch sites')).toBeVisible()
+
+  await row('Fine').getByRole('button', { name: 'Delete' }).click()
+  await page
+    .getByRole('dialog', { name: 'Delete preset?' })
+    .getByRole('button', { name: 'Delete', exact: true })
+    .click()
+  await expect(settings.locator('.preset-row')).toHaveCount(2)
+
+  // Kept in this browser's storage.
+  await page.evaluate(async () => (await import('/src/utils/persistence.js')).flushPersistence())
+  await page.reload()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  const saved = await page.evaluate(async () => (await import('/src/composables/dialogPresets.js')).loadDialogPresets())
+  expect(saved).toEqual({
+    'dense-cloud': [
+      { name: 'Arch sites', settings: {} },
+      { name: 'Fast', settings: {} },
+    ],
+  })
+  expect(errors).toEqual([])
+})

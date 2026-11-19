@@ -188,6 +188,22 @@ export default {
     removed: 'The downloaded AI models were removed.',
     failed: 'Removing the downloaded models failed: {error}',
   },
+  presets: {
+    label: 'Dialog presets',
+    desc: '{n, plural, one {# preset} other {# presets}}, saved with Presets ▾ in a dialog’s title bar. They belong to this browser; Export takes them along.',
+    none: 'None saved yet. Presets ▾ in a dialog’s title bar saves the settings it shows under a name.',
+    rename: 'Rename',
+    delete: 'Delete',
+    save: 'Save',
+    newName: 'New name of the preset',
+    deleteTitle: 'Delete preset?',
+    deleteMessage: 'Delete the preset “{name}”? Runs made with it are not affected.',
+    error: {
+      empty: 'Give the preset a name',
+      taken: 'This dialog has a preset of that name already',
+      missing: 'The preset is gone',
+    },
+  },
   transfer: {
     label: 'Settings and presets',
     desc: 'Save your preferences, dialog presets and workflow templates to a file, to bring them to another browser or computer. The memory limit, the workers and the GPU switch stay with this computer.',

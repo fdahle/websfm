@@ -44,3 +44,36 @@ export function presetName(name) {
     .slice(0, 60)
   return n || null
 }
+
+// ── Named presets (dialog-presets.json: { dialog: [{ name, settings }] }) ──
+// Each dialog's list is kept sorted by name. Every function returns a new object.
+
+const sorted = (list) => [...list].sort((a, b) => a.name.localeCompare(b.name))
+
+/** `all` with `op`'s preset `name` set to `settings` (added, or replaced). */
+export function withPreset(all, op, name, settings) {
+  const list = (all?.[op] ?? []).filter((p) => p.name !== name)
+  return { ...(all ?? {}), [op]: sorted([...list, { name, settings }]) }
+}
+
+/** `all` without `op`'s preset `name`; a dialog left with none is dropped. */
+export function withoutPreset(all, op, name) {
+  const list = (all?.[op] ?? []).filter((p) => p.name !== name)
+  const { [op]: _gone, ...rest } = all ?? {}
+  return list.length ? { ...rest, [op]: list } : rest
+}
+
+/**
+ * `all` with `op`'s preset `from` named `to`: { all }, or { error } — 'empty' (no name
+ * left after trimming), 'taken' (the dialog has a preset of that name), 'missing'.
+ */
+export function renamePreset(all, op, from, to) {
+  const name = presetName(to)
+  if (!name) return { error: 'empty' }
+  const list = all?.[op] ?? []
+  const preset = list.find((p) => p.name === from)
+  if (!preset) return { error: 'missing' }
+  if (name === from) return { all }
+  if (list.some((p) => p.name === name)) return { error: 'taken' }
+  return { all: { ...all, [op]: sorted(list.map((p) => (p === preset ? { ...p, name } : p))) } }
+}

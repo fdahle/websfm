@@ -9,8 +9,7 @@ import {
 import { downloadBlob } from '../utils/download.js'
 import { APP_VERSION } from '../utils/appBuild.js'
 import { flushPersistence } from '../utils/persistence.js'
-import * as opfs from '../utils/opfs.js'
-import { PRESETS } from './useDialogSettings.js'
+import { loadDialogPresets, writeDialogPresets } from './dialogPresets.js'
 import { TEMPLATE_KEY } from '../stores/useWorkflowsStore.js'
 import { useLog } from './useLog.js'
 
@@ -33,7 +32,7 @@ export function useSettingsTransfer() {
 
   async function exportSettings() {
     const stored = Object.fromEntries(PORTABLE_KEYS.map((k) => [k, localStorage.getItem(k)]))
-    const dialogPresets = (await opfs.readAppJson(PRESETS).catch(() => null)) ?? {}
+    const dialogPresets = await loadDialogPresets()
     const workflowTemplates = readJson(TEMPLATE_KEY, [])
     const file = settingsExport({ stored, dialogPresets, workflowTemplates, appVersion: APP_VERSION })
     downloadBlob('websfm-settings.json', JSON.stringify(file, null, 2), 'application/json')
@@ -59,8 +58,7 @@ export function useSettingsTransfer() {
   // and templates are merged (core/preferences.js).
   async function applyImport({ preferences, dialogPresets, workflowTemplates }, fileName) {
     for (const [key, value] of Object.entries(preferences)) localStorage.setItem(key, value)
-    const presets = mergeDialogPresets((await opfs.readAppJson(PRESETS).catch(() => null)) ?? {}, dialogPresets)
-    await opfs.writeAppJson(PRESETS, presets)
+    await writeDialogPresets(mergeDialogPresets(await loadDialogPresets(), dialogPresets))
     localStorage.setItem(TEMPLATE_KEY, JSON.stringify(mergeTemplates(readJson(TEMPLATE_KEY, []), workflowTemplates)))
     log(
       `Settings imported from "${fileName}": ${Object.keys(preferences).length.toLocaleString('en')} preferences, ` +
