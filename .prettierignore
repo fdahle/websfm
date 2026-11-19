@@ -17,3 +17,5 @@ dev/
 scripts/bench/configs/
 # Markdown keeps its hand wrapping: the guide's param markers and the changelog.
 *.md
+# Figure data: a coastline, kept compact.
+scripts/figures/*.json

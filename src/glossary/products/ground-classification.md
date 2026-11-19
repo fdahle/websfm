@@ -27,7 +27,7 @@ cloud from below, and a cloth pushed up against it from underneath:
 5. Each point is ground when it lies within a tolerance of the cloth. Points higher
    than that are above ground, and points lower are noise.
 
-<!-- TODO(image): assets/ground-classification.svg - a side view: terrain with a house and a tree, the cloud from below, a cloth pushed up from underneath that touches the open ground, spans under the roof and between the tree's ground hits; points near the cloth coloured as ground, the rest as above ground. -->
+![A side view of a cloud with open ground, a house and a tree, and a cloth pushed up from below: it touches the open ground, spans under the roof between the wall feet and reaches the ground between the tree's branches. Points within the tolerance of the cloth are ground, the roof, walls and canopy above ground.](assets/ground-classification.svg)
 
 The cloth's resolution and stiffness set what it can span and what it can follow. A
 cloth that bridges a 40 m roof also lifts off a sharp ridge narrower than that.

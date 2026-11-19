@@ -16,7 +16,7 @@ overview of the whole cloud; each level below doubles the detail, and every poin
 in exactly one node. This is the scheme of Potree and of COPC (Cloud Optimized Point
 Cloud) files.
 
-<!-- TODO(image): assets/level-of-detail.svg - a terrain cloud as the root's sparse sample, then one quadrant refined twice, the nodes' cubes outlined. -->
+![An octree over a terrain cloud in three steps: the root cube with a sparse, even sample of the whole cloud; one child cube adding its own sample, denser in its corner; and that child's child adding more again, the nodes' cubes outlined.](assets/level-of-detail.svg)
 
 While you orbit, the viewer walks the octree from the top and takes the nodes in the
 view that are largest on screen first, until the **point budget** is spent (5 million

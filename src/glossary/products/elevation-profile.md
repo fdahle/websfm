@@ -14,7 +14,7 @@ along the line. Spacing them about one DEM cell apart reads every cell the line
 crosses; closer spacing adds nothing the DEM does not contain, wider spacing can step
 over a narrow ditch or wall. Between cell centres the height is interpolated.
 
-<!-- TODO(image): assets/elevation-profile.svg - a DEM in plan view with a polyline drawn across a valley, and below it the profile: height against distance along the line, with a gap where the line crosses a nodata hole. -->
+![Left, a DEM in plan view with a line from A to B drawn across a valley and through a hole with no height. Right, the profile along the line, height against distance: it falls into the valley and rises again, with a gap where the line crosses the hole.](assets/elevation-profile.svg)
 
 A profile is only as honest as its gaps. Where the DEM has no height (a hole, water
 the cameras could not see, the edge of the raster) a profile should show a gap rather

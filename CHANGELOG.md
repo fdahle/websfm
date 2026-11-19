@@ -6,6 +6,7 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **Figures in the Glossary.** 46 Glossary entries that waited for a diagram now have one, from SIFT's scale space and the fundamental matrix to PatchMatch, seamlines, graph cuts and ground classification, in the light and the dark theme. Each is drawn from computed geometry by `scripts/figures/glossary.py`: the cost curves are real ZNCC against candidate depths, the graph cut is found by max flow, view selection and ICP really run, and the polar map is shaded by each projection's computed scale error over Natural Earth's Antarctic coastline.
 - **See whether a change made the model more accurate.** Evaluate ▸ Accuracy now starts
   with **Since the fit before**: every Georeference keeps the accuracy it reached, and the
   last fit is set against the one before (▲ better, ▼ worse), with what changed between

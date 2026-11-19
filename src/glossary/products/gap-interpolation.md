@@ -23,7 +23,7 @@ their neighbours is safe. The methods:
   steps such as a roof edge, but looks blocky.
 - **None** leaves the gap as nodata, which shows exactly where nothing was measured.
 
-<!-- TODO(image): assets/gap-interpolation.svg - a raster with a few one-cell holes and one large hole; the small holes filled from measured cells inside the radius circle, the large hole left as nodata because no measured cell lies within the radius of its interior. -->
+![A raster with four one-cell holes and one large hole, before and after filling. The small holes are filled, a circle of the radius around one showing measured cells inside it; in the large hole only the rim is filled, and a circle around an interior cell holds no measured cell, so the interior stays nodata.](assets/gap-interpolation.svg)
 
 **The radius is the safety limit.** A cell is filled only when a measured cell lies
 within the radius, and filled cells never feed further fills, so interpolation cannot

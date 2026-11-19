@@ -2871,6 +2871,254 @@ def tiles3d():
     b += text(kx, 296, 'far tiles stay coarse; near ones refine', GREY, 11)
     svg('3d-tiles.svg', W, H, b)
 
+def dem_tile(n, seed=0):
+    # a small terrain: a ridge, a valley and a knoll, in metres on a 1 m grid
+    return [[30 * math.exp(-(((i - n * 0.35) / (n * 0.22)) ** 2)) * (0.6 + 0.4 * math.sin(j / n * 3))
+             + 18 * math.exp(-(((i - n * 0.75) ** 2 + (j - n * 0.3) ** 2) / (n * 0.15) ** 2)) + 0.12 * j
+             for i in range(n)] for j in range(n)]
+def horn(z, dx=1.0):
+    n = len(z); g = lambda j, i: z[min(n - 1, max(0, j))][min(n - 1, max(0, i))]
+    gx = [[((g(j - 1, i + 1) + 2 * g(j, i + 1) + g(j + 1, i + 1)) - (g(j - 1, i - 1) + 2 * g(j, i - 1) + g(j + 1, i - 1))) / (8 * dx) for i in range(n)] for j in range(n)]
+    gy = [[((g(j + 1, i - 1) + 2 * g(j + 1, i) + g(j + 1, i + 1)) - (g(j - 1, i - 1) + 2 * g(j - 1, i) + g(j - 1, i + 1))) / (8 * dx) for i in range(n)] for j in range(n)]
+    return gx, gy            # gy: change toward the south (rows grow southward)
+def hsv(h, s, v):
+    i = int(h * 6) % 6; f = h * 6 - int(h * 6); p, q, t = v * (1 - s), v * (1 - f * s), v * (1 - (1 - f) * s)
+    return [(v, t, p), (q, v, p), (p, v, t), (p, q, v), (t, p, v), (v, p, q)][i]
+
+# ── terrain-derivatives.svg ──────────────────────────────────────────────────
+def terrain():
+    W, H = 720, 340
+    n = 56
+    z = dem_tile(n)
+    gx, gy = horn(z, 4.0)                                   # 4 m cells
+    zlo = min(min(r) for r in z); zhi = max(max(r) for r in z)
+    slope = [[math.degrees(math.atan(math.hypot(a, c))) for a, c in zip(ra, rc)] for ra, rc in zip(gx, gy)]
+    # aspect: the compass direction the slope faces (downhill), 0 = north, clockwise
+    aspect = [[(math.degrees(math.atan2(-a, c)) + 360) % 360 for a, c in zip(ra, rc)] for ra, rc in zip(gx, gy)]
+    az, alt = math.radians(315), math.radians(45)          # sun from the north-west
+    def shade(a, c):
+        sl = math.atan(math.hypot(a, c)); asp = math.atan2(-a, c)
+        return max(0, math.cos(alt) * math.cos(sl) + math.sin(alt) * math.sin(sl) * math.cos(az - asp - math.pi) * -1)
+    # a direct form: light vector from the NW, surface normal from the gradient
+    L = (math.sin(az) * math.cos(alt), -math.cos(az) * math.cos(alt), math.sin(alt))   # x east, y south, z up
+    hs = [[max(0, v_dot(v_norm((-a, -c, 1)), L)) for a, c in zip(ra, rc)] for ra, rc in zip(gx, gy)]
+    S = 150
+    b = ''
+    panels = [('heights', map_px(z, lambda v: ramp((v - zlo) / (zhi - zlo)))),
+              ('slope', map_px(slope, lambda v: ramp(min(1, v / 45), ((0, (240, 240, 230)), (1, (150, 60, 50)))))),
+              ('aspect', [[tuple(255 * c for c in hsv(a / 360, 0.55, 0.9)) for a in row] for row in aspect]),
+              ('hillshade, sun from the north-west', gray_px(hs, 0, 1))]
+    for k, (lab, px) in enumerate(panels):
+        x = 20 + k * 172
+        b += image(x, 50, S, S, px) + rect(x, 50, S, S, DIM, sw=1)
+        b += text(x + S / 2, 36, lab, FG, 12, 'middle')
+    # keys
+    b += text(20 + S / 2, 222, f'{zlo:.0f} to {zhi:.0f} m, on 4 m cells', GREY, 11, 'middle')
+    b += text(192 + S / 2, 222, '0° flat to 45°+ steep', GREY, 11, 'middle')
+    wx, wy, wr = 364 + S / 2, 270, 24
+    for k in range(36):
+        a0, a1 = math.radians(k * 10 - 90), math.radians(k * 10 - 80)
+        col = hexc(*(255 * c for c in hsv(k * 10 / 360, 0.55, 0.9)))
+        b += poly([(wx, wy), (wx + wr * math.cos(a0), wy + wr * math.sin(a0)), (wx + wr * math.cos(a1), wy + wr * math.sin(a1))], None, fill=col, closed=True)
+    for lab_, a in (('N', -90), ('E', 0), ('S', 90), ('W', 180)):
+        b += text(wx + (wr + 9) * math.cos(math.radians(a)), wy + (wr + 9) * math.sin(math.radians(a)) + 4, lab_, GREY, 10, 'middle')
+    b += text(364 + S / 2, 222, 'the way the slope faces', GREY, 11, 'middle')
+    sx, sy = 536 + 18, 68
+    b += arrow(sx, sy, sx + 26, sy + 26, GOLD, 2.2, 8) + circ(sx, sy, 6, GOLD)
+    b += text(536 + S / 2, 222, 'light from 315°, 45° high', GREY, 11, 'middle')
+    b += text(360, 330, 'one DEM tile four ways; slope, aspect and hillshade all come from Horn’s 3 × 3 gradient', GREY, 11, 'middle')
+    svg('terrain-derivatives.svg', W, H, b)
+
+# ── gap-interpolation.svg ────────────────────────────────────────────────────
+def gapfill():
+    W, H = 700, 340
+    nx, ny, c = 18, 13, 20
+    z = [[0.5 + 0.3 * math.sin(i / 4) * math.cos(j / 5) + 0.02 * j for i in range(nx)] for j in range(ny)]
+    holes = {(3, 3), (13, 2), (8, 9), (4, 10)}
+    big = {(i, j) for i in range(10, 17) for j in range(5, 11)}
+    nod = holes | big
+    r = 2.0
+    measured = lambda i, j: (i, j) not in nod
+    def fill(i, j):
+        near = [(math.hypot(i - a, j - bb), z[bb][a]) for a in range(nx) for bb in range(ny) if measured(a, bb) and 0 < math.hypot(i - a, j - bb) <= r]
+        if not near: return None
+        return sum(v / d ** 2 for d, v in near) / sum(1 / d ** 2 for d, v in near)
+    b = ''
+    zl, zh = min(min(rw) for rw in z), max(max(rw) for rw in z)
+    for pi, after in enumerate((False, True)):
+        ox, oy = 20 + pi * 345, 50
+        for j in range(ny):
+            for i in range(nx):
+                x, y = ox + i * c / 1.12, oy + j * c / 1.12; cc = c / 1.12
+                if measured(i, j):
+                    b += rect(x, y, cc, cc, fill=ramp((z[j][i] - zl) / (zh - zl)))
+                else:
+                    v = fill(i, j) if after else None
+                    if v is None:
+                        b += rect(x, y, cc, cc, fill=RAISED) + line(x + 2, y + cc - 2, x + cc - 2, y + 2, DIM, 1)
+                    else:
+                        b += rect(x, y, cc, cc, fill=ramp((v - zl) / (zh - zl))) + circ(x + cc / 2, y + cc / 2, 2.2, FG)
+        b += rect(ox, oy, nx * c / 1.12, ny * c / 1.12, DIM, sw=1)
+        b += text(ox + nx * c / 2.24, 36, 'after: filled within the radius' if after else 'before: holes with no height', FG, 12, 'middle')
+        cc = c / 1.12
+        if after:
+            for (i, j) in ((3, 3), (13, 7)):
+                b += circ(ox + (i + 0.5) * cc, oy + (j + 0.5) * cc, r * cc, GOLD if (i, j) == (3, 3) else RED, fill=False, w=1.8)
+    b += text(20 + 345 + 2, 318, 'gold: a small hole, measured cells inside the radius: filled (dot)', GOLD, 11)
+    b += text(20 + 345 + 2, 334, 'red: deep in the large hole, none inside: stays nodata', RED, 11)
+    b += text(20, 318, 'only the rim of the large hole is filled;', GREY, 11) + text(20, 334, 'a filled cell never feeds another', GREY, 11)
+    svg('gap-interpolation.svg', W, H, b)
+
+# ── elevation-profile.svg ────────────────────────────────────────────────────
+def profile():
+    W, H = 700, 330
+    n = 60
+    z = [[40 + 35 * abs((i - n * 0.5) / (n * 0.5)) ** 1.4 + 6 * math.sin(j / 6) + 0.2 * j for i in range(n)] for j in range(n)]
+    hole = lambda i, j: (i - 38) ** 2 + (j - 24) ** 2 < 30
+    zl = min(min(r) for r in z); zh = max(max(r) for r in z)
+    S = 4.0; ox, oy = 30, 40
+    b = rect(ox, oy, n * S, n * S, DIM, fill=RAISED, sw=1)
+    b += image(ox, oy, n * S, n * S, map_px([[None if hole(i, j) else (v - zl) / (zh - zl) for i, v in enumerate(row)] for j, row in enumerate(z)], ramp))
+    b += rect(ox, oy, n * S, n * S, DIM, sw=1)
+    line_pts = [(4, 44), (30, 30), (56, 18)]
+    b += poly([(ox + x * S, oy + y * S) for x, y in line_pts], RED, w=2.4)
+    for k, (x, y) in enumerate(line_pts): b += circ(ox + x * S, oy + y * S, 4, RED)
+    b += text(ox + 4 * S - 6, oy + 44 * S + 18, 'A', RED, 12) + text(ox + 56 * S + 4, oy + 18 * S - 8, 'B', RED, 12)
+    b += text(ox + 38 * S, oy + 24 * S + 4, 'no height', GREY, 10, 'middle')
+    b += text(ox + n * S / 2, 30, 'the line drawn across a valley', FG, 12, 'middle')
+    # sample about one cell apart, bilinear between cell centres; a nodata cell breaks the line
+    def zat(x, y):
+        i, j = int(x), int(y); fx, fy = x - i, y - j
+        cells = [(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)]
+        if any(hole(a, c) or not (0 <= a < n and 0 <= c < n) for a, c in cells): return None
+        return (z[j][i] * (1 - fx) + z[j][i + 1] * fx) * (1 - fy) + (z[j + 1][i] * (1 - fx) + z[j + 1][i + 1] * fx) * fy
+    samples = []; dist = 0.0
+    for (a, c) in zip(line_pts, line_pts[1:]):
+        L = math.dist(a, c); m = int(L)
+        for k in range(m):
+            t = k / m; x, y = a[0] + t * (c[0] - a[0]), a[1] + t * (c[1] - a[1])
+            samples.append((dist + t * L, zat(x, y)))
+        dist += L
+    gx, gy, gw, gh = 330, 60, 340, 190
+    b += line(gx, gy + gh, gx + gw, gy + gh, GREY, 1) + line(gx, gy, gx, gy + gh, GREY, 1)
+    vs = [v for _, v in samples if v is not None]; lo, hi = min(vs) - 5, max(vs) + 5
+    P = lambda d, v: (gx + gw * d / dist, gy + gh - gh * (v - lo) / (hi - lo))
+    seg = []
+    for d, v in samples:
+        if v is None:
+            if len(seg) > 1: b += poly(seg, GOLD, w=2)
+            seg = []
+            continue
+        seg.append(P(d, v))
+    if len(seg) > 1: b += poly(seg, GOLD, w=2)
+    gap_ds = [d for d, v in samples if v is None]
+    if gap_ds:
+        x0, x1 = P(min(gap_ds), lo)[0], P(max(gap_ds), lo)[0]
+        b += rect(x0, gy, x1 - x0, gh, fill=RAISED, op=0.7) + text((x0 + x1) / 2, gy + 16, 'gap: no height', GREY, 10, 'middle')
+    b += text(gx, gy + gh + 18, 'A', RED, 12, 'middle') + text(gx + gw, gy + gh + 18, 'B', RED, 12, 'middle')
+    b += text(gx + gw / 2, gy + gh + 34, f'distance along the line (m, {dist:.0f} m long)', GREY, 11, 'middle')
+    b += text(gx - 8, gy + 4, f'{hi:.0f}', GREY, 10, 'end') + text(gx - 8, gy + gh, f'{lo:.0f}', GREY, 10, 'end')
+    b += text(gx - 30, gy + gh / 2, 'height', GREY, 11, 'end') if False else text(gx + 4, gy - 8, 'height (m)', GREY, 11)
+    b += text(gx + gw / 2, 30, 'the profile: height against distance', FG, 12, 'middle')
+    b += text(350, 320, 'sampled about one DEM cell apart; where the DEM has no height the profile breaks rather than inventing terrain', GREY, 11, 'middle')
+    svg('elevation-profile.svg', W, H, b)
+
+# ── level-of-detail.svg ──────────────────────────────────────────────────────
+def lod():
+    W, H = 720, 320
+    rnd = random.Random(4)
+    zt = lambda x, y: 0.12 + 0.08 * math.sin(5 * x) * math.cos(4 * y) + 0.05 * math.sin(11 * x + 3 * y)
+    def iso(ox, oy, s):
+        return lambda p: (ox + s * (p[0] - p[1]) * 0.87, oy + s * ((p[0] + p[1]) * 0.5 - p[2] * 1.0))
+    def cube(P, x, y, z_, e, c, w=1.2):
+        pts = lambda a: P(a)
+        v = [(x + dx * e, y + dy * e, z_ + dz * e) for dz in (0, 1) for dy in (0, 1) for dx in (0, 1)]
+        out = ''
+        for a, bb in ((0, 1), (1, 3), (3, 2), (2, 0), (4, 5), (5, 7), (7, 6), (6, 4), (0, 4), (1, 5), (2, 6), (3, 7)):
+            out += line(*P(v[a]), *P(v[bb]), c, w, op=0.85)
+        return out
+    def sample(x0, y0, e, m):
+        # a node's sample: about one point per cell of an m × m grid over its square
+        out = []
+        for i in range(m):
+            for j in range(m):
+                x = x0 + (i + rnd.random()) * e / m; y = y0 + (j + rnd.random()) * e / m
+                out.append((x, y, zt(x, y)))
+        return out
+    root = sample(0, 0, 1, 11)
+    child = sample(0.5, 0.5, 0.5, 11)
+    grand = sample(0.75, 0.75, 0.25, 11)
+    b = ''
+    titles = ['root: a sparse sample of all', 'one child adds its own sample', 'and its child again']
+    for k in range(3):
+        P = iso(120 + k * 240, 155, 105)
+        b += cube(P, 0, 0, 0, 1, DIM, 1)
+        pts = root + (child if k >= 1 else []) + (grand if k >= 2 else [])
+        for p in sorted(pts, key=lambda p: p[0] + p[1]):
+            col = GOLD if p in root else (GREEN if p in child else BLUE)
+            b += circ(*P(p), 1.9, col)
+        if k >= 1: b += cube(P, 0.5, 0.5, 0, 0.5, GREEN, 1.4)
+        if k >= 2: b += cube(P, 0.75, 0.75, 0, 0.25, BLUE, 1.6)
+        b += text(120 + k * 240, 288, titles[k], FG, 12, 'middle')
+        if k < 2: b += arrow(120 + k * 240 + 100, 160, 120 + k * 240 + 136, 160, GREY, 1.4, 6)
+    b += text(360, 22, 'an octree of a terrain cloud: each node keeps a thin even sample, its children the detail', GREY, 11, 'middle')
+    b += text(360, 310, 'every point is in exactly one node; the viewer loads the nodes largest on screen first', GREY, 11, 'middle')
+    svg('level-of-detail.svg', W, H, b)
+
+# ── ground-classification.svg ────────────────────────────────────────────────
+def groundcls():
+    W, H = 700, 340
+    rnd = random.Random(10)
+    terr = lambda x: 230 - 18 * math.sin(x / 90) - 6 * math.sin(x / 31)
+    pts = []
+    for x in [rnd.uniform(10, 690) for _ in range(260)]:
+        if 250 < x < 380: continue                               # under the roof: no ground seen
+        if 480 < x < 600 and rnd.random() < 0.75: continue      # under the tree: a few ground hits only
+        pts.append((x, terr(x) + rnd.gauss(0, 1.2)))
+    for x in [rnd.uniform(250, 380) for _ in range(40)]:        # the roof
+        pts.append((x, 120 + abs(x - 315) * 0.45 + rnd.gauss(0, 1)))
+    for y in [rnd.uniform(150, 225) for _ in range(10)]:         # wall points
+        pts.append((250 + rnd.gauss(0, 1), y)); pts.append((380 + rnd.gauss(0, 1), y))
+    for _ in range(70):                                          # the canopy
+        a = rnd.uniform(0, 2 * math.pi); r = rnd.uniform(0.6, 1) ** 0.5
+        pts.append((540 + 62 * r * math.cos(a), 130 + 40 * r * math.sin(a)))
+    # the cloth: dropped onto the cloud turned upside down, held by its springs
+    # 100 cells, 15 spring passes: stiff enough to span the roof, loose enough to follow
+    # the open ground (a stiffer cloth spans more and follows less)
+    N = 100; xs = [10 + k * 680 / (N - 1) for k in range(N)]
+    lowest = [None] * N                                          # per cell, the lowest point (largest y on screen)
+    for x, y in pts:
+        k = min(N - 1, max(0, round((x - 10) / (680 / (N - 1)))))
+        lowest[k] = y if lowest[k] is None else max(lowest[k], y)
+    cl = [400.0] * N; fixed = [False] * N
+    for _ in range(300):
+        for k in range(N):
+            if fixed[k]: continue
+            cl[k] -= 1.5
+            if lowest[k] is not None and cl[k] <= lowest[k]: cl[k] = lowest[k]; fixed[k] = True
+        for _ in range(15):                                      # springs between neighbours
+            for k in range(N - 1):
+                d = cl[k + 1] - cl[k]
+                if fixed[k] and fixed[k + 1]: continue
+                if fixed[k]: cl[k + 1] -= d * 0.5
+                elif fixed[k + 1]: cl[k] += d * 0.5
+                else: cl[k] += d * 0.25; cl[k + 1] -= d * 0.25
+    cloth = lambda x: (lambda k: cl[k])(min(N - 1, max(0, round((x - 10) / (680 / (N - 1))))))
+    b = ''
+    tol = 6
+    for x, y in pts:
+        g = abs(y - cloth(x)) < tol
+        b += circ(x, y, 2.6, GOLD if g else GREEN)
+    b += poly([(x, c) for x, c in zip(xs, cl)], BLUE, w=2.2)
+    for x in range(40, 680, 60):
+        b += arrow(x, cloth(x) + 34, x, cloth(x) + 8, BLUE, 1.2, 6, op=0.6)
+    b += text(315, 270, 'spans under the roof', BLUE, 11, 'middle') + text(540, 266, 'reaches the ground between the branches', BLUE, 11, 'middle')
+    b += text(100, 290, 'cloth, pushed up from below', BLUE, 11, 'middle')
+    b += circ(450, 30, 4, GOLD) + text(460, 34, 'ground: within the tolerance of the cloth', GOLD, 12)
+    b += circ(450, 50, 4, GREEN) + text(460, 54, 'above ground', GREEN, 12)
+    b += text(350, 326, 'cloth simulation in a side view: the cloud seen from below, a cloth that touches open ground and bridges what stands on it', GREY, 11, 'middle')
+    svg('ground-classification.svg', W, H, b)
+
 FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, smoothing, normal, contours, binning,
            volume, gauge, lowe, track, cog, mgraph, pose,
            kpmatch, fmatrix, homog, cheir, pnp, incsfm,
@@ -2879,7 +3127,8 @@ FIGURES = [gsd, lens, baseline, ransac, fov, tri, pinhole, principal, sor, dod, 
            photocost, geocons, pmatch, mvs, sparsedense,
            georef, gcpmark, scalebar, crspolar, demcoreg, clouddist,
            orthopersp, orthoseams, seamlines, multiband, seamlevel, graphcut,
-           poisson, decimate, atlas, viewsel, icp, tiles3d]
+           poisson, decimate, atlas, viewsel, icp, tiles3d,
+           terrain, gapfill, profile, lod, groundcls]
 only = set(sys.argv[2:])
 for f in FIGURES:
     if not only or f.__name__ in only: f()

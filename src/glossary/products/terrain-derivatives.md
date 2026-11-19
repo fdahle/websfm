@@ -26,7 +26,7 @@ the nearer neighbours twice:
 
 $$\frac{\partial z}{\partial x} = \frac{(z_{NE} + 2z_{E} + z_{SE}) - (z_{NW} + 2z_{W} + z_{SW})}{8\,\Delta x}, \qquad \text{slope} = \arctan \lVert \nabla z \rVert$$
 
-<!-- TODO(image): assets/terrain-derivatives.svg - one small DEM tile shown four ways side by side: heights as a colour ramp, slope, aspect as a compass-coloured wheel, and a hillshade lit from the north-west, with the sun direction drawn. -->
+![One DEM tile four ways: heights as a colour ramp; slope, pale where flat and dark red where steep; aspect, coloured by the compass direction each slope faces, with a colour wheel; and a hillshade lit from the north-west, the sun's direction drawn as an arrow.](assets/terrain-derivatives.svg)
 
 **The units must match.** Slope compares a vertical rise with a horizontal run, so
 both must be in the same unit. Metres over metres works. A DEM in degrees of
