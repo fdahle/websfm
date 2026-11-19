@@ -325,6 +325,7 @@ const estimateText = computed(() => {
           class="gcp-panel"
           :class="{ current: current && p.key === current.key }"
           :data-key="p.key"
+          :data-image-id="p.imageId"
         >
           <div class="panel-viewport" :title="t('gcps.view.dragTip')" @mousedown="onPanelDown(p, $event)">
             <img
@@ -393,6 +394,7 @@ const estimateText = computed(() => {
             class="gcp-panel likely"
             :class="{ current: current && p.key === current.key }"
             :data-key="p.key"
+            :data-image-id="p.imageId"
           >
             <div
               class="panel-viewport"
