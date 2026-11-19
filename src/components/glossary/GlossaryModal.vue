@@ -1,4 +1,5 @@
 <script setup>
+import { vHelpFigures } from '../../composables/helpFigures.js'
 import 'katex/dist/katex.min.css'
 import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -147,6 +148,7 @@ function onBodyClick(e) {
           <template v-else>
             <div
               v-if="activeEntry"
+              v-help-figures
               class="term-body"
               v-html="activeHtml"
               @click="onBodyClick"

@@ -1,4 +1,5 @@
 <script setup>
+import { vHelpFigures } from '../../composables/helpFigures.js'
 import { ref, watch, nextTick, onMounted } from 'vue'
 
 // One hover help popup. Two phases:
@@ -56,6 +57,7 @@ watch(
     </svg>
     <div class="tt-title">{{ title }}</div>
     <div
+      v-help-figures
       class="tt-summary"
       @mouseover="emit('body-over', $event)"
       @mouseout="emit('body-out', $event)"

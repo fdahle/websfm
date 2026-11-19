@@ -1,4 +1,5 @@
 <script setup>
+import { vHelpFigures } from '../../composables/helpFigures.js'
 import 'katex/dist/katex.min.css'
 import { ref, computed, watch, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -126,7 +127,13 @@ function onBodyClick(e) {
 
           <!-- An operation -->
           <template v-else-if="activeDoc">
-            <div class="guide-body" @click="onBodyClick" @mouseover="onPreviewOver" @mouseout="onPreviewOut">
+            <div
+              v-help-figures
+              class="guide-body"
+              @click="onBodyClick"
+              @mouseover="onPreviewOver"
+              @mouseout="onPreviewOut"
+            >
               <div v-if="introHtml" class="guide-intro" v-html="introHtml"></div>
               <section v-for="s in sections" :key="s.key" :data-param="s.key" class="guide-param">
                 <h3 class="param-label">{{ s.label }}</h3>

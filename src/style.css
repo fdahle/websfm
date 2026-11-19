@@ -163,3 +163,13 @@ html[data-reduce-motion] *::after {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* A glossary figure still loading (core/help/helpMarkdown.js): hold its place. */
+.glossary-fig-pending {
+  display: block;
+  width: 100%;
+  max-width: 680px;
+  aspect-ratio: 2 / 1;
+  border-radius: 6px;
+  background: var(--hover-bg);
+}

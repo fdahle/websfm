@@ -2,7 +2,7 @@
 // variables, so they follow the light or dark theme (helpMarkdown.js ▸ themedSvg).
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
-import { renderHelpMarkdown } from './helpMarkdown.js'
+import { renderHelpMarkdown, loadFigure } from './helpMarkdown.js'
 
 const dir = new URL('../../glossary/assets/', import.meta.url)
 const svgs = readdirSync(dir).filter((f) => f.endsWith('.svg'))
@@ -13,9 +13,20 @@ describe('glossary figures', () => {
     expect(svgs.length).toBeGreaterThan(10)
   })
 
+  it('a figure is a placeholder until fetched, then inlined', async () => {
+    const md = '![A test](assets/track.svg)'
+    expect(renderHelpMarkdown(md)).toMatch(
+      /<span class="glossary-img glossary-fig-pending" data-fig="track.svg" data-alt="A test"/,
+    )
+    await loadFigure('track.svg')
+    const html = renderHelpMarkdown(md)
+    expect(html).toMatch(/<svg[^>]*class="glossary-img"[^>]*aria-label="A test"/)
+    expect(html).not.toContain('data-fig')
+  })
+
   for (const f of svgs) {
-    it(`${f} is inlined with theme colours`, () => {
-      const html = renderHelpMarkdown(`![Alt "quoted" & more](assets/${f})`)
+    it(`${f} is inlined with theme colours`, async () => {
+      const html = await loadFigure(f, 'Alt "quoted" & more')
       expect(html).toMatch(/<svg[^>]*class="glossary-img"[^>]*role="img"/)
       expect(html).toContain('aria-label="Alt &quot;quoted&quot; &amp; more"')
       expect(html).not.toContain('<img')
@@ -43,7 +54,8 @@ describe('glossary figures', () => {
     expect(bad).toEqual([])
   })
 
-  it('glossary terms are not linked inside a figure', () => {
+  it('glossary terms are not linked inside a figure', async () => {
+    await loadFigure('ransac.svg')
     const html = renderHelpMarkdown('![x](assets/ransac.svg)')
     expect(html.match(/<svg[\s\S]*<\/svg>/)[0]).not.toContain('glossary-link')
   })

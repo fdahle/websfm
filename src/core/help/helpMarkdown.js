@@ -41,7 +41,12 @@ let assetMap = null
 function assetUrl(href) {
   if (!href || /^(https?:)?\/\//.test(href) || href.startsWith('data:')) return null
   if (!assetMap) {
-    const mods = import.meta.glob('/src/glossary/assets/*', { eager: true, query: '?url', import: 'default' })
+    // raster images only: the SVG figures are inlined (themedSvg below)
+    const mods = import.meta.glob('/src/glossary/assets/*.{png,jpg,jpeg,webp,gif}', {
+      eager: true,
+      query: '?url',
+      import: 'default',
+    })
     assetMap = new Map(Object.entries(mods).map(([p, url]) => [p.split('/').pop(), url]))
   }
   return assetMap.get(href.replace(/^\.?\/?assets\//, '')) || null
@@ -52,6 +57,11 @@ function assetUrl(href) {
 // becomes a theme variable (`--fig-*` in style.css, light and dark) with the drawn
 // colour as its fallback, so a figure follows the light or dark theme. Colours
 // outside the palette (a DEM's height ramp) stay as drawn.
+//
+// Each figure is its own chunk, fetched when a help text that shows it is rendered:
+// until then the renderer writes a placeholder (`data-fig`), and the container's
+// v-help-figures directive (composables/helpFigures.js) swaps the figure in. Once
+// fetched, a figure is inlined directly.
 const FIGURE_PALETTE = {
   '#1b1f27': 'bg',
   '#2a303b': 'raised',
@@ -66,16 +76,32 @@ const FIGURE_PALETTE = {
 
 const escapeAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 
-let svgMap = null
-function themedSvg(href, alt, title) {
-  if (!href || !/\.svg$/i.test(href)) return null
-  if (!svgMap) {
-    const mods = import.meta.glob('/src/glossary/assets/*.svg', { eager: true, query: '?raw', import: 'default' })
-    svgMap = new Map(Object.entries(mods).map(([p, raw]) => [p.split('/').pop(), raw]))
+const figureLoaders = Object.fromEntries(
+  Object.entries(import.meta.glob('/src/glossary/assets/*.svg', { query: '?raw', import: 'default' })).map(
+    ([p, load]) => [p.split('/').pop(), load],
+  ),
+)
+const figureRaw = new Map()
+const figureName = (href) => (href && /\.svg$/i.test(href) ? href.replace(/^\.?\/?assets\//, '') : null)
+
+/** Fetch one figure (by file name) and return it inlined and themed. */
+export async function loadFigure(name, alt = '', title = null) {
+  if (!figureRaw.has(name)) {
+    if (!figureLoaders[name]) throw new Error(`no glossary figure ${name}`)
+    figureRaw.set(name, await figureLoaders[name]())
   }
-  const name = href.replace(/^\.?\/?assets\//, '')
-  const raw = svgMap.get(name)
-  if (raw == null) return null
+  return themeFigure(name, figureRaw.get(name), alt, title)
+}
+
+function themedSvg(href, alt, title) {
+  const name = figureName(href)
+  if (!name || !figureLoaders[name]) return null
+  if (figureRaw.has(name)) return themeFigure(name, figureRaw.get(name), alt, title)
+  const t = title ? ` data-title="${escapeAttr(title)}"` : ''
+  return `<span class="glossary-img glossary-fig-pending" data-fig="${escapeAttr(name)}" data-alt="${escapeAttr(alt || '')}"${t} role="img" aria-label="${escapeAttr(alt || '')}"></span>`
+}
+
+function themeFigure(name, raw, alt, title) {
   const prefix = `fig-${name.replace(/\.svg$/i, '').replace(/[^\w-]/g, '')}-`
   return (
     raw
@@ -86,6 +112,7 @@ function themedSvg(href, alt, title) {
       .replace(/href="#([^"]+)"/g, `href="#${prefix}$1"`)
       // A presentation attribute takes no var(), so palette colours move to `style`.
       .replace(/<[a-zA-Z][^>]*>/g, (tag) => {
+        if (tag.startsWith('<image')) return tag // an embedded image: its colours are data
         const props = []
         const rest = tag.replace(/\s(fill|stroke|stop-color)="(#[0-9a-fA-F]{6})"/g, (m, prop, hex) => {
           const key = FIGURE_PALETTE[hex.toLowerCase()]
