@@ -173,7 +173,7 @@
     },
     {
       "id": "eth3d-dense",
-      "title": "ETH3D high-res dense from the ground-truth cameras (eth3d_score.py --occlusion min: ETH3D's method, about \u00b14 points from the official evaluator)",
+      "title": "ETH3D high-res dense from the ground-truth cameras (eth3d_score.py --occlusion min: ETH3D's method, about ±4 points from the official evaluator)",
       "columns": ["f1", "denseTime"],
       "jobs": [
         {
@@ -517,6 +517,159 @@
           "label": "Metashape defaults",
           "tool": "metashape-hist",
           "config": "r3-il"
+        }
+      ]
+    },
+    {
+      "id": "strecha",
+      "heldout": true,
+      "title": "Strecha multi-view (held out: run only at a release; cameras against the ground-truth cameras Strecha et al. fitted to a laser scan)",
+      "unit": "mm",
+      "columns": ["truth", "time"],
+      "jobs": [
+        {
+          "id": "strecha-fountain-p11-websfm",
+          "block": "fountain-P11",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-strecha-fountain-P11",
+          "truth": "/data1/websfm_testdata/strecha/websfm/fountain-P11/images.txt"
+        },
+        {
+          "id": "strecha-fountain-p11-colmap",
+          "block": "fountain-P11",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-strecha-fountain-P11",
+          "truth": "/data1/websfm_testdata/strecha/websfm/fountain-P11/images.txt"
+        },
+        {
+          "id": "strecha-fountain-p11-metashape",
+          "block": "fountain-P11",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-strecha-fountain-P11",
+          "truth": "/data1/websfm_testdata/strecha/websfm/fountain-P11/images.txt"
+        },
+        {
+          "id": "strecha-herz-jesus-p8-websfm",
+          "block": "Herz-Jesu-P8",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-strecha-Herz-Jesus-P8",
+          "truth": "/data1/websfm_testdata/strecha/websfm/Herz-Jesus-P8/images.txt"
+        },
+        {
+          "id": "strecha-herz-jesus-p8-colmap",
+          "block": "Herz-Jesu-P8",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-strecha-Herz-Jesus-P8",
+          "truth": "/data1/websfm_testdata/strecha/websfm/Herz-Jesus-P8/images.txt"
+        },
+        {
+          "id": "strecha-herz-jesus-p8-metashape",
+          "block": "Herz-Jesu-P8",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-strecha-Herz-Jesus-P8",
+          "truth": "/data1/websfm_testdata/strecha/websfm/Herz-Jesus-P8/images.txt"
+        },
+        {
+          "id": "strecha-herz-jesus-p25-websfm",
+          "block": "Herz-Jesu-P25",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-strecha-Herz-Jesus-P25",
+          "truth": "/data1/websfm_testdata/strecha/websfm/Herz-Jesus-P25/images.txt"
+        },
+        {
+          "id": "strecha-herz-jesus-p25-colmap",
+          "block": "Herz-Jesu-P25",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-strecha-Herz-Jesus-P25",
+          "truth": "/data1/websfm_testdata/strecha/websfm/Herz-Jesus-P25/images.txt"
+        },
+        {
+          "id": "strecha-herz-jesus-p25-metashape",
+          "block": "Herz-Jesu-P25",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-strecha-Herz-Jesus-P25",
+          "truth": "/data1/websfm_testdata/strecha/websfm/Herz-Jesus-P25/images.txt"
+        },
+        {
+          "id": "strecha-entry-p10-websfm",
+          "block": "entry-P10",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-strecha-entry-P10",
+          "truth": "/data1/websfm_testdata/strecha/websfm/entry-P10/images.txt"
+        },
+        {
+          "id": "strecha-entry-p10-colmap",
+          "block": "entry-P10",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-strecha-entry-P10",
+          "truth": "/data1/websfm_testdata/strecha/websfm/entry-P10/images.txt"
+        },
+        {
+          "id": "strecha-entry-p10-metashape",
+          "block": "entry-P10",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-strecha-entry-P10",
+          "truth": "/data1/websfm_testdata/strecha/websfm/entry-P10/images.txt"
+        },
+        {
+          "id": "strecha-castle-p19-websfm",
+          "block": "castle-P19",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-strecha-castle-P19",
+          "truth": "/data1/websfm_testdata/strecha/websfm/castle-P19/images.txt"
+        },
+        {
+          "id": "strecha-castle-p19-colmap",
+          "block": "castle-P19",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-strecha-castle-P19",
+          "truth": "/data1/websfm_testdata/strecha/websfm/castle-P19/images.txt"
+        },
+        {
+          "id": "strecha-castle-p19-metashape",
+          "block": "castle-P19",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-strecha-castle-P19",
+          "truth": "/data1/websfm_testdata/strecha/websfm/castle-P19/images.txt"
+        },
+        {
+          "id": "strecha-castle-p30-websfm",
+          "block": "castle-P30",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "sb-strecha-castle-P30",
+          "truth": "/data1/websfm_testdata/strecha/websfm/castle-P30/images.txt"
+        },
+        {
+          "id": "strecha-castle-p30-colmap",
+          "block": "castle-P30",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "sb-strecha-castle-P30",
+          "truth": "/data1/websfm_testdata/strecha/websfm/castle-P30/images.txt"
+        },
+        {
+          "id": "strecha-castle-p30-metashape",
+          "block": "castle-P30",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "sb-strecha-castle-P30",
+          "truth": "/data1/websfm_testdata/strecha/websfm/castle-P30/images.txt"
         }
       ]
     }

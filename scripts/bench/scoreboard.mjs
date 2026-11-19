@@ -5,6 +5,7 @@
 //        [--out /data1/websfm_eval/scoreboard-<date>]   results, logs and the configs used
 //        [--only <table>[,<table>…]]                    some tables
 //        [--jobs <id>[,<id>…]]                          some jobs
+//        [--heldout]                                    also the held-out tables (a release run)
 //        [--dry-run]                                    print the commands, run nothing
 //        [--tabulate]                                   no runs: tables from what <out> holds
 //        [--pack]                                       <out>.tar.gz: configs, logs, summaries
@@ -15,6 +16,11 @@
 // stopped picks up where it left off. The configs are copied to <out>/configs/ and named in
 // each table row, and --pack bundles them with the logs and summaries (not the photos,
 // models or rasters) as the release asset of that benchmark date.
+//
+// A table with `heldout: true` runs only with --heldout, at a release: its sets are never
+// used to choose a default or tune a method, so their numbers say how WebSfM does on data
+// nobody fitted it to. Don't run them while developing, and don't change code because of them
+// without saying so in the CHANGELOG (the set is then no longer held out).
 //
 // Tools: websfm (run-bench.mjs), metashape (metashape-ref.mjs; `checkpoints: true` scores
 // the config's GCP marks with metashape_checkpoints.py), metashape-hist
@@ -51,7 +57,9 @@ const python = process.env.METASHAPE_PYTHON ?? join(homedir(), 'miniconda3/envs/
 const only = args.only ? new Set(String(args.only).split(',')) : null
 const pick = args.jobs ? new Set(String(args.jobs).split(',')) : null
 
-const tables = manifest.tables.filter((t) => !only || only.has(t.id))
+const heldBack = manifest.tables.filter((t) => t.heldout && !args.heldout && (!only || only.has(t.id)))
+if (heldBack.length) console.log(`held out (add --heldout at a release): ${heldBack.map((t) => t.id).join(', ')}`)
+const tables = manifest.tables.filter((t) => (!only || only.has(t.id)) && (!t.heldout || args.heldout))
 const jobs = tables.flatMap((t) => t.jobs.map((j) => ({ ...j, table: t.id }))).filter((j) => !pick || pick.has(j.id))
 const ids = new Set()
 for (const j of jobs) {

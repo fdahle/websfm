@@ -385,8 +385,16 @@ node scripts/bench/scoreboard.mjs --out <dir> --tabulate      # tables again, no
 A job whose summary is already in its folder is skipped, so a run that stopped resumes
 where it left off. The configs used are copied to `<out>/configs/`. `--pack` bundles them
 with the logs and summaries into `<out>.tar.gz`, without the photos, models or rasters.
-That archive is the release asset for that benchmark date. The ETH3D tables are scored by
-`camera-check.mjs` and `eth3d_score.py` and are not in the manifest yet.
+That archive is the release asset for that benchmark date. A job with `truth` is scored by
+`camera-check.mjs` (an ETH3D scene folder or a COLMAP `images.txt`), one with `eth3d` by
+`eth3d_score.py`.
+
+**Held-out tables** (`"heldout": true`, today Strecha's six multi-view sets) run only with
+`--heldout`, in the scoreboard run of a release. Their sets are never used to choose a
+default or tune a method, so their numbers show how WebSfM does on data nobody fitted it
+to. Don't run them while developing. If a change is ever made because of one, say so in
+the CHANGELOG: the set is then no longer held out. Their reference cameras come from
+`strecha-prep.mjs` (Strecha's `.camera` files as COLMAP `images.txt`).
 
 ## Historical blocks (`hist`)
 
