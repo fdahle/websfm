@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { mapObservations, buildBaObservations, appendObservations, tieWeightOf } from './baObservations.js'
+import {
+  mapObservations,
+  buildBaObservations,
+  appendObservations,
+  tieWeightOf,
+  tieScaleWeight,
+  tieScaleWeightCounts,
+} from './baObservations.js'
 
 describe('mapObservations', () => {
   const list = () => ({
@@ -65,5 +72,37 @@ describe('tie weights', () => {
     expect([...o.x]).toEqual([0, 10, 1, 11])
     const all = appendObservations(o, [{ camIdx: 0, ptIdx: 2, x: 5, y: 5, weightX: 4, weightY: 4 }])
     expect([...all.wx]).toEqual([1 / 16, 1 / 16, 1 / 16, 1 / 16, 4])
+  })
+
+  it("weighs a keypoint by its scale against its image's finest, 1 / clamp(s / s₀, 1, cap)²", () => {
+    // σ ∝ scale: twice the finest scale is half the precision, a quarter of the weight.
+    expect(tieScaleWeight(4, 2, 8)).toBe(1 / 4)
+    expect(tieScaleWeight(2, 2, 8)).toBe(1)
+    expect(tieScaleWeight(1, 2, 8)).toBe(1) // never more than the finest
+    expect(tieScaleWeight(100, 2, 4)).toBe(1 / 16) // capped at 4× the finest
+    // No scale, no finest scale, or the switch off: the weight is left alone.
+    for (const [s, s0, cap] of [
+      [0, 2, 4],
+      [4, 0, 4],
+      [4, 2, 0],
+      [4, 2, 1],
+      [NaN, 2, 4],
+    ])
+      expect(tieScaleWeight(s, s0, cap)).toBe(1)
+  })
+
+  it('multiplies the tie weight by the scale weight when the cap is on, and only then', () => {
+    // Image 0's keypoints at scales 2 and 6 (finest 2), image 1's at 3 and 3.
+    const scales = [Float32Array.of(2, 6), Float32Array.of(3, 3)]
+    const kps = (img) => ({ ...kp(img), scale: scales[img] })
+    const off = buildBaObservations(tracks, ids, (img) => img, kps, 1 / 16)
+    expect([...off.wx]).toEqual([1 / 16, 1 / 16, 1 / 16, 1 / 16])
+    const on = buildBaObservations(tracks, ids, (img) => img, kps, 1 / 16, 4)
+    // Order: point 0 in images 0, 1 (keypoint 0), point 1 in images 0, 1 (keypoint 1).
+    expect([...on.wx]).toEqual([1 / 16, 1 / 16, 1 / 16 / 9, 1 / 16])
+    expect([...on.wy]).toEqual([...on.wx])
+    expect(tieScaleWeightCounts(on, 1 / 16)).toEqual({ n: 4, lowered: 1, bands: [3, 1, 0, 0] })
+    // Without scales (a learned detector), the cap changes nothing.
+    expect([...buildBaObservations(tracks, ids, (img) => img, kp, 1 / 16, 4).wx]).toEqual([...off.wx])
   })
 })

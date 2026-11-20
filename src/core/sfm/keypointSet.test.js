@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { keypointSetFrom, isKeypointSet, kpX, kpY, hasKp, mapPositions, keypointSetTransfer } from './keypointSet.js'
+import {
+  keypointSetFrom,
+  isKeypointSet,
+  kpX,
+  kpY,
+  hasKp,
+  mapPositions,
+  keypointSetTransfer,
+  minKeypointScale,
+} from './keypointSet.js'
+import { keypointsFromObjects } from '../features/keypoints.js'
 
 // A keypoint's [r, g, b] as the set stores it, or null without one.
 const rgbOf = (set, k) => (set?.hasColor?.[k] ? Array.from(set.rgb.subarray(3 * k, 3 * k + 3)) : null)
@@ -49,5 +59,33 @@ describe('keypointSet', () => {
     expect([kpX(out, 0), kpY(out, 0)]).toEqual([11, -2])
     expect(hasKp(out, 1)).toBe(false) // a missing keypoint stays missing
     expect(Array.from(src.xy)).toEqual(before)
+  })
+
+  it("carries each keypoint's scale (slot 4 of the store's layout), 0 where it has none", () => {
+    const typed = keypointsFromObjects([
+      { x: 1, y: 2, scale: 3.5 },
+      { x: 4, y: 5, scale: 0 },
+      { x: 6, y: 7, scale: 14 },
+    ])
+    const set = keypointSetFrom(typed)
+    expect(Array.from(set.scale)).toEqual([3.5, 0, 14])
+    expect(minKeypointScale(set)).toBe(3.5)
+    // Objects (the SfM input dumps) the same way; a moved set keeps them.
+    const objs = keypointSetFrom([{ x: 1, y: 2, scale: 2 }, null, { x: 3, y: 4, scale: 8 }])
+    expect(Array.from(objs.scale)).toEqual([2, 0, 8])
+    expect(mapPositions(objs, (x, y) => ({ x: x + 1, y })).scale).toBe(objs.scale)
+    expect(keypointSetTransfer(objs)).toContain(objs.scale.buffer)
+  })
+
+  it('has no scale array when no keypoint has a scale (learned detectors, matched points)', () => {
+    const set = keypointSetFrom(
+      keypointsFromObjects([
+        { x: 1, y: 2 },
+        { x: 3, y: 4, scale: 0 },
+      ]),
+    )
+    expect(set.scale).toBeNull()
+    expect(minKeypointScale(set)).toBe(0)
+    expect(keypointSetTransfer(set)).toEqual([set.xy.buffer])
   })
 })

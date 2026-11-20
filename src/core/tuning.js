@@ -124,6 +124,19 @@ export const SFM_TUNING = {
     direct: true,
     threads: 16,
   },
+  // ── Tie point weights by keypoint scale (baObservations.js tieScaleWeight) ──
+  // > 1: a tie observation weighs 1 / (f · clamp(scale / s₀, 1, cap))² instead of 1 / f²
+  // (f the detection scale factor, tieWeightOf), s₀ the finest keypoint scale of its image
+  // (keypointSet.js minKeypointScale): a keypoint from a coarse pyramid level counts as
+  // proportionally less precise, up to `cap` times its image's finest. With it on, the
+  // robust loss reads each observation in its own σ (bundle/model.rs `sig`, solver
+  // `sigmaUnits`), so a coarse keypoint is not also cut by a threshold made for fine ones.
+  // 0 = off: every tie weighs 1 / f², the loss is in pixels. Off: measured 2026-11-20
+  // (plan-ba-next ▸ C1, same matches per set) it is mixed and inside the noise: quarry
+  // without priors RTK rms3d 0.203 m (0.233 with the pairs reversed) → 0.198 / 0.197 at
+  // cap 4 / 8; PUTI with RTK checkpoints 3.0 / 8.2 → 2.7 / 8.3 cm (cap 4); Casa Grande
+  // GCP checkpoints 1.09 / 1.02 → 1.11 / 1.04 m. Not gated with it on.
+  tieScaleWeightCap: 0,
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
   // native px against the run's detection scale (core/scaleContext.js, which owns

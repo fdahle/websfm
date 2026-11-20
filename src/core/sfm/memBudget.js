@@ -30,7 +30,7 @@ export const SPARSE_HEAP_FRACTION = 0.86
 export const SPARSE_MEMORY_MODEL = {
   margin: 1.25,
   // Renderer: the worker input, built as typed arrays and transferred.
-  rendererBufPerKeypoint: 20, // Float64 xy + RGB + colour mask (core/sfm/keypointSet.js)
+  rendererBufPerKeypoint: 24, // Float64 xy + Float32 scale + RGB + colour mask (core/sfm/keypointSet.js)
   rendererBufPerMatch: 8, // packed Uint32 pair
   rendererHeapPerKeypoint: 2, // the per-image/per-pair input records, amortised
   // Worker heap (the ceiling that matters): per-pair records, the registration
@@ -40,7 +40,7 @@ export const SPARSE_MEMORY_MODEL = {
   workerHeapPerKeypoint: 64,
   // Worker buffers: keypoint sets (input + a folded copy + a transient fold), packed
   // matches (input + the run's clone), the track arena and BA marshalling.
-  workerBufPerKeypoint: 60,
+  workerBufPerKeypoint: 64, // + the scale, shared by every copy (4)
   workerBufPerMatch: 16,
   workerBufPerObservation: 40,
   // The wasm solver (crates/reconstruction bundle.rs) — its own linear memory, capped

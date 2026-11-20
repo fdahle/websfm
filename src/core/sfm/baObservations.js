@@ -11,7 +11,7 @@
 // them at full precision; only the wasm hand-off rounds to Float32, as before.
 // Weights are null when every observation has weight 1 (the SIFT tracks).
 
-import { hasKp } from './keypointSet.js'
+import { hasKp, minKeypointScale } from './keypointSet.js'
 import { fillArray } from '../bigArray.js'
 
 export function isObservationList(o) {
@@ -29,14 +29,18 @@ export function isObservationList(o) {
  * @param {(img: number) => {n:number, xy:Float64Array} | null | undefined} keypointsAt
  *   the image's KeypointSet (keypointSet.js)
  * @param {number} [tieWeight] every observation's weight (tieWeightOf); 1 ⇒ no weights
+ * @param {number} [scaleCap] > 1: weigh each observation by its keypoint's scale as well
+ *   (tieScaleWeight, SFM_TUNING.tieScaleWeightCap); 0 ⇒ off, `tieWeight` for all
  */
-export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt, tieWeight = 1) {
+export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt, tieWeight = 1, scaleCap = 0) {
   let cap = 0
   for (let r = 0; r < ids.length; r++) cap += tracks.viewCount(ids[r])
   const cam = new Int32Array(cap),
     pt = new Int32Array(cap)
   const x = new Float64Array(cap),
     y = new Float64Array(cap)
+  const byScale = scaleCap > 1
+  const w = byScale ? new Float64Array(cap) : null
   let n = 0
   for (let r = 0; r < ids.length; r++) {
     tracks.forEachView(ids[r], (img, kpIdx) => {
@@ -48,9 +52,11 @@ export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt, tieWeigh
       pt[n] = r
       x[n] = set.xy[2 * kpIdx]
       y[n] = set.xy[2 * kpIdx + 1]
+      if (byScale) w[n] = tieWeight * tieScaleWeight(set.scale?.[kpIdx] ?? 0, minKeypointScale(set), scaleCap)
       n++
     })
   }
+  if (byScale) return { n, cam, pt, x, y, wx: w, wy: w }
   if (tieWeight === 1) return { n, cam, pt, x, y, wx: null, wy: null }
   return {
     n,
@@ -79,6 +85,38 @@ export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt, tieWeigh
 export function tieWeightOf(detectScaleFactor) {
   const f = Number.isFinite(detectScaleFactor) && detectScaleFactor > 1 ? detectScaleFactor : 1
   return 1 / (f * f)
+}
+
+/**
+ * A tie observation's weight for its keypoint's scale, relative to one at the image's finest
+ * scale: 1 / clamp(scale / s₀, 1, cap)². A keypoint found at a coarse scale of the image
+ * pyramid is located less precisely, about in proportion to its scale (Metashape scales its
+ * tie point accuracy by the key point size the same way). s₀ is the finest scale among the
+ * image's keypoints (keypointSet.js minKeypointScale), so a detector's finest scale weighs 1
+ * whatever its convention; a keypoint without a scale (learned detectors, imported matches)
+ * weighs 1, as one image's keypoints all do when none has a scale.
+ */
+export function tieScaleWeight(scale, s0, cap) {
+  if (!(scale > 0) || !(s0 > 0) || !(cap > 1)) return 1
+  const r = Math.min(Math.max(scale / s0, 1), cap)
+  return 1 / (r * r)
+}
+
+/**
+ * How many of `obs`' weights a scale weight lowered below `tieWeight`, and their
+ * distribution in octaves of scale / s₀ ([1, 2), [2, 4), [4, 8), ≥ 8 as weight bands).
+ */
+export function tieScaleWeightCounts(obs, tieWeight) {
+  const bands = [0, 0, 0, 0]
+  const w = obs.wx
+  if (!w) return { n: obs.n, lowered: 0, bands: [obs.n, 0, 0, 0] }
+  let lowered = 0
+  for (let i = 0; i < obs.n; i++) {
+    const rel = w[i] / tieWeight // 1 / ratio²
+    if (rel < 1) lowered++
+    bands[rel > 0.25 ? 0 : rel > 1 / 16 ? 1 : rel > 1 / 64 ? 2 : 3]++
+  }
+  return { n: obs.n, lowered, bands }
 }
 
 /** Positions of the points `ids` as one flat Float64Array [x0,y0,z0, x1,…], plus `extra` [{x,y,z}]. */

@@ -4,30 +4,53 @@
 // imports it.
 //
 // Layout: 'WSFMIN01' · u32 header length · header JSON · binary section. Bulk arrays
-// (keypoint positions and colours, descriptors, match indices) are stored as raw
+// (keypoint positions, scales and colours, descriptors, match indices) are stored as raw
 // little-endian typed arrays; everything else (meta, sensors, F, GCPs, priors,
 // settings) lives in the JSON header.
 
 const MAGIC = 'WSFMIN01'
 
 function keypointArrays(kps) {
-  // Object keypoints [{x, y, color?}] or an already-compact { n, xy, rgb, hasColor }.
+  // Object keypoints [{x, y, scale?, color?}], the store's typed { data } (KP_STRIDE 6:
+  // x, y, nx, ny, scale, response) or an already-compact { n, xy, scale?, rgb, hasColor }.
+  // A dump written before the scale was carried has none: its keypoints read as scale 0.
   if (kps && !Array.isArray(kps) && kps.xy) {
     return {
       n: kps.n,
       xy: kps.xy,
+      scale: kps.scale ?? null,
       rgb: kps.rgb ?? new Uint8Array(3 * kps.n),
       mask: kps.hasColor ?? new Uint8Array(kps.n),
     }
   }
+  if (kps?.data instanceof Float32Array) {
+    const n = Math.floor(kps.data.length / 6)
+    const xy = new Float64Array(2 * n),
+      scale = new Float32Array(n)
+    for (let i = 0; i < n; i++) {
+      xy[2 * i] = kps.data[6 * i]
+      xy[2 * i + 1] = kps.data[6 * i + 1]
+      scale[i] = kps.data[6 * i + 4]
+    }
+    const colored = kps.rgb?.length === 3 * n
+    return {
+      n,
+      xy,
+      scale,
+      rgb: colored ? kps.rgb : new Uint8Array(3 * n),
+      mask: colored ? new Uint8Array(n).fill(1) : new Uint8Array(n),
+    }
+  }
   const n = kps?.length ?? 0
   const xy = new Float64Array(2 * n),
+    scale = new Float32Array(n),
     rgb = new Uint8Array(3 * n),
     mask = new Uint8Array(n)
   for (let i = 0; i < n; i++) {
     const k = kps[i]
     xy[2 * i] = k.x
     xy[2 * i + 1] = k.y
+    scale[i] = k.scale ?? 0
     if (k.color) {
       rgb[3 * i] = k.color[0]
       rgb[3 * i + 1] = k.color[1]
@@ -35,7 +58,7 @@ function keypointArrays(kps) {
       mask[i] = 1
     }
   }
-  return { n, xy, rgb, mask }
+  return { n, xy, scale, rgb, mask }
 }
 
 const matchData = (m) =>
@@ -62,7 +85,7 @@ export function encodeSfmInput(input) {
     const k = keypointArrays(keypoints)
     return {
       ...rest,
-      kp: { n: k.n, xy: put(k.xy), rgb: put(k.rgb), mask: put(k.mask) },
+      kp: { n: k.n, xy: put(k.xy), ...(k.scale ? { scale: put(k.scale) } : {}), rgb: put(k.rgb), mask: put(k.mask) },
       descU8: descU8 ? put(descU8) : null,
     }
   })
@@ -109,6 +132,7 @@ export function decodeSfmInput(bytes) {
   const view = (Type, ref) => new Type(buf.slice(ref.offset, ref.offset + ref.length * Type.BYTES_PER_ELEMENT))
   const images = header.images.map(({ kp, descU8, ...rest }) => {
     const xy = view(Float64Array, kp.xy),
+      scale = kp.scale ? view(Float32Array, kp.scale) : null,
       rgb = view(Uint8Array, kp.rgb),
       mask = view(Uint8Array, kp.mask)
     const keypoints = new Array(kp.n)
@@ -116,6 +140,7 @@ export function decodeSfmInput(bytes) {
       keypoints[i] = {
         x: xy[2 * i],
         y: xy[2 * i + 1],
+        ...(scale ? { scale: scale[i] } : {}),
         color: mask[i] ? [rgb[3 * i], rgb[3 * i + 1], rgb[3 * i + 2]] : undefined,
       }
     }

@@ -185,7 +185,7 @@ export function createSelfCalFold({
           // eslint-disable-next-line no-self-compare
           if (rec.kp.xy[2 * j] !== rec.kp.xy[2 * j]) xy[2 * j] = xy[2 * j + 1] = NaN
         }
-        view = { n: rec.kp.n, xy, rgb: rec.kp.rgb, hasColor: rec.kp.hasColor }
+        view = { n: rec.kp.n, xy, scale: rec.kp.scale ?? null, rgb: rec.kp.rgb, hasColor: rec.kp.hasColor }
       } else view = mapPositions(rec.kp, (x, y) => undistortKeypoint(x, y, Kc, bag))
       moved(img.kp, view)
       img.kp = view

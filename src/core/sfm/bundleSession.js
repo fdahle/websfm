@@ -37,6 +37,7 @@ import {
   trackPositions,
   mapObservations,
   tieWeightOf,
+  tieScaleWeightCounts,
 } from './baObservations.js'
 import { fmtStats } from './modelStats.js'
 import { attachRollingShutter, captureSeconds } from './rollingShutter.js'
@@ -84,8 +85,31 @@ export function createBundleSession(ctx) {
   // Defaults + rationale for these live in defaults.user.js (baIterations,
   // refineIntrinsics); `cfg` already merged them.
   const { baIterations, refineIntrinsics } = cfg
-  // Ties weigh what one detection pixel measures against the survey terms (tieWeightOf).
+  // Ties weigh what one detection pixel measures against the survey terms (tieWeightOf),
+  // and, with tieScaleWeightCap, less for a coarser keypoint (tieScaleWeight).
   const tieWeight = tieWeightOf(cfg.detectScaleFactor)
+  const tieScaleCap = cfg.tieScaleWeightCap > 1 ? cfg.tieScaleWeightCap : 0
+  // With scale weights the robust loss reads each observation in its own σ (bundle/model.rs
+  // `sig`), so a coarse keypoint is not cut by a threshold made for the fine ones.
+  const baSolver =
+    tieScaleCap && cfg.baSolver?.sigmaUnits == null ? { ...cfg.baSolver, sigmaUnits: true } : cfg.baSolver
+  let tieScaleLogged = false
+  const tieObservations = (ptIds, camIdxOfFn) => {
+    const obs = buildBaObservations(tracks, ptIds, camIdxOfFn, keypointsAt, tieWeight, tieScaleCap)
+    if (tieScaleCap && !tieScaleLogged) {
+      tieScaleLogged = true
+      const { n, lowered, bands } = tieScaleWeightCounts(obs, tieWeight)
+      const pct = (v) => ((100 * v) / Math.max(1, n)).toFixed(1)
+      log(
+        `Bundle adjustment: tie points weighed by keypoint scale (up to ${tieScaleCap}× the image's finest): ` +
+          `in the first solve ${lowered.toLocaleString('en')} of ${n.toLocaleString('en')} observations weigh less; by scale ` +
+          `1–2× ${pct(bands[0])} %, 2–4× ${pct(bands[1])} %, 4–8× ${pct(bands[2])} %, 8× and more ${pct(bands[3])} %`,
+        'info',
+        'Sparse',
+      )
+    }
+    return obs
+  }
   if (tieWeight !== 1 && (cameraPriors?.length || gcps?.length || demHold))
     log(
       `Bundle adjustment: a tie point counts as ${Math.sqrt(1 / tieWeight).toFixed(2)} px (one detection pixel) ` +
@@ -229,14 +253,14 @@ export function createBundleSession(ctx) {
     const { kList, observations, fullLens } = lensFrame(
       uuidList,
       camList.map((c) => c.K),
-      buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt, tieWeight),
+      tieObservations(ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1),
     )
     const posBefore = trackPositions(tracks, ptIds)
     const result = await bundleAdjust(camList, kList, posBefore, observations, {
       maxIters: iters,
       refineIntrinsics: 'none',
       fullLens,
-      solver: cfg.baSolver,
+      solver: baSolver,
       flatPoints: true,
       fixedCams: fixed.map((_, k) => free.length + k),
     })
@@ -371,7 +395,7 @@ export function createBundleSession(ctx) {
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     const fixedCams = fixedCameras?.size ? uuidList.flatMap((u, i) => (isFixed(u) ? [i] : [])) : null
     // Point rank in this solve → point id; the solve's point i is ptIds[i].
-    const tieObs = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt, tieWeight)
+    const tieObs = tieObservations(ptIds, camIdxOfImg(camIdxOf))
     // kList / observations in the solve's frame: a fisheye camera's in recorded pixels
     // with its lens on K (lensFrame). Everything below — the diagnostic, the robust
     // acceptance, the validation — judges the solve in that same frame.
@@ -448,7 +472,7 @@ export function createBundleSession(ctx) {
         refineReadout: rollingShutter,
         ...(rig ? { rig: rig.attach(uuidList), refineRig: !fixedCameras?.size } : {}),
         sensorOfCam,
-        solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver,
+        solver: warm ? { ...baSolver, warm: true } : baSolver,
         flatPoints: true,
         ...(fixedCams?.length ? { fixedCams } : {}),
         ...(cameraPriors ? { cameraPriors } : {}),
@@ -794,7 +818,7 @@ export function createBundleSession(ctx) {
       const lf = lensFrame(
         uuidList,
         camList.map((c) => c.K),
-        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt, tieWeight),
+        tieObservations(ptIds, camIdxOfImg(camIdxOf)),
       )
       const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds), lf.observations, {
         maxIters: baIterations,
@@ -804,7 +828,7 @@ export function createBundleSession(ctx) {
         sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
         cameraPriors: constrained.priors,
         ...(rig ? { rig: rig.attach(uuidList) } : {}),
-        solver: cfg.baSolver,
+        solver: baSolver,
       })
       noteBaSolver(`camera-prior bundle adjustment (round ${round + 1})`, result)
       if (!result) return
@@ -908,10 +932,7 @@ export function createBundleSession(ctx) {
       const lf = lensFrame(
         uuidList,
         kList,
-        appendObservations(
-          buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt, tieWeight),
-          setup.observations,
-        ),
+        appendObservations(tieObservations(ptIds, camIdxOfImg(camIdxOf)), setup.observations),
       )
 
       const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds, anchorPts), lf.observations, {
@@ -923,7 +944,7 @@ export function createBundleSession(ctx) {
         flatPoints: true,
         cameraPriors: constrainedCameras?.priors ?? [],
         ...(rig ? { rig: rig.attach(uuidList) } : {}),
-        solver: cfg.baSolver,
+        solver: baSolver,
       })
       noteBaSolver(`GCP-anchored bundle adjustment (round ${round + 1})`, result)
       if (!result) {
