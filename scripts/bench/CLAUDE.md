@@ -16,8 +16,9 @@ reaching the GPU*). The traps below each cost a run before they were written dow
   `backend = WebGPU (…)` line: a run that fell back to SwiftShader is slow without error.
 - From a git worktree, symlink the gitignored `public/models` in, and never `git add -A`
   there (the symlink gets committed and replaces the real folder on merge).
-- Don't edit `src/` while a bench or Playwright suite runs: Vite reloads the page
-  mid-run and the failures are false. Rerun a failure on a settled tree.
+- Don't edit `src/` or `package.json` while a bench or Playwright suite runs: Vite reloads
+  the page, or re-optimizes its dependencies and a page gets two Pinias ("no active
+  Pinia"), and the failures are false. Rerun a failure on a settled tree.
 - Store runs take run units, not dialog units: build settings with `core/runSettings.js`
   (`{ ...ORTHO_DEFAULTS }` passed straight to a run gives an empty orthophoto).
 - Headed Chrome with `--enable-features=Vulkan` (the bench's GPU flag) reads a GPU-backed

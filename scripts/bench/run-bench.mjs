@@ -30,13 +30,23 @@
 import { chromium, firefox } from 'playwright'
 import { startWorkerHeapSampler } from './workerHeap.mjs'
 import { loadReference } from './reference.mjs'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { readFile, readdir, writeFile, mkdir, rm, stat } from 'node:fs/promises'
 import { createWriteStream, createReadStream } from 'node:fs'
 import { join, dirname, extname, resolve, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+// The code a run measured: the commit, and whether src/, crates/ or scripts/ had
+// uncommitted changes (then the commit alone does not say what ran). A bisect needs it.
+function gitCommit() {
+  const git = (...a) => spawnSync('git', a, { cwd: repo, encoding: 'utf8' })
+  const head = git('rev-parse', 'HEAD')
+  if (head.status !== 0) return null
+  const dirty = git('status', '--porcelain', '--untracked-files=no', '--', 'src', 'crates', 'scripts').stdout.trim()
+  return { sha: head.stdout.trim(), dirty: dirty.length > 0 }
+}
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.tif', '.tiff'])
 const MIME = {
   '.jpg': 'image/jpeg',
@@ -304,7 +314,14 @@ const browser = await (isFirefox ? firefox : chromium).launchPersistentContext(p
   // the run's disk (multi-GB exports, and /tmp may be a quota-limited tmpfs).
   downloadsPath: `${outPrefix}.downloads`,
 })
-const result = { name, config: cfg, files: files.length, startedAt: new Date().toISOString(), stages: {} }
+const result = {
+  name,
+  config: cfg,
+  files: files.length,
+  startedAt: new Date().toISOString(),
+  commit: gitCommit(),
+  stages: {},
+}
 // A headed run with the WebGPU flags needs the real GPU (checked at start and mid-run).
 const gpuRequired =
   !!cfg.headed && (cfg.chromeArgs ?? []).includes('--enable-unsafe-webgpu') && cfg.requireGpu !== false
