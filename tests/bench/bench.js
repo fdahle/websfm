@@ -2659,6 +2659,9 @@ window.bench = {
     // Subset-gate sample counts of the pairs it skipped (the app no longer logs a line
     // per gated pair), for the gate's recall against a reference.
     const gateScores = {}
+    // Ratio-test putatives of every pair the gate let through (rawCount), so two runs
+    // that differ can say whether the putatives or only the verification moved.
+    const rawPerPair = {}
     for (const [id, e] of matches.matchStore) {
       if (e.status === 'done' && !e.weak && (e.nMatches ?? 0) > 0) {
         accepted++
@@ -2671,6 +2674,7 @@ window.bench = {
         .join('|')
       perPair[key] = `${e.status}:${e.nMatches ?? 0}:${e.weak ? 1 : 0}`
       if (e.gated) gateScores[key] = e.gateScore ?? 0
+      else if (e.status === 'done') rawPerPair[key] = e.rawCount ?? 0
     }
     let h = 2166136261
     for (const k of Object.keys(perPair).sort())
@@ -2709,6 +2713,7 @@ window.bench = {
       pairDigest: h.toString(16),
       matchDigest: md.toString(16),
       perPair,
+      rawPerPair,
       gateScores,
       // Detect gaps again at full size (stores/matching/matchAll.js redetectGaps), if it ran.
       gapRedetect: matches.matchRun?.gapRedetect ?? null,
