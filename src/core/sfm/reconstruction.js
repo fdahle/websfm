@@ -638,16 +638,17 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const nObs = soa ? observations.n : observations.length
   if (nCam === 0 || nPts === 0 || nObs === 0) return null
 
-  // The solver takes Float32: positions far from the frame's origin (a long corridor, a
-  // short seed baseline) lose precision to rounding, a reprojection noise floor of
-  // 0.02 px at 1,000 baselines. The problem is solved about the cameras' centroid `o`
-  // (a translation changes no residual): points and targets move by −o, a camera's t
-  // by +R·o, and back after.
+  // Cameras, points, lens terms and survey targets cross as doubles both ways, so a call
+  // starts from the state the last one left, not from its f32 rounding (pixels and
+  // weights stay Float32: at 10,000 px wide its spacing is 0.001 px). The problem is
+  // still solved about the cameras' centroid `o` (a translation changes no residual), as
+  // the step-size stop measures a step against the parameters' size: points and targets
+  // move by −o, a camera's t by +R·o, and back after.
   const o = [0, 0, 0]
   for (const { R, t } of cameras)
     for (let k = 0; k < 3; k++) o[k] -= (R[0][k] * t[0] + R[1][k] * t[1] + R[2][k] * t[2]) / nCam
   const Ro = (R) => [0, 1, 2].map((i) => R[i][0] * o[0] + R[i][1] * o[1] + R[i][2] * o[2])
-  const camFlat = new Float32Array(nCam * 12)
+  const camFlat = new Float64Array(nCam * 12)
   cameras.forEach(({ R, t }, c) => {
     const b = c * 12
     const s = Ro(R)
@@ -670,7 +671,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     )
   })
 
-  const kFlat = new Float32Array(nCam * 4)
+  const kFlat = new Float64Array(nCam * 4)
   intrinsics.forEach(({ fx, fy, cx, cy }, c) => {
     kFlat.set([fx, fy, cx, cy], c * 4)
   })
@@ -679,15 +680,15 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   // [terms, k1, k2, k3, k4, p1, p2], a Brown camera's terms 0 and its coefficients the seed.
   const anyFisheye = intrinsics.some((k) => k?.fisheye)
   const lensStride = fullLens ? 7 : 5
-  const fisheyeFlat = new Float32Array(fullLens || anyFisheye ? nCam * lensStride : 0)
+  const fisheyeFlat = new Float64Array(fullLens || anyFisheye ? nCam * lensStride : 0)
   intrinsics.forEach((k, c) => {
     const at = c * lensStride
     if (k?.fisheye) fisheyeFlat.set([k.fisheyeTerms || 4, k.k1 || 0, k.k2 || 0, k.k3 || 0, k.k4 || 0], at)
     else if (fullLens) fisheyeFlat.set([0, k?.k1 || 0, k?.k2 || 0, k?.k3 || 0, 0, k?.p1 || 0, k?.p2 || 0], at)
   })
 
-  // Points about the centroid, subtracted in double before the cast.
-  const ptsFlat = new Float32Array(nPts * 3)
+  // Points about the centroid.
+  const ptsFlat = new Float64Array(nPts * 3)
   if (flatIn) for (let i = 0; i < nPts * 3; i++) ptsFlat[i] = points3d[i] - o[i % 3]
   else
     points3d.forEach(({ x, y, z }, i) => {
@@ -739,7 +740,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
 
   // Row layout is shared with bundle.rs. A zero orientation-precision matrix
   // means position-only (EXIF or an imported row without complete OPK angles).
-  const cameraPriorFlat = new Float32Array(cameraPriors.length * 31)
+  const cameraPriorFlat = new Float64Array(cameraPriors.length * 31)
   cameraPriors.forEach(({ camIdx, target, weights, positionPrecision, targetR, orientationPrecision }, i) => {
     const W = positionPrecision?.flat() ?? [weights[0], 0, 0, 0, weights[1], 0, 0, 0, weights[2]]
     const R = targetR?.flat() ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
@@ -761,7 +762,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   for (const c of fixedCams ?? []) if (c >= 0 && c < nCam) fixedMask[c] = 1
 
   // bundle.rs `rs_flat`: [vx, vy, vz, h, τ0] per camera, h 0 for a global shutter.
-  const rsFlat = new Float32Array(rsCams ? nCam * 5 : 0)
+  const rsFlat = new Float64Array(rsCams ? nCam * 5 : 0)
   if (rsCams)
     cameras.forEach(({ rs }, c) => {
       if (rs?.h > 0) rsFlat.set([rs.v[0], rs.v[1], rs.v[2], rs.h, rs.tau ?? 0], c * 5)

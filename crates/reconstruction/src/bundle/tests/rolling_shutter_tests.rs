@@ -1,4 +1,5 @@
 use super::*;
+use super::f32_entry::{bundle_adjust, bundle_adjust_rs};
 
 // Two nadir strips flown along +x at 10 m/s, 50 m above a gently rolling field:
 // f 1000 px on a 1000 × 750 frame, so 30 ms of readout moves a row ±0.15 m (±3 px).

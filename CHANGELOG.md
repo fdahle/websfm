@@ -294,6 +294,20 @@ Notable changes to WebSfM. The format follows
   positions and pairs.
 
 ### Changed
+- **Bundle adjustment keeps full precision between solves.** The cameras, points and lens
+  now go into the solver and come back in double precision, so each solve of Sparse
+  Model starts exactly where the last one ended instead of from a rounded copy. On real
+  blocks the rounding was tiny (0.0001–0.0005 px RMS on two 350–450-photo drone blocks)
+  and the result is the same within noise: on quarry, PUTI and Casa Grande, replayed from
+  the same matches in both pair orders, the same cameras, camera error against RTK and
+  checkpoint RMS (quarry 0.203 / 0.233 m in the two orders before and after; PUTI
+  checkpoints 3.01 / 8.18 → 3.02 / 8.16 cm, the pair-order spread 0.2 cm), the same
+  solve counts and BA time (116.5 → 116.1 s, 131.4 → 131.3 s side by side). Where a
+  solve starts far from its minimum it matters: on the large Ladybug problems of BAL, the
+  final cost against Ceres went from +3.4 % to +0.01 % (969 cameras), +4.0 % to −0.05 %
+  (885) and +2.2 % to −0.05 % (931), in a third to half the time: all three had started
+  from the f32 rounding of BAL's start (Ceres from that rounding ends 2–6 % higher too).
+  Dubrovnik-135's +2.6 % is another minimum and stays.
 - **The 3D view's toolboxes in German.** Measure in 3D, the turntable and Select points (with the LAS class names) now show in the interface language, as the image list and both settings dialogs already do.
 - **Settings, regrouped.** The two run switches (Keep the screen on, Notify when a run ends) moved to Settings ▸ Compute ▸ During a run, and the settings almost nobody changes (a satellite source of your own, the 3D near clipping distance, the number of compute workers) show with **Show advanced settings**, now in the Settings footer as in the processing dialogs. The Memory safety limit says in plain words what it does and when to change it, and Downloaded AI models lists the models actually downloaded.
 - **Glossary figures follow the light theme.** In light mode the diagrams in the Glossary

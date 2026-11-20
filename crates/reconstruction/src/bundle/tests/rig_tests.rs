@@ -1,4 +1,5 @@
 use super::*;
+use super::f32_entry::{bundle_adjust, bundle_adjust_rig};
 
 // A three-lens rig (reference + two bands, each turned a fraction of a degree and a
 // few centimetres off) flown in two nadir strips 50 m above a rolling field.

@@ -1,5 +1,6 @@
 // The robust loss in σ units (SolverOpts::sigma_units, Model::sig, Problem::w_ref).
 use super::*;
+use super::f32_entry::{bundle_adjust, wide};
 
 // Two cameras at x = 0 and x = 1 looking down +z (f 1000 px, principal point 0), 20 points
 // at z = 10. Every observation weighs 1 and sits 0.5 px off in x, so the median error is
@@ -27,7 +28,7 @@ fn two_sigma_problem() -> (Problem, State, usize, usize) {
     let x0 = [0.0, 0.5, 10.0];
     let ox = obs(0, 0, x0, 4.0, 1.0 / 16.0, &mut idx, &mut px, &mut wt);
     let oy = obs(1, 0, x0, 1.0, 16.0, &mut idx, &mut px, &mut wt);
-    let (problem, cams, pts) = Problem::parse(&cams, &intr, &pts, &idx, &px, &wt, &[], &[], &[], &[], &[], &[], &[]).unwrap();
+    let (problem, cams, pts) = Problem::parse(&wide(&cams), &wide(&intr), &wide(&pts), &idx, &px, &wt, &[], &[], &[], &[], &[], &[], &[]).unwrap();
     (problem, State { cams, pts, gpar: Vec::new() }, ox, oy)
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use super::f32_entry::bundle_adjust;
 
 // Three nadir strips 50–62 m over hilly ground (±8 m), f 1000 px on a 1000 × 750 frame:
 // relief and varied heights fix the focal well enough for first-order propagation.

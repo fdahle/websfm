@@ -122,9 +122,12 @@ pub(crate) mod prof {
 /// allowing the caller to transform per-OPK uncertainties into solver axes.
 ///
 /// # Inputs
-/// - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
-/// - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]` (the seed / base K)
-/// - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
+/// The state the solve refines and returns crosses as doubles both ways (cameras, points,
+/// lens, rolling-shutter seeds, camera-prior and anchor targets), so a warm re-solve starts
+/// where the last call ended; pixels and weights are f32 (0.001 px spacing at 10,000 px).
+/// - `cameras_flat`: n_cam × 12 doubles `[R(9)|t(3), …]`
+/// - `intrinsics_flat`: n_cam × 4 doubles `[fx,fy,cx,cy, …]` (the seed / base K)
+/// - `pts_flat`: n_pts × 3 doubles `[x,y,z, …]`
 /// - `obs_index`: n_obs × 2 u32 `[cam_i, pt_i, …]` and `obs_px`: n_obs × 2 floats
 ///   `[pixel_x, pixel_y, …]`. Indices are integers on purpose: as f32 they were exact
 ///   only to 2²⁴, so above 16.7 M points observations silently attached to the wrong
@@ -134,7 +137,7 @@ pub(crate) mod prof {
 ///   tie points use one detection pixel (1/f², baObservations.js tieWeightOf), GCP
 ///   marks their declared pixel variances
 /// - `anchor_weight`: n_anchor × 9 floats, row-major 3×3 precision matrices
-/// - `camera_prior_flat`: n_prior × 31 floats
+/// - `camera_prior_flat`: n_prior × 31 doubles
 ///   `[cam_i, target_x, target_y, target_z, position_precision(9),
 ///     target_R(9), orientation_precision(9), …]`, matrices row-major. An all-zero
 ///   orientation precision matrix makes the row position-only.
@@ -153,7 +156,7 @@ pub(crate) mod prof {
 /// - `solver_flat`: solver policy `[pcg_min_n, rel_tol, max_iter, accept_partial,
 ///   function_tol, precond, direct, warm, huber]`; empty / NaN slots ⇒
 ///   `SolverOpts::DEFAULT` (see there).
-/// - `fisheye_flat`: n_cam × 5 floats `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
+/// - `fisheye_flat`: n_cam × 5 doubles `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
 ///   camera is pinhole (+ the Brown self-cal residual) and its observations are in the
 ///   undistorted frame; its k1…k3 slots seed that residual (the app passes zeros; the
 ///   BAL bench, examples/bal.rs, the problems' own k1, k2); `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
@@ -163,7 +166,7 @@ pub(crate) mod prof {
 ///   the original behaviour exactly.
 ///
 /// # Output
-/// `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×8),
+/// Doubles: `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×8),
 ///   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
 ///   solver stats (BA_STATS_LEN), cost_trace…]` — the returned
 /// intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3,k4]`
@@ -176,11 +179,11 @@ pub(crate) mod prof {
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn bundle_adjust(
-    cameras_flat: &[f32], intrinsics_flat: &[f32], pts_flat: &[f32], obs_index: &[u32], obs_px: &[f32],
-    observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f32],
+    cameras_flat: &[f64], intrinsics_flat: &[f64], pts_flat: &[f64], obs_index: &[u32], obs_px: &[f32],
+    observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f64],
     max_iters: u32, sensor_of_cam: &[i32], refine_mask: u32, solver_flat: &[f32], fixed_cam: &[u8],
-    fisheye_flat: &[f32],
-) -> Vec<f32> {
+    fisheye_flat: &[f64],
+) -> Vec<f64> {
     bundle_adjust_impl(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat,
         anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, &[],
         &[], &[])
@@ -195,20 +198,20 @@ pub fn bundle_adjust(
 /// so the pose and point Jacobians keep their form and τ adds one column, −s·R·v.
 /// The pose is the one at the principal row (what the camera-centre priors constrain).
 ///
-/// - `rs_flat`: n_cam × 5 floats `[vx, vy, vz, H, τ0, …]`; H ≤ 0 (or a short list) ⇒
+/// - `rs_flat`: n_cam × 5 doubles `[vx, vy, vz, H, τ0, …]`; H ≤ 0 (or a short list) ⇒
 ///   that camera reads all rows at once. τ0 is the readout time in seconds; with refine
 ///   bit 64 the group's τ is refined from its first camera's τ0 (the slot follows k4).
 ///
-/// Output: `bundle_adjust`'s, with n_cam floats — each camera's τ after the solve —
+/// Output: `bundle_adjust`'s, with n_cam values — each camera's τ after the solve —
 /// between the solver stats and the cost trace.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn bundle_adjust_rs(
-    cameras_flat: &[f32], intrinsics_flat: &[f32], pts_flat: &[f32], obs_index: &[u32], obs_px: &[f32],
-    observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f32],
+    cameras_flat: &[f64], intrinsics_flat: &[f64], pts_flat: &[f64], obs_index: &[u32], obs_px: &[f32],
+    observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f64],
     max_iters: u32, sensor_of_cam: &[i32], refine_mask: u32, solver_flat: &[f32], fixed_cam: &[u8],
-    fisheye_flat: &[f32], rs_flat: &[f32],
-) -> Vec<f32> {
+    fisheye_flat: &[f64], rs_flat: &[f64],
+) -> Vec<f64> {
     bundle_adjust_impl(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat,
         anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat,
         &[], &[])
@@ -235,11 +238,11 @@ pub fn bundle_adjust_rs(
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn bundle_adjust_rig(
-    cameras_flat: &[f32], intrinsics_flat: &[f32], pts_flat: &[f32], obs_index: &[u32], obs_px: &[f32],
-    observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f32],
+    cameras_flat: &[f64], intrinsics_flat: &[f64], pts_flat: &[f64], obs_index: &[u32], obs_px: &[f32],
+    observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f64],
     max_iters: u32, sensor_of_cam: &[i32], refine_mask: u32, solver_flat: &[f32], fixed_cam: &[u8],
-    fisheye_flat: &[f32], rs_flat: &[f32], capture_of_cam: &[i32], offset_flat: &[f32],
-) -> Vec<f32> {
+    fisheye_flat: &[f64], rs_flat: &[f64], capture_of_cam: &[i32], offset_flat: &[f32],
+) -> Vec<f64> {
     bundle_adjust_impl(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat,
         anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat,
         capture_of_cam, offset_flat)
@@ -247,25 +250,25 @@ pub fn bundle_adjust_rig(
 
 #[allow(clippy::too_many_arguments)]
 fn bundle_adjust_impl(
-    cameras_flat: &[f32],
-    intrinsics_flat: &[f32],
-    pts_flat: &[f32],
+    cameras_flat: &[f64],
+    intrinsics_flat: &[f64],
+    pts_flat: &[f64],
     obs_index: &[u32],
     obs_px: &[f32],
     observation_weight: &[f32],
     anchor_flat: &[f64],
     anchor_weight: &[f32],
-    camera_prior_flat: &[f32],
+    camera_prior_flat: &[f64],
     max_iters: u32,
     sensor_of_cam: &[i32],
     refine_mask: u32,
     solver_flat: &[f32],
     fixed_cam: &[u8],
-    fisheye_flat: &[f32],
-    rs_flat: &[f32],
+    fisheye_flat: &[f64],
+    rs_flat: &[f64],
     capture_of_cam: &[i32],
     offset_flat: &[f32],
-) -> Vec<f32> {
+) -> Vec<f64> {
     // The parts (bundle/): the inputs parsed (problem.rs), the reduced system's variables
     // (layout.rs), the observation model (model.rs), the normal equations and their Schur
     // reduction (normal.rs, implicit.rs), the lens σ (sigma.rs). This is the LM loop.
@@ -470,37 +473,75 @@ fn bundle_adjust_impl(
     let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * intr_stride + 4 + BA_STATS_LEN + trace.len());
     for c in 0..n_cam {
         let (r, t) = m.pose_of(c, &st.cams, &st.gpar);
-        for row in &r { for &v in row { out.push(v as f32); } }
-        for &v in &t { out.push(v as f32); }
+        for row in &r { out.extend_from_slice(row); }
+        out.extend_from_slice(&t);
     }
-    for pt in &st.pts {
-        for &v in pt { out.push(v as f32); }
-    }
+    for pt in &st.pts { out.extend_from_slice(pt); }
     for c in 0..n_cam {
         let e = m.eff(c, &st.gpar);
-        out.push(e.fx as f32); out.push(e.fy as f32); out.push(e.cx as f32); out.push(e.cy as f32);
-        for j in 0..4 { out.push(e.k[j] as f32); }
-        if intr_stride == 10 { out.push(e.p[0] as f32); out.push(e.p[1] as f32); }
+        out.extend_from_slice(&[e.fx, e.fy, e.cx, e.cy]);
+        out.extend_from_slice(&e.k[..4]);
+        if intr_stride == 10 { out.extend_from_slice(&e.p); }
     }
-    out.push(cost_before as f32);
-    out.push(cost_after as f32);
-    out.push(anchor_rms_after as f32);
-    out.push(camera_prior_rms_after as f32);
+    out.extend_from_slice(&[cost_before, cost_after, anchor_rms_after, camera_prior_rms_after]);
     let ss = &solve_stats;
     for v in [n as f64, ss.solves as f64, ss.cholesky as f64, ss.pcg_converged as f64, ss.pcg_partial as f64,
               ss.pcg_fallback as f64, ss.pcg_npd as f64, ss.pcg_iters as f64, ss.pcg_iters_max as f64, ss.implicit as f64,
               ss.point_fail_tries as f64, ss.point_fail_points as f64] {
-        out.push(v as f32);
+        out.push(v);
     }
     if solver.covariance {
         // An empty section (no lens refined, or no accepted step) is [0].
-        out.push((sigmas.len() / LENS_SIGMA_LEN) as f32);
-        for &v in &sigmas { out.push(v as f32); }
+        out.push((sigmas.len() / LENS_SIGMA_LEN) as f64);
+        out.extend_from_slice(&sigmas);
     }
-    if !rs_flat.is_empty() { for c in 0..n_cam { out.push(m.tau_of(c, &st.gpar) as f32); } }
-    for &c in &trace { out.push(c as f32); }
+    if !rs_flat.is_empty() { for c in 0..n_cam { out.push(m.tau_of(c, &st.gpar)); } }
+    out.extend_from_slice(&trace);
     prof::add(14, t0);
     out
+}
+
+/// The unit tests' entry points: problems built in f32, as the caller passed them before
+/// the state crossed in f64, widened on the way in and the result narrowed on the way out.
+/// A test imports these by name, which shadows the f64 ones its `use super::*` brings.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) mod f32_entry {
+    pub(crate) fn wide(v: &[f32]) -> Vec<f64> { v.iter().map(|&x| x as f64).collect() }
+    fn narrow(v: Vec<f64>) -> Vec<f32> { v.into_iter().map(|x| x as f32).collect() }
+
+    pub(crate) fn bundle_adjust(
+        cameras_flat: &[f32], intrinsics_flat: &[f32], pts_flat: &[f32], obs_index: &[u32], obs_px: &[f32],
+        observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f32],
+        max_iters: u32, sensor_of_cam: &[i32], refine_mask: u32, solver_flat: &[f32], fixed_cam: &[u8],
+        fisheye_flat: &[f32],
+    ) -> Vec<f32> {
+        narrow(super::bundle_adjust(&wide(cameras_flat), &wide(intrinsics_flat), &wide(pts_flat), obs_index, obs_px,
+            observation_weight, anchor_flat, anchor_weight, &wide(camera_prior_flat), max_iters, sensor_of_cam,
+            refine_mask, solver_flat, fixed_cam, &wide(fisheye_flat)))
+    }
+
+    pub(crate) fn bundle_adjust_rs(
+        cameras_flat: &[f32], intrinsics_flat: &[f32], pts_flat: &[f32], obs_index: &[u32], obs_px: &[f32],
+        observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f32],
+        max_iters: u32, sensor_of_cam: &[i32], refine_mask: u32, solver_flat: &[f32], fixed_cam: &[u8],
+        fisheye_flat: &[f32], rs_flat: &[f32],
+    ) -> Vec<f32> {
+        narrow(super::bundle_adjust_rs(&wide(cameras_flat), &wide(intrinsics_flat), &wide(pts_flat), obs_index, obs_px,
+            observation_weight, anchor_flat, anchor_weight, &wide(camera_prior_flat), max_iters, sensor_of_cam,
+            refine_mask, solver_flat, fixed_cam, &wide(fisheye_flat), &wide(rs_flat)))
+    }
+
+    pub(crate) fn bundle_adjust_rig(
+        cameras_flat: &[f32], intrinsics_flat: &[f32], pts_flat: &[f32], obs_index: &[u32], obs_px: &[f32],
+        observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f32],
+        max_iters: u32, sensor_of_cam: &[i32], refine_mask: u32, solver_flat: &[f32], fixed_cam: &[u8],
+        fisheye_flat: &[f32], rs_flat: &[f32], capture_of_cam: &[i32], offset_flat: &[f32],
+    ) -> Vec<f32> {
+        narrow(super::bundle_adjust_rig(&wide(cameras_flat), &wide(intrinsics_flat), &wide(pts_flat), obs_index, obs_px,
+            observation_weight, anchor_flat, anchor_weight, &wide(camera_prior_flat), max_iters, sensor_of_cam,
+            refine_mask, solver_flat, fixed_cam, &wide(fisheye_flat), &wide(rs_flat), capture_of_cam, offset_flat))
+    }
 }
 
 #[cfg(test)]

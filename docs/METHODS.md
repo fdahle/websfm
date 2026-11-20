@@ -515,6 +515,12 @@ complement**, analytic Jacobians and **adaptive Huber** robustification (Triggs 
 
 - **Parameters**: each camera has `t` and a **left-perturbed so(3)** rotation update
   `R ← exp(δω)·R`; points are 3-DOF.
+- **Precision across the call**: cameras, points, lens terms and survey targets go in and
+  come out as doubles, about the cameras' centroid; only the pixels and weights are f32
+  (0.001 px spacing at 10,000 px). Rounding the state to f32 at each call moved a
+  converged model's residuals by 0.0001–0.0005 px RMS (at most 0.002 px) on 350–450
+  photo drone blocks, far below what any solve changes, and BAL's large Ladybug problems
+  start from Ceres' own start instead of its f32 rounding.
 - **Schur complement**: points are eliminated, leaving a camera (+ intrinsics) system
   stored **block-sparse** (a 6×6 block per pair of cameras sharing a point), so memory
   grows with co-visibility, not cameras². Below 600 unknowns (~100 cameras) it is solved

@@ -10,8 +10,10 @@
 // refine bits focal | k1 | k2) and the principal point at 0, once the camera is turned
 // half a turn about x (x_c → (x, −y, −z)), which leaves u and negates v. The cost is
 // Ceres': ½·Σ‖r‖², no robust loss (solver slot `huber` 0). `final_cost` is the solver's
-// own; BAL's formula on the f32-rounded start checks the mapping (`mapping_ok`).
-// BAL_TRACE=1 prints the cost after each iteration on stderr.
+// own; BAL's formula on the start as passed checks the mapping (`mapping_ok`).
+// BAL_TRACE=1 prints the cost after each iteration on stderr. BAL_F32_START=1 rounds the
+// start to f32 first, as the crate took it before its inputs were f64 (ceres_bal has the
+// same switch).
 //
 // Configurations: `app` is the app's solver policy (core/tuning.js SFM_TUNING.baSolver:
 // the sparse direct solve of the reduced system, a function tolerance of 1e-6 floored at
@@ -104,16 +106,18 @@ fn main() {
     let cost0 = bal_cost(&b, &cams0, &b.pts);
 
     // To the crate's frame: R' = D·R, t' = D·t with D = diag(1, −1, −1); v' = −v.
+    let f32_start = std::env::var_os("BAL_F32_START").is_some();
+    let start_value = |v: f64| if f32_start { v as f32 as f64 } else { v };
     let mut cameras_flat = Vec::with_capacity(b.n_cam * 12);
     let mut intrinsics_flat = Vec::with_capacity(b.n_cam * 4);
     let mut lens_flat = Vec::with_capacity(b.n_cam * 5);
     for (r, t, f, k1, k2) in &cams0 {
-        for (i, s) in [1.0, -1.0, -1.0].iter().enumerate() { cameras_flat.extend(r[i].iter().map(|v| (s * v) as f32)); }
-        cameras_flat.extend([t[0] as f32, -t[1] as f32, -t[2] as f32]);
-        intrinsics_flat.extend([*f as f32, *f as f32, 0.0, 0.0]);
-        lens_flat.extend([0.0, *k1 as f32, *k2 as f32, 0.0, 0.0]);
+        for (i, s) in [1.0, -1.0, -1.0].iter().enumerate() { cameras_flat.extend(r[i].iter().map(|v| start_value(s * v))); }
+        cameras_flat.extend([start_value(t[0]), start_value(-t[1]), start_value(-t[2])]);
+        intrinsics_flat.extend([start_value(*f), start_value(*f), 0.0, 0.0]);
+        lens_flat.extend([0.0, start_value(*k1), start_value(*k2), 0.0, 0.0]);
     }
-    let pts_flat: Vec<f32> = b.pts.iter().flat_map(|p| p.map(|v| v as f32)).collect();
+    let pts_flat: Vec<f64> = b.pts.iter().flat_map(|p| p.map(start_value)).collect();
     let obs_index: Vec<u32> = b.obs.iter().flat_map(|o| [o.0, o.1]).collect();
     let obs_px: Vec<f32> = b.obs.iter().flat_map(|o| [o.2 as f32, -o.3 as f32]).collect();
     let weight = vec![1.0f32; b.obs.len() * 2];
@@ -130,20 +134,17 @@ fn main() {
         other => panic!("unknown configuration {other} (app, pcg, implicit)"),
     };
     let refine_mask = 1 | 4 | 8; // focal scale, k1, k2
-    // The solver takes f32 in and gives f32 out (the app's arrays). Its own cost, in f64
-    // on the problem as rounded, is what it reports; check the frame mapping on that
-    // rounded start, where BAL's formula must give the solver's initial cost. Rounding the
-    // output again would not be a fair score: a point close to a camera's plane turns 1e-7
-    // of rounding into pixels (×10⁸ on the large Ladybug problems), and the app keeps
-    // its own f64 state between iterations.
+    // The solver's own cost is what it reports; check the frame mapping on the start as
+    // passed (rounded with BAL_F32_START), where BAL's formula must give the solver's
+    // initial cost.
     let start: Vec<_> = (0..b.n_cam).map(|c| {
-        let v = |i: usize| cameras_flat[c * 12 + i] as f64;
+        let v = |i: usize| cameras_flat[c * 12 + i];
         let s = [1.0, -1.0, -1.0];
         let r = [0, 1, 2].map(|i| [0, 1, 2].map(|j| s[i] * v(i * 3 + j)));
-        (r, [v(9), -v(10), -v(11)], intrinsics_flat[c * 4] as f64, lens_flat[c * 5 + 1] as f64, lens_flat[c * 5 + 2] as f64)
+        (r, [v(9), -v(10), -v(11)], intrinsics_flat[c * 4], lens_flat[c * 5 + 1], lens_flat[c * 5 + 2])
     }).collect();
-    let start_pts: Vec<[f64; 3]> = pts_flat.chunks(3).map(|p| [p[0] as f64, p[1] as f64, p[2] as f64]).collect();
-    let cost0_f32 = bal_cost(&b, &start, &start_pts);
+    let start_pts: Vec<[f64; 3]> = pts_flat.chunks(3).map(|p| [p[0], p[1], p[2]]).collect();
+    let cost0_start = bal_cost(&b, &start, &start_pts);
 
     let base = NOW.load(Relaxed);
     PEAK.store(base, Relaxed);
@@ -158,29 +159,28 @@ fn main() {
 
     let (nc, np) = (b.n_cam, b.n_pts);
     let o_cost = nc * 12 + np * 3 + nc * 8;
-    let (rms0, rms1) = (out[o_cost] as f64, out[o_cost + 1] as f64);
+    let (rms0, rms1) = (out[o_cost], out[o_cost + 1]);
     let stats = &out[o_cost + 4..o_cost + 4 + 12]; // BA_STATS_LEN
     let trace = &out[o_cost + 4 + 12..];
     let n_obs = b.obs.len() as f64;
     // BAL_TRACE=1: the cost after each accepted iteration (½·Σ‖r‖², from the RMS trace),
     // to set beside `BAL_TRACE=1 ceres_bal`'s.
     if std::env::var_os("BAL_TRACE").is_some() {
-        let costs: Vec<String> = trace.iter().map(|r| format!("{:.6e}", 0.5 * (*r as f64).powi(2) * n_obs)).collect();
+        let costs: Vec<String> = trace.iter().map(|r| format!("{:.6e}", 0.5 * r.powi(2) * n_obs)).collect();
         eprintln!("TRACE {}", costs.join(" "));
     }
     let (solver0, solver1) = (0.5 * rms0 * rms0 * n_obs, 0.5 * rms1 * rms1 * n_obs);
-    // FNV-1a over the whole output's f32 bits: a change meant to keep the arithmetic must
+    // FNV-1a over the whole output's bits: a change meant to keep the arithmetic must
     // leave it as it was.
     let out_hash = out.iter().fold(0xcbf29ce484222325u64, |h, v| {
         v.to_bits().to_le_bytes().iter().fold(h, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3))
     });
-    // rms0 comes back as f32: agreement to its 1e-7, not to f64.
-    let mapping_ok = ((solver0 - cost0_f32) / cost0_f32).abs() < 1e-5;
+    let mapping_ok = ((solver0 - cost0_start) / cost0_start).abs() < 1e-5;
     println!(
         "{{\"file\":\"{}\",\"solver\":\"websfm-{}\",\"cameras\":{},\"points\":{},\"observations\":{},\
-\"initial_cost\":{:.10e},\"start_cost_f32\":{:.10e},\"solver_initial_cost\":{:.10e},\"final_cost\":{:.10e},\
+\"initial_cost\":{:.10e},\"start_cost\":{:.10e},\"f32_start\":{},\"solver_initial_cost\":{:.10e},\"final_cost\":{:.10e},\
 \"mapping_ok\":{},\"iterations\":{},\"linear_solves\":{},\"cholesky\":{},\"implicit\":{},\"pcg_iters\":{},\"point_fail_tries\":{},\"point_fail_points\":{},\"solve_s\":{:.3},\"read_s\":{:.3},\"peak_alloc_mb\":{:.0},\"threads\":{},\"out_hash\":\"{:016x}\"}}",
-        path, config, nc, np, b.obs.len(), cost0, cost0_f32, solver0, solver1, mapping_ok,
+        path, config, nc, np, b.obs.len(), cost0, cost0_start, f32_start, solver0, solver1, mapping_ok,
         trace.len(), stats[1] as u32, stats[2] as u32, stats[9] as u32, stats[7] as u64, stats[10] as u32, stats[11] as u32, solve_s, read_s, peak_alloc_mb,
         if cfg!(feature = "threads") { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { 1 },
         out_hash,

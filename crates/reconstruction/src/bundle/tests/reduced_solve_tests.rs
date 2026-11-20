@@ -1,4 +1,5 @@
 use super::*;
+use super::f32_entry::{bundle_adjust, wide};
 
 // Deterministic pseudo-random numbers in [-1, 1).
 struct Lcg(u64);
@@ -429,7 +430,7 @@ fn bundle_adjust_timing() {
 #[ignore]
 fn elimination_tree_shape() {
     let TimingProblem { cams, intr, pts, idx, px, prior, sensors, side, views, refine_mask, .. } = timing_problem();
-    let (problem, _, _) = Problem::parse(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, &[], &[], &[], &[]).unwrap();
+    let (problem, _, _) = Problem::parse(&wide(&cams), &wide(&intr), &wide(&pts), &idx, &px, &[], &[], &[], &wide(&prior), &[], &[], &[], &[]).unwrap();
     let layout = Layout::new(&problem, &sensors, refine_mask, &[]);
     let pattern = layout.pattern(&problem, true);
     let t = std::time::Instant::now();
@@ -622,6 +623,44 @@ fn lm_converges_from_points_started_near_a_camera() {
     let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
     let (before, after) = (out[base], out[base + 1]);
     assert!(after < 1e-2, "rms {before} → {after} px after {} iterations", out.len() - base - 4 - BA_STATS_LEN);
+}
+
+// The state crosses the call in f64 both ways: a solved block handed back starts exactly
+// where the solve ended, its cost to the last bit. In f32 a block 1 km from the origin
+// rounds by ~6e-5 m, ~0.006 px at this focal and depth, and the second call starts
+// elsewhere.
+#[test]
+fn a_solved_state_comes_back_at_full_precision() {
+    let n_cam = 8;
+    let n_pts = 200;
+    let off = [1000.0, -700.0, 300.0];
+    let mut rng = Lcg(17);
+    let (mut cams, mut intr) = (Vec::new(), Vec::new());
+    for c in 0..n_cam {
+        // R = I, t = −C: the centres along x, the block `off` from the origin.
+        cams.extend_from_slice(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -(c as f64) - off[0], -off[1], -off[2]]);
+        intr.extend_from_slice(&[1000.0, 1000.0, 0.0, 0.0]);
+    }
+    let (mut pts, mut idx, mut px) = (Vec::new(), Vec::new(), Vec::new());
+    for p in 0..n_pts {
+        let x = [3.5 + 4.0 * rng.next(), 3.0 * rng.next(), 10.0 + 2.0 * rng.next()];
+        for c in 0..n_cam {
+            idx.extend_from_slice(&[c as u32, p as u32]);
+            px.extend_from_slice(&[(1000.0 * (x[0] - c as f64) / x[2] + 0.5 * rng.next()) as f32,
+                                   (1000.0 * x[1] / x[2] + 0.5 * rng.next()) as f32]);
+        }
+        pts.extend((0..3).map(|k| x[k] + off[k] + 0.01 * rng.next()));
+    }
+    let fixed = { let mut f = vec![0u8; n_cam]; f[0] = 1; f[1] = 1; f };
+    let solver = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-12, f32::NAN, f32::NAN, f32::NAN, 0.0];
+    let solve = |c: &[f64], p: &[f64]| crate::bundle::bundle_adjust(c, &intr, p, &idx, &px, &[], &[], &[], &[], 100, &[], 0,
+        &solver, &fixed, &[]);
+    let first = solve(&cams, &pts);
+    let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+    let again = solve(&first[..n_cam * 12], &first[n_cam * 12..n_cam * 12 + n_pts * 3]);
+    assert!(first[base + 1] < first[base] && first[base + 1] > 0.1, "rms {} → {} px", first[base], first[base + 1]);
+    assert_eq!(again[base].to_bits(), first[base + 1].to_bits(),
+        "the second call starts at {} px, the first ended at {} px", again[base], first[base + 1]);
 }
 
 // A far point (its block's entries ~(f/z)² ≈ 1e-8) is as invertible as a near one:

@@ -130,9 +130,12 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  * allowing the caller to transform per-OPK uncertainties into solver axes.
  *
  * # Inputs
- * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
- * - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]` (the seed / base K)
- * - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
+ * The state the solve refines and returns crosses as doubles both ways (cameras, points,
+ * lens, rolling-shutter seeds, camera-prior and anchor targets), so a warm re-solve starts
+ * where the last call ended; pixels and weights are f32 (0.001 px spacing at 10,000 px).
+ * - `cameras_flat`: n_cam × 12 doubles `[R(9)|t(3), …]`
+ * - `intrinsics_flat`: n_cam × 4 doubles `[fx,fy,cx,cy, …]` (the seed / base K)
+ * - `pts_flat`: n_pts × 3 doubles `[x,y,z, …]`
  * - `obs_index`: n_obs × 2 u32 `[cam_i, pt_i, …]` and `obs_px`: n_obs × 2 floats
  *   `[pixel_x, pixel_y, …]`. Indices are integers on purpose: as f32 they were exact
  *   only to 2²⁴, so above 16.7 M points observations silently attached to the wrong
@@ -142,7 +145,7 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  *   tie points use one detection pixel (1/f², baObservations.js tieWeightOf), GCP
  *   marks their declared pixel variances
  * - `anchor_weight`: n_anchor × 9 floats, row-major 3×3 precision matrices
- * - `camera_prior_flat`: n_prior × 31 floats
+ * - `camera_prior_flat`: n_prior × 31 doubles
  *   `[cam_i, target_x, target_y, target_z, position_precision(9),
  *     target_R(9), orientation_precision(9), …]`, matrices row-major. An all-zero
  *   orientation precision matrix makes the row position-only.
@@ -161,7 +164,7 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  * - `solver_flat`: solver policy `[pcg_min_n, rel_tol, max_iter, accept_partial,
  *   function_tol, precond, direct, warm, huber]`; empty / NaN slots ⇒
  *   `SolverOpts::DEFAULT` (see there).
- * - `fisheye_flat`: n_cam × 5 floats `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
+ * - `fisheye_flat`: n_cam × 5 doubles `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
  *   camera is pinhole (+ the Brown self-cal residual) and its observations are in the
  *   undistorted frame; its k1…k3 slots seed that residual (the app passes zeros; the
  *   BAL bench, examples/bal.rs, the problems' own k1, k2); `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
@@ -171,7 +174,7 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  *   the original behaviour exactly.
  *
  * # Output
- * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×8),
+ * Doubles: `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×8),
  *   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
  *   solver stats (BA_STATS_LEN), cost_trace…]` — the returned
  * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3,k4]`
@@ -181,29 +184,29 @@ if (Symbol.dispose) GuidedSearch.prototype[Symbol.dispose] = GuidedSearch.protot
  * pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
  * residual in the caller's world units, and camera_prior_rms_after is the RMS
  * camera-centre residual (both 0 when their respective prior list is empty).
- * @param {Float32Array} cameras_flat
- * @param {Float32Array} intrinsics_flat
- * @param {Float32Array} pts_flat
+ * @param {Float64Array} cameras_flat
+ * @param {Float64Array} intrinsics_flat
+ * @param {Float64Array} pts_flat
  * @param {Uint32Array} obs_index
  * @param {Float32Array} obs_px
  * @param {Float32Array} observation_weight
  * @param {Float64Array} anchor_flat
  * @param {Float32Array} anchor_weight
- * @param {Float32Array} camera_prior_flat
+ * @param {Float64Array} camera_prior_flat
  * @param {number} max_iters
  * @param {Int32Array} sensor_of_cam
  * @param {number} refine_mask
  * @param {Float32Array} solver_flat
  * @param {Uint8Array} fixed_cam
- * @param {Float32Array} fisheye_flat
- * @returns {Float32Array}
+ * @param {Float64Array} fisheye_flat
+ * @returns {Float64Array}
  */
 export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat) {
-    const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
+    const ptr0 = passArrayF64ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
+    const ptr1 = passArrayF64ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArrayF32ToWasm0(pts_flat, wasm.__wbindgen_malloc);
+    const ptr2 = passArrayF64ToWasm0(pts_flat, wasm.__wbindgen_malloc);
     const len2 = WASM_VECTOR_LEN;
     const ptr3 = passArray32ToWasm0(obs_index, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
@@ -215,7 +218,7 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index
     const len6 = WASM_VECTOR_LEN;
     const ptr7 = passArrayF32ToWasm0(anchor_weight, wasm.__wbindgen_malloc);
     const len7 = WASM_VECTOR_LEN;
-    const ptr8 = passArrayF32ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
+    const ptr8 = passArrayF64ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
     const len8 = WASM_VECTOR_LEN;
     const ptr9 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
     const len9 = WASM_VECTOR_LEN;
@@ -223,11 +226,11 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index
     const len10 = WASM_VECTOR_LEN;
     const ptr11 = passArray8ToWasm0(fixed_cam, wasm.__wbindgen_malloc);
     const len11 = WASM_VECTOR_LEN;
-    const ptr12 = passArrayF32ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
+    const ptr12 = passArrayF64ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
     const len12 = WASM_VECTOR_LEN;
     const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, max_iters, ptr9, len9, refine_mask, ptr10, len10, ptr11, len11, ptr12, len12);
-    var v14 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    var v14 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
     return v14;
 }
 
@@ -250,32 +253,32 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index
  * its first camera with the offset taken off; it is held fixed only when every camera
  * in it is. A camera-centre prior acts on the capture's pose: give one per capture.
  * Output: `bundle_adjust_rs`'s, each camera's pose being its composed pose.
- * @param {Float32Array} cameras_flat
- * @param {Float32Array} intrinsics_flat
- * @param {Float32Array} pts_flat
+ * @param {Float64Array} cameras_flat
+ * @param {Float64Array} intrinsics_flat
+ * @param {Float64Array} pts_flat
  * @param {Uint32Array} obs_index
  * @param {Float32Array} obs_px
  * @param {Float32Array} observation_weight
  * @param {Float64Array} anchor_flat
  * @param {Float32Array} anchor_weight
- * @param {Float32Array} camera_prior_flat
+ * @param {Float64Array} camera_prior_flat
  * @param {number} max_iters
  * @param {Int32Array} sensor_of_cam
  * @param {number} refine_mask
  * @param {Float32Array} solver_flat
  * @param {Uint8Array} fixed_cam
- * @param {Float32Array} fisheye_flat
- * @param {Float32Array} rs_flat
+ * @param {Float64Array} fisheye_flat
+ * @param {Float64Array} rs_flat
  * @param {Int32Array} capture_of_cam
  * @param {Float32Array} offset_flat
- * @returns {Float32Array}
+ * @returns {Float64Array}
  */
 export function bundle_adjust_rig(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat, capture_of_cam, offset_flat) {
-    const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
+    const ptr0 = passArrayF64ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
+    const ptr1 = passArrayF64ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArrayF32ToWasm0(pts_flat, wasm.__wbindgen_malloc);
+    const ptr2 = passArrayF64ToWasm0(pts_flat, wasm.__wbindgen_malloc);
     const len2 = WASM_VECTOR_LEN;
     const ptr3 = passArray32ToWasm0(obs_index, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
@@ -287,7 +290,7 @@ export function bundle_adjust_rig(cameras_flat, intrinsics_flat, pts_flat, obs_i
     const len6 = WASM_VECTOR_LEN;
     const ptr7 = passArrayF32ToWasm0(anchor_weight, wasm.__wbindgen_malloc);
     const len7 = WASM_VECTOR_LEN;
-    const ptr8 = passArrayF32ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
+    const ptr8 = passArrayF64ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
     const len8 = WASM_VECTOR_LEN;
     const ptr9 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
     const len9 = WASM_VECTOR_LEN;
@@ -295,17 +298,17 @@ export function bundle_adjust_rig(cameras_flat, intrinsics_flat, pts_flat, obs_i
     const len10 = WASM_VECTOR_LEN;
     const ptr11 = passArray8ToWasm0(fixed_cam, wasm.__wbindgen_malloc);
     const len11 = WASM_VECTOR_LEN;
-    const ptr12 = passArrayF32ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
+    const ptr12 = passArrayF64ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
     const len12 = WASM_VECTOR_LEN;
-    const ptr13 = passArrayF32ToWasm0(rs_flat, wasm.__wbindgen_malloc);
+    const ptr13 = passArrayF64ToWasm0(rs_flat, wasm.__wbindgen_malloc);
     const len13 = WASM_VECTOR_LEN;
     const ptr14 = passArray32ToWasm0(capture_of_cam, wasm.__wbindgen_malloc);
     const len14 = WASM_VECTOR_LEN;
     const ptr15 = passArrayF32ToWasm0(offset_flat, wasm.__wbindgen_malloc);
     const len15 = WASM_VECTOR_LEN;
     const ret = wasm.bundle_adjust_rig(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, max_iters, ptr9, len9, refine_mask, ptr10, len10, ptr11, len11, ptr12, len12, ptr13, len13, ptr14, len14, ptr15, len15);
-    var v17 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    var v17 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
     return v17;
 }
 
@@ -319,36 +322,36 @@ export function bundle_adjust_rig(cameras_flat, intrinsics_flat, pts_flat, obs_i
  * so the pose and point Jacobians keep their form and τ adds one column, −s·R·v.
  * The pose is the one at the principal row (what the camera-centre priors constrain).
  *
- * - `rs_flat`: n_cam × 5 floats `[vx, vy, vz, H, τ0, …]`; H ≤ 0 (or a short list) ⇒
+ * - `rs_flat`: n_cam × 5 doubles `[vx, vy, vz, H, τ0, …]`; H ≤ 0 (or a short list) ⇒
  *   that camera reads all rows at once. τ0 is the readout time in seconds; with refine
  *   bit 64 the group's τ is refined from its first camera's τ0 (the slot follows k4).
  *
- * Output: `bundle_adjust`'s, with n_cam floats — each camera's τ after the solve —
+ * Output: `bundle_adjust`'s, with n_cam values — each camera's τ after the solve —
  * between the solver stats and the cost trace.
- * @param {Float32Array} cameras_flat
- * @param {Float32Array} intrinsics_flat
- * @param {Float32Array} pts_flat
+ * @param {Float64Array} cameras_flat
+ * @param {Float64Array} intrinsics_flat
+ * @param {Float64Array} pts_flat
  * @param {Uint32Array} obs_index
  * @param {Float32Array} obs_px
  * @param {Float32Array} observation_weight
  * @param {Float64Array} anchor_flat
  * @param {Float32Array} anchor_weight
- * @param {Float32Array} camera_prior_flat
+ * @param {Float64Array} camera_prior_flat
  * @param {number} max_iters
  * @param {Int32Array} sensor_of_cam
  * @param {number} refine_mask
  * @param {Float32Array} solver_flat
  * @param {Uint8Array} fixed_cam
- * @param {Float32Array} fisheye_flat
- * @param {Float32Array} rs_flat
- * @returns {Float32Array}
+ * @param {Float64Array} fisheye_flat
+ * @param {Float64Array} rs_flat
+ * @returns {Float64Array}
  */
 export function bundle_adjust_rs(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat, rs_flat) {
-    const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
+    const ptr0 = passArrayF64ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
+    const ptr1 = passArrayF64ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArrayF32ToWasm0(pts_flat, wasm.__wbindgen_malloc);
+    const ptr2 = passArrayF64ToWasm0(pts_flat, wasm.__wbindgen_malloc);
     const len2 = WASM_VECTOR_LEN;
     const ptr3 = passArray32ToWasm0(obs_index, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
@@ -360,7 +363,7 @@ export function bundle_adjust_rs(cameras_flat, intrinsics_flat, pts_flat, obs_in
     const len6 = WASM_VECTOR_LEN;
     const ptr7 = passArrayF32ToWasm0(anchor_weight, wasm.__wbindgen_malloc);
     const len7 = WASM_VECTOR_LEN;
-    const ptr8 = passArrayF32ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
+    const ptr8 = passArrayF64ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
     const len8 = WASM_VECTOR_LEN;
     const ptr9 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
     const len9 = WASM_VECTOR_LEN;
@@ -368,13 +371,13 @@ export function bundle_adjust_rs(cameras_flat, intrinsics_flat, pts_flat, obs_in
     const len10 = WASM_VECTOR_LEN;
     const ptr11 = passArray8ToWasm0(fixed_cam, wasm.__wbindgen_malloc);
     const len11 = WASM_VECTOR_LEN;
-    const ptr12 = passArrayF32ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
+    const ptr12 = passArrayF64ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
     const len12 = WASM_VECTOR_LEN;
-    const ptr13 = passArrayF32ToWasm0(rs_flat, wasm.__wbindgen_malloc);
+    const ptr13 = passArrayF64ToWasm0(rs_flat, wasm.__wbindgen_malloc);
     const len13 = WASM_VECTOR_LEN;
     const ret = wasm.bundle_adjust_rs(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, max_iters, ptr9, len9, refine_mask, ptr10, len10, ptr11, len11, ptr12, len12, ptr13, len13);
-    var v15 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    var v15 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
     return v15;
 }
 

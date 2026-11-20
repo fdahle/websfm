@@ -78,9 +78,9 @@ impl Problem {
     /// when there is nothing to solve.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn parse(
-        cameras_flat: &[f32], intrinsics_flat: &[f32], pts_flat: &[f32], obs_index: &[u32], obs_px: &[f32],
-        observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f32],
-        fisheye_flat: &[f32], rs_flat: &[f32], capture_of_cam: &[i32], offset_flat: &[f32],
+        cameras_flat: &[f64], intrinsics_flat: &[f64], pts_flat: &[f64], obs_index: &[u32], obs_px: &[f32],
+        observation_weight: &[f32], anchor_flat: &[f64], anchor_weight: &[f32], camera_prior_flat: &[f64],
+        fisheye_flat: &[f64], rs_flat: &[f64], capture_of_cam: &[i32], offset_flat: &[f32],
     ) -> Option<(Problem, Vec<(M3, V3)>, Vec<V3>)> {
         let n_cam = cameras_flat.len() / 12;
         let n_pts = pts_flat.len() / 3;
@@ -127,10 +127,9 @@ impl Problem {
         let camera_priors: Vec<(usize, V3, M3, Option<(M3, M3)>)> = (0..n_camera_prior).filter_map(|i| {
             let b = i * 31;
             let ci = camera_prior_flat[b] as usize;
-            let target = [camera_prior_flat[b+1] as f64, camera_prior_flat[b+2] as f64,
-                          camera_prior_flat[b+3] as f64];
+            let target = [camera_prior_flat[b+1], camera_prior_flat[b+2], camera_prior_flat[b+3]];
             let mut weight: M3 = [0,1,2].map(|row| [0,1,2].map(|col|
-                camera_prior_flat[b + 4 + 3*row + col] as f64));
+                camera_prior_flat[b + 4 + 3*row + col]));
             for row in 0..3 { for col in (row+1)..3 {
                 let v = 0.5 * (weight[row][col] + weight[col][row]);
                 weight[row][col] = v; weight[col][row] = v;
@@ -140,9 +139,9 @@ impl Problem {
                 || weight.iter().flatten().any(|v| !v.is_finite())
                 || !(weight[0][0] > 0.0 && wdet2 > 0.0 && det3(&weight) > 0.0) { return None; }
             let target_r: M3 = [0,1,2].map(|row| [0,1,2].map(|col|
-                camera_prior_flat[b + 13 + 3*row + col] as f64));
+                camera_prior_flat[b + 13 + 3*row + col]));
             let mut precision: M3 = [0,1,2].map(|row| [0,1,2].map(|col|
-                camera_prior_flat[b + 22 + 3*row + col] as f64));
+                camera_prior_flat[b + 22 + 3*row + col]));
             for row in 0..3 { for col in (row+1)..3 {
                 let v = 0.5 * (precision[row][col] + precision[col][row]);
                 precision[row][col] = v; precision[col][row] = v;
@@ -159,10 +158,10 @@ impl Problem {
 
         let cams_in: Vec<(M3, V3)> = (0..n_cam).map(|c| {
             let b = c * 12;
-            let r: M3 = [[cameras_flat[b]   as f64, cameras_flat[b+1] as f64, cameras_flat[b+2]  as f64],
-                         [cameras_flat[b+3] as f64, cameras_flat[b+4] as f64, cameras_flat[b+5]  as f64],
-                         [cameras_flat[b+6] as f64, cameras_flat[b+7] as f64, cameras_flat[b+8]  as f64]];
-            let t: V3 = [cameras_flat[b+9] as f64, cameras_flat[b+10] as f64, cameras_flat[b+11] as f64];
+            let r: M3 = [[cameras_flat[b],   cameras_flat[b+1], cameras_flat[b+2]],
+                         [cameras_flat[b+3], cameras_flat[b+4], cameras_flat[b+5]],
+                         [cameras_flat[b+6], cameras_flat[b+7], cameras_flat[b+8]]];
+            let t: V3 = [cameras_flat[b+9], cameras_flat[b+10], cameras_flat[b+11]];
             (r, t)
         }).collect();
         // One pose per block: a capture starts from a camera without an offset where it has
@@ -185,8 +184,7 @@ impl Problem {
           } }
         let ks: Vec<(f64, f64, f64, f64)> = (0..n_cam).map(|c| {
             let b = c * 4;
-            (intrinsics_flat[b] as f64, intrinsics_flat[b+1] as f64,
-             intrinsics_flat[b+2] as f64, intrinsics_flat[b+3] as f64)
+            (intrinsics_flat[b], intrinsics_flat[b+1], intrinsics_flat[b+2], intrinsics_flat[b+3])
         }).collect();
         // terms 0 ⇒ Brown (pinhole when every coefficient is 0). A 7-float list also
         // returns p1/p2.
@@ -194,7 +192,7 @@ impl Problem {
         let lens: Vec<(usize, [f64; 4], [f64; 2])> = (0..n_cam).map(|c| {
             let b = c * lens_stride;
             let val = |j: usize| -> f64 {
-                let v = fisheye_flat.get(b + j).copied().unwrap_or(0.0) as f64;
+                let v = fisheye_flat.get(b + j).copied().unwrap_or(0.0);
                 if v.is_finite() { v } else { 0.0 }
             };
             let terms = fisheye_flat.get(b).copied().unwrap_or(0.0);
@@ -206,17 +204,15 @@ impl Problem {
         }).collect();
         let rs: Vec<Option<(V3, f64, f64)>> = (0..n_cam).map(|c| {
             let b = c * 5;
-            let h = rs_flat.get(b + 3).copied().unwrap_or(0.0) as f64;
+            let h = rs_flat.get(b + 3).copied().unwrap_or(0.0);
             if !(h > 0.0) { return None; }
-            let v = [0, 1, 2].map(|j| rs_flat.get(b + j).copied().unwrap_or(0.0) as f64);
-            let tau0 = rs_flat.get(b + 4).copied().unwrap_or(0.0) as f64;
+            let v = [0, 1, 2].map(|j| rs_flat.get(b + j).copied().unwrap_or(0.0));
+            let tau0 = rs_flat.get(b + 4).copied().unwrap_or(0.0);
             if v.iter().any(|x| !x.is_finite()) || !tau0.is_finite() { return None; }
             Some((v, h, tau0))
         }).collect();
         let rs_any = rs.iter().any(|r| r.is_some());
-        let pts: Vec<V3> = (0..n_pts).map(|i| {
-            [pts_flat[i*3] as f64, pts_flat[i*3+1] as f64, pts_flat[i*3+2] as f64]
-        }).collect();
+        let pts: Vec<V3> = (0..n_pts).map(|i| [pts_flat[i*3], pts_flat[i*3+1], pts_flat[i*3+2]]).collect();
         let obs: Vec<(u32, u32, f32, f32, f32, f32)> = (0..n_obs).map(|i| {
             let b = i * 2;
             let wx = observation_weight.get(b).copied().unwrap_or(1.0);

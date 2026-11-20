@@ -46,13 +46,13 @@ export const SPARSE_MEMORY_MODEL = {
   // The wasm solver (crates/reconstruction bundle.rs) — its own linear memory, capped
   // at 4 GiB by wasm32 whatever the device has. Per observation: the copied inputs
   // (index, pixel, weight: 24) + the unpacked observation (40) + two CSR indices (8)
-  // + the Huber median's sort buffer (8). Per point: the f32 input, f64 working,
-  // tentative and step copies, C, gp, C⁻¹, C⁻¹·gp (~300). The reduced camera system is
+  // + the Huber median's sort buffer (8). Per point: the f64 input and output (48), f64
+  // working, tentative and step copies, C, gp, C⁻¹, C⁻¹·gp (~325). The reduced camera system is
   // block-sparse: two copies (S and the damped, eliminated one) of a 6×6 f64 block per
   // co-visible camera pair (2·288 + index), at most `solverCovisible` partners per
   // camera, plus the dense Cholesky copy + factor below DENSE_MAX_N (16·n², n ≤ 4096).
   solverPerObservation: 80,
-  solverPerPoint: 300,
+  solverPerPoint: 325,
   solverPerCameraPair: 600,
   solverCovisible: 150,
   solverDenseMaxN: 4096,

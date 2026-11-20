@@ -33,6 +33,7 @@ pub use bundle::bundle_adjust;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bundle::f32_entry::bundle_adjust;
 
     // The tests build observations as [cam, pt, x, y] floats; bundle_adjust takes the
     // indices as u32 and the pixels as f32.
