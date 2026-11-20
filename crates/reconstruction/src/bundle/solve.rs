@@ -211,6 +211,9 @@ pub(crate) const BA_MEMORY_BUDGET: u64 = 3 << 30;
 // 1,679; dubrovnik-356 244 vs 289.
 pub(crate) const MEM_PER_OBS: u64 = 64;
 pub(crate) const MEM_PER_POINT: u64 = 400;
+// The residuals the LM loop keeps (Plan::keep_res): [q, s] per observation for the
+// accepted state and for the trial.
+pub(crate) const RES_PER_OBS: u64 = 32;
 // `parts_bytes`: the Schur step's group partials (schur.rs `range_parts_len`), which hold
 // the storage the factor takes over (bundle.rs `work`), so the larger of the two counts.
 pub(crate) fn direct_bytes(s_vals: usize, factor_bytes: u64, parts_bytes: u64, n_obs: usize, n_pts: usize) -> u64 {

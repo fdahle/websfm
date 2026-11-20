@@ -31,6 +31,9 @@ pub(crate) struct Plan {
     // Under self-calibration, each camera's cross blocks with its group in S: the value
     // offsets of (group, camera) and (camera, group); (0, 0) for a camera held fixed.
     pub cam_grp_at: Vec<(usize, usize)>,
+    // Whether the observations' residuals are kept from one iteration to the next (they
+    // fit the memory budget beside what the solve holds).
+    pub keep_res: bool,
 }
 
 impl Plan {
@@ -46,11 +49,12 @@ impl Plan {
         // stored (`implicit`): on a dense camera graph S alone outgrows wasm32 (BAL
         // final-1936, 1,936 cameras that nearly all see each other: 2.2 GB, held twice).
         let large = pattern.n >= solver.pcg_min_n || pattern.n > DENSE_MAX_N;
+        let mut parts = 0u64;
         let (direct, implicit) = if solver.direct == 2 && large { (None, true) }
         else if solver.direct == 1 && large {
             let room = solver.memory.saturating_sub(direct_bytes(pattern.n_vals, 0, 0, obs.len(), n_pts));
             // The factor and the group partials share one buffer: each must fit the room.
-            let parts = 8 * range_parts_len(&pattern, n_free) as u64;
+            parts = 8 * range_parts_len(&pattern, n_free) as u64;
             let max_blocks = (room / (8 * 36)).min(usize::MAX as u64) as usize;
             let sym = if max_blocks == 0 || parts > room { None } else {
                 crate::sparse_chol::Symbolic::new(&pattern, max_blocks).filter(|sym| sym.factor_bytes() as u64 <= room)
@@ -118,7 +122,19 @@ impl Plan {
                 if sc == FIXED { (0, 0) } else { (pattern.at(g, sc), pattern.at(sc, g)) }
             }).collect()
         };
-        Plan { pattern, direct, implicit, function_tol, lower_only, range_plan, point_chunks, use_jcache, jk, jstride, cam_grp_at }
+        // What the chosen solve holds besides what follows (the same accounting as the
+        // decisions above; the dense solve's copy and factor below DENSE_MAX_N). The kept
+        // residuals and the Jacobian cache change no result, only whether a pass is
+        // repeated, so they are on only when they fit beside it and never sway a decision.
+        let n_obs = obs.len() as u64;
+        let held = match direct.as_ref() {
+            Some(sym) => direct_bytes(pattern.n_vals, sym.factor_bytes() as u64, parts, obs.len(), n_pts),
+            None if implicit => 2 * 8 * pattern.n_vals as u64 + MEM_PER_OBS * n_obs + MEM_PER_POINT * n_pts as u64
+                + if use_jcache { 4 * (jstride as u64) * n_obs } else { 0 },
+            None => direct_bytes(pattern.n_vals, if n <= DENSE_MAX_N { 16 * (n * n) as u64 } else { 0 }, 0, obs.len(), n_pts),
+        };
+        let keep_res = held + RES_PER_OBS * n_obs <= solver.memory;
+        Plan { pattern, direct, implicit, function_tol, lower_only, range_plan, point_chunks, use_jcache, jk, jstride, cam_grp_at, keep_res }
     }
 
     /// The points of chunk c (`point_chunks`).
@@ -143,6 +159,9 @@ pub(crate) struct Work {
     pub share_r: Vec<Vec<f64>>,
     pub jcache: Vec<f32>,
     pub jcache_outer: u32,
+    // The accepted state's residuals and the trial's (Plan::keep_res, Model::fill_residuals).
+    pub res: Vec<[f64; 2]>,
+    pub res_trial: Vec<[f64; 2]>,
 }
 
 impl Work {
@@ -150,7 +169,8 @@ impl Work {
         let chunked = plan.range_plan.is_none();
         let share_s = if chunked { (0..plan.point_chunks).map(|_| vec![0f64; plan.pattern.n_vals]).collect() } else { Vec::new() };
         let share_r = if chunked { (0..plan.point_chunks).map(|_| vec![0f64; n]).collect() } else { Vec::new() };
-        Work { smat: Vec::new(), s: Vec::new(), b_damped: Vec::new(), work: Vec::new(), share_s, share_r, jcache: Vec::new(), jcache_outer: u32::MAX }
+        Work { smat: Vec::new(), s: Vec::new(), b_damped: Vec::new(), work: Vec::new(), share_s, share_r, jcache: Vec::new(),
+               jcache_outer: u32::MAX, res: Vec::new(), res_trial: Vec::new() }
     }
 }
 

@@ -257,7 +257,11 @@ fn bundle_adjust_impl(
     let mut solve_stats = SolveStats::default();
     let mut st = State { cams, pts, gpar: m.initial_gpar() };
 
-    let cost_before = m.rms(&st);
+    let mut w = Work::new(&plan, n);
+    // The accepted state's residuals, when kept (Plan::keep_res): one projection per
+    // iteration instead of four (threshold, start cost, trial cost, trace), same sums.
+    let keep = plan.keep_res;
+    let cost_before = if keep { m.fill_residuals(&st, &mut w.res); Model::rms_of(&w.res) } else { m.rms(&st) };
     // For the lens σ (solver slot 9): once the solve has ended, one more pass assembles
     // the reduced matrix at the solution without damping (`cov_pass`), keeps it and stops.
     // The last accepted step's own matrix will not do: a converged solve rejects steps to
@@ -269,7 +273,6 @@ fn bundle_adjust_impl(
     let mut last_implicit: Option<(Vec<f64>, Vec<f64>, Vec<Option<M3>>)> = None;
     let mut lambda = 1e-3f64;              // LM damping
     let mut trace: Vec<f64> = Vec::new();  // RMS after each accepted iteration
-    let mut w = Work::new(&plan, n);
     for outer in 0.. {
         if outer >= max_iters && !cov_pass {
             if !want_cov { break; }
@@ -277,8 +280,8 @@ fn bundle_adjust_impl(
         }
         if cov_pass { lambda = 0.0; }
         prof::start();
-        let dh = m.huber_threshold(&st);
-        let mut cost = m.robust_cost(&st, dh);
+        let dh = if keep { m.huber_threshold_of(&w.res) } else { m.huber_threshold(&st) };
+        let mut cost = if keep { m.robust_cost_of(&w.res, &st, dh) } else { m.robust_cost(&st, dh) };
         let cost_at_start = cost; // this iteration's robust cost, for the function-tolerance stop
         prof::mark(0);
         let nrm = assemble(&m, &plan, &st, dh, &mut w);
@@ -373,10 +376,12 @@ fn bundle_adjust_impl(
             for pi in 0..n_pts { for k in 0..3 { tent_pts[pi][k] += st.pts[pi][k]; } }
             let tent = State { cams: tent_cams, pts: tent_pts, gpar: tent_gpar };
 
-            let new_cost = m.robust_cost(&tent, dh);
+            let new_cost = if keep { m.fill_residuals(&tent, &mut w.res_trial); m.robust_cost_of(&w.res_trial, &tent, dh) }
+                else { m.robust_cost(&tent, dh) };
             prof::mark(4);
             if new_cost < cost {
                 st = tent;
+                if keep { std::mem::swap(&mut w.res, &mut w.res_trial); }
                 cost = new_cost;
                 lambda = (lambda * 0.3).max(LAMBDA_MIN);
                 accepted = true;
@@ -396,7 +401,7 @@ fn bundle_adjust_impl(
         if cov_pass { break; }
         // No step lowers the cost, even at the largest damping.
         let done = if !accepted { true } else {
-            trace.push(m.rms(&st));
+            trace.push(if keep { Model::rms_of(&w.res) } else { m.rms(&st) });
             // Compared within one iteration only: the Huber threshold is re-derived from
             // the residuals at the top of each iteration, so costs of different iterations
             // sit on different scales.
@@ -408,7 +413,7 @@ fn bundle_adjust_impl(
         }
     }
 
-    let cost_after = m.rms(&st);
+    let cost_after = if keep { Model::rms_of(&w.res) } else { m.rms(&st) };
     let anchor_rms_after = problem.anchor_rms(&st.pts);
     let camera_prior_rms_after = problem.camera_prior_rms(&st.cams);
     let cov_state = if !want_cov { None } else if let Some(s) = last_s.take() { Some((s, None)) }

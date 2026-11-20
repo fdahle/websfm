@@ -19,6 +19,25 @@ pub(crate) struct State {
     pub gpar: Vec<[f64; BLK_MAX]>,
 }
 
+/// The Huber loss of one observation's [q, s] (`Model::resid`) at threshold δ: the loss the
+/// IRLS weight r = δ/e descends, ρ = q·(2r − r²) past e = √s > δ (see `robust_cost`); δ²
+/// for one that projects nowhere.
+#[inline]
+pub(crate) fn rho([q, s]: [f64; 2], dh: f64) -> f64 {
+    if s < 0.0 { return dh * dh; }
+    let e = s.sqrt();
+    if e <= dh { q } else { let r = dh / e; q * (2.0 * r - r * r) }
+}
+
+/// 2.5 × the median residual, at least 1 px (1 px with none).
+fn median_threshold(mut es: Vec<f64>) -> f64 {
+    if es.is_empty() { return 1.0; }
+    // The median by selection: the same element a full sort puts there.
+    let mid = es.len() / 2;
+    let (_, m, _) = es.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
+    (2.5 * *m).max(1.0)
+}
+
 /// Effective K, lens coefficients (k1..k4, p1, p2) and whether the camera is a fisheye.
 pub(crate) struct Eff { pub fx: f64, pub fy: f64, pub cx: f64, pub cy: f64, pub k: [f64; 4], pub p: [f64; 2], pub fisheye: bool }
 
@@ -117,6 +136,62 @@ impl Model<'_> {
         if px.is_nan() { f64::NAN } else { (px - ox).powi(2) + (py - oy).powi(2) }
     }
 
+    /// One observation's weighted and plain squared errors at the state, [q, s] =
+    /// [wx·dx² + wy·dy², dx² + dy²]; s = −1 when it projects nowhere. The robust cost, the
+    /// Huber threshold and the RMS all follow from these (`rho`, `fill_residuals`).
+    #[inline]
+    pub(crate) fn resid(&self, o: usize, st: &State) -> [f64; 2] {
+        let (ci, pi, ox, oy, wx, wy) = self.p.ob(o);
+        let pose = self.pose_of(ci, &st.cams, &st.gpar);
+        let (r, t) = &pose;
+        let e = self.eff(ci, &st.gpar);
+        let x = if self.p.rs_any { self.seen_point(o, &st.pts, &st.gpar).0 } else { st.pts[pi] };
+        let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, &e.p, e.fisheye, &x);
+        if px.is_nan() { return [f64::NAN, -1.0]; }
+        let dx = px - ox; let dy = py - oy;
+        [wx*dx*dx + wy*dy*dy, dx*dx + dy*dy]
+    }
+
+    /// Every observation's [q, s] at the state into `buf` (on the pool when there is one).
+    /// The LM loop keeps them for the accepted state, so an iteration projects once: the
+    /// trial cost fills them, and the threshold, the start cost and the RMS trace read them.
+    pub(crate) fn fill_residuals(&self, st: &State, buf: &mut Vec<[f64; 2]>) {
+        let n_obs = self.p.obs.len();
+        buf.resize(n_obs, [0.0; 2]);
+        let bp = crate::par::SyncPtr::of(buf);
+        crate::par::for_each_index(n_obs.div_ceil(crate::par::CHUNK), |k| {
+            // SAFETY: chunk k alone writes observations k·CHUNK … (k+1)·CHUNK − 1.
+            for o in k * crate::par::CHUNK..((k + 1) * crate::par::CHUNK).min(n_obs) { unsafe { *bp.at(o) = self.resid(o, st); } }
+        });
+    }
+
+    /// `rms` from the residuals of `fill_residuals`: the same sum, in observation order.
+    pub(crate) fn rms_of(res: &[[f64; 2]]) -> f64 {
+        let mut sse = 0.0f64; let mut cnt = 0usize;
+        for &[_, s] in res {
+            if !(s >= 0.0) { continue; }
+            sse += s; cnt += 1;
+        }
+        if cnt == 0 { 0.0 } else { (sse / cnt as f64).sqrt() }
+    }
+
+    /// `robust_cost` from the residuals of `fill_residuals` at the same state `st`.
+    pub(crate) fn robust_cost_of(&self, res: &[[f64; 2]], st: &State, dh: f64) -> f64 {
+        let mut sum = 0.0f64;
+        for &r in res { sum += rho(r, dh); }
+        sum + self.p.anchor_sse(&st.pts) + self.p.camera_prior_sse(&st.cams)
+    }
+
+    /// `huber_threshold` from the residuals of `fill_residuals`.
+    pub(crate) fn huber_threshold_of(&self, res: &[[f64; 2]]) -> f64 {
+        match self.huber {
+            Some(d) if d > 0.0 => return d,
+            Some(_) => return NO_LOSS_DELTA,
+            None => {}
+        }
+        median_threshold(res.iter().filter(|r| r[1] >= 0.0).map(|r| r[1].sqrt()).collect())
+    }
+
     /// Plain RMS reprojection error over all observations (reported to the caller). The
     /// per-observation loops run on the pool (par.rs map_indexed) and are summed here in
     /// observation order, so they give the plain loop's bits.
@@ -165,11 +240,7 @@ impl Model<'_> {
         }
         let mut es: Vec<f64> = map_indexed(self.p.obs.len(), |o| self.sq_err(o, st).sqrt());
         es.retain(|v| !v.is_nan());
-        if es.is_empty() { return 1.0; }
-        // The median by selection: the same element a full sort puts there.
-        let mid = es.len() / 2;
-        let (_, m, _) = es.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
-        (2.5 * *m).max(1.0)
+        median_threshold(es)
     }
 
     /// Observation o linearised at the state. None when the point sits on the camera
