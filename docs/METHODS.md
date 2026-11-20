@@ -529,8 +529,16 @@ complement**, analytic Jacobians and **adaptive Huber** robustification (Triggs 
   as the caller's u32 and f32, the step written into the tentative points). These buffers
   are allocated once per bundle adjustment, not per try: wasm32's linear memory never
   shrinks, and per-try allocations fragmented it (BAL final-961 in Chrome: 2.2 → 1.9 GB
-  for a 1.8 GB native peak, the prediction within 5 %). Past
-  `BA_MEMORY_BUDGET` (3 GiB of wasm32's 4) the reduced system is **never stored**: only
+  for a 1.8 GB native peak, the prediction within 5 %). Two buffers that only spare
+  repeated work come after that decision and never sway it: each observation's residual
+  terms (32 B, the accepted state's and the trial's, so an LM iteration projects every
+  observation once instead of four times), and for the direct and dense solves each
+  observation's coupling rows E in f64 (145 B + 24 B per lens slot, written by the
+  assembly and read by every try's Schur step and back-substitution, which otherwise
+  linearise every observation again, the Schur step once per camera range its point is
+  in). Each is kept only when it fits the budget beside what the solve holds, the rows in
+  at most a quarter of it; without them the same values are derived again, the same bits.
+  Past `BA_MEMORY_BUDGET` (3 GiB of wasm32's 4) the reduced system is **never stored**: only
   B (camera blocks, lens groups, their couplings) is assembled, and PCG multiplies by
   S = B − Σ_p E_p·C_p⁻¹·E_pᵀ through each point's coupling blocks (Agarwal et al. 2010,
   Ceres' ITERATIVE_SCHUR), point chunks summed in a fixed order. The preconditioner is S's
