@@ -535,6 +535,10 @@ describe('bundleAdjust', () => {
     // Slot 10: the memory budget in MiB (SolverOpts::memory).
     expect(baSolverFlat({ memoryMb: 512 })[10]).toBe(512)
     expect(baSolverFlat({})[10]).toBeNaN()
+    // Slot 11: the robust loss in σ units (SolverOpts::sigma_units), off unless true.
+    expect(baSolverFlat({ sigmaUnits: true })[11]).toBe(1)
+    expect(baSolverFlat({ sigmaUnits: false })[11]).toBe(0)
+    expect(baSolverFlat({})[11]).toBeNaN()
   })
 
   it('returns null when there are no observations', async () => {

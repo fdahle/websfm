@@ -190,8 +190,8 @@ pub(crate) struct Work {
     pub jcache: Vec<f32>,
     pub jcache_outer: u32,
     // The accepted state's residuals and the trial's (Plan::keep_res, Model::fill_residuals).
-    pub res: Vec<[f64; 2]>,
-    pub res_trial: Vec<[f64; 2]>,
+    pub res: Vec<[f64; 3]>,
+    pub res_trial: Vec<[f64; 3]>,
     // Each observation's coupling rows at this iteration's linearisation (Plan::use_ecache),
     // and whether it has any (it projects somewhere).
     pub ecache: Vec<f64>,

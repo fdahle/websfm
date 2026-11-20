@@ -41,6 +41,23 @@ pub(crate) struct Problem {
     // Some point is seen twice from one pose block (two lenses of a rig capture, or a
     // repeated observation): only then do a point's camera coupling blocks merge.
     pub pb_dup: bool,
+    // The reference weight of the robust loss in σ units (`Model::sig`): the median of the
+    // observations' axis weights, None when every observation has the same weight on both
+    // axes (the loss is then in plain pixels, as one σ unit is the same for all).
+    pub w_ref: Option<f64>,
+}
+
+/// The weight one σ unit of the robust loss is measured against: the median of every
+/// observation's two axis weights (`Model::sig`), so the threshold's 1 px floor means one
+/// pixel of a typical observation. None when all weights are equal: then a σ unit is a
+/// fixed multiple of a pixel for every observation, and the loss stays in pixels.
+pub(crate) fn reference_weight(obs: &[(u32, u32, f32, f32, f32, f32)]) -> Option<f64> {
+    let w0 = obs.first()?.4;
+    if obs.iter().all(|o| o.4 == w0 && o.5 == w0) { return None; }
+    let mut ws: Vec<f32> = obs.iter().flat_map(|o| [o.4, o.5]).collect();
+    let mid = ws.len() / 2;
+    let (_, m, _) = ws.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
+    Some(*m as f64)
 }
 
 /// A camera's centre C = −Rᵀ·t.
@@ -221,9 +238,10 @@ impl Problem {
             dup
         };
 
+        let w_ref = reference_weight(&obs);
         let problem = Problem {
             n_cam, n_pts, off, pb, n_pb, anchors, anchored, camera_priors, ks, lens_stride, lens, rs, rs_any, obs,
-            pt_start, pt_obs, pb_dup,
+            pt_start, pt_obs, pb_dup, w_ref,
         };
         Some((problem, cams, pts))
     }

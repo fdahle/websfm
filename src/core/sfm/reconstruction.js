@@ -541,6 +541,7 @@ export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
     direct,
     warm,
     memoryMb,
+    sigmaUnits,
   } = solver ?? {}
   // pcgPreconditioner: 'jacobi' (default) | 'ic0' (block incomplete Cholesky, opt-in).
   // direct: a sparse block Cholesky wherever PCG would run (bundle.rs, sparse_chol.rs).
@@ -548,6 +549,9 @@ export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
   // warm: a re-solve of a converged model; the direct solve stops earlier (bundle.rs).
   // memoryMb: the budget past which the solve is implicit (slot 10; bundle/solve.rs
   // BA_MEMORY_BUDGET when unset).
+  // sigmaUnits: true reads the robust loss on each observation's error in σ units instead
+  // of the plain pixel error (slot 11, bundle/solve.rs SolverOpts::sigma_units); false or
+  // unset: pixels. bundleSession.js turns it on with the scale weights.
   return Float32Array.of(
     num(pcgMinN),
     num(pcgRelTol),
@@ -560,6 +564,7 @@ export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
     NaN, // huber: the crate's adaptive threshold
     lensSigma ? 1 : NaN,
     num(memoryMb),
+    sigmaUnits === true ? 1 : sigmaUnits === false ? 0 : NaN,
   )
 }
 

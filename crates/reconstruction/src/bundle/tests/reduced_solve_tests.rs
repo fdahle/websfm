@@ -375,6 +375,18 @@ fn bundle_adjust_timing() {
     let n_pts = pts.len() / 3;
     // BA_REPS: run it that many times and report the fastest (the phases of that run).
     let reps: usize = env("BA_REPS").and_then(|v| v.parse().ok()).unwrap_or(1);
+    // BA_WEIGHT: every observation's weight (both axes), as a run with a detection scale
+    // factor f passes 1/f² for its ties; unset ⇒ no weights. BA_WEIGHT_MIX: that share of
+    // the points (every k-th) gets 1/4 of it, as coarse keypoints under the scale weight.
+    let wt: Option<f32> = env("BA_WEIGHT").and_then(|v| v.parse().ok());
+    let mix: usize = env("BA_WEIGHT_MIX").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let weights: Vec<f32> = match wt {
+        None => Vec::new(),
+        Some(w) => (0..idx.len() / 2).flat_map(|o| {
+            let v = if mix > 0 && (idx[2 * o + 1] as usize).is_multiple_of(mix) { 0.25 * w } else { w };
+            [v, v]
+        }).collect(),
+    };
     let mut best: Option<(std::time::Duration, [f64; prof::N], Vec<f32>)> = None;
     // The first run orders the camera graph; the later ones reuse its ordering
     // (sparse_chol.rs `new_or_kept`), as a sparse run's later calls on one graph do.
@@ -383,7 +395,7 @@ fn bundle_adjust_timing() {
     for rep in 0..reps {
         prof::take();
         let t = std::time::Instant::now();
-        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 30, &sensors, refine_mask, &policy, &[], &[]);
+        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &weights, &[], &[], &prior, 30, &sensors, refine_mask, &policy, &[], &[]);
         let (total, ph) = (t.elapsed(), prof::take());
         if rep == 0 { first = total.as_secs_f64() }
         if let Some((_, _, o)) = &best { assert!(o.iter().zip(&out).all(|(a, b)| a.to_bits() == b.to_bits()), "runs differ"); }
@@ -394,7 +406,7 @@ fn bundle_adjust_timing() {
     let hash = out.iter().fold(0xcbf29ce484222325u64, |h, v| {
         v.to_bits().to_le_bytes().iter().fold(h, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3))
     });
-    println!("{n_cam} cameras, {n_pts} points, {} observations, views {views}, refine {refine_mask}: {total:?}, rms {:.3} → {:.3}, {} solves",
+    println!("{n_cam} cameras, {n_pts} points, {} observations, views {views}, refine {refine_mask}, weight {wt:?} mix {mix}: {total:?}, rms {:.3} → {:.3}, {} solves",
         idx.len() / 2, out[base], out[base + 1], out[base + 5]);
     // Setup (prof slots 5–14): Plan::new (slot 12) holds the pattern, the ordering, the
     // Schur order and the RangePlan; its rest is what is left of it.

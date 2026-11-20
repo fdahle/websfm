@@ -278,7 +278,7 @@ fn bundle_adjust_impl(
     let layout = Layout::new(&problem, sensor_of_cam, refine_mask, fixed_cam);
     prof::add(6, t0);
     let solver = SolverOpts::from_flat(solver_flat);
-    let m = Model { p: &problem, l: &layout, huber: solver.huber };
+    let m = Model { p: &problem, l: &layout, huber: solver.huber, sig: if solver.sigma_units { problem.w_ref } else { None } };
     let plan = Plan::new(&m, &solver);
     // A small problem runs on this thread alone (par.rs `Inline`), see POOL_MIN_OBS.
     let pool_min = if plan.range_plan.is_some() { POOL_MIN_OBS_RANGES } else { POOL_MIN_OBS_CHUNKS };
@@ -515,3 +515,6 @@ mod rig_tests;
 #[cfg(test)]
 #[path = "bundle/tests/lens_sigma_tests.rs"]
 mod lens_sigma_tests;
+#[cfg(test)]
+#[path = "bundle/tests/robust_sigma_tests.rs"]
+mod robust_sigma_tests;

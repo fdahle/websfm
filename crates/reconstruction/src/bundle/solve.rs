@@ -116,6 +116,14 @@ pub(crate) const PCG_MIN_N: usize = 600;
 //                   the median residual, ≥ 1 px); 0 ⇒ none, plain least squares (to
 //                   compare with another solver on the same objective: the BAL bench,
 //                   examples/bal.rs); > 0 ⇒ Huber at that fixed threshold (px).
+//   sigma_units     slot 11: 1 ⇒ the robust loss's threshold, IRLS weight and loss on each
+//                   observation's error in σ units, √(wx·dx² + wy·dy²), relative to the
+//                   median weight (`Problem::w_ref`, `Model::sig`); absent / 0 ⇒ on the
+//                   plain pixel error. Equal weights give the same bits either way. Off by
+//                   default: with GCP marks (weighted by their own accuracy, the ties by
+//                   one detection pixel) it moved Casa Grande's checkpoints 1.09 / 1.02 →
+//                   1.11 / 1.05 m; the app turns it on with the scale weights
+//                   (SFM_TUNING.tieScaleWeightCap).
 //   memory          slot 10, MiB: the most the direct solve may predict it holds at its
 //                   peak (`direct_bytes`); absent ⇒ BA_MEMORY_BUDGET. Past it the reduced
 //                   system is never stored: PCG runs on S implicitly (Ceres'
@@ -129,10 +137,12 @@ pub(crate) struct SolverOpts {
     pub covariance: bool,
     // Slot 10, in bytes.
     pub memory: u64,
+    // Slot 11.
+    pub sigma_units: bool,
 }
 
 impl SolverOpts {
-    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None, covariance: false, memory: BA_MEMORY_BUDGET };
+    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None, covariance: false, memory: BA_MEMORY_BUDGET, sigma_units: false };
 
     pub(crate) fn from_flat(f: &[f32]) -> SolverOpts {
         let d = SolverOpts::DEFAULT;
@@ -150,6 +160,7 @@ impl SolverOpts {
             huber: slot(8).or(d.huber),
             covariance: slot(9).map_or(d.covariance, |v| v == 1.0),
             memory: slot(10).map_or(d.memory, |v| (v * (1u64 << 20) as f64) as u64),
+            sigma_units: slot(11).map_or(d.sigma_units, |v| v != 0.0),
         }
     }
 }
@@ -213,9 +224,9 @@ pub(crate) const BA_MEMORY_BUDGET: u64 = 3 << 30;
 // 1,679; dubrovnik-356 244 vs 289.
 pub(crate) const MEM_PER_OBS: u64 = 64;
 pub(crate) const MEM_PER_POINT: u64 = 400;
-// The residuals the LM loop keeps (Plan::keep_res): [q, s] per observation for the
+// The residuals the LM loop keeps (Plan::keep_res): [q, s, n] per observation for the
 // accepted state and for the trial.
-pub(crate) const RES_PER_OBS: u64 = 32;
+pub(crate) const RES_PER_OBS: u64 = 48;
 // `parts_bytes`: the Schur step's group partials (schur.rs `range_parts_len`), which hold
 // the storage the factor takes over (bundle.rs `work`), so the larger of the two counts.
 pub(crate) fn direct_bytes(s_vals: usize, factor_bytes: u64, parts_bytes: u64, n_obs: usize, n_pts: usize) -> u64 {

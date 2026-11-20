@@ -19,17 +19,18 @@ pub(crate) struct State {
     pub gpar: Vec<[f64; BLK_MAX]>,
 }
 
-/// The Huber loss of one observation's [q, s] (`Model::resid`) at threshold δ: the loss the
-/// IRLS weight r = δ/e descends, ρ = q·(2r − r²) past e = √s > δ (see `robust_cost`); δ²
-/// for one that projects nowhere.
+/// The Huber loss of one observation's [q, s, n] (`Model::resid`) at threshold δ: the loss
+/// the IRLS weight r = δ/e descends, ρ = q·(2r − r²) past e = √n > δ (see `robust_cost`);
+/// δ² for one that projects nowhere.
 #[inline]
-pub(crate) fn rho([q, s]: [f64; 2], dh: f64) -> f64 {
+pub(crate) fn rho([q, s, n]: [f64; 3], dh: f64) -> f64 {
     if s < 0.0 { return dh * dh; }
-    let e = s.sqrt();
+    let e = n.sqrt();
     if e <= dh { q } else { let r = dh / e; q * (2.0 * r - r * r) }
 }
 
-/// 2.5 × the median residual, at least 1 px (1 px with none).
+/// 2.5 × the median residual, at least 1 px (1 px with none); in σ units (`Model::sig`),
+/// 1 px of an observation of the reference weight.
 fn median_threshold(mut es: Vec<f64>) -> f64 {
     if es.is_empty() { return 1.0; }
     // The median by selection: the same element a full sort puts there.
@@ -53,9 +54,22 @@ pub(crate) struct Model<'a> {
     pub l: &'a Layout,
     // SolverOpts::huber.
     pub huber: Option<f64>,
+    // The robust loss in σ units (SolverOpts::sigma_units): the reference weight w₀
+    // (Problem::w_ref) the error is measured against, e = √((wx/w₀)·dx² + (wy/w₀)·dy²), so
+    // an observation weighted 1/σ² is an outlier at the same multiple of its own σ as any
+    // other. None: the plain pixel error √(dx² + dy²), which equal weights give anyway.
+    pub sig: Option<f64>,
 }
 
 impl Model<'_> {
+    /// The squared error the robust loss reads (see `sig`), from the observation's weights,
+    /// residual and plain squared error s = dx² + dy² (returned as it is without `sig`;
+    /// with it, an observation of weight w₀ on both axes gives the same bits too).
+    #[inline]
+    pub(crate) fn loss_sq(&self, wx: f64, wy: f64, dx: f64, dy: f64, s: f64) -> f64 {
+        match self.sig { None => s, Some(w0) => (wx / w0) * dx * dx + (wy / w0) * dy * dy }
+    }
+
     /// The starting group params.
     pub(crate) fn initial_gpar(&self) -> Vec<[f64; BLK_MAX]> {
         let mut gpar = vec![[0.0f64; BLK_MAX]; self.l.g_count.max(1)];
@@ -136,28 +150,38 @@ impl Model<'_> {
         if px.is_nan() { f64::NAN } else { (px - ox).powi(2) + (py - oy).powi(2) }
     }
 
-    /// One observation's weighted and plain squared errors at the state, [q, s] =
-    /// [wx·dx² + wy·dy², dx² + dy²]; s = −1 when it projects nowhere. The robust cost, the
-    /// Huber threshold and the RMS all follow from these (`rho`, `fill_residuals`).
+    /// One observation's squared error as the robust loss reads it (`loss_sq`), NaN when it
+    /// projects nowhere.
+    fn loss_sq_err(&self, o: usize, st: &State) -> f64 {
+        if self.sig.is_none() { return self.sq_err(o, st); }
+        let r = self.resid(o, st);
+        if r[1] < 0.0 { f64::NAN } else { r[2] }
+    }
+
+    /// One observation's weighted, plain and loss squared errors at the state, [q, s, n] =
+    /// [wx·dx² + wy·dy², dx² + dy², `loss_sq`]; s = n = −1 when it projects nowhere. The
+    /// robust cost, the Huber threshold and the RMS all follow from these (`rho`,
+    /// `fill_residuals`).
     #[inline]
-    pub(crate) fn resid(&self, o: usize, st: &State) -> [f64; 2] {
+    pub(crate) fn resid(&self, o: usize, st: &State) -> [f64; 3] {
         let (ci, pi, ox, oy, wx, wy) = self.p.ob(o);
         let pose = self.pose_of(ci, &st.cams, &st.gpar);
         let (r, t) = &pose;
         let e = self.eff(ci, &st.gpar);
         let x = if self.p.rs_any { self.seen_point(o, &st.pts, &st.gpar).0 } else { st.pts[pi] };
         let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, &e.p, e.fisheye, &x);
-        if px.is_nan() { return [f64::NAN, -1.0]; }
+        if px.is_nan() { return [f64::NAN, -1.0, -1.0]; }
         let dx = px - ox; let dy = py - oy;
-        [wx*dx*dx + wy*dy*dy, dx*dx + dy*dy]
+        let s = dx*dx + dy*dy;
+        [wx*dx*dx + wy*dy*dy, s, self.loss_sq(wx, wy, dx, dy, s)]
     }
 
     /// Every observation's [q, s] at the state into `buf` (on the pool when there is one).
     /// The LM loop keeps them for the accepted state, so an iteration projects once: the
     /// trial cost fills them, and the threshold, the start cost and the RMS trace read them.
-    pub(crate) fn fill_residuals(&self, st: &State, buf: &mut Vec<[f64; 2]>) {
+    pub(crate) fn fill_residuals(&self, st: &State, buf: &mut Vec<[f64; 3]>) {
         let n_obs = self.p.obs.len();
-        buf.resize(n_obs, [0.0; 2]);
+        buf.resize(n_obs, [0.0; 3]);
         let bp = crate::par::SyncPtr::of(buf);
         crate::par::for_each_index(n_obs.div_ceil(crate::par::CHUNK), |k| {
             // SAFETY: chunk k alone writes observations k·CHUNK … (k+1)·CHUNK − 1.
@@ -166,9 +190,9 @@ impl Model<'_> {
     }
 
     /// `rms` from the residuals of `fill_residuals`: the same sum, in observation order.
-    pub(crate) fn rms_of(res: &[[f64; 2]]) -> f64 {
+    pub(crate) fn rms_of(res: &[[f64; 3]]) -> f64 {
         let mut sse = 0.0f64; let mut cnt = 0usize;
-        for &[_, s] in res {
+        for &[_, s, _] in res {
             if !(s >= 0.0) { continue; }
             sse += s; cnt += 1;
         }
@@ -176,20 +200,20 @@ impl Model<'_> {
     }
 
     /// `robust_cost` from the residuals of `fill_residuals` at the same state `st`.
-    pub(crate) fn robust_cost_of(&self, res: &[[f64; 2]], st: &State, dh: f64) -> f64 {
+    pub(crate) fn robust_cost_of(&self, res: &[[f64; 3]], st: &State, dh: f64) -> f64 {
         let mut sum = 0.0f64;
         for &r in res { sum += rho(r, dh); }
         sum + self.p.anchor_sse(&st.pts) + self.p.camera_prior_sse(&st.cams)
     }
 
     /// `huber_threshold` from the residuals of `fill_residuals`.
-    pub(crate) fn huber_threshold_of(&self, res: &[[f64; 2]]) -> f64 {
+    pub(crate) fn huber_threshold_of(&self, res: &[[f64; 3]]) -> f64 {
         match self.huber {
             Some(d) if d > 0.0 => return d,
             Some(_) => return NO_LOSS_DELTA,
             None => {}
         }
-        median_threshold(res.iter().filter(|r| r[1] >= 0.0).map(|r| r[1].sqrt()).collect())
+        median_threshold(res.iter().filter(|r| r[1] >= 0.0).map(|r| r[2].sqrt()).collect())
     }
 
     /// Plain RMS reprojection error over all observations (reported to the caller). The
@@ -204,7 +228,7 @@ impl Model<'_> {
         if cnt == 0 { 0.0 } else { (sse / cnt as f64).sqrt() }
     }
 
-    /// Huber-robustified cost Σ ρ(‖r‖) at pixel threshold δ, plus the (unrobustified,
+    /// Huber-robustified cost Σ ρ(e) at threshold δ (e in pixels, or σ units: `sig`), plus the (unrobustified,
     /// quadratic) anchor and camera-prior terms: the objective the LM step descends.
     pub(crate) fn robust_cost(&self, st: &State, dh: f64) -> f64 {
         let terms = map_indexed(self.p.obs.len(), |o| {
@@ -215,7 +239,7 @@ impl Model<'_> {
             let x = if self.p.rs_any { self.seen_point(o, &st.pts, &st.gpar).0 } else { st.pts[pi] };
             let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, &e.p, e.fisheye, &x);
             if px.is_nan() { return dh * dh; }
-            let dx=px-ox; let dy=py-oy; let e=(dx*dx+dy*dy).sqrt();
+            let dx=px-ox; let dy=py-oy; let e=self.loss_sq(wx, wy, dx, dy, dx*dx+dy*dy).sqrt();
             // The Huber loss the IRLS weight r = δ/e actually descends: ρ = q·(2r − r²)
             // (= 2δe − δ² for unit weights), continuous with q at e = δ. Evaluating
             // r·q (= δe) instead halved the outlier slope relative to the step model
@@ -231,14 +255,14 @@ impl Model<'_> {
     /// The Huber threshold: SolverOpts::huber's fixed one, or none (a δ no residual
     /// reaches: an observation on the camera plane still costs δ², finite), or by default
     /// a multiple of the residual median, so it tracks the noise floor as the model
-    /// tightens. Recomputed once per outer iteration.
+    /// tightens. Recomputed once per outer iteration. In the loss's units (`sig`).
     pub(crate) fn huber_threshold(&self, st: &State) -> f64 {
         match self.huber {
             Some(d) if d > 0.0 => return d,
             Some(_) => return NO_LOSS_DELTA,
             None => {}
         }
-        let mut es: Vec<f64> = map_indexed(self.p.obs.len(), |o| self.sq_err(o, st).sqrt());
+        let mut es: Vec<f64> = map_indexed(self.p.obs.len(), |o| self.loss_sq_err(o, st).sqrt());
         es.retain(|v| !v.is_nan());
         median_threshold(es)
     }
@@ -334,8 +358,8 @@ impl Model<'_> {
                 }
             }
         }
-        // Huber IRLS weight.
-        let e = (ru*ru + rv*rv).sqrt();
+        // Huber IRLS weight, on the loss's error (`sig`).
+        let e = self.loss_sq(obs_wx, obs_wy, ru, rv, ru*ru + rv*rv).sqrt();
         let w = if e <= dh { 1.0 } else { dh / e };
         Some(Jac { ci, ru, rv, wu: w * obs_wx, wv: w * obs_wy, ju, jv, jpu, jpv, jku, jkv })
     }
