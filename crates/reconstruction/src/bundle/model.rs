@@ -270,20 +270,21 @@ impl Model<'_> {
     }
 
     /// Point pi's coupling blocks E (Jvarᵀ·Jp): camera then group, per observation.
-    pub(crate) fn eblocks(&self, pi: usize, st: &State, dh: f64, list: &mut Vec<EBlock>) {
+    /// A camera block merges only where a point has two observations on one pose block
+    /// (`Problem::pb_dup`); a group block with the point's other observations in its group.
+    pub(crate) fn eblocks(&self, pi: usize, st: &State, dh: f64, list: &mut EList) {
         let (p, l) = (self.p, self.l);
         list.clear();
         for q in p.pt_start[pi]..p.pt_start[pi + 1] {
             let Some(j) = self.jac(p.pt_obs[q as usize] as usize, st, dh) else { continue };
-            let mut cblk = [[0f64; 3]; BLK_MAX];
-            for a in 0..6 { for b in 0..3 { cblk[a][b] = j.wu*j.ju[a]*j.jpu[b] + j.wv*j.jv[a]*j.jpv[b]; } }
             let sj = l.slot[p.pb[j.ci]];
-            if sj != FIXED { add_eblock(list, sj, 6 * sj, 6, &cblk); }
+            if sj != FIXED {
+                list.add(sj, 6 * sj, 6, p.pb_dup, |a| [0, 1, 2].map(|b| j.wu*j.ju[a]*j.jpu[b] + j.wv*j.jv[a]*j.jpv[b]));
+            }
             if l.refine {
                 let g = l.grp[j.ci];
-                let mut kblk = [[0f64; 3]; BLK_MAX];
-                for a in 0..l.kdim { for b in 0..3 { kblk[a][b] = j.wu*j.jku[a]*j.jpu[b] + j.wv*j.jkv[a]*j.jpv[b]; } }
-                add_eblock(list, l.n_free + g, l.group_off + g * l.kdim, l.kdim, &kblk);
+                list.add(l.n_free + g, l.group_off + g * l.kdim, l.kdim, true,
+                         |a| [0, 1, 2].map(|b| j.wu*j.jku[a]*j.jpu[b] + j.wv*j.jkv[a]*j.jpv[b]));
             }
         }
     }

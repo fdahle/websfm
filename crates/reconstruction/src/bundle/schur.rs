@@ -16,19 +16,35 @@ pub(crate) const BLK_MAX: usize = 13;
 // SolverOpts::huber 0: the Huber δ that makes the loss plain least squares.
 pub(crate) const NO_LOSS_DELTA: f64 = 1e12;
 
-// One point's merged Jvarᵀ·Jp coupling block, keyed by its reduced-variable offset
-// (a camera's 6 rows, or an intrinsic group's 1–8 rows). Fixed BLK_MAX-row storage
-// keeps assembly allocation-free; only `dim` rows are used.
-// `blk` is the block's id in the reduced-system pattern (camera c, or n_cam + group).
-pub(crate) struct EBlock { pub blk: usize, pub off: usize, pub dim: usize, pub rows: [[f64; 3]; BLK_MAX] }
+// One point's merged Jvarᵀ·Jp coupling block: its id in the reduced-system pattern
+// (camera slot, or n_free + group), its offset in the reduced variables, its rows (a
+// camera's 6, a group's kdim) and where they start in its list's `rows`.
+#[derive(Clone, Copy)]
+pub(crate) struct EBlock { pub blk: usize, pub off: usize, pub dim: usize, pub at: usize }
 
-// Accumulate a coupling block into a point's E-list, merging by block so that two
-// cameras sharing an intrinsic group fold into that group's single block.
-pub(crate) fn add_eblock(list: &mut Vec<EBlock>, blk: usize, off: usize, dim: usize, rows: &[[f64; 3]; BLK_MAX]) {
-    if let Some(eb) = list.iter_mut().find(|e| e.blk == blk) {
-        for a in 0..dim { for b in 0..3 { eb.rows[a][b] += rows[a][b]; } }
-    } else {
-        list.push(EBlock { blk, off, dim, rows: *rows });
+// A point's coupling blocks in order, their rows one after another: a camera block takes
+// its 6 rows, not a group's BLK_MAX. Reused from point to point (no allocation per point).
+#[derive(Default)]
+pub(crate) struct EList { pub blocks: Vec<EBlock>, pub rows: Vec<[f64; 3]> }
+
+impl EList {
+    pub(crate) fn clear(&mut self) { self.blocks.clear(); self.rows.clear(); }
+    pub(crate) fn is_empty(&self) -> bool { self.blocks.is_empty() }
+    #[inline]
+    pub(crate) fn rows_of(&self, eb: &EBlock) -> &[[f64; 3]] { &self.rows[eb.at..eb.at + eb.dim] }
+    // Add block `blk` with rows row(0), …, row(dim − 1): with `merge`, into the list's
+    // block blk when there is one (the cameras of one intrinsics group, or of one rig
+    // capture, fold into one block), else appended.
+    #[inline]
+    pub(crate) fn add(&mut self, blk: usize, off: usize, dim: usize, merge: bool, row: impl Fn(usize) -> [f64; 3]) {
+        if merge {
+            if let Some(at) = self.blocks.iter().find(|e| e.blk == blk).map(|e| e.at) {
+                for a in 0..dim { let r = row(a); for b in 0..3 { self.rows[at + a][b] += r[b]; } }
+                return;
+            }
+        }
+        self.blocks.push(EBlock { blk, off, dim, at: self.rows.len() });
+        for a in 0..dim { self.rows.push(row(a)); }
     }
 }
 

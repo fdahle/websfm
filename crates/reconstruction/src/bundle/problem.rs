@@ -38,6 +38,9 @@ pub(crate) struct Problem {
     // Schur reduction iterates.
     pub pt_start: Vec<u32>,
     pub pt_obs: Vec<u32>,
+    // Some point is seen twice from one pose block (two lenses of a rig capture, or a
+    // repeated observation): only then do a point's camera coupling blocks merge.
+    pub pb_dup: bool,
 }
 
 /// A camera's centre C = −Rᵀ·t.
@@ -205,10 +208,22 @@ impl Problem {
              if wx.is_finite() && wx > 0.0 { wx } else { 1.0 }, if wy.is_finite() && wy > 0.0 { wy } else { 1.0 })
         }).filter(|&(ci, pi, _, _, _, _)| (ci as usize) < n_cam && (pi as usize) < n_pts).collect();
         let (pt_start, pt_obs) = csr(n_pts, obs.iter().map(|o| o.1 as usize));
+        let pb_dup = {
+            let mut last = vec![u32::MAX; n_pb];
+            let mut dup = false;
+            for pi in 0..n_pts {
+                for &o in &pt_obs[pt_start[pi] as usize..pt_start[pi + 1] as usize] {
+                    let b = pb[obs[o as usize].0 as usize];
+                    dup |= last[b] == pi as u32;
+                    last[b] = pi as u32;
+                }
+            }
+            dup
+        };
 
         let problem = Problem {
             n_cam, n_pts, off, pb, n_pb, anchors, anchored, camera_priors, ks, lens_stride, lens, rs, rs_any, obs,
-            pt_start, pt_obs,
+            pt_start, pt_obs, pb_dup,
         };
         Some((problem, cams, pts))
     }

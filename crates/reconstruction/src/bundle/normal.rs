@@ -445,8 +445,8 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
             .collect();
         for_each_index(rp.n, |r| {
             let part = parts_p[r];
-            let mut el: Vec<EBlock> = Vec::new();
-            let mut ms: Vec<[[f64; 3]; BLK_MAX]> = Vec::new();
+            let mut el = EList::default();
+            let mut ms: Vec<[f64; 3]> = Vec::new();
             for &pi in &rp.points[r] {
                 if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
                 let pi = pi as usize;
@@ -459,31 +459,24 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                 let owner = rp.owner[pi] as usize == r;
                 // SAFETY (all writes below): RangePlan gives each element one writing range.
                 if owner { unsafe { *ci_p.at(pi) = Some(cinv); } }
-                for eb in &el {
+                for eb in &el.blocks {
                     let camera = eb.blk < rp.n_free;
                     if !(if camera { rp.range(eb.blk) == r } else { owner }) { continue; }
+                    let rows = el.rows_of(eb);
                     for a in 0..eb.dim {
-                        let v = eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2];
+                        let v = rows[a][0]*tmp[0] + rows[a][1]*tmp[1] + rows[a][2]*tmp[2];
                         if camera || r == 0 { unsafe { *rhs_p.at(eb.off + a) += v; } }
                         else { unsafe { *part.at(rp.gg_len + eb.off + a - rp.group_off) += v; } }
                     }
                 }
                 ms.clear();
-                ms.extend(el.iter().map(|eb| {
-                    let mut m = [[0f64; 3]; BLK_MAX];
-                    for a in 0..eb.dim {
-                        for k in 0..3 {
-                            m[a][k] = eb.rows[a][0]*cinv[0][k] + eb.rows[a][1]*cinv[1][k] + eb.rows[a][2]*cinv[2][k];
-                        }
-                    }
-                    m
-                }));
-                for (i1, eb1) in el.iter().enumerate() {
-                    let m = &ms[i1];
+                ms.extend(el.rows.iter().map(|e| [0, 1, 2].map(|k| e[0]*cinv[0][k] + e[1]*cinv[1][k] + e[2]*cinv[2][k])));
+                for eb1 in &el.blocks {
+                    let m = &ms[eb1.at..eb1.at + eb1.dim];
                     // Row eb1 of the pattern, searched for each eb2.
                     let k0 = pattern.row_ptr[eb1.blk];
                     let row = &pattern.cols[k0..pattern.row_ptr[eb1.blk + 1]];
-                    for eb2 in &el {
+                    for eb2 in &el.blocks {
                         if eb2.blk > eb1.blk { continue; }
                         // Row eb1's owner for a camera row; the column camera's owner
                         // for a group row; the point's owner for group × group.
@@ -494,9 +487,10 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                         let k = k0 + row.binary_search(&(eb2.blk as u32)).expect("block outside the reduced-system pattern");
                         let at = if direct { pattern.val_at[k] } else { rp.gg_part[k - rp.gg_k0] };
                         let dst = if direct { s_p } else { part };
+                        let e2 = el.rows_of(eb2);
                         for a in 0..eb1.dim {
                             for b in 0..eb2.dim {
-                                let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                let v = m[a][0]*e2[b][0] + m[a][1]*e2[b][1] + m[a][2]*e2[b][2];
                                 if direct { unsafe { *dst.at(at + a*eb2.dim + b) -= v; } }
                                 else { unsafe { *dst.at(at + a*eb2.dim + b) += v; } }
                             }
@@ -526,8 +520,8 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
         let ci_p = SyncPtr::of(&mut cinv_store);
         for_each_index(plan.point_chunks, |c| {
             let (s_p, r_p) = (s_ps[c], r_ps[c]);
-            let mut el: Vec<EBlock> = Vec::new();
-            let mut ms: Vec<[[f64; 3]; BLK_MAX]> = Vec::new();
+            let mut el = EList::default();
+            let mut ms: Vec<[f64; 3]> = Vec::new();
             for pi in plan.chunk_range(c, n_pts) {
                 if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
                 m.eblocks(pi, st, dh, &mut el);
@@ -541,42 +535,37 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                 let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
                 // SAFETY (all writes below): chunk c alone writes its shares and its points.
                 unsafe { *ci_p.at(pi) = Some(cinv); }
-                for eb in &el {
+                for eb in &el.blocks {
+                    let rows = el.rows_of(eb);
                     for a in 0..eb.dim {
-                        unsafe { *r_p.at(eb.off + a) += eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2]; }
+                        unsafe { *r_p.at(eb.off + a) += rows[a][0]*tmp[0] + rows[a][1]*tmp[1] + rows[a][2]*tmp[2]; }
                     }
                 }
                 // M_v = E_v·C⁻¹ (dim×3); then S -= Σ_{v1,v2} M_{v1}·E_{v2}ᵀ.
                 ms.clear();
-                ms.extend(el.iter().map(|eb| {
-                    let mut m = [[0f64; 3]; BLK_MAX];
-                    for a in 0..eb.dim {
-                        for k in 0..3 {
-                            m[a][k] = eb.rows[a][0]*cinv[0][k] + eb.rows[a][1]*cinv[1][k] + eb.rows[a][2]*cinv[2][k];
-                        }
-                    }
-                    m
-                }));
-                for (i1, eb1) in el.iter().enumerate() {
-                    let m = &ms[i1];
+                ms.extend(el.rows.iter().map(|e| [0, 1, 2].map(|k| e[0]*cinv[0][k] + e[1]*cinv[1][k] + e[2]*cinv[2][k])));
+                for eb1 in &el.blocks {
+                    let m = &ms[eb1.at..eb1.at + eb1.dim];
                     let k0 = pattern.row_ptr[eb1.blk];
                     let row = &pattern.cols[k0..pattern.row_ptr[eb1.blk + 1]];
-                    for eb2 in &el {
+                    for eb2 in &el.blocks {
                         if lower_only && eb2.blk > eb1.blk { continue; }
                         if implicit && eb2.blk != eb1.blk { continue; }
                         let base = pattern.val_at[k0 + row.binary_search(&(eb2.blk as u32)).expect("block outside the reduced-system pattern")];
+                        let e2 = el.rows_of(eb2);
                         if eb1.dim == 6 && eb2.dim == 6 {
                             // Camera × camera, fixed size (the same sums as below).
+                            let (m, e2): (&[[f64; 3]; 6], &[[f64; 3]; 6]) = (m.try_into().unwrap(), e2.try_into().unwrap());
                             for a in 0..6 {
                                 for b in 0..6 {
-                                    let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                    let v = m[a][0]*e2[b][0] + m[a][1]*e2[b][1] + m[a][2]*e2[b][2];
                                     unsafe { *s_p.at(base + a*6 + b) -= v; }
                                 }
                             }
                         } else {
                             for a in 0..eb1.dim {
                                 for b in 0..eb2.dim {
-                                    let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                    let v = m[a][0]*e2[b][0] + m[a][1]*e2[b][1] + m[a][2]*e2[b][2];
                                     unsafe { *s_p.at(base + a*eb2.dim + b) -= v; }
                                 }
                             }
@@ -604,15 +593,16 @@ pub(crate) fn back_substitute(m: &Model, st: &State, dh: f64, cinv_store: &[Opti
     let mut dp = vec![[0f64; 3]; n_pts];
     let dp_p = SyncPtr::of(&mut dp);
     for_each_index(n_pts.div_ceil(CHUNK), |k| {
-        let mut el: Vec<EBlock> = Vec::new();
+        let mut el = EList::default();
         for pi in k * CHUNK..((k + 1) * CHUNK).min(n_pts) {
             let cinv = match cinv_store[pi] { Some(m) => m, None => continue };
             m.eblocks(pi, st, dh, &mut el);
             let mut acc = [0f64; 3];
-            for eb in &el {
+            for eb in &el.blocks {
+                let rows = el.rows_of(eb);
                 for k in 0..3 {
                     let mut sdot = 0.0;
-                    for a in 0..eb.dim { sdot += eb.rows[a][k] * dsol[eb.off + a]; }
+                    for a in 0..eb.dim { sdot += rows[a][k] * dsol[eb.off + a]; }
                     acc[k] += sdot;
                 }
             }

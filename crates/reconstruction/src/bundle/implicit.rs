@@ -40,7 +40,7 @@ pub(crate) fn implicit_product(m: &Model, plan: &Plan, b: &[f64], cinv_store: &[
     let ps: Vec<SyncPtr<f64>> = shares.iter_mut().map(|v| SyncPtr::of(v)).collect();
     for_each_index(plan.point_chunks, |c| {
         let p = ps[c];
-        let mut el: Vec<EBlock> = Vec::new();
+        let mut el = EList::default();
         for pi in plan.chunk_range(c, n_pts) {
             let Some(cinv) = cinv_store[pi] else { continue };
             if use_jcache {
@@ -72,11 +72,11 @@ pub(crate) fn implicit_product(m: &Model, plan: &Plan, b: &[f64], cinv_store: &[
             }
             m.eblocks(pi, st, dh, &mut el);
             let mut t = [0f64; 3];
-            for eb in &el { for a in 0..eb.dim { for k in 0..3 { t[k] += eb.rows[a][k] * x[eb.off + a]; } } }
+            for eb in &el.blocks { let rows = el.rows_of(eb); for a in 0..eb.dim { for k in 0..3 { t[k] += rows[a][k] * x[eb.off + a]; } } }
             let z = mat3_vec(&cinv, &t);
             // SAFETY: chunk c alone writes its share.
-            for eb in &el { for a in 0..eb.dim {
-                unsafe { *p.at(eb.off + a) += eb.rows[a][0]*z[0] + eb.rows[a][1]*z[1] + eb.rows[a][2]*z[2]; }
+            for eb in &el.blocks { let rows = el.rows_of(eb); for a in 0..eb.dim {
+                unsafe { *p.at(eb.off + a) += rows[a][0]*z[0] + rows[a][1]*z[1] + rows[a][2]*z[2]; }
             } }
         }
     });
