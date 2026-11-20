@@ -64,7 +64,7 @@ impl Plan {
             parts = 8 * range_parts_len(&pattern, n_free) as u64;
             let max_blocks = (room / (8 * 36)).min(usize::MAX as u64) as usize;
             let sym = if max_blocks == 0 || parts > room { None } else {
-                crate::sparse_chol::Symbolic::new(&pattern, max_blocks).filter(|sym| sym.factor_bytes() as u64 <= room)
+                crate::sparse_chol::Symbolic::new_or_kept(&pattern, max_blocks).filter(|sym| sym.factor_bytes() as u64 <= room)
             };
             // Measurement builds: the elimination tree's shape (examples/bal.rs, BA_TREE=1).
             #[cfg(feature = "bench")]
@@ -72,6 +72,8 @@ impl Plan {
             let implicit = sym.is_none();
             (sym, implicit)
         } else { (None, false) };
+        // A kept ordering lives only from one direct solve to the next on the same graph.
+        if direct.is_none() { crate::sparse_chol::Symbolic::forget(); }
         if implicit { let t0 = prof::now(); pattern = l.pattern(p, false); prof::add(7, t0); }
         // Exact steps keep finding improvements of a few 10⁻⁶ of the cost long after the
         // model has stopped changing (1,600 aerial cameras: all 30 iterations ran, RMS

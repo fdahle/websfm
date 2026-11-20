@@ -73,6 +73,11 @@ pub(crate) struct Symbolic {
     sched: Sched,
 }
 
+// The last minimum-degree ordering, kept between calls (`Symbolic::new_or_kept`) with the
+// block graph it was made for: one sparse run solves the same camera graph several times.
+struct Kept { row_ptr: Vec<usize>, graph: Vec<u32>, order: Vec<usize>, cols: Vec<Vec<u32>>, md_total: usize }
+static KEPT: std::sync::Mutex<Option<Kept>> = std::sync::Mutex::new(None);
+
 // The order `factor_panels` runs the supernodes in (`Symbolic::schedule`): subtree tasks,
 // each its supernodes ascending (task k: task_sn[task_ptr[k]..task_ptr[k + 1]]), then the
 // supernodes above them in waves (a wave's supernodes have every child done).
@@ -93,18 +98,56 @@ impl Symbolic {
     /// Minimum-degree order, supernodes and their rows. `max_blocks` bounds the fill:
     /// past it the factorisation would cost more memory than it is worth, and `None`
     /// says so.
+    #[allow(dead_code)] // the tests and the bench hook; the solve calls new_or_kept
     pub(crate) fn new(pat: &BlockPattern, max_blocks: usize) -> Option<Symbolic> {
+        let (order, cols, _) = ordering(pat, max_blocks)?;
+        Symbolic::from_ordering(pat, order, cols, max_blocks)
+    }
+
+    /// `new`, with the minimum-degree ordering a previous call kept when the block graph
+    /// is exactly this one (its rows and columns compared, not a hash). The ordering
+    /// depends on the graph alone, so it is the one `new` would make, and so are the
+    /// supernodes built on it here for this call's block sizes: the same bits. One sparse
+    /// run solves the same camera graph several times (the decentring trial's two solves,
+    /// a re-solve after a filter that removed no camera pair; a lens term unlocked
+    /// changes the block sizes, not the graph). A new graph's ordering replaces the kept
+    /// one; `None` exactly when `new` gives none.
+    pub(crate) fn new_or_kept(pat: &BlockPattern, max_blocks: usize) -> Option<Symbolic> {
+        let mut kept = KEPT.lock().unwrap_or_else(|e| e.into_inner());
+        let hit = kept.as_ref().filter(|k| k.row_ptr == pat.row_ptr && k.graph == pat.cols);
+        let (order, cols) = match hit {
+            Some(k) => {
+                if k.md_total > max_blocks { return None }
+                (k.order.clone(), k.cols.clone())
+            }
+            None => {
+                *kept = None;
+                let (order, cols, md_total) = ordering(pat, max_blocks)?;
+                *kept = Some(Kept { row_ptr: pat.row_ptr.clone(), graph: pat.cols.clone(), order: order.clone(), cols: cols.clone(), md_total });
+                (order, cols)
+            }
+        };
+        drop(kept);
+        Symbolic::from_ordering(pat, order, cols, max_blocks)
+    }
+
+    /// Drop the kept ordering (a call that solves another way).
+    pub(crate) fn forget() {
+        *KEPT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// Bytes the kept ordering holds between calls (the timing test reports it).
+    #[allow(dead_code)]
+    pub(crate) fn kept_bytes() -> usize {
+        KEPT.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map_or(0, |k| {
+            (k.row_ptr.len() + k.order.len()) * std::mem::size_of::<usize>() + k.graph.len() * 4
+                + k.cols.iter().map(|c| c.len() * 4 + std::mem::size_of::<Vec<u32>>()).sum::<usize>()
+        })
+    }
+
+    // The supernodes, their rows and the schedule on a minimum-degree ordering.
+    fn from_ordering(pat: &BlockPattern, order: Vec<usize>, cols: Vec<Vec<u32>>, max_blocks: usize) -> Option<Symbolic> {
         let nb = pat.dims.len();
-        let graph: Vec<Vec<u32>> = (0..nb).map(|r| {
-            pat.cols[pat.row_ptr[r]..pat.row_ptr[r + 1]].iter().copied().filter(|&c| c as usize != r).collect()
-        }).collect();
-        // Minimum degree. (Nested dissection by breadth-first level separators was tried
-        // and gave 10–15 % more work on aerial camera graphs: a camera couples with
-        // neighbours several cells away, so a level is a thick separator.)
-        let t0 = crate::bundle::prof::now();
-        let res = min_degree(&graph, max_blocks);
-        crate::bundle::prof::add(8, t0);
-        let (order, cols) = res?;
         let t0 = crate::bundle::prof::now();
         let mut pos = vec![0usize; nb];
         for (k, &b) in order.iter().enumerate() { pos[b] = k }
@@ -686,10 +729,25 @@ impl Factor<'_> {
     }
 }
 
+// The minimum-degree ordering of a block pattern's graph (its blocks, coupled where the
+// pattern has a block off the diagonal): (order, each block's later neighbours, their
+// count). (Nested dissection by breadth-first level separators was tried and gave 10–15 %
+// more work on aerial camera graphs: a camera couples with neighbours several cells
+// away, so a level is a thick separator.)
+fn ordering(pat: &BlockPattern, max_blocks: usize) -> Option<(Vec<usize>, Vec<Vec<u32>>, usize)> {
+    let t0 = crate::bundle::prof::now();
+    let graph: Vec<Vec<u32>> = (0..pat.dims.len()).map(|r| {
+        pat.cols[pat.row_ptr[r]..pat.row_ptr[r + 1]].iter().copied().filter(|&c| c as usize != r).collect()
+    }).collect();
+    let res = min_degree(&graph, max_blocks);
+    crate::bundle::prof::add(8, t0);
+    res
+}
+
 // Minimum degree on the block graph: repeatedly eliminate a node of least current
 // degree, joining its neighbours into a clique. → (order, each block's later neighbours
-// at its elimination), None past `max_blocks` of fill.
-fn min_degree(graph: &[Vec<u32>], max_blocks: usize) -> Option<(Vec<usize>, Vec<Vec<u32>>)> {
+// at its elimination, their count), None past `max_blocks` of fill.
+fn min_degree(graph: &[Vec<u32>], max_blocks: usize) -> Option<(Vec<usize>, Vec<Vec<u32>>, usize)> {
     let nb = graph.len();
     let mut adj: Vec<Vec<u32>> = graph.to_vec();
     let mut alive = vec![true; nb];
@@ -717,7 +775,7 @@ fn min_degree(graph: &[Vec<u32>], max_blocks: usize) -> Option<(Vec<usize>, Vec<
         cols[v] = nbrs;
         adj[v] = Vec::new();
     }
-    Some((order, cols))
+    Some((order, cols, total))
 }
 
 fn union(a: &[u32], b: &[u32]) -> Vec<u32> {
@@ -993,6 +1051,33 @@ mod tests {
         }
         for r in 0..pat.dims.len() { let (d, b) = (pat.dims[r], pat.diag_at[r]); for i in 0..d { vals[b + i * d + i] += 400.0 } }
         (pat, vals)
+    }
+
+    #[test]
+    fn a_kept_ordering_is_the_one_new_makes() {
+        let same = |a: &Symbolic, b: &Symbolic| a.order == b.order && a.dims == b.dims && a.sn_start == b.sn_start && a.rows == b.rows
+            && a.rows_soff == b.rows_soff && a.src == b.src && a.n_vals == b.n_vals && a.fill_blocks == b.fill_blocks
+            && a.sched.task_sn == b.sched.task_sn && a.sched.wave_sn == b.sched.wave_sn;
+        // The same graph with other block sizes (a lens group of 3, then of 5 terms), and
+        // another graph. Other tests may order other graphs meanwhile: whatever is kept,
+        // what comes back must be what `new` makes.
+        let (pat3, _) = aerial(12, 12, 2, 3, 2);
+        let (pat5, _) = aerial(12, 12, 2, 5, 2);
+        let (other, _) = aerial(12, 11, 2, 3, 2);
+        for pat in [&pat3, &pat5, &pat5, &other, &pat3] {
+            assert!(same(&Symbolic::new_or_kept(pat, usize::MAX).unwrap(), &Symbolic::new(pat, usize::MAX).unwrap()));
+        }
+        // `None` exactly where `new` gives none: at and below the fill, and below the
+        // minimum-degree count, with the ordering kept and without.
+        let fresh = Symbolic::new(&pat3, usize::MAX).unwrap();
+        let md_total = ordering(&pat3, usize::MAX).unwrap().2;
+        for max in [fresh.fill_blocks, fresh.fill_blocks - 1, md_total, md_total - 1, 10] {
+            for forget in [false, true] {
+                Symbolic::new_or_kept(&pat3, usize::MAX);
+                if forget { Symbolic::forget() }
+                assert_eq!(Symbolic::new_or_kept(&pat3, max).is_some(), Symbolic::new(&pat3, max).is_some(), "max_blocks {max}");
+            }
+        }
     }
 
     #[test]

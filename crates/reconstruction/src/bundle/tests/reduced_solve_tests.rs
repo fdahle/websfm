@@ -278,6 +278,20 @@ fn sparse_cholesky_solves_as_the_dense_one() {
     assert!(Symbolic::new(&aerial_pattern(20, 20, 3, 4), 100).is_none());
 }
 
+// A call that reuses the ordering kept by the call before it (same camera graph) gives
+// the bits of one that orders afresh.
+#[test]
+fn a_kept_ordering_gives_the_same_bits() {
+    let TimingProblem { cams, intr, pts, idx, px, prior, policy, sensors, refine_mask, .. } = timing_problem_of(12, "3-5", 5);
+    let run = || bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 30, &sensors, refine_mask, &policy, &[], &[]);
+    crate::sparse_chol::Symbolic::forget();
+    let (a, b) = (run(), run());
+    crate::sparse_chol::Symbolic::forget();
+    let c = run();
+    assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()) && a.len() == b.len());
+    assert!(a.iter().zip(&c).all(|(x, y)| x.to_bits() == y.to_bits()) && a.len() == c.len());
+}
+
 // A realistic aerial bundle adjustment, timed by phase:
 // cargo test -p reconstruction --release -- --ignored --nocapture bundle_adjust_timing
 // Knobs (env): BA_SIDE (grid side, 40 ⇒ 1,600 cameras), BA_VIEWS (views per point: 9, the
@@ -294,13 +308,16 @@ struct TimingProblem {
 
 fn timing_problem() -> TimingProblem {
     let env = |k: &str| std::env::var(k).ok();
-    let side: usize = env("BA_SIDE").and_then(|v| v.parse().ok()).unwrap_or(40);
-    let views = env("BA_VIEWS").unwrap_or_else(|| "9".into());
+    timing_problem_of(env("BA_SIDE").and_then(|v| v.parse().ok()).unwrap_or(40), &env("BA_VIEWS").unwrap_or_else(|| "9".into()),
+        env("BA_REFINE").and_then(|v| v.parse().ok()).unwrap_or(0))
+}
+
+fn timing_problem_of(side: usize, views: &str, refine_mask: u32) -> TimingProblem {
+    let views = views.to_string();
     let (v_lo, v_hi): (usize, usize) = match views.split_once('-') {
         Some((a, b)) => (a.parse().unwrap(), b.parse().unwrap()),
         None => { let v = views.parse().unwrap(); (v, v) }
     };
-    let refine_mask: u32 = env("BA_REFINE").and_then(|v| v.parse().ok()).unwrap_or(0);
     let n_cam = side * side;
     let mut rng = Lcg(17);
     let mut cams = Vec::new();
@@ -364,11 +381,16 @@ fn bundle_adjust_timing() {
     // BA_REPS: run it that many times and report the fastest (the phases of that run).
     let reps: usize = env("BA_REPS").and_then(|v| v.parse().ok()).unwrap_or(1);
     let mut best: Option<(std::time::Duration, [f64; prof::N], Vec<f32>)> = None;
-    for _ in 0..reps {
+    // The first run orders the camera graph; the later ones reuse its ordering
+    // (sparse_chol.rs `new_or_kept`), as a sparse run's later calls on one graph do.
+    crate::sparse_chol::Symbolic::forget();
+    let mut first = 0.0;
+    for rep in 0..reps {
         prof::take();
         let t = std::time::Instant::now();
         let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 30, &sensors, refine_mask, &policy, &[], &[]);
         let (total, ph) = (t.elapsed(), prof::take());
+        if rep == 0 { first = total.as_secs_f64() }
         if let Some((_, _, o)) = &best { assert!(o.iter().zip(&out).all(|(a, b)| a.to_bits() == b.to_bits()), "runs differ"); }
         if best.as_ref().is_none_or(|b| total < b.0) { best = Some((total, ph, out)); }
     }
@@ -390,7 +412,7 @@ fn bundle_adjust_timing() {
         ph[0], ph[1], ph[2], ph[3], ph[4]);
     println!("  setup (s): {}", prof::SETUP.iter().zip(&parts).map(|(k, v)| format!("{k} {v:.4}")).collect::<Vec<_>>().join(", "));
     println!("  output hash {hash:016x}");
-    println!("TIMING side={side} views={views} refine={refine_mask} total={:.3} cost={:.3} assemble={:.3} schur={:.3} solve={:.3} back={:.3} untimed={untimed:.3} setup={setup:.3} {} hash={hash:016x}",
+    println!("TIMING side={side} views={views} refine={refine_mask} total={:.3} cost={:.3} assemble={:.3} schur={:.3} solve={:.3} back={:.3} untimed={untimed:.3} setup={setup:.3} first={first:.3} {} hash={hash:016x}",
         total.as_secs_f64(), ph[0], ph[1], ph[2], ph[3], ph[4], prof::SETUP.iter().zip(&parts).map(|(k, v)| format!("s_{k}={v:.4}")).collect::<Vec<_>>().join(" "));
 }
 
@@ -406,8 +428,11 @@ fn elimination_tree_shape() {
     let t = std::time::Instant::now();
     let mut sym = crate::sparse_chol::Symbolic::new(&pattern, usize::MAX).unwrap();
     if let Some(share) = std::env::var("BA_TASK_SHARE").ok().and_then(|v| v.parse().ok()) { sym.set_task_share(share) }
-    println!("{} cameras, views {views}, refine {refine_mask}: n {}, ordering {:?}, {:.0} MB of factor\n{}", side * side, pattern.n,
-        t.elapsed(), sym.factor_bytes() as f64 / 1e6, sym.tree_shape());
+    crate::sparse_chol::Symbolic::forget();
+    let _ = crate::sparse_chol::Symbolic::new_or_kept(&pattern, usize::MAX);
+    let kept = crate::sparse_chol::Symbolic::kept_bytes();
+    println!("{} cameras, views {views}, refine {refine_mask}: n {}, ordering {:?}, {:.0} MB of factor, {:.2} MB kept between calls\n{}",
+        side * side, pattern.n, t.elapsed(), sym.factor_bytes() as f64 / 1e6, kept as f64 / 1e6, sym.tree_shape());
     // One factorisation of a random SPD fill of the same pattern, best of 5: the scatter,
     // the factor one supernode after another and by the tree, and the substitutions.
     let vals = spd_fill(&pattern, 1, 0.05);
