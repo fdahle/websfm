@@ -6,11 +6,39 @@
 // result does not depend on how many threads ran it: every output element has exactly
 // one writer, and every sum is taken in a fixed order (see bundle.rs, the Schur step).
 
-/// `f(i)` for every i in 0..n, on the thread pool when there is one.
+/// `f(i)` for every i in 0..n, on the thread pool when there is one (in a loop for one
+/// item, or while an `Inline` guard is alive on this thread).
 #[cfg(feature = "threads")]
 pub(crate) fn for_each_index<F: Fn(usize) + Sync + Send>(n: usize, f: F) {
     use rayon::prelude::*;
+    if n <= 1 || INLINE.with(|c| c.get()) {
+        for i in 0..n { f(i) }
+        return;
+    }
     (0..n).into_par_iter().for_each(f);
+}
+
+#[cfg(feature = "threads")]
+thread_local! { static INLINE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+/// While alive and `on`, every `for_each_index` called on this thread runs as a loop on
+/// it, and so do the calls inside those loops: for a problem too small for the pool,
+/// whose hand-offs to other threads (and the data they leave in other cores' caches)
+/// cost more than they save. The same items in the same order, so the same bits.
+pub(crate) struct Inline { #[cfg(feature = "threads")] was: bool }
+impl Inline {
+    pub(crate) fn new(on: bool) -> Inline {
+        #[cfg(feature = "threads")]
+        { Inline { was: INLINE.with(|c| c.replace(on || c.get())) } }
+        #[cfg(not(feature = "threads"))]
+        { let _ = on; Inline {} }
+    }
+}
+impl Drop for Inline {
+    fn drop(&mut self) {
+        #[cfg(feature = "threads")]
+        INLINE.with(|c| c.set(self.was));
+    }
 }
 
 /// `f(i)` for every i in 0..n, on the thread pool when there is one.

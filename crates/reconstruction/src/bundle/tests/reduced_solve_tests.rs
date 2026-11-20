@@ -292,13 +292,7 @@ fn a_kept_ordering_gives_the_same_bits() {
     assert!(a.iter().zip(&c).all(|(x, y)| x.to_bits() == y.to_bits()) && a.len() == c.len());
 }
 
-// A realistic aerial bundle adjustment, timed by phase:
-// cargo test -p reconstruction --release -- --ignored --nocapture bundle_adjust_timing
-// Knobs (env): BA_SIDE (grid side, 40 ⇒ 1,600 cameras), BA_VIEWS (views per point: 9, the
-// 3×3 neighbourhood, or a range such as 3-5, drawn per point), BA_REFINE (refine_mask;
-// with it every camera shares sensor 0). It prints an FNV-1a hash of the whole output
-// (the f32 bits), which a same-bits change must leave as it was.
-// The timing test's problem (env knobs BA_SIDE, BA_VIEWS, BA_REFINE, see below):
+// The timing test's problem (env knobs BA_SIDE, BA_VIEWS, BA_REFINE, BA_PTS, see below):
 // cameras, intrinsics, points, observation indices and pixels, the prior, the policy,
 // the sensors, and (side, views, refine_mask) for the print.
 struct TimingProblem {
@@ -328,7 +322,7 @@ fn timing_problem_of(side: usize, views: &str, refine_mask: u32) -> TimingProble
         intr.extend_from_slice(&[800.0, 800.0, 320.0, 240.0]);
     }
     let (mut pts, mut idx, mut px) = (Vec::new(), Vec::new(), Vec::new());
-    let n_pts = n_cam * 70;
+    let n_pts = n_cam * std::env::var("BA_PTS").ok().and_then(|v| v.parse().ok()).unwrap_or(70);
     let mut nb: Vec<(isize, isize)> = Vec::new();
     for p in 0..n_pts {
         let (x, y, z) = (rng.next() * 0.5 * side as f64 + 0.5 * side as f64, rng.next() * 0.5 * side as f64 + 0.5 * side as f64, 0.5 * rng.next());
@@ -369,8 +363,9 @@ fn timing_problem_of(side: usize, views: &str, refine_mask: u32) -> TimingProble
 // cargo test -p reconstruction --release -- --ignored --nocapture bundle_adjust_timing
 // Knobs (env): BA_SIDE (grid side, 40 ⇒ 1,600 cameras), BA_VIEWS (views per point: 9, the
 // 3×3 neighbourhood, or a range such as 3-5, drawn per point), BA_REFINE (refine_mask;
-// with it every camera shares sensor 0). It prints an FNV-1a hash of the whole output
-// (the f32 bits), which a same-bits change must leave as it was.
+// with it every camera shares sensor 0), BA_PTS (points per camera, 70), BA_REPS. It
+// prints an FNV-1a hash of the whole output (the f32 bits), which a same-bits change must
+// leave as it was.
 #[test]
 #[ignore]
 fn bundle_adjust_timing() {

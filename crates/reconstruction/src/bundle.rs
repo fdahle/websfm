@@ -38,6 +38,18 @@ const PARAM_TOL: f64 = 1e-8;
 pub(crate) const DIRECT_FUNCTION_TOL: f64 = 1e-5;
 pub(crate) const WARM_FUNCTION_TOL: f64 = 1e-4;
 
+// Below this many observations the threaded build runs a bundle adjustment on the
+// calling thread alone: the pool's hand-offs and the data left in other cores' caches
+// cost more than the work they share. Measured natively, the pool's 20 threads against
+// the calling thread alone (the timing test's grid, BA_PTS for more points): with point
+// chunks (the dense and PCG solves, under ~100 cameras) 24k observations 0.11 against
+// 0.064 s, 48k 0.115 against 0.084 s, 84k 0.354 against 0.374 s, 96k 0.18 against 0.21 s;
+// with camera ranges (the sparse direct solve) 27k 0.085 against 0.072 s, 33k 0.111
+// against 0.116 s, 39k 0.131 against 0.142 s, 53k 0.117 against 0.152 s. The bits are the
+// same either way.
+const POOL_MIN_OBS_CHUNKS: usize = 64_000;
+const POOL_MIN_OBS_RANGES: usize = 32_000;
+
 // Phase timers for the native timing test (bundle_adjust_timing); no-ops in the app.
 // Slots 0–4 are the LM phases (`mark`), the rest the setup of a call (`add` from a `now`):
 // the parse, Layout::new, the pattern, the minimum-degree ordering, the supernodes, the
@@ -268,6 +280,9 @@ fn bundle_adjust_impl(
     let solver = SolverOpts::from_flat(solver_flat);
     let m = Model { p: &problem, l: &layout, huber: solver.huber };
     let plan = Plan::new(&m, &solver);
+    // A small problem runs on this thread alone (par.rs `Inline`), see POOL_MIN_OBS.
+    let pool_min = if plan.range_plan.is_some() { POOL_MIN_OBS_RANGES } else { POOL_MIN_OBS_CHUNKS };
+    let _inline = crate::par::Inline::new(problem.obs.len() < pool_min);
     let (n, n_pts, refine) = (layout.n, problem.n_pts, layout.refine);
     let mut solve_stats = SolveStats::default();
     let mut st = State { cams, pts, gpar: m.initial_gpar() };
