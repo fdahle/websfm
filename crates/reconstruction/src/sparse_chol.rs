@@ -15,7 +15,9 @@
 //!   rows below them, a few explicit zeros allowed), and each supernode's rows;
 //! - `Symbolic::factor`: left-looking numeric factorisation of dense supernode panels
 //!   (each takes its sources' updates in ascending order, which is what a right-looking
-//!   factor applies; a big one in row chunks on the pool, see `factor_panels`).
+//!   factor applies). On the pool, the elimination tree's disjoint subtrees factor side
+//!   by side, then the supernodes above them in waves, and a big one in row chunks (see
+//!   `factor_panels`).
 //!   An update is a run of long dot products over a panel's contiguous rows, where a
 //!   column-by-column factor did many separate 6×6 products (1,600 aerial cameras,
 //!   native: 0.83 s by columns); `None` when the matrix is not positive-definite, the
@@ -24,6 +26,7 @@
 
 use crate::bundle::BlockPattern;
 use crate::par::{for_each_index, SyncPtr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -36,6 +39,9 @@ const MAX_SUPERNODE_BLOCKS: usize = 96;
 // A supernode's updates and row solves go to the pool from about this much work (a
 // rough multiply count), below it the pool's dispatch would cost more than it saves.
 const PAR_UPDATE_FLOPS: f64 = 2.0e6;
+// The elimination tree is cut into subtree tasks of at most this share of the factor's
+// work each (`Symbolic::schedule`).
+const TASK_SHARE: f64 = 1.0 / 64.0;
 
 thread_local! {
     // A pool thread's product buffer, kept between tasks.
@@ -61,6 +67,18 @@ pub(crate) struct Symbolic {
     n_vals: usize,
     #[allow(dead_code)] // reported by the timing test
     pub(crate) fill_blocks: usize, // blocks of L below the diagonal blocks, explicit zeros included
+    sched: Sched,
+}
+
+// The order `factor_panels` runs the supernodes in (`Symbolic::schedule`): subtree tasks,
+// each its supernodes ascending (task k: task_sn[task_ptr[k]..task_ptr[k + 1]]), then the
+// supernodes above them in waves (a wave's supernodes have every child done).
+#[derive(Default)]
+struct Sched {
+    task_ptr: Vec<usize>,
+    task_sn: Vec<u32>,
+    wave_ptr: Vec<usize>,
+    wave_sn: Vec<u32>,
 }
 
 pub(crate) struct Factor<'a> {
@@ -182,7 +200,60 @@ impl Symbolic {
         let mut src_ptr = vec![0usize];
         let mut src = Vec::new();
         for list in by_t { src.extend(list); src_ptr.push(src.len()) }
-        Some(Symbolic { order, dims, off, sn_start, sn_of, rows_ptr, rows, rows_soff, width, height, panel_at, src_ptr, src, n_vals, fill_blocks: blocks })
+        let mut sym = Symbolic { order, dims, off, sn_start, sn_of, rows_ptr, rows, rows_soff, width, height, panel_at, src_ptr, src, n_vals,
+            fill_blocks: blocks, sched: Sched::default() };
+        sym.sched = sym.schedule(TASK_SHARE);
+        Some(sym)
+    }
+
+    // Cut the elimination tree into subtree tasks of at most `share` of the work each (the
+    // largest such subtrees), the supernodes above them into waves by height. Depends on
+    // the tree alone, not on the thread count (the bits do not depend on it either way).
+    fn schedule(&self, share: f64) -> Sched {
+        let n_sn = self.width.len();
+        let (parent, work) = self.tree();
+        let mut sub = work.clone();
+        for s in 0..n_sn { if let Some(p) = parent[s] { sub[p] += sub[s] } }
+        let cut = share * sub.iter().zip(&parent).filter(|(_, p)| p.is_none()).map(|(w, _)| w).sum::<f64>();
+        // A supernode is in the top when its subtree is over the cut (then so is its
+        // parent's); a task is a subtree under the cut whose parent is in the top, or a root.
+        let in_top: Vec<bool> = sub.iter().map(|&w| w > cut).collect();
+        let mut task_of = vec![u32::MAX; n_sn];
+        let mut task_root: Vec<usize> = Vec::new();
+        for s in (0..n_sn).rev() {
+            if in_top[s] { continue }
+            match parent[s] {
+                Some(p) if !in_top[p] => task_of[s] = task_of[p],
+                _ => { task_of[s] = task_root.len() as u32; task_root.push(s) }
+            }
+        }
+        // Tasks largest first (the pool balances better), each one's supernodes ascending.
+        let mut rank: Vec<usize> = (0..task_root.len()).collect();
+        rank.sort_by(|&a, &b| sub[task_root[b]].total_cmp(&sub[task_root[a]]).then(a.cmp(&b)));
+        let mut pos = vec![0usize; task_root.len()];
+        for (k, &r) in rank.iter().enumerate() { pos[r] = k }
+        let mut task_ptr = vec![0usize; task_root.len() + 1];
+        for s in 0..n_sn { if !in_top[s] { task_ptr[pos[task_of[s] as usize] + 1] += 1 } }
+        for k in 0..task_root.len() { task_ptr[k + 1] += task_ptr[k] }
+        let mut fill = task_ptr.clone();
+        let mut task_sn = vec![0u32; task_ptr[task_root.len()]];
+        for s in 0..n_sn { if !in_top[s] { let k = pos[task_of[s] as usize]; task_sn[fill[k]] = s as u32; fill[k] += 1 } }
+        // Waves: a top supernode's height is one more than its highest top child's.
+        let mut height = vec![0usize; n_sn];
+        let mut n_waves = 0;
+        for s in 0..n_sn {
+            if !in_top[s] { continue }
+            height[s] += 1;
+            n_waves = n_waves.max(height[s]);
+            if let Some(p) = parent[s] { height[p] = height[p].max(height[s]) }
+        }
+        let mut wave_ptr = vec![0usize; n_waves + 1];
+        for s in 0..n_sn { if in_top[s] { wave_ptr[height[s]] += 1 } }
+        for k in 0..n_waves { wave_ptr[k + 1] += wave_ptr[k] }
+        let mut fill = wave_ptr.clone();
+        let mut wave_sn = vec![0u32; wave_ptr[n_waves]];
+        for s in 0..n_sn { if in_top[s] { let k = height[s] - 1; wave_sn[fill[k]] = s as u32; fill[k] += 1 } }
+        Sched { task_ptr, task_sn, wave_ptr, wave_sn }
     }
 
     /// Floating-point operations of one numeric factorisation (the timing test).
@@ -218,6 +289,93 @@ impl Symbolic {
     /// Bytes the numeric factor holds.
     pub(crate) fn factor_bytes(&self) -> usize { self.n_vals * 8 }
 
+    // Each supernode's parent in the elimination tree (the supernode of its first row
+    // below; None for a root), and the work it does: its own Cholesky and row solves and
+    // the updates it takes from its sources (`flops` counts the same, by source).
+    fn tree(&self) -> (Vec<Option<usize>>, Vec<f64>) {
+        let n_sn = self.width.len();
+        let parent = (0..n_sn).map(|s| (self.rows_ptr[s] < self.rows_ptr[s + 1]).then(|| self.sn_of[self.rows[self.rows_ptr[s]] as usize])).collect();
+        let mut work: Vec<f64> = (0..n_sn).map(|t| { let (w, h) = (self.width[t] as f64, self.height[t] as f64); w * w * w / 3.0 + h * w * w }).collect();
+        for t in 0..n_sn {
+            for &(s, i, j) in &self.src[self.src_ptr[t]..self.src_ptr[t + 1]] {
+                let (s, i, j) = (s as usize, i as usize, j as usize);
+                let (ws, hs) = (self.width[s] as f64, self.height[s]);
+                let r0 = self.rows_soff[i] as f64;
+                let c_end = if j < self.rows_ptr[s + 1] { self.rows_soff[j] as f64 } else { hs as f64 };
+                let (m, gc) = (hs as f64 - r0, c_end - r0);
+                work[t] += 2.0 * (m * gc - gc * gc / 2.0) * ws;
+            }
+        }
+        (parent, work)
+    }
+
+    /// The shape of the supernodal elimination tree, for the timing tests: how much of the
+    /// factor's work could run side by side.
+    #[allow(dead_code)]
+    pub(crate) fn tree_shape(&self) -> String {
+        let n_sn = self.width.len();
+        let (parent, work) = self.tree();
+        let total: f64 = work.iter().sum();
+        // Depth from the root, subtree work, and the critical path (the most work on one
+        // chain from a leaf to a root): a child precedes its parent.
+        let mut depth = vec![0usize; n_sn];
+        for s in (0..n_sn).rev() { if let Some(p) = parent[s] { depth[s] = depth[p] + 1 } }
+        let mut sub = work.clone();
+        let mut cp = work.clone();
+        let mut kids = vec![0usize; n_sn];
+        for s in 0..n_sn {
+            if let Some(p) = parent[s] {
+                sub[p] += sub[s];
+                kids[p] += 1;
+                if cp[s] + work[p] > cp[p] { cp[p] = cp[s] + work[p] }
+            }
+        }
+        let roots: Vec<usize> = (0..n_sn).filter(|&s| parent[s].is_none()).collect();
+        let crit = roots.iter().map(|&r| cp[r]).fold(0.0, f64::max);
+        let max_depth = depth.iter().copied().max().unwrap_or(0);
+        let big: f64 = (0..n_sn).filter(|&t| work[t] >= PAR_UPDATE_FLOPS).map(|t| work[t]).sum();
+        let mut out = format!("{n_sn} supernodes, {} roots, work {:.3} GFLOP, depth {max_depth}, critical path {:.3} GFLOP ({:.1}% of the work, bound {:.1}×); supernodes ≥ PAR_UPDATE_FLOPS hold {:.1}%; branching nodes {}\n",
+            roots.len(), total / 1e9, crit / 1e9, 100.0 * crit / total, total / crit.max(1.0), 100.0 * big / total,
+            kids.iter().filter(|&&k| k > 1).count());
+        // Work by depth, in ten bands of equal depth.
+        let bands = 10usize;
+        let mut by = vec![(0.0f64, 0usize); bands];
+        for s in 0..n_sn { let b = (depth[s] * bands / (max_depth + 1)).min(bands - 1); by[b].0 += work[s]; by[b].1 += 1 }
+        out += "  work by depth band (root first): ";
+        for (b, &(w, c)) in by.iter().enumerate() { out += &format!("{}–{}: {:.1}% ({c}) ", b * (max_depth + 1) / bands, (b + 1) * (max_depth + 1) / bands, 100.0 * w / total) }
+        out += "\n";
+        // Cut into subtree tasks of at most total / k work: the top (supernodes above
+        // every task) runs as today.
+        for k in [8usize, 16, 32, 64, 128] {
+            let cut = total / k as f64;
+            let mut top = 0.0;
+            let mut in_top = vec![false; n_sn];
+            let mut tasks: Vec<f64> = Vec::new();
+            let mut stack = roots.clone();
+            let mut children: Vec<Vec<usize>> = vec![Vec::new(); n_sn];
+            for s in 0..n_sn { if let Some(p) = parent[s] { children[p].push(s) } }
+            while let Some(s) = stack.pop() {
+                if sub[s] <= cut { tasks.push(sub[s]) } else { top += work[s]; in_top[s] = true; stack.extend(&children[s]) }
+            }
+            // The top's own critical path, and its height (waves of supernodes whose
+            // children are done).
+            let (mut cpt, mut ht) = (vec![0.0f64; n_sn], vec![0usize; n_sn]);
+            let (mut top_cp, mut waves) = (0.0f64, 0usize);
+            for s in 0..n_sn {
+                if !in_top[s] { continue }
+                cpt[s] += work[s];
+                ht[s] += 1;
+                top_cp = top_cp.max(cpt[s]);
+                waves = waves.max(ht[s]);
+                if let Some(p) = parent[s] { cpt[p] = cpt[p].max(cpt[s]); ht[p] = ht[p].max(ht[s]) }
+            }
+            let largest = tasks.iter().copied().fold(0.0, f64::max);
+            out += &format!("  cut total/{k}: {} tasks holding {:.1}% (largest {:.1}%), top {:.1}% in {} supernodes, its critical path {:.1}%, {waves} waves\n", tasks.len(),
+                100.0 * (total - top) / total, 100.0 * largest / total, 100.0 * top / total, in_top.iter().filter(|&&b| b).count(), 100.0 * top_cp / total);
+        }
+        out
+    }
+
     // Panel row of block position `b` in supernode `t` (its own columns first, then its rows).
     fn panel_row(&self, t: usize, b: usize) -> usize {
         if self.sn_of[b] == t { return self.off[b] - self.off[self.sn_start[t]] }
@@ -245,12 +403,11 @@ impl Symbolic {
 
     // Source s's update to supernode t (its rows i..j are t's columns), on t's panel rows
     // rows.0..rows.1 only: the dense product of s's rows from i on with rows i..j, then
-    // scattered into t. `left` holds every panel before t's; `dst` is t's panel.
+    // scattered into t. `src` is s's panel; `dst` is t's panel.
     #[allow(clippy::too_many_arguments)]
-    fn update(&self, left: &[f64], s: usize, i: usize, j: usize, t: usize, dst: SyncPtr<f64>, rows: (usize, usize), tmp: &mut Vec<f64>) {
-        let (w, h, p) = (self.width[s], self.height[s], self.panel_at[s]);
+    fn update(&self, src: &[f64], s: usize, i: usize, j: usize, t: usize, dst: SyncPtr<f64>, rows: (usize, usize), tmp: &mut Vec<f64>) {
+        let (w, h) = (self.width[s], self.height[s]);
         let hi = self.rows_ptr[s + 1];
-        let src = &left[p..p + (w + h) * w];
         let wt = self.width[t];
         let t0 = self.off[self.sn_start[t]];
         // The source rows whose destination lies in `rows` (ascending, so a run).
@@ -284,7 +441,7 @@ impl Symbolic {
     }
 
     pub(crate) fn factor(&self, pat: &BlockPattern, a: &[f64]) -> Option<Factor<'_>> {
-        self.factor_with(pat, a, PAR_UPDATE_FLOPS, Vec::new()).ok()
+        self.factor_with(pat, a, PAR_UPDATE_FLOPS, true, Vec::new()).ok()
     }
 
     /// `factor` into `buf`'s storage (cleared first), handed back on failure: a solve that
@@ -292,14 +449,37 @@ impl Symbolic {
     /// linear memory, which never shrinks, a fresh factor and a fresh copy of S each try
     /// fragmented it: BAL final-961 grew to 2.2 GB for a 1.8 GB peak.
     pub(crate) fn factor_reusing(&self, pat: &BlockPattern, a: &[f64], buf: Vec<f64>) -> Result<Factor<'_>, Vec<f64>> {
-        self.factor_with(pat, a, PAR_UPDATE_FLOPS, buf)
+        self.factor_with(pat, a, PAR_UPDATE_FLOPS, true, buf)
     }
 
-    // `par_flops`: the work from which a supernode is cut into row chunks (tests: 0).
-    fn factor_with(&self, pat: &BlockPattern, a: &[f64], par_flops: f64, buf: Vec<f64>) -> Result<Factor<'_>, Vec<f64>> {
+    // `par_flops`: the work from which a supernode is cut into row chunks (tests: 0);
+    // `tree`: by the elimination tree's tasks and waves, else one supernode after another.
+    fn factor_with(&self, pat: &BlockPattern, a: &[f64], par_flops: f64, tree: bool, buf: Vec<f64>) -> Result<Factor<'_>, Vec<f64>> {
         let mut v = self.scatter(pat, a, buf);
-        if self.factor_panels(&mut v, par_flops).is_none() { return Err(v) }
+        if self.factor_panels(&mut v, par_flops, tree).is_none() { return Err(v) }
         Ok(Factor { sym: self, vals: v })
+    }
+
+    /// The timing tests: one factorisation's scatter and numeric factor in seconds, by the
+    /// tree (`tree`) or one supernode after another.
+    #[cfg(test)]
+    pub(crate) fn factor_timed(&self, pat: &BlockPattern, a: &[f64], tree: bool) -> (f64, f64, Vec<f64>) {
+        let t = std::time::Instant::now();
+        let mut v = self.scatter(pat, a, Vec::new());
+        let ts = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        self.factor_panels(&mut v, PAR_UPDATE_FLOPS, tree).unwrap();
+        (ts, t.elapsed().as_secs_f64(), v)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_task_share(&mut self, share: f64) { self.sched = self.schedule(share) }
+
+    #[cfg(test)]
+    pub(crate) fn with_vals_solve(&self, vals: Vec<f64>, pat: &BlockPattern, b: &[f64]) -> (Vec<f64>, Vec<f64>) {
+        let f = Factor { sym: self, vals };
+        let x = f.solve(pat, b);
+        (x, f.vals)
     }
 
     fn scatter(&self, pat: &BlockPattern, a: &[f64], mut v: Vec<f64>) -> Vec<f64> {
@@ -335,56 +515,90 @@ impl Symbolic {
                 }
             }
         }
-        // Left-looking: each supernode t takes its updates from its sources s < t, in
-        // ascending s, then factors. That is the sequence of subtractions a right-looking
-        // factor applies to t's elements (each source's update, as soon as the source is
-        // done), so the bits are the same. A big t is cut into row chunks on the pool:
-        // a chunk takes every source's update to its own rows, in the same order.
         v
     }
 
-    fn factor_panels(&self, v: &mut [f64], par_flops: f64) -> Option<()> {
-        let n_sn = self.width.len();
-        let mut tmp: Vec<f64> = Vec::new();
-        for t in 0..n_sn {
-            let (w, h, p) = (self.width[t], self.height[t], self.panel_at[t]);
-            let (left, right) = v.split_at_mut(p);
-            let panel = &mut right[..(w + h) * w];
-            let sources = &self.src[self.src_ptr[t]..self.src_ptr[t + 1]];
-            // t's panel rows in blocks: its own columns, then its rows below.
-            let work: f64 = sources.iter().map(|&(s, i, _)| {
-                let (hs, ws) = (self.height[s as usize], self.width[s as usize]);
-                ((hs - self.rows_soff[i as usize]) * ws) as f64
-            }).sum::<f64>() * (w + h) as f64;
-            let chunks = if work >= par_flops { self.row_chunks(t) } else { vec![(0, w + h)] };
-            if chunks.len() > 1 {
-                let dst = SyncPtr::of(panel);
-                for_each_index(chunks.len(), |k| SCRATCH.with(|sc| {
-                    let tmp = &mut *sc.borrow_mut();
-                    for &(s, i, j) in sources { self.update(left, s as usize, i as usize, j as usize, t, dst, chunks[k], tmp) }
-                }));
-            } else {
-                let dst = SyncPtr::of(panel);
-                for &(s, i, j) in sources { self.update(left, s as usize, i as usize, j as usize, t, dst, (0, w + h), &mut tmp) }
+    // Left-looking, by the elimination tree: a supernode reads only the panels of its
+    // descendants, so the subtree tasks (`tasks`) factor side by side on the pool, then the
+    // supernodes above them (`top`) in waves, each wave's supernodes once their children
+    // are done. Every panel has one writer and takes its sources in ascending order, so
+    // the bits are those of the loop over 0..n_sn, whatever runs where (`tree` false runs
+    // that loop; the tests compare both).
+    fn factor_panels(&self, v: &mut [f64], par_flops: f64, tree: bool) -> Option<()> {
+        let vp = SyncPtr::of(v);
+        if !tree {
+            for t in 0..self.width.len() { if !self.factor_one(vp, t, par_flops) { return None } }
+            return Some(())
+        }
+        let failed = AtomicBool::new(false);
+        let sch = &self.sched;
+        for_each_index(sch.task_ptr.len() - 1, |k| {
+            for &t in &sch.task_sn[sch.task_ptr[k]..sch.task_ptr[k + 1]] {
+                if failed.load(Ordering::Relaxed) { return }
+                if !self.factor_one(vp, t as usize, par_flops) { failed.store(true, Ordering::Relaxed); return }
             }
-            // The diagonal part: a dense Cholesky.
-            if !chol_in_place(w, &mut panel[..w * w]) { return None }
-            // The rows below: x ← x · L⁻ᵀ, each row on its own.
-            let (diag, below) = panel.split_at_mut(w * w);
-            if work >= par_flops && h >= 64 {
-                let (bp, n_chunk) = (SyncPtr::of(below), h.div_ceil(32));
-                for_each_index(h.div_ceil(n_chunk), |k| {
-                    for r in k * n_chunk..((k + 1) * n_chunk).min(h) {
-                        // SAFETY: row r belongs to chunk k alone.
-                        let row = unsafe { bp.slice(r * w, w) };
-                        trsv_lower_row(w, diag, row)
-                    }
-                });
+        });
+        for wv in 0..sch.wave_ptr.len() - 1 {
+            if failed.load(Ordering::Relaxed) { return None }
+            let wave = &sch.wave_sn[sch.wave_ptr[wv]..sch.wave_ptr[wv + 1]];
+            if wave.len() == 1 {
+                if !self.factor_one(vp, wave[0] as usize, par_flops) { return None }
             } else {
-                for r in 0..h { trsv_lower_row(w, diag, &mut below[r * w..(r + 1) * w]) }
+                for_each_index(wave.len(), |k| {
+                    if !self.factor_one(vp, wave[k] as usize, par_flops) { failed.store(true, Ordering::Relaxed) }
+                });
             }
         }
-        Some(())
+        (!failed.load(Ordering::Relaxed)).then_some(())
+    }
+
+    // Supernode t: its sources' updates in ascending order, then its dense Cholesky and
+    // row solves; false when it is not positive-definite. Its panel is written here
+    // alone, and its sources' panels are complete (they are its descendants).
+    fn factor_one(&self, vp: SyncPtr<f64>, t: usize, par_flops: f64) -> bool {
+        let (w, h, p) = (self.width[t], self.height[t], self.panel_at[t]);
+        // SAFETY: t's panel has this one writer; nobody reads it until t is done.
+        let panel = unsafe { vp.slice(p, (w + h) * w) };
+        let sources = &self.src[self.src_ptr[t]..self.src_ptr[t + 1]];
+        // SAFETY: a source is a descendant of t, finished before t starts, and only read.
+        let src_panel = |s: usize| unsafe { vp.slice_ref(self.panel_at[s], (self.width[s] + self.height[s]) * self.width[s]) };
+        // t's panel rows in blocks: its own columns, then its rows below.
+        let work: f64 = sources.iter().map(|&(s, i, _)| {
+            let (hs, ws) = (self.height[s as usize], self.width[s as usize]);
+            ((hs - self.rows_soff[i as usize]) * ws) as f64
+        }).sum::<f64>() * (w + h) as f64;
+        let chunks = if work >= par_flops { self.row_chunks(t) } else { vec![(0, w + h)] };
+        let dst = SyncPtr::of(panel);
+        if chunks.len() > 1 {
+            for_each_index(chunks.len(), |k| SCRATCH.with(|sc| {
+                let tmp = &mut *sc.borrow_mut();
+                for &(s, i, j) in sources { self.update(src_panel(s as usize), s as usize, i as usize, j as usize, t, dst, chunks[k], tmp) }
+            }));
+        } else {
+            // No pool call while the scratch is borrowed (a waiting thread may run a task
+            // that borrows it).
+            SCRATCH.with(|sc| {
+                let tmp = &mut *sc.borrow_mut();
+                for &(s, i, j) in sources { self.update(src_panel(s as usize), s as usize, i as usize, j as usize, t, dst, (0, w + h), tmp) }
+            });
+        }
+        // The diagonal part: a dense Cholesky.
+        if !chol_in_place(w, &mut panel[..w * w]) { return false }
+        // The rows below: x ← x · L⁻ᵀ, each row on its own.
+        let (diag, below) = panel.split_at_mut(w * w);
+        if work >= par_flops && h >= 64 {
+            let (bp, n_chunk) = (SyncPtr::of(below), h.div_ceil(32));
+            for_each_index(h.div_ceil(n_chunk), |k| {
+                for r in k * n_chunk..((k + 1) * n_chunk).min(h) {
+                    // SAFETY: row r belongs to chunk k alone.
+                    let row = unsafe { bp.slice(r * w, w) };
+                    trsv_lower_row(w, diag, row)
+                }
+            });
+        } else {
+            for r in 0..h { trsv_lower_row(w, diag, &mut below[r * w..(r + 1) * w]) }
+        }
+        true
     }
 }
 
@@ -762,13 +976,21 @@ mod tests {
     fn left_looking_factor_is_the_right_looking_one_bit_for_bit() {
         for &(rows, cols, radius, kdim, seed) in &[(6, 7, 1, 7, 1u64), (12, 12, 2, 3, 2), (20, 18, 2, 6, 3), (25, 25, 3, 5, 4)] {
             let (pat, vals) = aerial(rows, cols, radius, kdim, seed);
-            let sym = Symbolic::new(&pat, usize::MAX).unwrap();
+            let mut sym = Symbolic::new(&pat, usize::MAX).unwrap();
             let want = factor_right_looking(&sym, &pat, &vals).unwrap();
-            // As the app runs it, and with every supernode cut into row chunks.
-            for par in [PAR_UPDATE_FLOPS, 0.0] {
-                let got = sym.factor_with(&pat, &vals, par, Vec::new()).ok().unwrap();
-                assert!(got.vals.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()),
-                    "{rows}×{cols} r{radius} k{kdim}, par_flops {par}: the factors differ");
+            // As the app runs it, one supernode after another, and with every supernode
+            // cut into row chunks; by the elimination tree as the app cuts it, all in
+            // waves, in a few larger tasks, and in one task.
+            for share in [TASK_SHARE, 1e-12, 0.1, 1.0] {
+                sym.sched = sym.schedule(share);
+                let (tasks, waves) = (sym.sched.task_ptr.len() - 1, sym.sched.wave_ptr.len() - 1);
+                if share == TASK_SHARE && rows >= 20 { assert!(tasks > 8 && waves > 2, "{rows}×{cols}: {tasks} tasks, {waves} waves") }
+                if share < TASK_SHARE { assert!(tasks == 0 && waves > 4, "{rows}×{cols}: {tasks} tasks, {waves} waves") }
+                for par in [PAR_UPDATE_FLOPS, 0.0] { for tree in [false, true] {
+                    let got = sym.factor_with(&pat, &vals, par, tree, Vec::new()).ok().unwrap();
+                    assert!(got.vals.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "{rows}×{cols} r{radius} k{kdim}, par_flops {par}, tree {tree}, share {share}: the factors differ");
+                } }
             }
         }
     }

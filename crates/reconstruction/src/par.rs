@@ -43,6 +43,13 @@ impl<T> SyncPtr<T> {
         debug_assert!(i.checked_add(len).is_some_and(|e| e <= self.len), "SyncPtr range {i}+{len} out of {}", self.len);
         std::slice::from_raw_parts_mut(self.ptr.add(i), len)
     }
+    /// # Safety
+    /// `i..i + len` is in bounds and no thread writes it meanwhile.
+    #[inline(always)]
+    pub(crate) unsafe fn slice_ref<'a>(self, i: usize, len: usize) -> &'a [T] {
+        debug_assert!(i.checked_add(len).is_some_and(|e| e <= self.len), "SyncPtr range {i}+{len} out of {}", self.len);
+        std::slice::from_raw_parts(self.ptr.add(i), len)
+    }
 }
 
 /// Items per task for the per-observation and per-point loops: big enough that the pool's

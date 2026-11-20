@@ -63,6 +63,9 @@ impl Plan {
             let sym = if max_blocks == 0 || parts > room { None } else {
                 crate::sparse_chol::Symbolic::new(&pattern, max_blocks).filter(|sym| sym.factor_bytes() as u64 <= room)
             };
+            // Measurement builds: the elimination tree's shape (examples/bal.rs, BA_TREE=1).
+            #[cfg(feature = "bench")]
+            if let (Some(s), Some(_)) = (sym.as_ref(), std::env::var_os("BA_TREE")) { eprintln!("n {}: {}", pattern.n, s.tree_shape()) }
             let implicit = sym.is_none();
             (sym, implicit)
         } else { (None, false) };

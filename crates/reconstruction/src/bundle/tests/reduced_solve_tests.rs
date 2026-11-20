@@ -284,9 +284,15 @@ fn sparse_cholesky_solves_as_the_dense_one() {
 // 3×3 neighbourhood, or a range such as 3-5, drawn per point), BA_REFINE (refine_mask;
 // with it every camera shares sensor 0). It prints an FNV-1a hash of the whole output
 // (the f32 bits), which a same-bits change must leave as it was.
-#[test]
-#[ignore]
-fn bundle_adjust_timing() {
+// The timing test's problem (env knobs BA_SIDE, BA_VIEWS, BA_REFINE, see below):
+// cameras, intrinsics, points, observation indices and pixels, the prior, the policy,
+// the sensors, and (side, views, refine_mask) for the print.
+struct TimingProblem {
+    cams: Vec<f32>, intr: Vec<f32>, pts: Vec<f32>, idx: Vec<u32>, px: Vec<f32>, prior: Vec<f32>, policy: [f32; 7],
+    sensors: Vec<i32>, side: usize, views: String, refine_mask: u32,
+}
+
+fn timing_problem() -> TimingProblem {
     let env = |k: &str| std::env::var(k).ok();
     let side: usize = env("BA_SIDE").and_then(|v| v.parse().ok()).unwrap_or(40);
     let views = env("BA_VIEWS").unwrap_or_else(|| "9".into());
@@ -339,6 +345,22 @@ fn bundle_adjust_timing() {
     prior[3] = -10.0; prior[4] = 1e4; prior[8] = 1e4; prior[12] = 1e4;
     let policy = [f32::NAN, 1e-6, 200.0, 1.0, 1e-6, f32::NAN, 1.0];
     let sensors = if refine_mask != 0 { vec![0i32; n_cam] } else { Vec::new() };
+    TimingProblem { cams, intr, pts, idx, px, prior, policy, sensors, side, views, refine_mask }
+}
+
+// A realistic aerial bundle adjustment, timed by phase:
+// cargo test -p reconstruction --release -- --ignored --nocapture bundle_adjust_timing
+// Knobs (env): BA_SIDE (grid side, 40 ⇒ 1,600 cameras), BA_VIEWS (views per point: 9, the
+// 3×3 neighbourhood, or a range such as 3-5, drawn per point), BA_REFINE (refine_mask;
+// with it every camera shares sensor 0). It prints an FNV-1a hash of the whole output
+// (the f32 bits), which a same-bits change must leave as it was.
+#[test]
+#[ignore]
+fn bundle_adjust_timing() {
+    let env = |k: &str| std::env::var(k).ok();
+    let TimingProblem { cams, intr, pts, idx, px, prior, policy, sensors, side, views, refine_mask } = timing_problem();
+    let n_cam = side * side;
+    let n_pts = pts.len() / 3;
     // BA_REPS: run it that many times and report the fastest (the phases of that run).
     let reps: usize = env("BA_REPS").and_then(|v| v.parse().ok()).unwrap_or(1);
     let mut best: Option<(std::time::Duration, [f64; 5], Vec<f32>)> = None;
@@ -362,6 +384,42 @@ fn bundle_adjust_timing() {
     println!("  output hash {hash:016x}");
     println!("TIMING side={side} views={views} refine={refine_mask} total={:.3} cost={:.3} assemble={:.3} schur={:.3} solve={:.3} back={:.3} untimed={:.3} hash={hash:016x}",
         total.as_secs_f64(), ph[0], ph[1], ph[2], ph[3], ph[4], total.as_secs_f64() - ph.iter().sum::<f64>());
+}
+
+// The shape of the sparse factor's elimination tree on the timing test's problem (same
+// knobs): cargo test -p reconstruction --release -- --ignored --nocapture elimination_tree_shape
+#[test]
+#[ignore]
+fn elimination_tree_shape() {
+    let TimingProblem { cams, intr, pts, idx, px, prior, sensors, side, views, refine_mask, .. } = timing_problem();
+    let (problem, _, _) = Problem::parse(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, &[], &[], &[], &[]).unwrap();
+    let layout = Layout::new(&problem, &sensors, refine_mask, &[]);
+    let pattern = layout.pattern(&problem, true);
+    let t = std::time::Instant::now();
+    let mut sym = crate::sparse_chol::Symbolic::new(&pattern, usize::MAX).unwrap();
+    if let Some(share) = std::env::var("BA_TASK_SHARE").ok().and_then(|v| v.parse().ok()) { sym.set_task_share(share) }
+    println!("{} cameras, views {views}, refine {refine_mask}: n {}, ordering {:?}, {:.0} MB of factor\n{}", side * side, pattern.n,
+        t.elapsed(), sym.factor_bytes() as f64 / 1e6, sym.tree_shape());
+    // One factorisation of a random SPD fill of the same pattern, best of 5: the scatter,
+    // the factor one supernode after another and by the tree, and the substitutions.
+    let vals = spd_fill(&pattern, 1, 0.05);
+    let b: Vec<f64> = (0..pattern.n).map(|i| (i as f64 * 0.37).sin()).collect();
+    let mut best = [f64::MAX; 4];
+    let mut bits: Option<Vec<u64>> = None;
+    for _ in 0..5 {
+        for tree in [false, true] {
+            let (ts, tf, v) = sym.factor_timed(&pattern, &vals, tree);
+            best[0] = best[0].min(ts);
+            best[1 + tree as usize] = best[1 + tree as usize].min(tf);
+            let vb: Vec<u64> = v.iter().map(|x| x.to_bits()).collect();
+            if let Some(w) = &bits { assert!(*w == vb, "tree and loop factors differ") } else { bits = Some(vb) }
+            let t = std::time::Instant::now();
+            let _ = sym.with_vals_solve(v, &pattern, &b);
+            best[3] = best[3].min(t.elapsed().as_secs_f64());
+        }
+    }
+    println!("  one factorisation (s): scatter {:.4}, factor by supernode {:.4}, by tree {:.4}, substitutions {:.4}",
+        best[0], best[1], best[2], best[3]);
 }
 
 // cargo test -p reconstruction --release -- --ignored --nocapture sparse_cholesky_timing
