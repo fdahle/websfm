@@ -169,14 +169,20 @@ fn main() {
         eprintln!("TRACE {}", costs.join(" "));
     }
     let (solver0, solver1) = (0.5 * rms0 * rms0 * n_obs, 0.5 * rms1 * rms1 * n_obs);
+    // FNV-1a over the whole output's f32 bits: a change meant to keep the arithmetic must
+    // leave it as it was.
+    let out_hash = out.iter().fold(0xcbf29ce484222325u64, |h, v| {
+        v.to_bits().to_le_bytes().iter().fold(h, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+    });
     // rms0 comes back as f32: agreement to its 1e-7, not to f64.
     let mapping_ok = ((solver0 - cost0_f32) / cost0_f32).abs() < 1e-5;
     println!(
         "{{\"file\":\"{}\",\"solver\":\"websfm-{}\",\"cameras\":{},\"points\":{},\"observations\":{},\
 \"initial_cost\":{:.10e},\"start_cost_f32\":{:.10e},\"solver_initial_cost\":{:.10e},\"final_cost\":{:.10e},\
-\"mapping_ok\":{},\"iterations\":{},\"linear_solves\":{},\"cholesky\":{},\"implicit\":{},\"pcg_iters\":{},\"solve_s\":{:.3},\"read_s\":{:.3},\"peak_alloc_mb\":{:.0},\"threads\":{}}}",
+\"mapping_ok\":{},\"iterations\":{},\"linear_solves\":{},\"cholesky\":{},\"implicit\":{},\"pcg_iters\":{},\"solve_s\":{:.3},\"read_s\":{:.3},\"peak_alloc_mb\":{:.0},\"threads\":{},\"out_hash\":\"{:016x}\"}}",
         path, config, nc, np, b.obs.len(), cost0, cost0_f32, solver0, solver1, mapping_ok,
         trace.len(), stats[1] as u32, stats[2] as u32, stats[9] as u32, stats[7] as u64, solve_s, read_s, peak_alloc_mb,
         if cfg!(feature = "threads") { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { 1 },
+        out_hash,
     );
 }

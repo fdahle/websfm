@@ -280,10 +280,21 @@ fn sparse_cholesky_solves_as_the_dense_one() {
 
 // A realistic aerial bundle adjustment, timed by phase:
 // cargo test -p reconstruction --release -- --ignored --nocapture bundle_adjust_timing
+// Knobs (env): BA_SIDE (grid side, 40 ⇒ 1,600 cameras), BA_VIEWS (views per point: 9, the
+// 3×3 neighbourhood, or a range such as 3-5, drawn per point), BA_REFINE (refine_mask;
+// with it every camera shares sensor 0). It prints an FNV-1a hash of the whole output
+// (the f32 bits), which a same-bits change must leave as it was.
 #[test]
 #[ignore]
 fn bundle_adjust_timing() {
-    let side = 40usize;
+    let env = |k: &str| std::env::var(k).ok();
+    let side: usize = env("BA_SIDE").and_then(|v| v.parse().ok()).unwrap_or(40);
+    let views = env("BA_VIEWS").unwrap_or_else(|| "9".into());
+    let (v_lo, v_hi): (usize, usize) = match views.split_once('-') {
+        Some((a, b)) => (a.parse().unwrap(), b.parse().unwrap()),
+        None => { let v = views.parse().unwrap(); (v, v) }
+    };
+    let refine_mask: u32 = env("BA_REFINE").and_then(|v| v.parse().ok()).unwrap_or(0);
     let n_cam = side * side;
     let mut rng = Lcg(17);
     let mut cams = Vec::new();
@@ -295,33 +306,62 @@ fn bundle_adjust_timing() {
     }
     let (mut pts, mut idx, mut px) = (Vec::new(), Vec::new(), Vec::new());
     let n_pts = n_cam * 70;
+    let mut nb: Vec<(isize, isize)> = Vec::new();
     for p in 0..n_pts {
         let (x, y, z) = (rng.next() * 0.5 * side as f64 + 0.5 * side as f64, rng.next() * 0.5 * side as f64 + 0.5 * side as f64, 0.5 * rng.next());
         let (cx0, cy0) = (x.round() as isize, y.round() as isize);
-        let mut seen = 0;
+        nb.clear();
         for dy in -1..=1 { for dx in -1..=1 {
             let (gx, gy) = (cx0 + dx, cy0 + dy);
             if gx < 0 || gy < 0 || gx >= side as isize || gy >= side as isize { continue }
+            nb.push((gx, gy));
+        }}
+        if v_hi < 9 {
+            // k of the neighbourhood's cameras, drawn without replacement, kept in grid order.
+            let k = (v_lo + ((rng.next() * 0.5 + 0.5) * (v_hi - v_lo + 1) as f64) as usize).min(v_hi).min(nb.len());
+            for i in 0..k {
+                let j = i + (((rng.next() * 0.5 + 0.5) * (nb.len() - i) as f64) as usize).min(nb.len() - i - 1);
+                nb.swap(i, j);
+            }
+            nb.truncate(k);
+            nb.sort_unstable_by_key(|&(gx, gy)| (gy, gx));
+        }
+        assert!(!nb.is_empty());
+        for &(gx, gy) in &nb {
             let c = gy as usize * side + gx as usize;
             let (u, v) = (800.0 * (x - gx as f64) / (z + 10.0) + 320.0, 800.0 * (y - gy as f64) / (z + 10.0) + 240.0);
             idx.extend_from_slice(&[c as u32, p as u32]);
             px.extend_from_slice(&[(u + 0.3 * rng.next()) as f32, (v + 0.3 * rng.next()) as f32]);
-            seen += 1;
-        }}
-        assert!(seen > 0);
+        }
         pts.extend_from_slice(&[(x + 0.01 * rng.next()) as f32, (y + 0.01 * rng.next()) as f32, (z + 0.01 * rng.next()) as f32]);
     }
     let mut prior = vec![0f32; 31];
     prior[3] = -10.0; prior[4] = 1e4; prior[8] = 1e4; prior[12] = 1e4;
     let policy = [f32::NAN, 1e-6, 200.0, 1.0, 1e-6, f32::NAN, 1.0];
-    let t = std::time::Instant::now();
-    let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 30, &[], 0, &policy, &[], &[]);
-    let total = t.elapsed();
+    let sensors = if refine_mask != 0 { vec![0i32; n_cam] } else { Vec::new() };
+    // BA_REPS: run it that many times and report the fastest (the phases of that run).
+    let reps: usize = env("BA_REPS").and_then(|v| v.parse().ok()).unwrap_or(1);
+    let mut best: Option<(std::time::Duration, [f64; 5], Vec<f32>)> = None;
+    for _ in 0..reps {
+        prof::take();
+        let t = std::time::Instant::now();
+        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 30, &sensors, refine_mask, &policy, &[], &[]);
+        let (total, ph) = (t.elapsed(), prof::take());
+        if let Some((_, _, o)) = &best { assert!(o.iter().zip(&out).all(|(a, b)| a.to_bits() == b.to_bits()), "runs differ"); }
+        if best.as_ref().is_none_or(|b| total < b.0) { best = Some((total, ph, out)); }
+    }
+    let (total, ph, out) = best.unwrap();
     let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
-    let ph = prof::take();
-    println!("{n_cam} cameras, {n_pts} points, {} observations: {total:?}, rms {:.3} → {:.3}, {} solves",
+    let hash = out.iter().fold(0xcbf29ce484222325u64, |h, v| {
+        v.to_bits().to_le_bytes().iter().fold(h, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+    });
+    println!("{n_cam} cameras, {n_pts} points, {} observations, views {views}, refine {refine_mask}: {total:?}, rms {:.3} → {:.3}, {} solves",
         idx.len() / 2, out[base], out[base + 1], out[base + 5]);
-    println!("  phases (s): cost {:.2}, assemble {:.2}, schur {:.2}, solve {:.2}, back-substitute + trial cost {:.2}", ph[0], ph[1], ph[2], ph[3], ph[4]);
+    println!("  phases (s): cost {:.2}, assemble {:.2}, schur {:.2}, solve {:.2}, back-substitute + trial cost {:.2}, untimed {:.2}",
+        ph[0], ph[1], ph[2], ph[3], ph[4], total.as_secs_f64() - ph.iter().sum::<f64>());
+    println!("  output hash {hash:016x}");
+    println!("TIMING side={side} views={views} refine={refine_mask} total={:.3} cost={:.3} assemble={:.3} schur={:.3} solve={:.3} back={:.3} untimed={:.3} hash={hash:016x}",
+        total.as_secs_f64(), ph[0], ph[1], ph[2], ph[3], ph[4], total.as_secs_f64() - ph.iter().sum::<f64>());
 }
 
 // cargo test -p reconstruction --release -- --ignored --nocapture sparse_cholesky_timing
