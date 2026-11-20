@@ -520,7 +520,18 @@ complement**, analytic Jacobians and **adaptive Huber** robustification (Triggs 
   grows with co-visibility, not cameras². Below 600 unknowns (~100 cameras) it is solved
   by dense Cholesky, above by a **sparse block Cholesky** (`sparse_chol.rs`). The Schur
   step is split over fixed contiguous camera ranges, so results are bit-identical on any
-  thread count.
+  thread count. The sparse factor orders the camera graph by minimum degree and groups
+  its columns into supernodes; a supernode reads only those below it in the elimination
+  tree, so disjoint subtrees factor side by side, then the supernodes above them in
+  waves, and a big one in row chunks. Each still takes its updates in the same order, so
+  the bits do not depend on the schedule. An aerial block's tree is top-heavy (1,600
+  cameras: three quarters of the work on one chain), which bounds what this buys: the
+  waves overlap the big supernodes' serial parts. The ordering depends on the graph
+  alone and is kept from one call to the next; a call on the same graph (the decentring
+  trial's second solve, a re-solve after a filter that dropped no camera pair) reuses
+  it. A small solve (under 64,000 observations with the dense solve, 32,000 with the
+  sparse one) runs on one thread in the threaded build: the pool's hand-offs cost more
+  than they share there.
 - **Past the memory budget: the implicit Schur solve.** Before ordering, the solve predicts
   what the direct path would hold at its peak (`direct_bytes`: the reduced matrix twice,
   the undamped assembly and the damped copy a try factors, plus the larger of the factor

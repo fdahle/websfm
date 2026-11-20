@@ -53,9 +53,14 @@ up to 4 GiB, and a rayon pool that `initThreadPool(n)` starts as Web Workers sha
 that memory (wasm-bindgen-rayon). The bundle adjustment's assembly, Schur step, cost,
 back-substitution and sparse Cholesky run on it (`par.rs`). The Cholesky is
 left-looking: a supernode gathers its sources' updates in ascending order, the same
-subtractions a right-looking factor makes, and a big one is cut into row chunks
-(`sparse_chol.rs`; a test holds it to the old right-looking factor bit for bit).
-Spreading a right-looking supernode's updates over its targets instead was slower.
+subtractions a right-looking factor makes; disjoint subtrees of the elimination tree
+factor side by side, the supernodes above them in waves, and a big one is cut into row
+chunks (`sparse_chol.rs`; a test holds every schedule to the old right-looking factor
+bit for bit). Spreading a right-looking supernode's updates over its targets instead was
+slower; running the triangular solves by the tree gained nothing. A small bundle
+adjustment (under 64,000 observations with the dense solve, 32,000 with the sparse one)
+runs on the calling thread alone (`par.rs` `Inline`): below that the pool cost more than
+it saved.
 
 Besides the bundle adjustment, the pose hypotheses of PnP RANSAC (`pose.rs`), the
 Brown undistortion of the self-calibration fold (`distort.rs`) and guided track

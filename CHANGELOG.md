@@ -403,15 +403,22 @@ Notable changes to WebSfM. The format follows
 
 ### Performance
 - **Bundle adjustment is faster.** Every bundle adjustment (Sparse Model, Optimize
-  Cameras, the solves with GCPs) repeats less work from one step to the next: it
+  Cameras, the solves with GCPs) repeats less work from one step to the next and shares
+  more of it between processor cores, and the result is the same to the last bit. It
   projects each observation once per iteration and keeps what a step worked out for the
-  next attempt, and the result is the same to the last bit. A synthetic aerial block of
-  1,600 photos (9-photo tie points): 7.1 → 5.5 s on one core, 1.9 → 1.7 s on 20, 9.6 →
-  6.4 s in the browser's single-threaded build; with 3–5-photo tie points 4.9 → 4.3 s;
-  with self-calibration 8.6 → 6.3 s; 144 photos 0.40 → 0.25 s. Bundle Adjustment in the
-  Large: dubrovnik-88 24.5 → 15.1 s (4.7 → 3.5 s on 20 cores), trafalgar-126 8.5 → 5.3 s.
-  The solve holds 32 B more per observation, and where the memory budget has room (at
-  most a quarter of it) about 150 B more: 293 instead of 138 MB at 966,755 observations.
+  next attempt; on several cores, a large block's camera system is factored in
+  independent parts side by side, the setup of each solve runs on every core, and a
+  solve on the same camera graph as the one before reuses its ordering; a small project
+  stays on one core, where handing work to the others cost more than it saved. A
+  synthetic aerial block of 1,600 photos (9-photo tie points): 7.1 → 5.1 s on one core,
+  1.9 → 1.4 s on 20, 9.6 → 6.4 s in the browser's single-threaded build; with 3–5-photo
+  tie points 4.9 → 4.0 s (1.7 → 1.25 s on 20); with self-calibration 8.6 → 6.0 s (2.2 →
+  1.5 s); 144 photos 0.40 → 0.23 s; 49 photos on the multi-core build 0.11 → 0.065 s.
+  Bundle Adjustment in the Large: dubrovnik-88 24.5 → 15.2 s (4.7 → 3.6 s on 20 cores),
+  trafalgar-126 8.5 → 5.3 s, ladybug-539 5.5 → 5.2 s on 20 cores. The solve holds 32 B
+  more per observation, and where the memory budget has room (at most a quarter of it)
+  about 150 B more: 293 instead of 138 MB at 966,755 observations; the kept ordering
+  0.45 MB at 1,600 photos.
 - **Texturing a mesh is about four times faster.** Tools ▸ Mesh ▸ Texture now spreads its
   photo work over every processor core: finding which photos see each face, and copying
   the photos' pixels into the atlas, run side by side, one share of the photos per core;
