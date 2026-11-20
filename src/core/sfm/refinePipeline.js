@@ -202,7 +202,7 @@ export async function refineModel(ctx) {
 
     // Pre-filter solve stays pinhole ('none'): self-calibration before the tighter
     // cleanup can drift cx/cy badly (R6). Intrinsics are refined only below.
-    await runBundleAdjust('bundle adjustment', baIterations, 'none')
+    await runBundleAdjust('bundle adjustment', baIterations, 'none', { preFilter: true })
     logOutlierShare('pre-filter residuals')
 
     // A3: retriangulate missed matches + merge split tracks under the improved
@@ -244,7 +244,10 @@ export async function refineModel(ctx) {
           'info',
           'Sparse',
         )
-        await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none', { warm: true })
+        await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none', {
+          warm: true,
+          preFilter: true,
+        })
       } else if (lowParallax) {
         log(
           `Retriangulation found no stable missed structure — rejected ` +

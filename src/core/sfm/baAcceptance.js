@@ -95,19 +95,28 @@ function residuals(state, observations) {
   return out
 }
 
-const huber = (e, d) => (Number.isNaN(e) ? d * d : e <= d ? e * e : 2 * d * e - d * d)
+// The crate's losses (bundle/model.rs `Loss`) for one pixel error e at threshold d.
+const LOSSES = {
+  'huber': (e, d) => (e <= d ? e * e : 2 * d * e - d * d),
+  'cauchy': (e, d) => d * d * Math.log1p((e * e) / (d * d)),
+  'geman-mcclure': (e, d) => (d * d * e * e) / (d * d + e * e),
+}
 
 /**
- * Compare a pre- and post-BA state under one Huber cost.
+ * Compare a pre- and post-BA state under one robust cost: Huber, or the loss the solve
+ * descended (`loss`, SFM_TUNING.baPreFilterLoss).
  *
  * @param {object} o
  * @param {{cams:Array, Ks:Array, points:Array|Float64Array}} o.before  points: [{x,y,z}] or flat xyz
  * @param {{cams:Array, Ks:Array, points:Array}} o.after
  * @param {{camIdx:number, ptIdx:number, x:number, y:number}[] | object} o.observations  records or an ObservationList
+ * @param {string} [o.loss]  'huber' (default), 'cauchy' or 'geman-mcclure'
  * @returns {{ delta:number, before:number, after:number, improved:boolean }}
  *   `before`/`after` are RMS-equivalent (sqrt of mean Huber cost), in px.
  */
-export function compareRobustCost({ before, after, observations }) {
+export function compareRobustCost({ before, after, observations, loss = 'huber' }) {
+  const rho = LOSSES[loss] ?? LOSSES.huber
+  const cost = (e, d) => (Number.isNaN(e) ? d * d : rho(e, d))
   const eb = residuals(before, observations)
   const ea = residuals(after, observations)
   const finite = [...eb].filter((e) => Number.isFinite(e)).sort((x, y) => x - y)
@@ -117,8 +126,8 @@ export function compareRobustCost({ before, after, observations }) {
     ca = 0
   const nObs = obsCount(observations)
   for (let i = 0; i < nObs; i++) {
-    cb += huber(eb[i], delta)
-    ca += huber(ea[i], delta)
+    cb += cost(eb[i], delta)
+    ca += cost(ea[i], delta)
   }
   const n = Math.max(1, nObs)
   const b = Math.sqrt(cb / n),

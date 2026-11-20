@@ -52,6 +52,19 @@ describe('compareRobustCost', () => {
     expect(compareRobustCost({ before, after, observations }).improved).toBe(true)
   })
 
+  it('judges a solve by the loss it descended', () => {
+    // "before": every inlier 1 px off; "after": the inliers fit and the 5 outliers (40 px)
+    // drifted 20 px further out. Huber charges each outlier 2δ per pixel of drift and
+    // rejects it; the redescending losses charge less than the inliers gained.
+    const before = state(points.map((p) => ({ ...p, x: p.x + 0.005 })))
+    const after = state(points.map((p, i) => (i < 5 ? { ...p, x: p.x - 0.1 } : p)))
+    const judge = (loss) => compareRobustCost({ before, after, observations, loss })
+    expect(judge('huber').improved).toBe(false)
+    expect(judge(undefined).improved).toBe(false)
+    expect(judge('cauchy').improved).toBe(true)
+    expect(judge('geman-mcclure').improved).toBe(true)
+  })
+
   it('rejects a solve that genuinely worsens the fit', () => {
     const before = state(points)
     const after = state(points.map((p) => ({ ...p, x: p.x + 0.02 })))

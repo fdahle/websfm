@@ -539,6 +539,11 @@ describe('bundleAdjust', () => {
     expect(baSolverFlat({ sigmaUnits: true })[11]).toBe(1)
     expect(baSolverFlat({ sigmaUnits: false })[11]).toBe(0)
     expect(baSolverFlat({})[11]).toBeNaN()
+    // Slot 12: the robust loss (SolverOpts::loss), Huber unless named.
+    expect(baSolverFlat({ loss: 'huber' })[12]).toBe(0)
+    expect(baSolverFlat({ loss: 'cauchy' })[12]).toBe(1)
+    expect(baSolverFlat({ loss: 'geman-mcclure' })[12]).toBe(2)
+    expect(baSolverFlat({})[12]).toBeNaN()
   })
 
   it('returns null when there are no observations', async () => {

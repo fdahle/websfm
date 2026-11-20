@@ -29,6 +29,39 @@ pub(crate) fn rho([q, s, n]: [f64; 3], dh: f64) -> f64 {
     if e <= dh { q } else { let r = dh / e; q * (2.0 * r - r * r) }
 }
 
+/// The robust loss (solver slot 12) at threshold δ, on the loss's error e = √n:
+/// Huber ρ = q·(2r − r²) past δ (r = δ/e), its IRLS weight δ/e; Cauchy ρ = q·(δ²/n)·ln(1 + n/δ²),
+/// weight 1/(1 + n/δ²); Geman–McClure ρ = q·δ²/(δ² + n), weight (δ²/(δ² + n))². Each is q
+/// near zero, and its weight is ρ's slope in n over q's, so the IRLS step descends the
+/// cost the LM accept test compares. Huber bounds a gross mismatch's pull at δ; the two
+/// redescending ones release it (its pull falls as 1/e and 1/e³).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Loss { Huber, Cauchy, GemanMcClure }
+
+impl Loss {
+    /// ρ of one observation's [q, s, n] at δ; δ² for one that projects nowhere.
+    #[inline]
+    pub(crate) fn rho(self, r: [f64; 3], dh: f64) -> f64 {
+        let [q, s, n] = r;
+        match self {
+            Loss::Huber => rho(r, dh),
+            _ if s < 0.0 => dh * dh,
+            Loss::Cauchy => { let u = n / (dh * dh); if u == 0.0 { q } else { q * u.ln_1p() / u } }
+            Loss::GemanMcClure => q * (dh * dh) / (dh * dh + n),
+        }
+    }
+
+    /// The IRLS weight of an observation whose loss error is e.
+    #[inline]
+    pub(crate) fn weight(self, e: f64, dh: f64) -> f64 {
+        match self {
+            Loss::Huber => if e <= dh { 1.0 } else { dh / e },
+            Loss::Cauchy => 1.0 / (1.0 + (e * e) / (dh * dh)),
+            Loss::GemanMcClure => { let g = (dh * dh) / (dh * dh + e * e); g * g }
+        }
+    }
+}
+
 /// 2.5 × the median residual, at least 1 px (1 px with none); in σ units (`Model::sig`),
 /// 1 px of an observation of the reference weight.
 fn median_threshold(mut es: Vec<f64>) -> f64 {
@@ -59,6 +92,8 @@ pub(crate) struct Model<'a> {
     // an observation weighted 1/σ² is an outlier at the same multiple of its own σ as any
     // other. None: the plain pixel error √(dx² + dy²), which equal weights give anyway.
     pub sig: Option<f64>,
+    // SolverOpts::loss.
+    pub loss: Loss,
 }
 
 impl Model<'_> {
@@ -202,7 +237,7 @@ impl Model<'_> {
     /// `robust_cost` from the residuals of `fill_residuals` at the same state `st`.
     pub(crate) fn robust_cost_of(&self, res: &[[f64; 3]], st: &State, dh: f64) -> f64 {
         let mut sum = 0.0f64;
-        for &r in res { sum += rho(r, dh); }
+        for &r in res { sum += self.loss.rho(r, dh); }
         sum + self.p.anchor_sse(&st.pts) + self.p.camera_prior_sse(&st.cams)
     }
 
@@ -228,7 +263,7 @@ impl Model<'_> {
         if cnt == 0 { 0.0 } else { (sse / cnt as f64).sqrt() }
     }
 
-    /// Huber-robustified cost Σ ρ(e) at threshold δ (e in pixels, or σ units: `sig`), plus the (unrobustified,
+    /// The robust cost Σ ρ(e) of the loss in use (`Loss`) at threshold δ (e in pixels, or σ units: `sig`), plus the (unrobustified,
     /// quadratic) anchor and camera-prior terms: the objective the LM step descends.
     pub(crate) fn robust_cost(&self, st: &State, dh: f64) -> f64 {
         let terms = map_indexed(self.p.obs.len(), |o| {
@@ -239,13 +274,12 @@ impl Model<'_> {
             let x = if self.p.rs_any { self.seen_point(o, &st.pts, &st.gpar).0 } else { st.pts[pi] };
             let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, &e.p, e.fisheye, &x);
             if px.is_nan() { return dh * dh; }
-            let dx=px-ox; let dy=py-oy; let e=self.loss_sq(wx, wy, dx, dy, dx*dx+dy*dy).sqrt();
-            // The Huber loss the IRLS weight r = δ/e actually descends: ρ = q·(2r − r²)
+            let dx=px-ox; let dy=py-oy; let s=dx*dx+dy*dy;
+            // The loss the IRLS weight actually descends (`Loss`): for Huber ρ = q·(2r − r²)
             // (= 2δe − δ² for unit weights), continuous with q at e = δ. Evaluating
             // r·q (= δe) instead halved the outlier slope relative to the step model
             // and the anchor/prior terms, so step acceptance judged a different cost.
-            let q = wx*dx*dx + wy*dy*dy;
-            if e <= dh { q } else { let r = dh/e; q * (2.0*r - r*r) }
+            self.loss.rho([wx*dx*dx + wy*dy*dy, s, self.loss_sq(wx, wy, dx, dy, s)], dh)
         });
         let mut sum = 0.0f64;
         for v in terms { sum += v; }
@@ -358,9 +392,9 @@ impl Model<'_> {
                 }
             }
         }
-        // Huber IRLS weight, on the loss's error (`sig`).
+        // The loss's IRLS weight, on the loss's error (`sig`).
         let e = self.loss_sq(obs_wx, obs_wy, ru, rv, ru*ru + rv*rv).sqrt();
-        let w = if e <= dh { 1.0 } else { dh / e };
+        let w = self.loss.weight(e, dh);
         Some(Jac { ci, ru, rv, wu: w * obs_wx, wv: w * obs_wy, ju, jv, jpu, jpv, jku, jkv })
     }
 

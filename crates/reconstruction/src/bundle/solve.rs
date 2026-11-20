@@ -124,6 +124,10 @@ pub(crate) const PCG_MIN_N: usize = 600;
 //                   one detection pixel) it moved Casa Grande's checkpoints 1.09 / 1.02 →
 //                   1.11 / 1.05 m; the app turns it on with the scale weights
 //                   (SFM_TUNING.tieScaleWeightCap).
+//   loss            slot 12: the robust loss at that threshold: absent / 0 ⇒ Huber (a
+//                   mismatch's pull bounded at δ), 1 ⇒ Cauchy, 2 ⇒ Geman–McClure
+//                   (redescending: a residual far past δ pulls ever less, so a gross
+//                   mismatch is released, not just bounded). Same δ; `Loss`.
 //   memory          slot 10, MiB: the most the direct solve may predict it holds at its
 //                   peak (`direct_bytes`); absent ⇒ BA_MEMORY_BUDGET. Past it the reduced
 //                   system is never stored: PCG runs on S implicitly (Ceres'
@@ -139,10 +143,12 @@ pub(crate) struct SolverOpts {
     pub memory: u64,
     // Slot 11.
     pub sigma_units: bool,
+    // Slot 12.
+    pub loss: Loss,
 }
 
 impl SolverOpts {
-    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None, covariance: false, memory: BA_MEMORY_BUDGET, sigma_units: false };
+    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0, huber: None, covariance: false, memory: BA_MEMORY_BUDGET, sigma_units: false, loss: Loss::Huber };
 
     pub(crate) fn from_flat(f: &[f32]) -> SolverOpts {
         let d = SolverOpts::DEFAULT;
@@ -161,6 +167,7 @@ impl SolverOpts {
             covariance: slot(9).map_or(d.covariance, |v| v == 1.0),
             memory: slot(10).map_or(d.memory, |v| (v * (1u64 << 20) as f64) as u64),
             sigma_units: slot(11).map_or(d.sigma_units, |v| v != 0.0),
+            loss: slot(12).map_or(d.loss, |v| if v == 1.0 { Loss::Cauchy } else if v == 2.0 { Loss::GemanMcClure } else { Loss::Huber }),
         }
     }
 }

@@ -332,6 +332,7 @@ export function createBundleSession(ctx) {
   // tracks, their mark observations and the anchor residuals — so a GCP-anchored solve
   // can refine intrinsics through the same validation + fold path as every other pass.
   let lastSolve = null // see runBundleAdjust
+  const LOSS_LABEL = { 'huber': 'Huber', 'cauchy': 'Cauchy', 'geman-mcclure': 'Geman–McClure' }
   // `warm`: the model is already converged (a re-solve after a filter, a
   // retriangulation or with survey constraints added), so the solve may stop earlier.
   // Brown's decentring terms under the auto schedule are a model-selection decision, made
@@ -347,7 +348,7 @@ export function createBundleSession(ctx) {
     label,
     iters,
     refineMode = refineIntrinsics,
-    { cameraPriors = null, refineOnly = null, gcp = null, warm = false, lensSigma = false } = {},
+    { cameraPriors = null, refineOnly = null, gcp = null, warm = false, lensSigma = false, preFilter = false } = {},
   ) {
     // Any solve replaces the record of the last one; it is set again below only when
     // this one leaves a converged model (refinePipeline.js skips a re-solve of it).
@@ -408,9 +409,13 @@ export function createBundleSession(ctx) {
     // A survey-constrained solve (camera priors or GCP anchors) is judged by the
     // bounded-increase rule, not "cost must fall".
     const constrained = !!(cameraPriors || gcp)
+    // A solve before the track filter may descend a redescending loss (SFM_TUNING
+    // baPreFilterLoss), never one with GCP marks in it; every other keeps Huber.
+    const loss =
+      preFilter && !gcp && cfg.baPreFilterLoss && cfg.baPreFilterLoss !== 'huber' ? cfg.baPreFilterLoss : null
     log(
       `${capitalize(label)} — ${camList.length} cameras, ${ptIds.length} points, ` +
-        `${observations.n} observations, ${iters} iters`,
+        `${observations.n} observations, ${iters} iters${loss ? `, ${LOSS_LABEL[loss]} loss` : ''}`,
       'info',
       'Sparse',
     )
@@ -464,6 +469,10 @@ export function createBundleSession(ctx) {
       }
     }
 
+    const solverOf = () => {
+      const s = warm ? { ...baSolver, warm: true } : baSolver
+      return loss ? { ...s, loss } : s
+    }
     const solve = (mode) =>
       bundleAdjust(camList, kList, posBefore, observations, {
         maxIters: iters,
@@ -472,7 +481,7 @@ export function createBundleSession(ctx) {
         refineReadout: rollingShutter,
         ...(rig ? { rig: rig.attach(uuidList), refineRig: !fixedCameras?.size } : {}),
         sensorOfCam,
-        solver: warm ? { ...baSolver, warm: true } : baSolver,
+        solver: solverOf(),
         flatPoints: true,
         ...(fixedCams?.length ? { fixedCams } : {}),
         ...(cameraPriors ? { cameraPriors } : {}),
@@ -549,6 +558,7 @@ export function createBundleSession(ctx) {
         before: { cams: camList, Ks: kList, points: posBefore },
         after: { cams: result.cameras, Ks: afterKs, points: result.pos },
         observations,
+        loss: loss ?? 'huber',
       })
       if (delta < 0.01) {
         log(
@@ -564,7 +574,7 @@ export function createBundleSession(ctx) {
         log(
           `${capitalize(label)} not kept: RMS ${result.costBefore.toFixed(2)}px → ` +
             `${result.costAfter.toFixed(2)}px and robust cost ${robust.before.toFixed(2)} → ` +
-            `${robust.after.toFixed(2)}px (Huber δ ${robust.delta.toFixed(1)}px) would worsen the model; ` +
+            `${robust.after.toFixed(2)}px (${LOSS_LABEL[loss ?? 'huber']} δ ${robust.delta.toFixed(1)}px) would worsen the model; ` +
             'the earlier estimate stays',
           'warn',
           'Sparse',
@@ -574,7 +584,7 @@ export function createBundleSession(ctx) {
       log(
         `${capitalize(label)} accepted — plain RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px rose, ` +
           `but the robust cost it minimises fell ${robust.before.toFixed(2)} → ${robust.after.toFixed(2)}px ` +
-          `(Huber δ ${robust.delta.toFixed(1)}px): outliers were down-weighted, not the fit worsened`,
+          `(${LOSS_LABEL[loss ?? 'huber']} δ ${robust.delta.toFixed(1)}px): outliers were down-weighted, not the fit worsened`,
         'info',
         'Sparse',
       )

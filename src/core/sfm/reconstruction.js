@@ -527,6 +527,9 @@ export function lensGroupOfCamera(sensorIds) {
   })
 }
 
+// Solver slot 12: the robust loss (bundle/model.rs `Loss`).
+const BA_LOSS_SLOT = { 'huber': 0, 'cauchy': 1, 'geman-mcclure': 2 }
+
 // bundle.rs `solver_flat`; NaN keeps that slot's crate default. `lensSigma` (slot 9) asks
 // for the refined lens terms' standard deviations (bundleAdjust ▸ lensSigma).
 export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
@@ -542,6 +545,7 @@ export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
     warm,
     memoryMb,
     sigmaUnits,
+    loss,
   } = solver ?? {}
   // pcgPreconditioner: 'jacobi' (default) | 'ic0' (block incomplete Cholesky, opt-in).
   // direct: a sparse block Cholesky wherever PCG would run (bundle.rs, sparse_chol.rs).
@@ -552,6 +556,8 @@ export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
   // sigmaUnits: true reads the robust loss on each observation's error in σ units instead
   // of the plain pixel error (slot 11, bundle/solve.rs SolverOpts::sigma_units); false or
   // unset: pixels. bundleSession.js turns it on with the scale weights.
+  // loss: the robust loss at the threshold (slot 12, bundle/model.rs `Loss`): 'huber'
+  // (default), 'cauchy' or 'geman-mcclure' (redescending; SFM_TUNING.baPreFilterLoss).
   return Float32Array.of(
     num(pcgMinN),
     num(pcgRelTol),
@@ -565,6 +571,7 @@ export function baSolverFlat(solver = {}, { lensSigma = false } = {}) {
     lensSigma ? 1 : NaN,
     num(memoryMb),
     sigmaUnits === true ? 1 : sigmaUnits === false ? 0 : NaN,
+    BA_LOSS_SLOT[loss] ?? NaN,
   )
 }
 

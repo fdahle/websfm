@@ -33,7 +33,7 @@ fn two_sigma_problem() -> (Problem, State, usize, usize) {
 }
 
 fn model<'a>(p: &'a Problem, l: &'a Layout, sigma_units: bool) -> Model<'a> {
-    Model { p, l, huber: None, sig: if sigma_units { p.w_ref } else { None } }
+    Model { p, l, huber: None, sig: if sigma_units { p.w_ref } else { None }, loss: Loss::Huber }
 }
 
 #[test]
@@ -154,4 +154,42 @@ fn a_fine_keypoint_far_off_its_sigma_pulls_less_in_sigma_units() {
     // and the coarse ones go past δ themselves: r ≈ 2.7 px.
     println!("coarse views: σ units {sig:.3} px, pixels {pix:.3} px");
     assert!((sig - 1.6).abs() < 0.15 && pix > 2.3, "coarse views' residual: σ units {sig} px, pixels {pix} px");
+}
+
+// A planted gross mismatch (40 px on one of a point's six observations, δ fixed at 2 px):
+// Huber bounds its pull at δ but keeps it, so the point settles off its five good views;
+// Cauchy and Geman–McClure release it, and the point goes where those views put it.
+#[test]
+fn a_redescending_loss_releases_a_gross_mismatch() {
+    let (n_cam, n_pts, bad) = (6usize, 60usize, 7usize);
+    let mut rng = 0x2545f4914f6cdd1du64;
+    let mut next = || { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; (rng >> 11) as f64 / (1u64 << 53) as f64 };
+    let cams: Vec<f64> = (0..n_cam).flat_map(|c| [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -(c as f64), 0.0, 0.0]).collect();
+    let intr: Vec<f64> = (0..n_cam).flat_map(|_| [1000.0, 1000.0, 0.0, 0.0]).collect();
+    let truth: Vec<[f64; 3]> = (0..n_pts).map(|_| [5.0 * next(), 4.0 * next() - 2.0, 10.0 + 4.0 * next()]).collect();
+    let (mut idx, mut px) = (Vec::new(), Vec::new());
+    for (p, x) in truth.iter().enumerate() {
+        for c in 0..n_cam {
+            let shift = if p == bad && c == 3 { 40.0 } else { 0.0 };
+            idx.extend_from_slice(&[c as u32, p as u32]);
+            px.extend_from_slice(&[(1000.0 * (x[0] - c as f64) / x[2] + shift) as f32, (1000.0 * x[1] / x[2]) as f32]);
+        }
+    }
+    // The point starts off its true place, so each loss has to find its own minimum.
+    let mut pts: Vec<f64> = truth.iter().flatten().copied().collect();
+    for (k, d) in [0.03, -0.02, 0.05].iter().enumerate() { pts[bad * 3 + k] += d; }
+    let fixed = { let mut f = vec![0u8; n_cam]; f[0] = 1; f[1] = 1; f };
+    // Slot 8: Huber δ 2 px; slot 12: the loss.
+    let run = |loss: f32| {
+        let solver = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-12, f32::NAN, f32::NAN, f32::NAN, 2.0, f32::NAN,
+                      f32::NAN, f32::NAN, loss];
+        let out = crate::bundle::bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &[], 100, &[], 0, &solver,
+            &fixed, &[]);
+        let q = &out[n_cam * 12 + bad * 3..n_cam * 12 + bad * 3 + 3];
+        ((0..3).map(|k| (q[k] - truth[bad][k]).powi(2)).sum::<f64>()).sqrt()
+    };
+    let (huber, cauchy, gm) = (run(0.0), run(1.0), run(2.0));
+    assert!(huber > 2e-3, "Huber moved the point by {huber} m");
+    assert!(cauchy < 0.1 * huber, "Cauchy {cauchy} m vs Huber {huber} m");
+    assert!(gm < 0.01 * huber, "Geman–McClure {gm} m vs Huber {huber} m");
 }

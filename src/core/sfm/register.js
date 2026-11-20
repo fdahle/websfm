@@ -633,6 +633,7 @@ export async function registerImages(ctx) {
           `interim bundle adjustment (${cameras.size} cameras)`,
           interimBaIterations,
           distortionRefine(cameras.size),
+          { preFilter: true },
         )
         const ptsBeforeFilter = tracks.liveCount()
         const f = filterTracks({ maxReprojPx: filterMaxReprojPx * 2, minTriAngleDeg: filterMinTriAngleDeg })

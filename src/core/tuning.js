@@ -137,6 +137,18 @@ export const SFM_TUNING = {
   // cap 4 / 8; PUTI with RTK checkpoints 3.0 / 8.2 → 2.7 / 8.3 cm (cap 4); Casa Grande
   // GCP checkpoints 1.09 / 1.02 → 1.11 / 1.04 m. Not gated with it on.
   tieScaleWeightCap: 0,
+  // ── The robust loss of the solves before the track filter (plan-ba-next ▸ C3) ──
+  // The interim solves of registration, the first global solve and the one after
+  // retriangulation run before the tight filter, on observations that still hold gross
+  // mismatches. Huber bounds a mismatch's pull at δ but keeps it; 'cauchy' or
+  // 'geman-mcclure' (redescending, same δ: 2.5 × the median residual) release it. Every
+  // later solve, and any solve with GCP marks, keeps Huber. 'huber' = as before. Off:
+  // measured 2026-11-20 (plan-ba-next ▸ C3, same matches, both pair orders) Cauchy is a
+  // trade-off: quarry RTK rms3d 0.203 / 0.233 m → 0.199 / 0.227, PUTI checkpoints V
+  // 8.16 / 8.18 → 7.87 / 7.80 cm, Casa Grande equal, the gate's ETH3D medians −11 … +3 %;
+  // but the first global solve takes 2–3× the iterations: BA 114 → 160 s on quarry,
+  // 131 → 145 s on PUTI. Geman–McClure: mixed (PUTI lost 756 points to filter pass 1 once).
+  baPreFilterLoss: 'huber',
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
   // native px against the run's detection scale (core/scaleContext.js, which owns
