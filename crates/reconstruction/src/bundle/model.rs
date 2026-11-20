@@ -340,6 +340,23 @@ impl Model<'_> {
         Some(Jac { ci, ru, rv, wu: w * obs_wx, wv: w * obs_wy, ju, jv, jpu, jpv, jku, jkv })
     }
 
+    /// `eblocks` from the rows the assembly cached (Plan::use_ecache): the same values.
+    pub(crate) fn eblocks_cached(&self, pi: usize, ec: &[f64], ev: &[bool], es: usize, list: &mut EList) {
+        let (p, l) = (self.p, self.l);
+        list.clear();
+        for q in p.pt_start[pi]..p.pt_start[pi + 1] {
+            let o = p.pt_obs[q as usize] as usize;
+            if !ev[o] { continue; }
+            let (row, ci) = (&ec[o * es..(o + 1) * es], p.obs[o].0 as usize);
+            let sj = l.slot[p.pb[ci]];
+            if sj != FIXED { list.add(sj, 6 * sj, 6, p.pb_dup, |a| [row[a * 3], row[a * 3 + 1], row[a * 3 + 2]]); }
+            if l.refine {
+                let g = l.grp[ci];
+                list.add(l.n_free + g, l.group_off + g * l.kdim, l.kdim, true, |a| [row[18 + a * 3], row[19 + a * 3], row[20 + a * 3]]);
+            }
+        }
+    }
+
     /// Point pi's coupling blocks E (Jvarᵀ·Jp): camera then group, per observation.
     /// A camera block merges only where a point has two observations on one pose block
     /// (`Problem::pb_dup`); a group block with the point's other observations in its group.

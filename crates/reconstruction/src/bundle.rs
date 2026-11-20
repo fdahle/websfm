@@ -352,7 +352,7 @@ fn bundle_adjust_impl(
             prof::mark(3);
             // δX is written where the tentative points will be, turned into X + δX below,
             // so the step needs no array of its own.
-            let mut tent_pts = back_substitute(&m, &st, dh, &cinv_store, &nrm.gpv, &dsol);
+            let mut tent_pts = back_substitute(&m, &plan, &w, &st, dh, &cinv_store, &nrm.gpv, &dsol);
 
             // Tentative update: t += δt, R = exp(δω)·R, X += δX, group params += δ.
             let mut tent_cams = st.cams.clone();

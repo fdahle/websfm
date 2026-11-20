@@ -34,6 +34,10 @@ pub(crate) struct Plan {
     // Whether the observations' residuals are kept from one iteration to the next (they
     // fit the memory budget beside what the solve holds).
     pub keep_res: bool,
+    // The explicit solves' coupling-row cache (Work::ecache): on or not, and its f64 per
+    // observation (a camera's 6 × 3 rows, then the group's kdim × 3).
+    pub use_ecache: bool,
+    pub estride: usize,
 }
 
 impl Plan {
@@ -134,7 +138,19 @@ impl Plan {
             None => direct_bytes(pattern.n_vals, if n <= DENSE_MAX_N { 16 * (n * n) as u64 } else { 0 }, 0, obs.len(), n_pts),
         };
         let keep_res = held + RES_PER_OBS * n_obs <= solver.memory;
-        Plan { pattern, direct, implicit, function_tol, lower_only, range_plan, point_chunks, use_jcache, jk, jstride, cam_grp_at, keep_res }
+        // The direct and dense solves' coupling-row cache: each observation's rows of E
+        // (Jvarᵀ·Jp, the values `Model::eblocks` derives), in f64, written by the assembly,
+        // which linearises every observation once an iteration anyway, and read by the
+        // Schur step and the back-substitution of every try, which otherwise linearise each
+        // observation again (the Schur step once for each range its point is in). Same
+        // values, so the same bits. Only when it fits beside the rest and takes at most a
+        // quarter of the budget (a large block keeps its headroom); else `eblocks`.
+        let estride = 18 + 3 * if l.refine { l.kdim } else { 0 };
+        let ecache_bytes = (8 * estride as u64 + 1) * n_obs;
+        let use_ecache = !implicit && ecache_bytes <= solver.memory / 4
+            && held + if keep_res { RES_PER_OBS * n_obs } else { 0 } + ecache_bytes <= solver.memory;
+        Plan { pattern, direct, implicit, function_tol, lower_only, range_plan, point_chunks, use_jcache, jk, jstride, cam_grp_at,
+               keep_res, use_ecache, estride }
     }
 
     /// The points of chunk c (`point_chunks`).
@@ -162,6 +178,10 @@ pub(crate) struct Work {
     // The accepted state's residuals and the trial's (Plan::keep_res, Model::fill_residuals).
     pub res: Vec<[f64; 2]>,
     pub res_trial: Vec<[f64; 2]>,
+    // Each observation's coupling rows at this iteration's linearisation (Plan::use_ecache),
+    // and whether it has any (it projects somewhere).
+    pub ecache: Vec<f64>,
+    pub evalid: Vec<bool>,
 }
 
 impl Work {
@@ -170,7 +190,7 @@ impl Work {
         let share_s = if chunked { (0..plan.point_chunks).map(|_| vec![0f64; plan.pattern.n_vals]).collect() } else { Vec::new() };
         let share_r = if chunked { (0..plan.point_chunks).map(|_| vec![0f64; n]).collect() } else { Vec::new() };
         Work { smat: Vec::new(), s: Vec::new(), b_damped: Vec::new(), work: Vec::new(), share_s, share_r, jcache: Vec::new(),
-               jcache_outer: u32::MAX, res: Vec::new(), res_trial: Vec::new() }
+               jcache_outer: u32::MAX, res: Vec::new(), res_trial: Vec::new(), ecache: Vec::new(), evalid: Vec::new() }
     }
 }
 
@@ -201,6 +221,12 @@ pub(crate) fn assemble(m: &Model, plan: &Plan, st: &State, dh: f64, w: &mut Work
     let pts = &st.pts;
     w.smat.clear();
     w.smat.resize(pattern.n_vals, 0.0);
+    // The coupling-row cache: each observation's rows written by the one visit below that
+    // owns it (its camera's range, or for a camera held fixed its point's owner).
+    let (ec_on, es) = (plan.use_ecache, plan.estride);
+    let kd = if refine { kdim } else { 0 };
+    if ec_on { w.ecache.resize(es * p.obs.len(), 0.0); w.evalid.resize(p.obs.len(), false); }
+    let (ec_p, ev_p) = (SyncPtr::of(&mut w.ecache), SyncPtr::of(&mut w.evalid));
     let mut gr = vec![0f64; n];
     let mut cmat = vec![[[0f64; 3]; 3]; n_pts];
     let mut gpv = vec![[0f64; 3]; n_pts];
@@ -306,8 +332,13 @@ pub(crate) fn assemble(m: &Model, plan: &Plan, st: &State, dh: f64, w: &mut Work
                     let free = sc != FIXED;
                     let mine = free && rp.range(sc) == r;
                     if !mine && !owner { continue; }
-                    let Some(Jac { ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv, ci }) = m.jac(o, st, dh)
-                        else { continue };
+                    let writer = ec_on && (mine || (!free && owner));
+                    let jac = m.jac(o, st, dh);
+                    // SAFETY: observation o has one writer (its camera's range, or its point's owner).
+                    if writer { unsafe { *ev_p.at(o) = jac.is_some(); } }
+                    let Some(j) = jac else { continue };
+                    if writer { write_erows(unsafe { ec_p.slice(o * es, es) }, &j, kd); }
+                    let Jac { ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv, ci } = j;
                     // SAFETY (all writes below): RangePlan gives each element one writing range.
                     if mine {
                         let (coff, dc) = (6 * sc, pattern.diag_at[sc]);
@@ -369,8 +400,13 @@ pub(crate) fn assemble(m: &Model, plan: &Plan, st: &State, dh: f64, w: &mut Work
                 // SAFETY (all writes below): chunk c alone writes its shares and its points.
                 let (gp, cm) = unsafe { (gp_p.at(pi), cm_p.at(pi)) };
                 for q in pt_start[pi]..pt_start[pi + 1] {
-                    let Some(Jac { ci, ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv }) = m.jac(pt_obs[q as usize] as usize, st, dh)
-                        else { continue };
+                    let o = pt_obs[q as usize] as usize;
+                    let jac = m.jac(o, st, dh);
+                    // SAFETY: observation o is point pi's, and the point chunk c's alone.
+                    if ec_on { unsafe { *ev_p.at(o) = jac.is_some(); } }
+                    let Some(j) = jac else { continue };
+                    if ec_on { write_erows(unsafe { ec_p.slice(o * es, es) }, &j, kd); }
+                    let Jac { ci, ru, rv, wu, wv, ju, jv, jpu, jpv, jku, jkv } = j;
                     let sc = slot[pb[ci]];
                     let free = sc != FIXED;
                     let coff = if free { 6 * sc } else { 0 };
@@ -438,6 +474,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
     let (p, n_pts, n) = (m.p, m.p.n_pts, m.l.n);
     let pattern = &plan.pattern;
     let (cmat, gpv, anchored) = (&nrm.cmat, &nrm.gpv, &p.anchored);
+    let (ec, ev) = (&w.ecache, &w.evalid);
     let s = &mut w.s;
     s.clone_from(&w.smat);
     let mut rhs = vec![0f64; n];
@@ -470,7 +507,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
             for &pi in &rp.points[r] {
                 if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
                 let pi = pi as usize;
-                m.eblocks(pi, st, dh, &mut el);
+                point_eblocks(m, plan, ec, ev, pi, st, dh, &mut el);
                 if el.is_empty() && !anchored[pi] { continue; }
                 let mut cp = cmat[pi];
                 for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
@@ -549,7 +586,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
             let mut ms: Vec<[f64; 3]> = Vec::new();
             for pi in plan.chunk_range(c, n_pts) {
                 if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
-                m.eblocks(pi, st, dh, &mut el);
+                point_eblocks(m, plan, ec, ev, pi, st, dh, &mut el);
                 // An anchored point with no camera coupling (edge case: every
                 // observing camera failed cheirality) still needs its C⁻¹·gp
                 // computed so the back-substitution moves it toward the anchor.
@@ -605,6 +642,20 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
     Reduced { ok, rhs, cinv_store }
 }
 
+/// Observation j's coupling rows into the cache (`Model::eblocks`' values, same products):
+/// the camera's 6 × 3, then the group's kd × 3.
+#[inline(always)]
+fn write_erows(row: &mut [f64], j: &Jac, kd: usize) {
+    for a in 0..6 { for b in 0..3 { row[a * 3 + b] = j.wu*j.ju[a]*j.jpu[b] + j.wv*j.jv[a]*j.jpv[b]; } }
+    for a in 0..kd { for b in 0..3 { row[18 + a * 3 + b] = j.wu*j.jku[a]*j.jpu[b] + j.wv*j.jkv[a]*j.jpv[b]; } }
+}
+
+/// Point pi's coupling blocks, from the cache when the plan keeps one.
+#[inline(always)]
+fn point_eblocks(m: &Model, plan: &Plan, ec: &[f64], ev: &[bool], pi: usize, st: &State, dh: f64, el: &mut EList) {
+    if plan.use_ecache { m.eblocks_cached(pi, ec, ev, plan.estride, el) } else { m.eblocks(pi, st, dh, el) }
+}
+
 /// A 6×6 block of S (row-major in `dst`) less M·Eᵀ: element (a, b) less m[a]·e[b], its
 /// three products summed in order, as the general loops do. On wasm two b at a time in
 /// f64x2 lanes: each lane makes the same multiplications and additions in the same order
@@ -640,7 +691,9 @@ fn sub_mt6(dst: &mut [f64], m: &[[f64; 3]; 6], e: &[[f64; 3]; 6]) {
 
 /// Back-substitute the points: δp = −C⁻¹·gp − C⁻¹·(Σ_v E_vᵀ·δv). Every point on its own:
 /// on the pool, CHUNK points per task. C⁻¹·gp is recomputed, not kept.
-pub(crate) fn back_substitute(m: &Model, st: &State, dh: f64, cinv_store: &[Option<M3>], gpv: &[V3], dsol: &[f64]) -> Vec<V3> {
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn back_substitute(m: &Model, plan: &Plan, w: &Work, st: &State, dh: f64, cinv_store: &[Option<M3>], gpv: &[V3],
+                              dsol: &[f64]) -> Vec<V3> {
     let n_pts = m.p.n_pts;
     let mut dp = vec![[0f64; 3]; n_pts];
     let dp_p = SyncPtr::of(&mut dp);
@@ -648,7 +701,7 @@ pub(crate) fn back_substitute(m: &Model, st: &State, dh: f64, cinv_store: &[Opti
         let mut el = EList::default();
         for pi in k * CHUNK..((k + 1) * CHUNK).min(n_pts) {
             let cinv = match cinv_store[pi] { Some(m) => m, None => continue };
-            m.eblocks(pi, st, dh, &mut el);
+            point_eblocks(m, plan, &w.ecache, &w.evalid, pi, st, dh, &mut el);
             let mut acc = [0f64; 3];
             for eb in &el.blocks {
                 let rows = el.rows_of(eb);
