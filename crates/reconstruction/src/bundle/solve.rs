@@ -323,10 +323,12 @@ impl BlockPattern {
     }
 
     // Value offset of block (r, c); it must be in the pattern.
-    pub(crate) fn at(&self, r: usize, c: usize) -> usize {
+    pub(crate) fn at(&self, r: usize, c: usize) -> usize { self.val_at[self.pos(r, c)] }
+
+    // Position of block (r, c) in `cols` / `val_at`; it must be in the pattern.
+    pub(crate) fn pos(&self, r: usize, c: usize) -> usize {
         let row = &self.cols[self.row_ptr[r]..self.row_ptr[r + 1]];
-        let k = row.binary_search(&(c as u32)).expect("block outside the reduced-system pattern");
-        self.val_at[self.row_ptr[r] + k]
+        self.row_ptr[r] + row.binary_search(&(c as u32)).expect("block outside the reduced-system pattern")
     }
 
     pub(crate) fn matvec(&self, vals: &[f64], x: &[f64], y: &mut [f64]) {

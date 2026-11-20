@@ -297,7 +297,7 @@ pub(crate) fn assemble(m: &Model, plan: &Plan, st: &State, dh: f64, w: &mut Work
                                 let gv = wu*jku[a]*ru + wv*jkv[a]*rv;
                                 if r == 0 { unsafe { *gr_p.at(goff + a) += gv; } }
                                 else { unsafe { *part.at(rp.gg_len + goff + a - rp.group_off) += gv; } }
-                                let at = if r == 0 { dg } else { rp.gg_at[&dg] };
+                                let at = if r == 0 { dg } else { rp.gg_diag[g] };
                                 let dst = if r == 0 { sm_p } else { part };
                                 for b in 0..kdim { unsafe { *dst.at(at + a*kdim + b) += wu*jku[a]*jku[b] + wv*jkv[a]*jkv[b]; } }
                             }
@@ -320,8 +320,7 @@ pub(crate) fn assemble(m: &Model, plan: &Plan, st: &State, dh: f64, w: &mut Work
         });
         if refine {
             for part in work.chunks(pl.max(1)).take(rp.n - 1) {
-                for &(base, len) in &rp.gg {
-                    let o = rp.gg_at[&base];
+                for &(base, len, o) in &rp.gg {
                     for i in 0..len { smat[base + i] += part[o + i]; }
                 }
                 for i in 0..rp.group_rows { gr[rp.group_off + i] += part[rp.gg_len + i]; }
@@ -480,8 +479,8 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                             else if eb2.blk < rp.n_free { (rp.range(eb2.blk) == r, true) }
                             else { (owner, r == 0) };
                         if !mine { continue; }
-                        let base = pattern.at(eb1.blk, eb2.blk);
-                        let at = if direct { base } else { rp.gg_at[&base] };
+                        let k = pattern.pos(eb1.blk, eb2.blk);
+                        let at = if direct { pattern.val_at[k] } else { rp.gg_part[k - rp.gg_k0] };
                         let dst = if direct { s_p } else { part };
                         for a in 0..eb1.dim {
                             for b in 0..eb2.dim {
@@ -497,8 +496,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
         ok = !failed.load(std::sync::atomic::Ordering::Relaxed);
         // The other ranges' group shares, in range order.
         for part in work.chunks(pl.max(1)).take(rp.n - 1) {
-            for &(base, len) in &rp.gg {
-                let o = rp.gg_at[&base];
+            for &(base, len, o) in &rp.gg {
                 for i in 0..len { s[base + i] -= part[o + i]; }
             }
             for i in 0..rp.group_rows { rhs[rp.group_off + i] += part[rp.gg_len + i]; }

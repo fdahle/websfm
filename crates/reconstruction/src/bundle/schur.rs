@@ -59,10 +59,14 @@ pub(crate) struct RangePlan {
     pub points: Vec<Vec<u32>>,
     pub points_by_index: Vec<Vec<u32>>,
     pub owner: Vec<u32>,
-    // Group × group blocks: (value offset in S, length), and each one's offset in a
-    // range's partial; the group right-hand side follows them in the partial.
-    pub gg: Vec<(usize, usize)>,
-    pub gg_at: std::collections::HashMap<usize, usize>,
+    // Group × group blocks: (value offset in S, length, offset in a range's partial); the
+    // group right-hand side follows them in the partial. A block's partial offset by its
+    // pattern position k (`gg_part[k − gg_k0]`, the group rows' positions from gg_k0), and
+    // each group's diagonal block's (`gg_diag`).
+    pub gg: Vec<(usize, usize, usize)>,
+    pub gg_k0: usize,
+    pub gg_part: Vec<usize>,
+    pub gg_diag: Vec<usize>,
     pub gg_len: usize,
     pub group_rows: usize,
     pub group_off: usize,
@@ -89,21 +93,24 @@ impl RangePlan {
             for &r in &seen { points[r].push(p as u32); }
         }
         let mut gg = Vec::new();
-        let mut gg_at = std::collections::HashMap::new();
+        let gg_k0 = pattern.row_ptr[n_free.min(pattern.dims.len())];
+        let mut gg_part = vec![usize::MAX; pattern.cols.len() - gg_k0];
+        let mut gg_diag = vec![usize::MAX; pattern.dims.len() - n_free.min(pattern.dims.len())];
         let mut gg_len = 0;
         for r in n_free..pattern.dims.len() {
             for k in pattern.row_ptr[r]..pattern.row_ptr[r + 1] {
                 let c = pattern.cols[k] as usize;
                 if c < n_free || c > r { continue; }
                 let len = pattern.dims[r] * pattern.dims[c];
-                gg_at.insert(pattern.val_at[k], gg_len);
-                gg.push((pattern.val_at[k], len));
+                gg_part[k - gg_k0] = gg_len;
+                if c == r { gg_diag[r - n_free] = gg_len; }
+                gg.push((pattern.val_at[k], len, gg_len));
                 gg_len += len;
             }
         }
         let group_off = if n_free < pattern.dims.len() { pattern.offs[n_free] } else { pattern.n };
         let points_by_index = points.iter().map(|l| { let mut v = l.clone(); v.sort_unstable(); v }).collect();
-        RangePlan { n, n_free, points, points_by_index, owner, gg, gg_at, gg_len, group_rows: pattern.n - group_off, group_off }
+        RangePlan { n, n_free, points, points_by_index, owner, gg, gg_k0, gg_part, gg_diag, gg_len, group_rows: pattern.n - group_off, group_off }
     }
     pub(crate) fn range(&self, b: usize) -> usize { (b * self.n).checked_div(self.n_free).unwrap_or(0) }
     pub(crate) fn part_len(&self) -> usize { self.gg_len + self.group_rows }
