@@ -488,6 +488,11 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                         let at = if direct { pattern.val_at[k] } else { rp.gg_part[k - rp.gg_k0] };
                         let dst = if direct { s_p } else { part };
                         let e2 = el.rows_of(eb2);
+                        if eb1.blk < rp.n_free && eb2.blk < rp.n_free {
+                            // Camera × camera (direct: a camera row), the same sums as below.
+                            sub_mt6(unsafe { s_p.slice(at, 36) }, m.try_into().unwrap(), e2.try_into().unwrap());
+                            continue;
+                        }
                         for a in 0..eb1.dim {
                             for b in 0..eb2.dim {
                                 let v = m[a][0]*e2[b][0] + m[a][1]*e2[b][1] + m[a][2]*e2[b][2];
@@ -555,13 +560,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                         let e2 = el.rows_of(eb2);
                         if eb1.dim == 6 && eb2.dim == 6 {
                             // Camera × camera, fixed size (the same sums as below).
-                            let (m, e2): (&[[f64; 3]; 6], &[[f64; 3]; 6]) = (m.try_into().unwrap(), e2.try_into().unwrap());
-                            for a in 0..6 {
-                                for b in 0..6 {
-                                    let v = m[a][0]*e2[b][0] + m[a][1]*e2[b][1] + m[a][2]*e2[b][2];
-                                    unsafe { *s_p.at(base + a*6 + b) -= v; }
-                                }
-                            }
+                            sub_mt6(unsafe { s_p.slice(base, 36) }, m.try_into().unwrap(), e2.try_into().unwrap());
                         } else {
                             for a in 0..eb1.dim {
                                 for b in 0..eb2.dim {
@@ -584,6 +583,39 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
         }
     }
     Reduced { ok, rhs, cinv_store }
+}
+
+/// A 6×6 block of S (row-major in `dst`) less M·Eᵀ: element (a, b) less m[a]·e[b], its
+/// three products summed in order, as the general loops do. On wasm two b at a time in
+/// f64x2 lanes: each lane makes the same multiplications and additions in the same order
+/// (wasm has no fused multiply-add), so the same bits.
+#[inline(always)]
+fn sub_mt6(dst: &mut [f64], m: &[[f64; 3]; 6], e: &[[f64; 3]; 6]) {
+    let dst: &mut [f64; 36] = dst.try_into().unwrap();
+    #[cfg(target_arch = "wasm32")]
+    {
+        use core::arch::wasm32::*;
+        // E by column, b in pairs: c[k][h] = (e[2h][k], e[2h + 1][k]).
+        let c: [[v128; 3]; 3] = [0, 1, 2].map(|k| [0, 1, 2].map(|h| f64x2(e[2 * h][k], e[2 * h + 1][k])));
+        for a in 0..6 {
+            let (m0, m1, m2) = (f64x2_splat(m[a][0]), f64x2_splat(m[a][1]), f64x2_splat(m[a][2]));
+            for h in 0..3 {
+                let v = f64x2_add(f64x2_add(f64x2_mul(m0, c[0][h]), f64x2_mul(m1, c[1][h])), f64x2_mul(m2, c[2][h]));
+                // SAFETY: elements a·6 + 2h and a·6 + 2h + 1 are inside the 36.
+                unsafe {
+                    let p = dst.as_mut_ptr().add(a * 6 + 2 * h) as *mut v128;
+                    v128_store(p, f64x2_sub(v128_load(p), v));
+                }
+            }
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    for a in 0..6 {
+        for b in 0..6 {
+            let v = m[a][0]*e[b][0] + m[a][1]*e[b][1] + m[a][2]*e[b][2];
+            dst[a*6 + b] -= v;
+        }
+    }
 }
 
 /// Back-substitute the points: δp = −C⁻¹·gp − C⁻¹·(Σ_v E_vᵀ·δv). Every point on its own:
