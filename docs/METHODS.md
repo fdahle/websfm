@@ -524,7 +524,11 @@ complement**, analytic Jacobians and **adaptive Huber** robustification (Triggs 
 - **Schur complement**: points are eliminated, leaving a camera (+ intrinsics) system
   stored **block-sparse** (a 6×6 block per pair of cameras sharing a point), so memory
   grows with co-visibility, not cameras². Below 600 unknowns (~100 cameras) it is solved
-  by dense Cholesky, above by a **sparse block Cholesky** (`sparse_chol.rs`). The Schur
+  by dense Cholesky (in place in the dense copy, inner products in four lanes as the sparse
+  factor's), above by a **sparse block Cholesky** (`sparse_chol.rs`). The sparse factor at
+  every size was measured too: its solve is faster, but its lower-triangle Schur step on
+  one range is slower than the full-matrix one over point chunks below ~100 cameras
+  (Aukerman's global solve 1.9 → 2.2 s, Casa Grande's 1.5 → 1.8 s natively). The Schur
   step is split over fixed contiguous camera ranges, so results are bit-identical on any
   thread count. The sparse factor orders the camera graph by minimum degree and groups
   its columns into supernodes; a supernode reads only those below it in the elimination

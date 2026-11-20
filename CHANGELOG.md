@@ -430,7 +430,12 @@ Notable changes to WebSfM. The format follows
   reprojection; quarry and PUTI (346 and 444 photos) the same bits. Regression gate:
   every set keeps its cameras, the ETH3D camera medians move within their ±3 % noise
   (courtyard 6.12 → 6.26 mm) or better (pipes 1.60 → 1.48 mm), South Building 4.86 mm
-  as before. BAL's small problems end within 10⁻⁶ of their cost.
+  as before. BAL's small problems end within 10⁻⁶ of their cost. The camera system of a
+  small project is also factored in place with the sparse solver's four-lane sums: the
+  solve itself 2–3× faster (Aukerman's global solve 0.10–0.16 → 0.06 s of 1.9 s natively),
+  a 49-photo synthetic block 0.060 → 0.054 s and 0.068 → 0.056 s with self-calibration in
+  the browser's single-threaded build; whole replays equal within their timing noise, the
+  results the same within noise (gate: South Building 4.86 → 4.87 mm, the rest equal).
 - **Bundle adjustment is faster.** Every bundle adjustment (Sparse Model, Optimize
   Cameras, the solves with GCPs) repeats less work from one step to the next and shares
   more of it between processor cores, and the result is the same to the last bit. It

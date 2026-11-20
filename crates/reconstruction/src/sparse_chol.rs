@@ -871,7 +871,7 @@ fn tile_2x4(x0: &[f64], x1: &[f64], y: [&[f64]; 4], w: usize) -> [[f64; 4]; 2] {
 
 // Four independent sums, so the compiler can keep them in vector lanes.
 #[inline(always)]
-fn dot(a: &[f64], b: &[f64]) -> f64 {
+pub(crate) fn dot(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let (a, b) = (&a[..n], &b[..n]);
     let mut s = [0f64; 4];

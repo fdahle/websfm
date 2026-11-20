@@ -72,6 +72,41 @@ pub(crate) fn chol_solve(n: usize, a: &[f64], b: &[f64]) -> Option<Vec<f64>> {
     Some(x)
 }
 
+// The dense reduced solve (`solve_reduced_with` below DENSE_MAX_N): `chol_solve`'s
+// factorisation, done in place in the dense copy the caller hands over (no second n²
+// buffer a try) and with its inner products in four lanes (sparse_chol.rs `dot`, the
+// sparse factor's). The same pivot test against the diagonal entry. Its sums run in a
+// fixed order, so every build and thread count gives the same bits.
+pub(crate) fn chol_solve_owned(n: usize, mut m: Vec<f64>, b: &[f64]) -> Option<Vec<f64>> {
+    use crate::sparse_chol::dot;
+    for j in 0..n {
+        let row_j = j * n;
+        let a_jj = m[row_j + j];
+        let d = a_jj - dot(&m[row_j..row_j + j], &m[row_j..row_j + j]);
+        if !(d > CHOL_MIN_PIVOT_RATIO * a_jj) { return None; }
+        let dj = d.sqrt();
+        m[row_j + j] = dj;
+        for i in (j + 1)..n {
+            let row_i = i * n;
+            let s = m[row_i + j] - dot(&m[row_i..row_i + j], &m[row_j..row_j + j]);
+            m[row_i + j] = s / dj;
+        }
+    }
+    let mut y = vec![0f64; n]; // forward solve L·y = b
+    for i in 0..n {
+        let s = b[i] - dot(&m[i * n..i * n + i], &y[..i]);
+        y[i] = s / m[i * n + i];
+    }
+    // back solve Lᵀ·x = y, over y in place: Lᵀ's row i is L's column i, so subtract each
+    // solved x_i times its column from the rows above.
+    for i in (0..n).rev() {
+        y[i] /= m[i * n + i];
+        let xi = y[i];
+        for k in 0..i { y[k] -= m[i * n + k] * xi; }
+    }
+    Some(y)
+}
+
 // Reduced systems at least this large go to `pcg_solve` first. A dense Cholesky is
 // n³/3 flops: ~10¹⁰ at 522 cameras (n ≈ 3,140), about 7 s per LM try in wasm, which
 // made bundle adjustment 2,100 of 2,550 s on the 538-image Monster set. One CG
@@ -269,7 +304,7 @@ pub(crate) fn solve_reduced_with(n: usize, matvec: impl Fn(&[f64], &mut [f64]), 
     } else {
         stats.cholesky += 1;
     }
-    chol_solve(n, &to_dense(), b)
+    chol_solve_owned(n, to_dense(), b)
 }
 
 #[cfg(test)]

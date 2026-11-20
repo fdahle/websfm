@@ -122,7 +122,7 @@ fn capped_pcg_falls_back_or_returns_its_iterate() {
     // pcg_min_n = ∞ keeps everything on Cholesky.
     let mut st = SolveStats::default();
     let z = solve_reduced(n, &a, &b, &blocks, &SolverOpts { pcg_min_n: usize::MAX, ..SolverOpts::DEFAULT }, &mut st).unwrap();
-    assert_eq!(z, exact);
+    assert_eq!(z, chol_solve_owned(n, a.to_vec(), &b).unwrap());
     assert_eq!((st.cholesky, st.pcg_iters), (1, 0));
 }
 
@@ -834,8 +834,29 @@ fn small_systems_stay_on_cholesky() {
     let (n, a, b, blocks) = ba_like(10, 3);
     assert!(n < PCG_MIN_N);
     let mut st = SolveStats::default();
-    assert_eq!(solve_reduced(n, &a, &b, &blocks, &SolverOpts::DEFAULT, &mut st).unwrap(), chol_solve(n, &a, &b).unwrap());
+    assert_eq!(solve_reduced(n, &a, &b, &blocks, &SolverOpts::DEFAULT, &mut st).unwrap(), chol_solve_owned(n, a.to_vec(), &b).unwrap());
     assert_eq!((st.solves, st.cholesky), (1, 1));
+}
+
+// The dense reduced solve factors in place with four-lane sums: the solution of A·x = b
+// to rounding (residual against A itself, and the scalar chol_solve's answer), and None
+// where A is not positive-definite, as chol_solve.
+#[test]
+fn the_in_place_dense_cholesky_solves_the_system() {
+    for (cams, seed) in [(10usize, 3u64), (40, 7), (1, 2)] {
+        let (n, a, b, _) = ba_like(cams, seed);
+        let x = chol_solve_owned(n, a.to_vec(), &b).expect("SPD");
+        let r = (0..n).map(|i| ((0..n).map(|j| a[i * n + j] * x[j]).sum::<f64>() - b[i]).abs()).fold(0.0, f64::max);
+        let bmax = b.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        assert!(r <= 1e-10 * bmax, "n {n}: residual {r:e}");
+        let x0 = chol_solve(n, &a, &b).unwrap();
+        let d = x.iter().zip(&x0).map(|(u, v)| (u - v).abs()).fold(0.0, f64::max);
+        let xmax = x0.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        assert!(d <= 1e-9 * xmax, "n {n}: differs from the scalar factor by {d:e}");
+    }
+    // Indefinite: a 2×2 with a negative eigenvalue.
+    assert!(chol_solve_owned(2, vec![1.0, 2.0, 2.0, 1.0], &[1.0, 1.0]).is_none());
+    assert!(chol_solve(2, &[1.0, 2.0, 2.0, 1.0], &[1.0, 1.0]).is_none());
 }
 
 // A grid of cameras 10 above rough ground, each tilted up to 0.15 rad about x and y, a
