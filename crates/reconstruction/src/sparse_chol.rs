@@ -101,7 +101,11 @@ impl Symbolic {
         // Minimum degree. (Nested dissection by breadth-first level separators was tried
         // and gave 10–15 % more work on aerial camera graphs: a camera couples with
         // neighbours several cells away, so a level is a thick separator.)
-        let (order, cols) = min_degree(&graph, max_blocks)?;
+        let t0 = crate::bundle::prof::now();
+        let res = min_degree(&graph, max_blocks);
+        crate::bundle::prof::add(8, t0);
+        let (order, cols) = res?;
+        let t0 = crate::bundle::prof::now();
         let mut pos = vec![0usize; nb];
         for (k, &b) in order.iter().enumerate() { pos[b] = k }
         let dims: Vec<usize> = order.iter().map(|&b| pat.dims[b]).collect();
@@ -203,6 +207,7 @@ impl Symbolic {
         let mut src_ptr = vec![0usize];
         let mut src = Vec::new();
         for list in by_t { src.extend(list); src_ptr.push(src.len()) }
+        crate::bundle::prof::add(9, t0);
         let mut sym = Symbolic { order, dims, off, sn_start, sn_of, rows_ptr, rows, rows_soff, width, height, panel_at, src_ptr, src, n_vals,
             fill_blocks: blocks, sched: Sched::default() };
         sym.sched = sym.schedule(TASK_SHARE);

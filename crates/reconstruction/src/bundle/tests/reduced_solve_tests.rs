@@ -363,7 +363,7 @@ fn bundle_adjust_timing() {
     let n_pts = pts.len() / 3;
     // BA_REPS: run it that many times and report the fastest (the phases of that run).
     let reps: usize = env("BA_REPS").and_then(|v| v.parse().ok()).unwrap_or(1);
-    let mut best: Option<(std::time::Duration, [f64; 5], Vec<f32>)> = None;
+    let mut best: Option<(std::time::Duration, [f64; prof::N], Vec<f32>)> = None;
     for _ in 0..reps {
         prof::take();
         let t = std::time::Instant::now();
@@ -379,11 +379,19 @@ fn bundle_adjust_timing() {
     });
     println!("{n_cam} cameras, {n_pts} points, {} observations, views {views}, refine {refine_mask}: {total:?}, rms {:.3} → {:.3}, {} solves",
         idx.len() / 2, out[base], out[base + 1], out[base + 5]);
-    println!("  phases (s): cost {:.2}, assemble {:.2}, schur {:.2}, solve {:.2}, back-substitute + trial cost {:.2}, untimed {:.2}",
-        ph[0], ph[1], ph[2], ph[3], ph[4], total.as_secs_f64() - ph.iter().sum::<f64>());
+    // Setup (prof slots 5–14): Plan::new (slot 12) holds the pattern, the ordering, the
+    // Schur order and the RangePlan; its rest is what is left of it.
+    let phases: f64 = ph[..5].iter().sum();
+    let setup = ph[5] + ph[6] + ph[12] + ph[13] + ph[14];
+    let mut parts = ph[5..].to_vec();
+    parts[7] = ph[12] - ph[7..12].iter().sum::<f64>();
+    let untimed = total.as_secs_f64() - phases - setup;
+    println!("  phases (s): cost {:.2}, assemble {:.2}, schur {:.2}, solve {:.2}, back-substitute + trial cost {:.2}, setup {setup:.3}, untimed {untimed:.2}",
+        ph[0], ph[1], ph[2], ph[3], ph[4]);
+    println!("  setup (s): {}", prof::SETUP.iter().zip(&parts).map(|(k, v)| format!("{k} {v:.4}")).collect::<Vec<_>>().join(", "));
     println!("  output hash {hash:016x}");
-    println!("TIMING side={side} views={views} refine={refine_mask} total={:.3} cost={:.3} assemble={:.3} schur={:.3} solve={:.3} back={:.3} untimed={:.3} hash={hash:016x}",
-        total.as_secs_f64(), ph[0], ph[1], ph[2], ph[3], ph[4], total.as_secs_f64() - ph.iter().sum::<f64>());
+    println!("TIMING side={side} views={views} refine={refine_mask} total={:.3} cost={:.3} assemble={:.3} schur={:.3} solve={:.3} back={:.3} untimed={untimed:.3} setup={setup:.3} {} hash={hash:016x}",
+        total.as_secs_f64(), ph[0], ph[1], ph[2], ph[3], ph[4], prof::SETUP.iter().zip(&parts).map(|(k, v)| format!("s_{k}={v:.4}")).collect::<Vec<_>>().join(" "));
 }
 
 // The shape of the sparse factor's elimination tree on the timing test's problem (same

@@ -45,7 +45,10 @@ impl Plan {
         let (p, l) = (m.p, m.l);
         let (n_pts, n_free, n) = (p.n_pts, l.n_free, l.n);
         let (obs, pt_start, pt_obs, pb, slot) = (&p.obs, &p.pt_start, &p.pt_obs, &p.pb, &l.slot);
+        let t_plan = prof::now();
+        let t0 = prof::now();
         let mut pattern = l.pattern(p, true);
+        prof::add(7, t0);
         // The sparse direct solve's ordering, once for every LM iteration of this call, when
         // the direct solve fits the memory (`direct_bytes`, solver slot 10): the ordering is
         // given what is left once the reduced matrix and the per-observation and per-point
@@ -69,7 +72,7 @@ impl Plan {
             let implicit = sym.is_none();
             (sym, implicit)
         } else { (None, false) };
-        if implicit { pattern = l.pattern(p, false); }
+        if implicit { let t0 = prof::now(); pattern = l.pattern(p, false); prof::add(7, t0); }
         // Exact steps keep finding improvements of a few 10⁻⁶ of the cost long after the
         // model has stopped changing (1,600 aerial cameras: all 30 iterations ran, RMS
         // 0.46 px from the 13th on); a 10⁻⁵ stop ends them with the same final model.
@@ -86,6 +89,7 @@ impl Plan {
         // With it, the Schur elimination visits the points grouped by their first camera, so
         // consecutive points write nearby blocks of S (21 MB at 1,600 cameras: scattered
         // writes were the cost). The full-matrix paths keep the index order (and their bits).
+        let t0 = prof::now();
         let schur_order: Vec<usize> = if lower_only {
             let mut key: Vec<(usize, usize)> = (0..n_pts).map(|pi| {
                 ((pt_start[pi] as usize..pt_start[pi + 1] as usize).map(|q| pb[obs[pt_obs[q] as usize].0 as usize]).min().unwrap_or(usize::MAX), pi)
@@ -93,12 +97,15 @@ impl Plan {
             key.sort_unstable();
             key.into_iter().map(|(_, pi)| pi).collect()
         } else { (0..n_pts).collect() };
+        prof::add(10, t0);
+        let t0 = prof::now();
         let range_plan = if lower_only { Some(RangePlan::new(&pattern, n_free, &schur_order, |pi, visit: &mut dyn FnMut(usize)| {
             for q in pt_start[pi] as usize..pt_start[pi + 1] as usize {
                 let sl = slot[pb[obs[pt_obs[q] as usize].0 as usize]];
                 if sl != FIXED { visit(sl); }
             }
         })) } else { None };
+        prof::add(11, t0);
         // The full-matrix paths (no RangePlan: the dense and PCG solves, below ~128 cameras)
         // split the assembly and the Schur step over points instead: `point_chunks`
         // contiguous chunks, each summing into its own share of S and the right-hand side,
@@ -152,6 +159,8 @@ impl Plan {
         let ecache_bytes = (8 * estride as u64 + 1) * n_obs;
         let use_ecache = !implicit && ecache_bytes <= solver.memory / 4
             && held + if keep_res { RES_PER_OBS * n_obs } else { 0 } + ecache_bytes <= solver.memory;
+        // Plan::new's own time, less the parts timed on their own.
+        prof::add(12, t_plan);
         Plan { pattern, direct, implicit, function_tol, lower_only, range_plan, point_chunks, use_jcache, jk, jstride, cam_grp_at,
                keep_res, use_ecache, estride }
     }

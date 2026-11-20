@@ -39,12 +39,18 @@ pub(crate) const DIRECT_FUNCTION_TOL: f64 = 1e-5;
 pub(crate) const WARM_FUNCTION_TOL: f64 = 1e-4;
 
 // Phase timers for the native timing test (bundle_adjust_timing); no-ops in the app.
+// Slots 0–4 are the LM phases (`mark`), the rest the setup of a call (`add` from a `now`):
+// the parse, Layout::new, the pattern, the minimum-degree ordering, the supernodes, the
+// Schur order, the RangePlan, the rest of Plan::new, Work::new and the output packing.
 #[cfg(test)]
 pub(crate) mod prof {
     use std::cell::Cell;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Instant;
-    pub static T: [AtomicU64; 5] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+    pub const N: usize = 15;
+    pub const SETUP: [&str; 10] = ["parse", "layout", "pattern", "min_degree", "supernodes", "schur_order", "range_plan",
+        "plan_rest", "work_new", "packing"];
+    pub static T: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
     thread_local! { static LAST: Cell<Option<Instant>> = const { Cell::new(None) }; }
     pub fn start() { LAST.with(|l| l.set(Some(Instant::now()))) }
     pub fn mark(i: usize) {
@@ -54,8 +60,10 @@ pub(crate) mod prof {
             l.set(Some(now));
         })
     }
-    pub fn take() -> [f64; 5] {
-        let mut out = [0.0; 5];
+    pub fn now() -> Instant { Instant::now() }
+    pub fn add(i: usize, since: Instant) { T[i].fetch_add(since.elapsed().as_micros() as u64, Ordering::Relaxed); }
+    pub fn take() -> [f64; N] {
+        let mut out = [0.0; N];
         for (i, t) in T.iter().enumerate() { out[i] = t.swap(0, Ordering::Relaxed) as f64 / 1e6 }
         out
     }
@@ -64,6 +72,9 @@ pub(crate) mod prof {
 pub(crate) mod prof {
     #[inline(always)] pub fn start() {}
     #[inline(always)] pub fn mark(_: usize) {}
+    pub struct Now;
+    #[inline(always)] pub fn now() -> Now { Now }
+    #[inline(always)] pub fn add(_: usize, _: Now) {}
 }
 
 /// Bundle adjustment by sparse Levenberg–Marquardt with the Schur complement.
@@ -246,10 +257,14 @@ fn bundle_adjust_impl(
     // The parts (bundle/): the inputs parsed (problem.rs), the reduced system's variables
     // (layout.rs), the observation model (model.rs), the normal equations and their Schur
     // reduction (normal.rs, implicit.rs), the lens σ (sigma.rs). This is the LM loop.
+    let t0 = prof::now();
     let Some((problem, cams, pts)) = Problem::parse(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px,
         observation_weight, anchor_flat, anchor_weight, camera_prior_flat, fisheye_flat, rs_flat, capture_of_cam,
         offset_flat) else { return vec![] };
+    prof::add(5, t0);
+    let t0 = prof::now();
     let layout = Layout::new(&problem, sensor_of_cam, refine_mask, fixed_cam);
+    prof::add(6, t0);
     let solver = SolverOpts::from_flat(solver_flat);
     let m = Model { p: &problem, l: &layout, huber: solver.huber };
     let plan = Plan::new(&m, &solver);
@@ -257,7 +272,9 @@ fn bundle_adjust_impl(
     let mut solve_stats = SolveStats::default();
     let mut st = State { cams, pts, gpar: m.initial_gpar() };
 
+    let t0 = prof::now();
     let mut w = Work::new(&plan, n);
+    prof::add(13, t0);
     // The accepted state's residuals, when kept (Plan::keep_res): one projection per
     // iteration instead of four (threshold, start cost, trial cost, trace), same sums.
     let keep = plan.keep_res;
@@ -427,6 +444,7 @@ fn bundle_adjust_impl(
     // (8 each: fx,fy,cx,cy,k1,k2,k3,k4 — a pinhole camera's Brown residual, 0 for the
     // bits not in refine_mask; a fisheye's full Kannala–Brandt coefficients),
     // [cost_before, cost_after, anchor_rms_after, camera_prior_rms_after], then trace.
+    let t0 = prof::now();
     let n_cam = problem.n_cam;
     let intr_stride = if problem.lens_stride == 7 { 10 } else { 8 };
     let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * intr_stride + 4 + BA_STATS_LEN + trace.len());
@@ -460,6 +478,7 @@ fn bundle_adjust_impl(
     }
     if !rs_flat.is_empty() { for c in 0..n_cam { out.push(m.tau_of(c, &st.gpar) as f32); } }
     for &c in &trace { out.push(c as f32); }
+    prof::add(14, t0);
     out
 }
 
