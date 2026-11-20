@@ -3,7 +3,7 @@
 // Node, scored against the sets' reference cameras and held to the gate's baseline
 // (scripts/bench/gate-baseline.json). The inputs are the exact worker payloads, so a
 // change under src/core/sfm is judged without the GPU and without matching's own changes.
-// About a minute a set.
+// About a minute a set, twice: ten minutes for the nine sets.
 //
 // Each input also runs a second time with its photo pairs in reverse order. Registration
 // should not depend on that order; a set whose camera count changes with it is on a knife

@@ -70,7 +70,7 @@ Rules that are easy to miss:
 - A change to detection, matching, verification or SfM (`crates/sift`, `crates/matching`,
   `crates/reconstruction`, `src/core/features/`, `src/core/sfm/`, `src/stores/matching/`,
   or their sections of `tuning.js` and `defaults.user.js`) runs the regression gate before
-  it is called done: `npm run gate:sfm` (CPU, minutes) for SfM alone, `npm run gate`
+  it is called done: `npm run gate:sfm` (CPU, ~10 min) for SfM alone, `npm run gate`
   (GPU, ~15 min, one block of each kind: close range, indoor, drone, film) for anything
   that changes what matching produces. Give the gate's table in the commit message. A
   synthetic test or a run on one kind of block is not evidence that nothing else broke
