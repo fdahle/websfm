@@ -27,7 +27,7 @@
   "crates/reconstruction/src/bundle.rs": "624241fff9c9dbc9789ac474cfc1a53683f539ea432186166bee2cb595ed6332",
   "crates/reconstruction/src/bundle/camera.rs": "51681173cf278bc631499ba0dbac1e81943f24d5c1660f710e457483cc004dec",
   "crates/reconstruction/src/bundle/implicit.rs": "1f309a4e2c8a65db15bfa8823f97d7131bc42c71ff1d276e98eade738d136576",
-  "crates/reconstruction/src/bundle/layout.rs": "b5cd7cc2d580d22b0ea28aff6fa4c666aca3df280e8d8e196d2ebc820417e883",
+  "crates/reconstruction/src/bundle/layout.rs": "c7fc57b57bff385888afc9212b47d7d158bac860b1d14eb14869ef78479f0fd1",
   "crates/reconstruction/src/bundle/model.rs": "acbbb6fffb59dc135a4c194dfd53152d456bb1f7d5d8a45b1ce2cbf86fb7d2fc",
   "crates/reconstruction/src/bundle/normal.rs": "3ff794fd48a65a15b109b3124208eac0b536d79143538c9e7ccc13a944c1ed15",
   "crates/reconstruction/src/bundle/problem.rs": "0ce874660ee64b44f5eba6f2fbbd3b525c281974c3efc3b0c458c41e8d1160c1",
@@ -74,11 +74,11 @@
   "src/wasm/mesh/mesh_bg.wasm.d.ts": "02188ba2285f1b63e9fa49f2e64f77d616693611c6d655321051df24799a592f",
   "src/wasm/reconstruction-mt/reconstruction.d.ts": "bb306678969dd33a5352b6c2ff118f6991e10b4f9b1056e208111911ffcd067c",
   "src/wasm/reconstruction-mt/reconstruction.js": "397addf5021cc84114a9677d41387decedba05003eb2ac6a1ad27f34877ac266",
-  "src/wasm/reconstruction-mt/reconstruction_bg.wasm": "8bf222ff8bc173a5eeb7db370c4b2fceba3408cfcdebfc34b7b572ddc0a5ea0b",
+  "src/wasm/reconstruction-mt/reconstruction_bg.wasm": "03cdc2643ca9bfaa98fca290ee754c0a9bd585160031f0d5e401ac9ed50f03b8",
   "src/wasm/reconstruction-mt/reconstruction_bg.wasm.d.ts": "975fae4abf8a8414fb95142d4940d1d8101d451205a16d6c7ddd2b3661ae678e",
   "src/wasm/reconstruction-mt/snippets/wasm-bindgen-rayon-38edf6e439f6d70d/src/workerHelpers.js": "ea9b3e16cef0500d99d5aed177f72e7dc84762e78fa915c628f7aa460cd26ea0",
   "src/wasm/reconstruction/reconstruction.d.ts": "c6d5f05208dd5ea830cc77a864f3414fa03de0f74a9450ed3d2b6e38ee0a14f6",
   "src/wasm/reconstruction/reconstruction.js": "d66c1535d95ec656f9485ada83e6efabcfe0cd4494dd5eb8f924ca003538641c",
-  "src/wasm/reconstruction/reconstruction_bg.wasm": "4f3ef8c6a3158076ad556ae1d5b9c92488fce91fe337d3db4fb1d1a308c7147c",
+  "src/wasm/reconstruction/reconstruction_bg.wasm": "04de8dfe795a6d7325167a198a70a243a980cd39a40fc9292f261d089cf1033a",
   "src/wasm/reconstruction/reconstruction_bg.wasm.d.ts": "307395fc552bf5ab0d39d4d529cb0e3e10df6261aadfe768aec7f5db2425ffdb"
 }

@@ -6,9 +6,12 @@
 use crate::linalg::*;
 #[allow(unused_imports)]
 use super::*;
+use crate::par::{for_each_index, SyncPtr};
 
 // The slot of a pose block held fixed: it has none.
 pub(crate) const FIXED: usize = usize::MAX;
+// Cameras per pool task when the pattern is built.
+const PATTERN_CAMS: usize = 32;
 
 pub(crate) struct Layout {
     // The per-group param vector is the ordered subset [s?, dcx?, dcy?, k1?, k2?, k3?, k4?,
@@ -130,27 +133,37 @@ impl Layout {
         let (blk_start, blk_cams) = csr(p.n_pb, (0..n_cam).map(|c| pb[c]));
         let mut dims = vec![6usize; n_free];
         dims.extend(std::iter::repeat_n(self.kdim, n_groups));
-        BlockPattern::new(dims, |r, touch| {
-            let visit = |c: usize, touch: &mut dyn FnMut(usize)| {
+        // Each camera's blocks, on the pool (a camera's own work: its points' cameras): a
+        // row is then the union of its cameras' lists (a group's, of all its cameras'),
+        // which BlockPattern sorts. The same pattern as visiting the cameras row by row.
+        let nb = dims.len();
+        let mut cam_cols: Vec<Vec<u32>> = vec![Vec::new(); n_cam];
+        let cp = SyncPtr::of(&mut cam_cols);
+        for_each_index(n_cam.div_ceil(PATTERN_CAMS), |k| {
+            let mut mark = vec![u32::MAX; nb];
+            for c in k * PATTERN_CAMS..((k + 1) * PATTERN_CAMS).min(n_cam) {
+                // SAFETY: camera c's list is this task's alone.
+                let list = unsafe { cp.at(c) };
+                let mut touch = |b: usize| if mark[b] != c as u32 { mark[b] = c as u32; list.push(b as u32) };
                 if n_groups > 0 { touch(n_free + grp[c]); }
                 if !coupled {
                     if slot[pb[c]] != FIXED { touch(slot[pb[c]]); }
-                    return;
+                    continue;
                 }
-                for k in cam_start[c]..cam_start[c + 1] {
-                    let pt = obs[cam_obs[k as usize] as usize].1 as usize;
+                for e in cam_start[c]..cam_start[c + 1] {
+                    let pt = obs[cam_obs[e as usize] as usize].1 as usize;
                     for q in pt_start[pt]..pt_start[pt + 1] {
                         let c2 = obs[pt_obs[q as usize] as usize].0 as usize;
                         if slot[pb[c2]] != FIXED { touch(slot[pb[c2]]); }
                         if n_groups > 0 { touch(n_free + grp[c2]); }
                     }
                 }
-            };
-            if r < n_free {
-                let b = self.free_cams[r];
-                for k in blk_start[b]..blk_start[b + 1] { visit(blk_cams[k as usize] as usize, &mut *touch); }
             }
-            else { for k in grp_start[r - n_free]..grp_start[r - n_free + 1] { visit(grp_cams[k as usize] as usize, &mut *touch); } }
+        });
+        BlockPattern::new(dims, |r, touch| {
+            let cams = if r < n_free { let b = self.free_cams[r]; &blk_cams[blk_start[b] as usize..blk_start[b + 1] as usize] }
+                else { &grp_cams[grp_start[r - n_free] as usize..grp_start[r - n_free + 1] as usize] };
+            for &c in cams { for &b in &cam_cols[c as usize] { touch(b as usize) } }
         })
     }
 }
