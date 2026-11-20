@@ -2920,6 +2920,8 @@ window.bench = {
       // (TODO ▸ MEM ▸ PCG) reads these; set recon.baSolver per variant to compare.
       baSolver: s?.baSolver ?? null,
       timings: s?.timings ?? null,
+      // Photos registered near the correspondence floor (the regression gate's warning).
+      registrationMargin: s?.registrationMargin ?? null,
       positionCheck,
       appCameraCheck,
       demCheck: demCheckResult,

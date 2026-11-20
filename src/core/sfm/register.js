@@ -461,6 +461,8 @@ export async function registerImages(ctx) {
       registeredUuids.add(img.uuid)
       deferReasons.delete(img.uuid)
       progressed = true
+      // How far over the correspondence floor it came in (registrationMargin.js).
+      ctx.marginPhotos?.push({ uuid: img.uuid, name: img.name, correspondences: pts3.length })
       markStale(img.uuid) // after the track extension and triangulation below, which it covers
 
       // Reprojection error over the PnP inliers — how well this pose fits.

@@ -297,6 +297,11 @@ export const SFM_TUNING = {
   // depth is still within ~3 % (enough for PnP); the interim filter drops what is still
   // under filterMinTriAngleDeg once the new photo has added its view.
   rescueMinTriAngleDeg: 0.25,
+  // A photo registered with fewer than this × minMatchesForRegistration correspondences is
+  // counted as near the floor (summary.registrationMargin, a log line, the regression
+  // gate's warning): the knife edge a small upstream change can push it over. ETH3D
+  // playground's hinge photo registered at 34 against 20 (1.7×).
+  registrationMarginFactor: 2,
   // ── Secondary-model recovery ──
   secondaryModels: true, // reconstruct coherent blocks stranded outside the primary
   secondaryMinImages: 8, // avoid recursively solving tiny/noisy leftovers

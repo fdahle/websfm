@@ -25,6 +25,7 @@ import { completeTracks, mergeSplitTracks, filterTracks } from './tracks.js'
 import { selectInitPair } from './initPair.js'
 import { seedFromModel } from './extendModel.js'
 import { registerImages } from './register.js'
+import { summarizeMargin, describeMargin } from './registrationMargin.js'
 import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
 import { compactTrackRecords } from './resultCodec.js'
@@ -682,6 +683,8 @@ export async function reconstructSingleModel(input, hooks = {}) {
       log,
       onProgress,
       reportPhase: (local, label, counts) => report('register', local, label, counts),
+      // Each photo PnP registers, with its correspondence count (registrationMargin.js).
+      marginPhotos: [],
     }
     await registerImages(registrationCtx)
     snapshots.tick({ force: true })
@@ -865,6 +868,15 @@ export async function reconstructSingleModel(input, hooks = {}) {
       fiducialTransforms,
       initPairRecord: extension ? (base.summary?.initPair ?? null) : undefined,
     })
+    // The photos still in the model, with how close to the floor each registered (the
+    // last time, when the final sweep registered one again).
+    const lastRegistration = new Map(registrationCtx.marginPhotos.map((p) => [p.uuid, p]))
+    summary.registrationMargin = summarizeMargin(
+      [...lastRegistration.values()].filter((p) => cameras.has(p.uuid)),
+      { floor: cfg.minMatchesForRegistration, factor: cfg.registrationMarginFactor },
+    )
+    const marginLine = describeMargin(summary.registrationMargin)
+    if (marginLine) log(marginLine, 'info', 'Sparse')
     if (extension) {
       const added = extension.added.filter((u) => cameras.has(u))
       summary.extension = {
