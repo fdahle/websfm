@@ -66,6 +66,8 @@ impl EList {
 // 2·RANGE_MIN_CAMS free cameras), every sum is the single loop's, bit for bit; with them, the group blocks are
 // summed range by range, which rounds differently from one loop.
 pub(crate) const RANGE_MIN_CAMS: usize = 8;
+// Points of the Schur order per pool task when a RangePlan is built.
+const RANGE_PLAN_CHUNK: usize = 16384;
 pub(crate) const RANGE_MAX: usize = 16;
 pub(crate) struct RangePlan {
     pub n: usize,
@@ -90,24 +92,44 @@ pub(crate) struct RangePlan {
 
 impl RangePlan {
     pub(crate) fn new(pattern: &BlockPattern, n_free: usize, schur_order: &[usize],
-           cams_of: impl Fn(usize, &mut dyn FnMut(usize))) -> RangePlan {
+           cams_of: impl Fn(usize, &mut dyn FnMut(usize)) + Sync) -> RangePlan {
         let n = (n_free / RANGE_MIN_CAMS).clamp(1, RANGE_MAX);
         let range = |b: usize| (b * n).checked_div(n_free).unwrap_or(0);
         let n_pts = schur_order.iter().copied().max().map_or(0, |m| m + 1);
         let mut owner = vec![0u32; n_pts];
+        // Each chunk of the Schur order on the pool: its points' owners, and its share of
+        // every range's list, which are then joined in chunk order (the serial order).
+        let n_chunks = schur_order.len().div_ceil(RANGE_PLAN_CHUNK);
+        let mut shares: Vec<Vec<Vec<u32>>> = vec![Vec::new(); n_chunks];
+        let (own_p, sh_p) = (SyncPtr::of(&mut owner), SyncPtr::of(&mut shares));
+        for_each_index(n_chunks, |k| {
+            let mut lists: Vec<Vec<u32>> = vec![Vec::new(); n];
+            let mut seen: Vec<usize> = Vec::new();
+            for &p in &schur_order[k * RANGE_PLAN_CHUNK..((k + 1) * RANGE_PLAN_CHUNK).min(schur_order.len())] {
+                seen.clear();
+                let mut lowest = usize::MAX;
+                cams_of(p, &mut |b| { lowest = lowest.min(b); seen.push(range(b)); });
+                let own = if lowest == usize::MAX { 0 } else { range(lowest) };
+                // SAFETY: point p is in one chunk of the order (a permutation).
+                unsafe { *own_p.at(p) = own as u32; }
+                seen.push(own);
+                seen.sort_unstable();
+                seen.dedup();
+                for &r in &seen { lists[r].push(p as u32); }
+            }
+            // SAFETY: chunk k alone writes its share.
+            unsafe { *sh_p.at(k) = lists; }
+        });
         let mut points: Vec<Vec<u32>> = vec![Vec::new(); n];
-        let mut seen: Vec<usize> = Vec::new();
-        for &p in schur_order {
-            seen.clear();
-            let mut lowest = usize::MAX;
-            cams_of(p, &mut |b| { lowest = lowest.min(b); seen.push(range(b)); });
-            let own = if lowest == usize::MAX { 0 } else { range(lowest) };
-            owner[p] = own as u32;
-            seen.push(own);
-            seen.sort_unstable();
-            seen.dedup();
-            for &r in &seen { points[r].push(p as u32); }
-        }
+        let mut points_by_index: Vec<Vec<u32>> = vec![Vec::new(); n];
+        let (pts_p, idx_p) = (SyncPtr::of(&mut points), SyncPtr::of(&mut points_by_index));
+        for_each_index(n, |r| {
+            let list: Vec<u32> = shares.iter().flat_map(|sh| sh[r].iter().copied()).collect();
+            let mut by_index = list.clone();
+            by_index.sort_unstable();
+            // SAFETY: range r's lists are this task's alone.
+            unsafe { *pts_p.at(r) = list; *idx_p.at(r) = by_index; }
+        });
         let mut gg = Vec::new();
         let gg_k0 = pattern.row_ptr[n_free.min(pattern.dims.len())];
         let mut gg_part = vec![usize::MAX; pattern.cols.len() - gg_k0];
@@ -125,7 +147,6 @@ impl RangePlan {
             }
         }
         let group_off = if n_free < pattern.dims.len() { pattern.offs[n_free] } else { pattern.n };
-        let points_by_index = points.iter().map(|l| { let mut v = l.clone(); v.sort_unstable(); v }).collect();
         RangePlan { n, n_free, points, points_by_index, owner, gg, gg_k0, gg_part, gg_diag, gg_len, group_rows: pattern.n - group_off, group_off }
     }
     pub(crate) fn range(&self, b: usize) -> usize { (b * self.n).checked_div(self.n_free).unwrap_or(0) }
