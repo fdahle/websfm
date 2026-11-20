@@ -439,11 +439,21 @@ Notable changes to WebSfM. The format follows
   close-range scene could stop at half its photos: on ETH3D playground 19 of 38 cameras
   registered (0.8 took photo pairs' best matches first, which nudged the one photo that
   half the scene hung on below the 20 points PnP needs), office 21 of 26 with 2 cameras
-  wrong. Now playground 35 / 38 and office 26 / 26, every camera within 1.3 cm of ETH3D's
-  laser-scan cameras (median 2.5 / 3.1 mm). Where the model does not stall, nothing
+  wrong. With this alone playground registers 35 / 38 and office 26 / 26, every camera
+  within 1.3 cm of ETH3D's laser-scan cameras (median 2.5 / 3.1 mm); with the next entry,
+  every camera. Where the model does not stall, nothing
   changes: delivery_area, pipes, terrace, South Building, quarry, GeoScan PUTI, Casa Grande
-  1978 and Iceland 1980 give byte-identical models. Courtyard is still 36 / 38 (a
-  different cause, under investigation).
+  1978 and Iceland 1980 give byte-identical models.
+- **Match Features checks each pair's geometry by sampling all its matches again.** 0.8
+  drew RANSAC's samples from the best matches first (PROSAC); on close-range scenes that
+  settled on worse models and cost cameras, so it is off. With the fix above every ETH3D
+  camera registers: courtyard 38 / 38 (was 36), office 26 / 26 (21), playground 38 / 38
+  (19), delivery_area, pipes and terrace all, median 1.6–6.1 mm against ETH3D's laser-scan
+  cameras. One courtyard pair had kept 475 of the 558 inliers uniform sampling finds.
+  PROSAC's gain had been shown on synthetic pairs with 15–30 % true matches only; on real
+  data quarry and Casa Grande 1978 match the same (quarry 6,592 accepted pairs against
+  6,589, 3.32 M inliers, same 346 cameras) at +5 % matching time (149 against 142 s). It
+  stays in the code behind a tuning switch (`MATCH_TUNING.prosacSampling`).
 - **It says why a GCP is not used.** A GCP only constrains the georeference with X, Y, Z,
   an accuracy and marks in two photos, but a point placed by hand had no accuracy and
   nothing said so: the table showed a small "⚠ unknown" beside the datum, and Georeference

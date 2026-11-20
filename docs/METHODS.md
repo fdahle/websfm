@@ -253,13 +253,14 @@ outer ring of the frame. An unknown lens, the usual drone case, is verified as r
 1. **Fundamental-matrix RANSAC** (`verify_matches_hf`, normalised 8-point of Hartley 1997,
    in `crates/matching`) → inlier mask. Each new best sample gets a **local optimisation**:
    refit F on its inliers and recount, up to four rounds while the set changes, keeping a
-   refit only if it explains at least as many points. Samples are drawn **best match
-   first** (PROSAC, Chum & Matas 2005; the order is the descriptor distance, or LightGlue's
-   confidence): from a small, growing set of the best matches, so a pair whose good matches
-   are a minority finds a clean sample in about a hundred draws. It stops by PROSAC's rule
-   (the best model's inliers among the n best points, against what a wrong model would
-   gather by chance), after at least 100 draws, gives up after 1,000 when no model beats
-   chance, and is capped at 10,000 (COLMAP's cap). A homography is also fitted, for an
+   refit only if it explains at least as many points. Samples are drawn **uniformly**; the
+   run stops when a clean sample is 99 % certain at the best model's inlier ratio, and is
+   capped at 10,000 (COLMAP's cap). Drawing the best matches first (PROSAC, Chum & Matas
+   2005) is in the crate behind `MATCH_TUNING.prosacSampling`, off: in 0.8 it cost
+   close-range scenes cameras (ETH3D playground 38 → 19 registered; a courtyard pair kept 475
+   of the 558 inliers uniform sampling finds, its model a local optimum of the best-ranked
+   matches) and gained nothing measured on real data. Uniform: every ETH3D camera
+   registers, quarry at +5 % matching time. A homography is also fitted, for an
    **H-vs-F** degeneracy signal. It is logged and flags the pair (`entry.degenerate`), but
    no gate reads it: seed selection (§4.2) guards against planar and low-parallax pairs by
    its parallax floor and the calibrated five-point solve instead.

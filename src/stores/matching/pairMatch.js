@@ -406,9 +406,9 @@ export function createPairMatcher({
             // regardless of H, so the H/F degeneracy label is never consulted (see
             // verify_matches_hf). minMatches is the one un-overridable accept gate.
             hSkipBelow: minMatches,
-            // Best first, for PROSAC sampling: a weak pair's few good matches are
-            // found in a few hundred samples instead of being missed.
-            order: qualityOrder(raw, keep),
+            // Uniform sampling unless MATCH_TUNING.prosacSampling (best first, PROSAC):
+            // see its note for why it is off.
+            order: MATCH_TUNING.prosacSampling ? qualityOrder(raw, keep) : null,
           },
           { ...timing('verificationMs'), avoidWorker },
         )

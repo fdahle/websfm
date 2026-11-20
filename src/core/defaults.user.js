@@ -160,9 +160,9 @@ export const MATCH_DEFAULTS = {
   // of 15–40-inlier pairs is what carries its 3.6 mean track length vs our 2.6. 0.15 keeps
   // a guard against the ~0.06 spurious fits while re-admitting the tail.
   minInlierRatio: 0.15,
-  // F-RANSAC sample cap. Samples are drawn best match first (PROSAC), so a pair with
-  // geometry stops after about a hundred; one that finds none beyond chance gives up at
-  // 1,000 (crates/matching ransac_fundamental_ordered). The cap is COLMAP's.
+  // F-RANSAC sample cap. Uniform sampling stops once a clean sample is 99 % certain (a
+  // few dozen draws on a pair with geometry); a pair without uses the whole cap
+  // (crates/matching ransac_fundamental_ordered). The cap is COLMAP's.
   maxIters: 10000,
   // Robust estimator for the F (and H-vs-F) fit: 'ransac' — inlier count + local
   // optimisation — or 'magsac' — MAGSAC++ (σ-marginalised loss, IRLS polish;

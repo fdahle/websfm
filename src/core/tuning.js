@@ -331,6 +331,15 @@ export const SFM_TUNING = {
 // MatchFeaturesModal — the user-facing match defaults live in defaults.user.js ▸
 // MATCH_DEFAULTS. `settings` from the caller still overrides.
 export const MATCH_TUNING = {
+  // Draw F-RANSAC's samples best match first (PROSAC, crates/matching
+  // ransac_fundamental_ordered) instead of uniformly. Off: in 0.8 it cost close-range
+  // scenes cameras (ETH3D courtyard 38 → 36, office 26 → 21 and playground 38 → 19
+  // registered; on courtyard a 743-match pair kept 475 inliers where uniform sampling
+  // finds 558) and gained nothing measured on real data (quarry and PUTI kept their
+  // accepted pairs, the film sets their cameras). Uniform: every ETH3D camera registers;
+  // quarry 6,592 pairs (6,589) at +5 % matching time. Its gain was on synthetic pairs
+  // with 15–30 % true matches; turn it on to try a set that has such pairs.
+  prosacSampling: false,
   // How often a matching run saves its matches and its journal (core/runJournal.js)
   // while pairs finish: what a dead tab's run can lose, against one rewrite of the match
   // document (never more often than ten times that rewrite takes). `_journalMs` in a

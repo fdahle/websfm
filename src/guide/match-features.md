@@ -198,9 +198,9 @@ with visible overlap are rejected, lower it if wrong pairs are accepted.
 
 ## RANSAC iterations
 <!-- param: maxIters  default: 10000 -->
-The most samples RANSAC tries on one pair. It samples the best matches first (PROSAC), so a
-pair with real overlap usually stops after a hundred or so, and a pair with none gives up
-after 1,000. Lower it only to cap the time spent on very hard pairs.
+The most samples RANSAC tries on one pair. A pair with real overlap stops once a clean sample
+is all but certain, usually after a few dozen; a pair with little or none uses them all.
+Lower it only to cap the time spent on very hard pairs.
 
 ## Min matches per pair
 <!-- param: minMatches  default: 15 -->

@@ -28,7 +28,8 @@ this idea in two places: verifying pairwise matches via the fundamental matrix
 during [Epipolar Geometry](help:epipolar-geometry) checking, and estimating each
 camera's pose during registration (using MSAC, a variant that scores inliers by
 how well they fit rather than a hard in/out count). Pair verification draws its
-subsets from the best matches first (PROSAC, by descriptor distance or the matcher's
-confidence), so a pair whose good matches are a minority is still found quickly. It can use
+subsets uniformly from all the matches. (Drawing the best matches first, PROSAC, finds a pair
+whose good matches are a small minority sooner, but on close-range scenes it settled on worse
+models and cost cameras, so it is off.) It can use
 [MAGSAC++](help:magsac) instead, which also drops the single hard threshold when it
 scores and refines a model.
