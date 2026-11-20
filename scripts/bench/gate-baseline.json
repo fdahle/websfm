@@ -1,0 +1,99 @@
+{
+  "commit": "e1298962c0a816828359153abdea5edfd96d9845",
+  "date": "2026-11-20",
+  "sets": {
+    "eth3d-courtyard": {
+      "images": 38,
+      "cameras": 38,
+      "points": 24953,
+      "pointsGe3": 22519,
+      "seconds": 89,
+      "nearFloor": 0,
+      "median": 0.00612,
+      "p90": 0.0138,
+      "off": 0
+    },
+    "eth3d-delivery_area": {
+      "images": 44,
+      "cameras": 44,
+      "points": 18980,
+      "pointsGe3": 17192,
+      "seconds": 76,
+      "nearFloor": 1,
+      "median": 0.00262,
+      "p90": 0.004,
+      "off": 0
+    },
+    "eth3d-office": {
+      "images": 26,
+      "cameras": 26,
+      "points": 2935,
+      "pointsGe3": 2239,
+      "seconds": 48,
+      "nearFloor": 2,
+      "median": 0.00253,
+      "p90": 0.0068,
+      "off": 0
+    },
+    "eth3d-pipes": {
+      "images": 14,
+      "cameras": 14,
+      "points": 2112,
+      "pointsGe3": 1186,
+      "seconds": 44,
+      "nearFloor": 2,
+      "median": 0.0016,
+      "p90": 0.0033,
+      "off": 0
+    },
+    "eth3d-playground": {
+      "images": 38,
+      "cameras": 38,
+      "points": 8126,
+      "pointsGe3": 6261,
+      "seconds": 68,
+      "nearFloor": 8,
+      "median": 0.00248,
+      "p90": 0.0041,
+      "off": 0
+    },
+    "eth3d-terrace": {
+      "images": 23,
+      "cameras": 23,
+      "points": 6863,
+      "pointsGe3": 5918,
+      "seconds": 59,
+      "nearFloor": 0,
+      "median": 0.00235,
+      "p90": 0.004,
+      "off": 0
+    },
+    "south-building": {
+      "images": 128,
+      "cameras": 128,
+      "points": 64567,
+      "pointsGe3": 61351,
+      "seconds": 138,
+      "nearFloor": 0,
+      "median": 0.00486,
+      "p90": 0.007,
+      "off": 0
+    },
+    "example-aukerman": {
+      "images": 42,
+      "cameras": 42,
+      "points": 14983,
+      "pointsGe3": 13038,
+      "seconds": 77,
+      "nearFloor": 1
+    },
+    "film-casa-grande": {
+      "images": 37,
+      "cameras": 37,
+      "points": 49117,
+      "pointsGe3": 25620,
+      "seconds": 194,
+      "nearFloor": 0
+    }
+  }
+}
