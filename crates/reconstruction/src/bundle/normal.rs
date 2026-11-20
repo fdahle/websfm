@@ -28,6 +28,9 @@ pub(crate) struct Plan {
     pub use_jcache: bool,
     pub jk: usize,
     pub jstride: usize,
+    // Under self-calibration, each camera's cross blocks with its group in S: the value
+    // offsets of (group, camera) and (camera, group); (0, 0) for a camera held fixed.
+    pub cam_grp_at: Vec<(usize, usize)>,
 }
 
 impl Plan {
@@ -109,7 +112,13 @@ impl Plan {
         let use_jcache = implicit
             && 2 * 8 * pattern.n_vals as u64 + MEM_PER_OBS * obs.len() as u64 + MEM_PER_POINT * n_pts as u64
                 + 4 * (jstride * obs.len()) as u64 <= solver.memory;
-        Plan { pattern, direct, implicit, function_tol, lower_only, range_plan, point_chunks, use_jcache, jk, jstride }
+        let cam_grp_at = if !l.refine { Vec::new() } else {
+            (0..p.n_cam).map(|ci| {
+                let (sc, g) = (slot[pb[ci]], n_free + l.grp[ci]);
+                if sc == FIXED { (0, 0) } else { (pattern.at(g, sc), pattern.at(sc, g)) }
+            }).collect()
+        };
+        Plan { pattern, direct, implicit, function_tol, lower_only, range_plan, point_chunks, use_jcache, jk, jstride, cam_grp_at }
     }
 
     /// The points of chunk c (`point_chunks`).
@@ -291,7 +300,7 @@ pub(crate) fn assemble(m: &Model, plan: &Plan, st: &State, dh: f64, w: &mut Work
                         let g = grp[ci];
                         let goff = group_off + g * kdim;
                         let dg = pattern.diag_at[n_free + g];
-                        let (gc, cg) = if mine { (pattern.at(n_free + g, sc), pattern.at(sc, n_free + g)) } else { (0, 0) };
+                        let (gc, cg) = plan.cam_grp_at[ci];
                         for a in 0..kdim {
                             if owner {
                                 let gv = wu*jku[a]*ru + wv*jkv[a]*rv;
@@ -356,7 +365,7 @@ pub(crate) fn assemble(m: &Model, plan: &Plan, st: &State, dh: f64, w: &mut Work
                         let g = grp[ci];
                         let goff = group_off + g * kdim;
                         let dg = pattern.diag_at[n_free + g];
-                        let (gc, cg) = if free { (pattern.at(n_free + g, sc), pattern.at(sc, n_free + g)) } else { (0, 0) };
+                        let (gc, cg) = plan.cam_grp_at[ci];
                         for a in 0..kdim {
                             unsafe { *gr_p.at(goff + a) += wu*jku[a]*ru + wv*jkv[a]*rv; }
                             for b in 0..kdim { unsafe { *sm_p.at(dg + a*kdim + b) += wu*jku[a]*jku[b] + wv*jkv[a]*jkv[b]; } }
