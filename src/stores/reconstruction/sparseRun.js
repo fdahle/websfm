@@ -309,8 +309,9 @@ export function createSparseRun({
     try {
       // Descriptors are required for matching, never for SfM. In a persistent
       // project they are already in OPFS and can be loaded on demand if matching
-      // is run again. Keeping 127 × 25k × 128 float SIFT descriptors resident can
-      // consume ~1.5 GiB and is enough to kill the renderer during reconstruction.
+      // is run again. Keeping 127 × 25k × 128 float SIFT descriptors resident could
+      // consume ~1.5 GiB (a quarter of it since SIFT is stored as bytes) and was enough
+      // to kill the renderer during reconstruction.
       let descriptorBytesReleased = 0
       let descriptorImagesReleased = 0
       if (isPersisting()) {
@@ -704,7 +705,10 @@ export function createSparseRun({
             : img.descriptors
           const d = toMatchSpace(raw, img, 128)
           if (!d || d.length !== img.kpCount * 128) continue
-          const u8 = rootSiftToU8(d)
+          // Stored bytes are this encoding already; the image's own in-memory copy (a
+          // project not saved) is copied, since the buffer is transferred.
+          let u8 = rootSiftToU8(d)
+          if (u8 === img.descriptors) u8 = u8.slice()
           input.images[i].descU8 = u8
           reconstructionTransfers.push(u8.buffer)
           bytes += u8.length

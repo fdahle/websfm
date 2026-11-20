@@ -1,4 +1,5 @@
 import init, { match_descriptors } from '../../wasm/matching/matching.js'
+import { descriptorsAsFloat } from './siftDescriptors.js'
 
 let initPromise = null
 
@@ -10,8 +11,10 @@ function ensureWasm() {
 /**
  * Brute-force descriptor matching with Lowe's ratio test.
  *
- * @param {Float32Array} descA - N_a × dim descriptors (flat, row-major)
- * @param {Float32Array} descB - N_b × dim descriptors (flat, row-major)
+ * @param {Float32Array|Uint8Array} descA - N_a × dim descriptors (flat, row-major); stored
+ *   uint8 RootSIFT is widened here (core/features/siftDescriptors.js descriptorsAsFloat),
+ *   so either side may be either encoding
+ * @param {Float32Array|Uint8Array} descB - N_b × dim descriptors (flat, row-major)
  * @param {object} options
  * @param {number} [options.dim=128] - descriptor width (128 SIFT, 256 SuperPoint).
  *   Wrong dim mis-slices the buffer into 2× phantom rows whose indices overflow the
@@ -21,7 +24,7 @@ function ensureWasm() {
 export async function matchDescriptors(descA, descB, options = {}) {
   const { ratioThreshold = 0.75, crossCheck = false, dim = 128 } = options
   await ensureWasm()
-  const raw = match_descriptors(descA, descB, dim, ratioThreshold, crossCheck)
+  const raw = match_descriptors(descriptorsAsFloat(descA), descriptorsAsFloat(descB), dim, ratioThreshold, crossCheck)
   const count = raw.length / 3
   const matches = []
   for (let i = 0; i < count; i++) {

@@ -15,7 +15,7 @@ import {
   SEAM_NMS_RADIUS,
 } from '../../core/features/tiling.js'
 import { capOrder, capBoundary } from '../../core/features/keypointCap.js'
-import { SIFT_DESC_NORM, rootSiftInPlace } from '../../core/features/siftDescriptors.js'
+import { SIFT_DESC_NORM, rootSiftInPlace, rootSiftToU8 } from '../../core/features/siftDescriptors.js'
 import { buildMaskLookup } from '../../utils/maskCanvas.js'
 import { analyzeImageQuality } from '../../core/features/imageQuality.js'
 import { fromScaledPx } from '../../core/sfm/geometry.js'
@@ -421,15 +421,17 @@ export function makeKeypointOps({ rasterize }) {
       kept++
     }
     // Trim to the kept keypoints (copy so the transferred buffer is exactly sized).
-    const descriptors = kept === feats.count ? descBuf : descBuf.slice(0, kept * feats.descLen)
+    const floatDesc = kept === feats.count ? descBuf : descBuf.slice(0, kept * feats.descLen)
     const keypoints = {
       data: kept === feats.count ? kpBuf : kpBuf.slice(0, kept * KP_STRIDE),
       rgb: kept === feats.count ? rgbBuf : rgbBuf.slice(0, kept * 3),
     }
-    // SIFT is stored and matched as RootSIFT (core/features/siftDescriptors.js); the
-    // stamp travels with the image so legacy L2 projects convert on load.
+    // SIFT is stored and matched as RootSIFT, one byte per value (× 512, COLMAP's rule:
+    // core/features/siftDescriptors.js); the stamp travels with the image so legacy L2
+    // projects convert on load. Learned descriptors stay Float32.
     const descNorm = spec ? null : SIFT_DESC_NORM.ROOT
-    if (descNorm === SIFT_DESC_NORM.ROOT) rootSiftInPlace(descriptors, feats.descLen)
+    const descriptors =
+      descNorm === SIFT_DESC_NORM.ROOT ? rootSiftToU8(rootSiftInPlace(floatDesc, feats.descLen)) : floatDesc
 
     const diag = {
       detectWidth: uw,

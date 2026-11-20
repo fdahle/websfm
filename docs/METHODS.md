@@ -160,6 +160,16 @@ between the histograms and damps the few dominant bins that make plain SIFT conf
 texture. It is still unit-L2, so every distance gate is unchanged. Stored L2 vectors are
 converted on load (`core/features/siftDescriptors.js`, `descNorm` per image).
 
+**Stored as bytes:** RootSIFT × 512, rounded and clamped at 255 (`rootSiftToU8`, COLMAP's
+encoding), 128 B a keypoint instead of 512; an older project's Float32 descriptors are read
+and matched as they were (`descriptors/<uuid>.u8` or `.bin`). RootSIFT values out of the
+clamped SIFT stay under ~0.29 (max 0.285 over 384 k PUTI rows, none clamped), so the
+rounding error is 5.6e-4 RMS a value, ~0.3 % of a nearest-neighbour distance. The matchers
+widen the bytes (÷ 512): every dot product of two such rows is then exact in Float32, so the
+WebGPU kernel and the WASM matcher agree bit for bit whatever their summation order.
+Measured against the floats on the same keypoints: see CHANGELOG (*SIFT descriptors in a
+quarter of the space*).
+
 **Which keypoints survive the cap: coarse first** (COLMAP's rule;
 `core/features/keypointCap.js`, `DETECT_TUNING.siftCapRule`). The largest scales are kept
 first, with response as the tie-break inside the octave the cap cuts through. Ranking by

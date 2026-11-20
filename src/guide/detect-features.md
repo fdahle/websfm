@@ -8,7 +8,8 @@ order: 20
 Detection finds repeatable [keypoint](help:keypoint)s in each image and describes the
 image around them. More keypoints help difficult images but make matching slower, and
 they can't make up for blur, poor overlap or repeated texture. SIFT descriptors are
-stored as RootSIFT, as in COLMAP. Keypoints and matches from another tool come in
+stored as RootSIFT, one byte per value as in COLMAP: 128 bytes a keypoint, about 2.5 MB
+for a photo of 20,000 keypoints. Keypoints and matches from another tool come in
 through [Import Keypoints & Matches](guide:import-features) or
 [Import from COLMAP](guide:import-sfm).
 

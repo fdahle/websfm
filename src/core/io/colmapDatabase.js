@@ -169,11 +169,9 @@ export function decodeColmapDescriptors(row) {
   const bytes = bytesOf(row.data)
   if (bytes.byteLength !== rows * bytesPerRow) throw new Error(`image ${row.image_id} descriptors: invalid blob length`)
   if (bytesPerRow === 128) {
-    const out = new Float32Array(rows * 128)
-    // COLMAP's SIFT descriptors are RootSIFT-like values quantized by ×512.
-    // The common scalar is immaterial to Lowe ratios but restoring it keeps norms sane.
-    for (let i = 0; i < out.length; i++) out[i] = bytes[i] / 512
-    return { descriptors: out, descriptorType: 'sift-u8', descDim: 128, compatible: true }
+    // COLMAP's SIFT descriptors are RootSIFT × 512 as uint8: WebSfM's own stored
+    // encoding (core/features/siftDescriptors.js), so the bytes are kept as they are.
+    return { descriptors: bytes.slice(), descriptorType: 'sift-u8', descDim: 128, compatible: true }
   }
   if (bytesPerRow === 512) {
     const raw = typedBlob(bytes, Float32Array, rows * 128, `image ${row.image_id} ALIKED descriptors`)

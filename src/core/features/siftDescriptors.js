@@ -14,6 +14,18 @@
 // (`toMatchSpace`). Mixing the two spaces without converting would be silent garbage:
 // the ratio test still passes, just on the wrong distances. That is why the space is
 // stamped on the image (`descNorm`) rather than inferred from the settings.
+//
+// **Stored as one byte per value** (since 2026-11): RootSIFT × 512, rounded, clamped at
+// 255 (`rootSiftToU8`), COLMAP's own rule, so a COLMAP database round-trips its bytes
+// unchanged. 128 B a keypoint instead of 512. RootSIFT values are non-negative and, out
+// of the crate's clamped SIFT, at most ~0.29 (PUTI at 4,000 px, 384 k rows: max 0.285,
+// none clamped), so the rounding error is 5.6e-4 RMS per value, ~0.3 % of a typical
+// nearest-neighbour distance; on adjacent PUTI photos 0.06 % of the ratio-test
+// putatives changed. A Uint8Array is always RootSIFT (nothing writes L2 as bytes);
+// a Float32Array is an older project's, stamped as above. Matching widens the bytes
+// (`descriptorsAsFloat`, ÷ 512, exact in a float): every dot product of two widened
+// rows is then a multiple of 2⁻¹⁸ below 2⁶, so it is exact in Float32 whatever the
+// summation order, and the WebGPU and WASM matchers agree bit for bit.
 
 /** Normalisation stamps for SIFT descriptors. */
 export const SIFT_DESC_NORM = Object.freeze({ L2: 'l2', ROOT: 'root' })
@@ -63,28 +75,50 @@ export function siftDescNorm(img) {
  * @param {number} [dim]
  */
 export function toMatchSpace(desc, img, dim = 128) {
-  if (!desc || siftDescNorm(img) !== SIFT_DESC_NORM.L2) return desc
+  if (!desc || desc instanceof Uint8Array || siftDescNorm(img) !== SIFT_DESC_NORM.L2) return desc
   return rootSiftInPlace(desc.slice(), dim)
 }
 
+/** The scale of stored uint8 RootSIFT: byte = round(value × 512), clamped at 255. */
+export const SIFT_U8_SCALE = 512
+
 /**
- * RootSIFT as COLMAP-style uint8 (× 512, clamped at 255): what guided track extension
- * gets (stores/reconstruction/sparseRun.js), Math.min(255, Math.round(v · 512)) per
- * value. For a Float32Array, v · 512 + 0.5 is exact in a double (a power-of-two scale
+ * Descriptors as floats, for the matchers and retrieval: stored uint8 RootSIFT widened
+ * (byte ÷ 512) into a new Float32Array; a Float32Array (learned descriptors, an older
+ * project's SIFT) passes through. Null stays null.
+ *
+ * @param {Float32Array|Uint8Array|null} desc
+ * @returns {Float32Array|null}
+ */
+export function descriptorsAsFloat(desc) {
+  if (!(desc instanceof Uint8Array)) return desc
+  const out = new Float32Array(desc.length)
+  const inv = 1 / SIFT_U8_SCALE
+  for (let k = 0; k < desc.length; k++) out[k] = desc[k] * inv
+  return out
+}
+
+/**
+ * RootSIFT as COLMAP-style uint8 (× 512, clamped at 255): what detection stores, what
+ * guided track extension gets (stores/reconstruction/sparseRun.js) and what a COLMAP
+ * database export writes, Math.min(255, Math.round(v · 512)) per value (a negative
+ * value, which RootSIFT never has, to 0). Bytes pass through: they are this encoding
+ * already. For a Float32Array, v · 512 + 0.5 is exact in a double (a power-of-two scale
  * of a 24-bit value under 2¹⁰), so the truncation is Math.round's result for every
  * non-negative value and NaN (0 either way); ~4× faster, which on a 347-image block was
  * seconds of the page's main thread before SfM started. Other arrays take Math.round.
  *
- * @param {Float32Array|Float64Array|number[]} d
+ * @param {Float32Array|Float64Array|Uint8Array|number[]} d
  * @returns {Uint8Array}
  */
 export function rootSiftToU8(d) {
+  if (d instanceof Uint8Array) return d
   const u8 = new Uint8Array(d.length)
   if (d instanceof Float32Array) {
     for (let k = 0; k < d.length; k++) {
-      const v = d[k] >= 0 ? (d[k] * 512 + 0.5) | 0 : Math.round(d[k] * 512)
+      const v = d[k] >= 0 ? (d[k] * SIFT_U8_SCALE + 0.5) | 0 : 0
       u8[k] = v > 255 ? 255 : v
     }
-  } else for (let k = 0; k < d.length; k++) u8[k] = Math.min(255, Math.round(d[k] * 512))
+  } else for (let k = 0; k < d.length; k++) u8[k] = Math.max(0, Math.min(255, Math.round(d[k] * SIFT_U8_SCALE)))
   return u8
 }

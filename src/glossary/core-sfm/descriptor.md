@@ -25,7 +25,8 @@ detectors: SIFT, DISK and ALIKED at 128 dimensions, and SuperPoint at 256 (ALIKE
 DISK and SuperPoint are learned detectors).
 The width travels with the descriptors through matching, because slicing a flat
 descriptor buffer at the wrong width silently produces nonsense rows rather than
-an error.
+an error. SIFT descriptors are kept as one byte per number (RootSIFT scaled by 512, as
+COLMAP keeps them), 128 bytes a keypoint; the learned detectors' as 32-bit floats.
 
 Nearest-neighbour distance alone is a weak test — a repetitive façade offers many
 near-equal candidates — so matching accepts a pair only if the best match is

@@ -1,7 +1,17 @@
 // Keypoints, keypoint colours, descriptors and the packed matches document.
 import { trackPersistence, persistenceLock, ignoreMissing } from '../persistence.js'
 import { writeBinaryDocument, readBinaryDocument } from '../binaryDocument.js'
-import { FLOATS_PER_KP, getProjectDir, getSubDir, readBin, readJson, writeBin, writeFileIn, writeJson } from './base.js'
+import {
+  FLOATS_PER_KP,
+  getProjectDir,
+  getSubDir,
+  readBin,
+  readJson,
+  removeFileIn,
+  writeBin,
+  writeFileIn,
+  writeJson,
+} from './base.js'
 
 // ── Keypoints ─────────────────────────────────────────────────────────────────
 // keypoints/{uuid}.bin is the Keypoints `data` buffer itself (Float32, KP_STRIDE = 6:
@@ -77,22 +87,44 @@ export async function loadColors(projectId, uuid) {
 }
 
 // ── Descriptors ───────────────────────────────────────────────────────────────
-// Stored as raw Float32Array (N×128 floats) in descriptors/{uuid}.bin.
-// Not loaded into the image object — fetched on-demand when matching.
+// descriptors/{uuid}.u8: SIFT as uint8 RootSIFT (N×128 bytes, × 512: COLMAP's rule,
+// core/features/siftDescriptors.js), since 2026-11. descriptors/{uuid}.bin: Float32
+// (N×dim floats): the learned detectors', and SIFT detected before then. The file name
+// says the encoding, so an older project reads as it always did and no record needs a
+// stamp; an image has one of the two (saving one removes the other). Not loaded into the
+// image object: fetched on demand when matching.
+const DESC_FILES = Object.freeze({ u8: '.u8', f32: '.bin' })
 
 export async function saveDescriptors(projectId, uuid, descriptors) {
   return trackPersistence('saveDescriptors:' + String(projectId) + ':' + String(uuid), async () => {
     const dir = await getSubDir(projectId, 'descriptors')
-    await writeFileIn(dir, uuid + '.bin', descriptors.buffer)
+    const bytes = descriptors instanceof Uint8Array
+    await writeFileIn(dir, uuid + (bytes ? DESC_FILES.u8 : DESC_FILES.f32), descriptors)
+    // After the write: a tab that dies between the two keeps the newer file, which
+    // loadDescriptors picks by its time.
+    await removeFileIn(dir, uuid + (bytes ? DESC_FILES.f32 : DESC_FILES.u8))
   })
 }
 
+async function descriptorFile(dir, name) {
+  try {
+    return await (await dir.getFileHandle(name)).getFile()
+  } catch {
+    return null
+  }
+}
+
+// A Uint8Array (.u8) or a Float32Array (.bin), or null when there is neither.
 export async function loadDescriptors(projectId, uuid) {
   try {
     const dir = await getSubDir(projectId, 'descriptors')
-    const fh = await dir.getFileHandle(uuid + '.bin')
-    const file = await fh.getFile()
-    return new Float32Array(await file.arrayBuffer())
+    const [u8, f32] = await Promise.all([
+      descriptorFile(dir, uuid + DESC_FILES.u8),
+      descriptorFile(dir, uuid + DESC_FILES.f32),
+    ])
+    if (u8 && (!f32 || u8.lastModified >= f32.lastModified)) return new Uint8Array(await u8.arrayBuffer())
+    if (f32 && f32.size % 4 === 0) return new Float32Array(await f32.arrayBuffer())
+    return null
   } catch {
     return null
   }
@@ -102,7 +134,7 @@ export async function deleteDescriptors(projectId, uuid) {
   return trackPersistence('deleteDescriptors:' + String(projectId) + ':' + String(uuid), async () => {
     try {
       const dir = await getSubDir(projectId, 'descriptors')
-      await dir.removeEntry(uuid + '.bin')
+      for (const ext of Object.values(DESC_FILES)) await removeFileIn(dir, uuid + ext)
     } catch (error) {
       ignoreMissing(error)
     }

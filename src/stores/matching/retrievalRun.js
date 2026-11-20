@@ -11,18 +11,19 @@
 import * as opfs from '../../utils/opfs.js'
 import { POOL_SIZE, retrievalCodebook, retrievalEncode, retrievalTopK } from '../../workers/computeClient.js'
 import { retrievalPairs, sampleImageRows, samplesPerImage } from '../../core/features/retrieval.js'
-import { toMatchSpace } from '../../core/features/siftDescriptors.js'
+import { descriptorsAsFloat, toMatchSpace } from '../../core/features/siftDescriptors.js'
 import { sharedArray } from '../../core/bigArray.js'
 import { RETRIEVAL_TUNING } from '../../core/tuning.js'
 import { pluralize } from '../../core/textFormat.js'
 
-/** One photo's descriptors in the space matching uses (RootSIFT for SIFT), or null. */
+/** One photo's descriptors in the space matching uses (RootSIFT for SIFT), as floats, or null. */
 export function descriptorLoader({ projectId, persisting }) {
   return async (img) => {
     const d = persisting
       ? ((await opfs.loadDescriptors(projectId, img.uuid)) ?? img.descriptors ?? null)
       : (img.descriptors ?? null)
-    return toMatchSpace(d, img, img.descDim ?? 128)
+    // Stored bytes widen into a new array; VLAD's codebook and residuals are float maths.
+    return descriptorsAsFloat(toMatchSpace(d, img, img.descDim ?? 128))
   }
 }
 

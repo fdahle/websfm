@@ -123,9 +123,10 @@ export function pickSpreadIndices(kps, count) {
 }
 
 // Gather the rows at `indices` from a flat row-major N×dim descriptor buffer into
-// a compact indices.length×dim buffer, ready to hand to the brute-force matcher.
+// a compact indices.length×dim buffer, ready to hand to the brute-force matcher, of the
+// same type (stored uint8 RootSIFT stays bytes; the matchers widen it).
 export function sliceDescriptorRows(desc, indices, dim) {
-  const out = new Float32Array(indices.length * dim)
+  const out = new desc.constructor(indices.length * dim)
   for (let i = 0; i < indices.length; i++) {
     const off = indices[i] * dim
     out.set(desc.subarray(off, off + dim), i * dim)

@@ -20,6 +20,7 @@
 import { ensureDevice } from './device.js'
 import shaderSrc from './match.wgsl?raw'
 import { descriptorNorms, selectMatches } from '../../core/features/nnSelect.js'
+import { descriptorsAsFloat } from '../../core/features/siftDescriptors.js'
 
 // Kernel geometry — must agree with the constants in match.wgsl.
 export const MATCH_GPU_GEOMETRY = Object.freeze({
@@ -115,7 +116,11 @@ function destroyEntry(e) {
   e.normBuf.destroy()
 }
 
-function createEntry(device, desc, dim) {
+// Stored uint8 RootSIFT is widened here, once per image per run (the bytes travel from
+// the page, a quarter of the floats): the kernel then sees the same floats as the WASM
+// matcher, whose dot products on them are exact (core/features/siftDescriptors.js).
+function createEntry(device, stored, dim) {
+  const desc = descriptorsAsFloat(stored)
   const n = Math.floor(desc.length / dim)
   const descBytes = Math.max(RECORD, n * dim * 4)
   const buf = device.createBuffer({ size: descBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
@@ -180,7 +185,8 @@ function evict(r, id) {
  * @param {object} a
  * @param {string} a.runId
  * @param {string|null} a.idA, a.idB  cache keys (image uuids); null ⇒ throw-away buffers
- * @param {Float32Array|null} a.descA, a.descB  required on a cache miss
+ * @param {Float32Array|Uint8Array|null} a.descA, a.descB  required on a cache miss (uint8:
+ *   stored RootSIFT, widened on upload)
  * @param {number} a.dim  descriptor width (128 SIFT / 256 SuperPoint)
  * @returns {Promise<{needs:string[]} | {matches, count, nA, nB, gpuMs, selectMs, chunks}>}
  */

@@ -146,7 +146,9 @@ describe('COLMAP database adapters', () => {
     ])
     const d = decodeColmapDescriptors({ image_id: 1, rows: 1, cols: 128, data: new Uint8Array(128).fill(128) })
     expect(d.compatible).toBe(true)
-    expect(d.descriptors[0]).toBeCloseTo(0.25)
+    // RootSIFT × 512 bytes, WebSfM's stored encoding: kept as they are.
+    expect(d.descriptors).toBeInstanceOf(Uint8Array)
+    expect(d.descriptors[0]).toBe(128)
     expect(decodeColmapKeypoints({ image_id: 2, rows: 1, cols: 2, data: blob(Float32Array, [7, 8]) })[0]).toMatchObject(
       { x: 6.5, y: 7.5 },
     )

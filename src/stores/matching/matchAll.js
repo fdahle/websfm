@@ -1216,7 +1216,7 @@ export function createMatchAll({
       const dc = descCache.stats()
       const kpAfter = kpStats()
       log(
-        `Descriptors loaded ${en(dc.loads)}× for ${pluralize(ready.length, 'image')} ` +
+        `Descriptors loaded ${en(dc.loads)}× (${en(dc.byteLoads)} as bytes) for ${pluralize(ready.length, 'image')} ` +
           `(${en(dc.hits)} hits, ${(dc.loadedBytes / 2 ** 30).toFixed(2)} GB read: storage ${(dc.readMs / 1000).toFixed(1)} s, ` +
           `conversion ${(dc.convertMs / 1000).toFixed(1)} s, summed), resident peak ${(dc.peakBytes / 2 ** 20).toFixed(0)} MiB; ` +
           `keypoints ${en(kpAfter.misses - kpBefore.misses)} loads, ${en(kpAfter.hits - kpBefore.hits)} hits`,

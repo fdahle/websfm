@@ -4,6 +4,7 @@ import { beforeAll, describe, it, expect } from 'vitest'
 
 import initMatching from '../../wasm/matching/matching.js'
 import { matchDescriptors } from './bruteforce.js'
+import { descriptorsAsFloat } from './siftDescriptors.js'
 
 // Load the matching wasm bytes ourselves (Node can't fetch() the .wasm URL the
 // glue defaults to); the module-level singleton then makes the core module's own
@@ -134,5 +135,24 @@ describe('matchDescriptors (SIMD wasm)', () => {
     const B = pack([oneHot(0, 100), oneHot(40, 100)])
     const { matches, count } = await matchDescriptors(A, B)
     expect(count).toBe(matches.length)
+  })
+
+  it('matches stored uint8 RootSIFT as its widened floats, either side either encoding', async () => {
+    // Bytes with planted near-duplicates: B row j is A row 2j with a few values nudged.
+    let seed = 7
+    const byte = () => (seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) % 140
+    const A = Uint8Array.from({ length: 40 * 128 }, byte)
+    const B = Uint8Array.from({ length: 30 * 128 }, byte)
+    for (let j = 0; j < 15; j++) {
+      B.set(A.subarray(2 * j * 128, 2 * j * 128 + 128), j * 128)
+      B[j * 128 + (j % 128)] ^= 3
+    }
+    const opts = { ratioThreshold: 0.8, crossCheck: true, dim: 128 }
+    const key = (r) => r.matches.map((m) => `${m.ia}-${m.ib}-${m.dist}`)
+    const floats = await matchDescriptors(descriptorsAsFloat(A), descriptorsAsFloat(B), opts)
+    expect(floats.count).toBeGreaterThanOrEqual(15)
+    expect(key(await matchDescriptors(A, B, opts))).toEqual(key(floats))
+    expect(key(await matchDescriptors(A, descriptorsAsFloat(B), opts))).toEqual(key(floats))
+    expect(key(await matchDescriptors(descriptorsAsFloat(A), B, opts))).toEqual(key(floats))
   })
 })

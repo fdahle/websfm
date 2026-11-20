@@ -382,10 +382,13 @@ export const MATCH_TUNING = {
   // Byte budget of a matching run's descriptor cache in the page
   // (core/features/descriptorCache.js: each image's descriptors and subset-gate sample,
   // the image whose next pair is furthest ahead evicted first). A smaller budget costs
-  // reloads from project storage; the gate samples (≤ 0.5 MB an image) keep a pair the
-  // gate skips from loading anything.
+  // reloads from project storage; the gate samples (≤ 0.1 MB an image as bytes, 0.4 MB
+  // as an older project's floats) keep a pair the gate skips from loading anything. SIFT
+  // is stored as bytes (128 B a keypoint), so 2 GiB holds 16 M keypoints of it (PUTI at
+  // 4,000 px is 8.5 M) and a quarter as many of floats.
   descCacheMiB: 2048,
-  // WebGPU brute-force: byte budget of the per-run GPU descriptor cache (LRU). 1 GiB
+  // WebGPU brute-force: byte budget of the per-run GPU descriptor cache (LRU). The GPU
+  // holds floats (stored bytes are widened on upload, 512 B a SIFT keypoint): 1 GiB
   // holds a whole 128-image SIFT run at ~8.4k kp (≈ 4.3 MB/image); a smaller budget
   // only costs re-uploads (the worker answers a miss and the store resends).
   gpuDescCacheMiB: 1024,

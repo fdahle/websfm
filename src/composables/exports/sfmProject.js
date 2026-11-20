@@ -7,7 +7,7 @@ import { buildColmapModel, serializeColmapModelBinParts, serializeColmapModelPar
 import { downloadBlob } from '../../utils/download.js'
 import { partsToBlob } from '../../utils/blobParts.js'
 import { buildNvmParts, buildOpenMvg } from '../../core/io/sfmInterop.js'
-import { siftDescNorm, toMatchSpace } from '../../core/features/siftDescriptors.js'
+import { rootSiftToU8, siftDescNorm, toMatchSpace } from '../../core/features/siftDescriptors.js'
 import * as opfs from '../../utils/opfs.js'
 import { imageIdsToPairId } from '../../core/io/colmapDatabase.js'
 import { exportColmapDatabase } from '../../workers/colmapDbClient.js'
@@ -194,11 +194,9 @@ export function createSfmProjectExports({
               source.descriptors ??
               (projects.isPersisting ? await opfs.loadDescriptors(projects.currentProjectId, im.uuid) : null)
             const root = toMatchSpace(stored, source)
-            if (root?.length === im.keypoints.length * 128) {
-              descriptors = new Uint8Array(root.length)
-              for (let k = 0; k < root.length; k++)
-                descriptors[k] = Math.max(0, Math.min(255, Math.round(root[k] * 512)))
-            }
+            // Stored bytes are COLMAP's encoding already and go as they are; older
+            // float descriptors are rounded by the same rule.
+            if (root?.length === im.keypoints.length * 128) descriptors = rootSiftToU8(root)
           }
           return { imageId: model.images[i].imageId, keypoints: im.keypoints, descriptors }
         }),

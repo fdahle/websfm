@@ -416,6 +416,31 @@ Notable changes to WebSfM. The format follows
   still grouped by size.
 
 ### Performance
+- **SIFT descriptors take a quarter of the space.** Detect Features now stores each SIFT
+  descriptor value in one byte, as COLMAP does (RootSIFT × 512), so a photo's descriptors
+  take 128 bytes a keypoint instead of 512, and matching keeps four times as many photos
+  in memory. Projects detected before keep their descriptors as they are and match exactly
+  as before; detecting again stores the bytes. A COLMAP database exports and imports its
+  descriptors unchanged. GeoScan PUTI at 4,000 px (444 photos, 8.5 M keypoints):
+  descriptors 4.36 → 1.09 GB (9.8 → 2.5 MB a photo), the project 9.5 → 6.3 GB; matching
+  read 1.0 GB instead of 6.3 GB (each photo once: they now fit the 2 GiB cache), the page's
+  memory while matching 3.0 → 2.2 GB, matching time unchanged (352–360 s against 352–391 s:
+  the GPU is the bound). The rounding (RootSIFT values stay under 0.29, so no byte is
+  clamped) changed 0.13 % of the ratio-test matches (6,286 of 4.98 M); because RANSAC is
+  seeded by the match count, 83 % of the pairs then verified to slightly different inliers
+  (median 1.2 %), just as dropping one match from every pair of the float run does (control:
+  median 1.2 %, the same pairs accepted). Accepted pairs 3,242 → 3,241 (11 left, 10
+  joined; the quick overlap check decided 21 of 98,346 pairs the other way). Checkpoints
+  H / V in cm, both pair orders: floats 2.56 / 7.39 and 2.66 / 7.41, bytes 2.88 / 7.43 and
+  2.85 / 7.40; with one match fewer per pair, floats 2.63 / 7.76 and 2.65 / 7.69, bytes
+  2.64 / 7.60 and 2.67 / 7.48. Any reseeding of the verification moves them by up to
+  0.3 cm (H) and 0.4 cm (V), and the bytes stay inside that (means of the four: H 2.63 →
+  2.76, V 7.56 → 7.48). South Building at the defaults (128 photos): descriptors
+  0.52 → 0.13 GB, matching 36.0 → 35.3 s, accepted pairs 1,262 → 1,258, all 128 photos
+  aligned. The WebGPU and CPU matchers agree bit for bit on bytes. The learned detectors' descriptors stay 32-bit floats: 0.5–1 MB a photo could be
+  saved with half floats, which changed 0.02–0.04 % of LightGlue's matches (ALIKED on 40
+  South Building photos, DISK and SuperPoint on 25; 8-bit 0.4–0.6 %), but LightGlue's
+  own time is the bound there and the cache already holds about 2,000 photos of them.
 - **Matching many keypoints is up to three times faster.** Detect and Match Features
   now reads a photo's full keypoints and descriptors only for the pairs that pass the quick
   overlap check, and keeps in memory the photos it needs again soonest, so a large block

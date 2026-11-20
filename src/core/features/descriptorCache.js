@@ -44,6 +44,7 @@ export function createDescriptorCache({ pairs = [], budgetBytes = 1024 ** 3 } = 
     loadedBytes = 0,
     readMs = 0,
     convertMs = 0,
+    byteLoads = 0,
     peak = 0
 
   const drop = (key, e) => {
@@ -119,9 +120,11 @@ export function createDescriptorCache({ pairs = [], budgetBytes = 1024 ** 3 } = 
     noteLoad(t) {
       readMs += t.readMs ?? 0
       convertMs += t.convertMs ?? 0
+      if (t.bytes) byteLoads++
     },
     stats: () => ({
       loads,
+      byteLoads,
       hits,
       evictions,
       loadedBytes,

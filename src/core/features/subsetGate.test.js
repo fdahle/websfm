@@ -64,6 +64,14 @@ describe('sliceDescriptorRows', () => {
     const out = sliceDescriptorRows(desc, [1, 2, 3], dim)
     expect(out.length).toBe(3 * dim)
   })
+
+  it('keeps stored uint8 RootSIFT as bytes', () => {
+    const desc = Uint8Array.from({ length: 3 * 128 }, (_, k) => k >> 7)
+    const out = sliceDescriptorRows(desc, [2, 0], 128)
+    expect(out).toBeInstanceOf(Uint8Array)
+    expect(out[0]).toBe(2)
+    expect(out[128]).toBe(0)
+  })
 })
 
 describe('resolveSubsetGateSize', () => {

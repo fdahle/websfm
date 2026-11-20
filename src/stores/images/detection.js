@@ -332,7 +332,7 @@ export function createDetection({
           learnedSpec
             ? ''
             : `, ≤${pluralize(settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations, 'orientation')} per extremum` +
-              `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`
+              `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors stored as bytes (128 B a keypoint)`
         }`,
       'info',
       'Detection',

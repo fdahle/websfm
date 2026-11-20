@@ -174,13 +174,18 @@ export function createPairMatcher({
         )
           // SIFT matches in RootSIFT; legacy L2 detections convert here, once per run
           // (core/features/siftDescriptors.js). Never in place: `src.descriptors` is
-          // the image's live copy.
+          // the image's live copy. Stored bytes stay bytes (a quarter of the floats in
+          // this cache and on the way to a worker); the matchers widen them.
           .then((d) => {
             t1 = performance.now()
             return toMatchSpace(d, src, src.descDim ?? 128)
           })
           .then((d) => {
-            descCache?.noteLoad?.({ readMs: t1 - t0, convertMs: performance.now() - t1 })
+            descCache?.noteLoad?.({
+              readMs: t1 - t0,
+              convertMs: performance.now() - t1,
+              bytes: d instanceof Uint8Array,
+            })
             return d
           })
         descCache?.set(id, p)
