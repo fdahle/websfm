@@ -2675,6 +2675,31 @@ window.bench = {
     let h = 2166136261
     for (const k of Object.keys(perPair).sort())
       for (const c of k + perPair[k]) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0
+    // matchDigest: every match of every pair with matches (keypoint indices, in the
+    // stored order, turned to name order) and its raw and inlier counts, so two runs
+    // on the same detection can be held bit-identical, not just equal in counts.
+    const withMatches = []
+    for (const [id, e] of matches.matchStore) {
+      if (!(e.nMatches > 0)) continue
+      const [nA, nB] = id.split('--').map((u) => nameOf.get(u) ?? u)
+      withMatches.push({ id, e, key: [nA, nB].sort().join('|'), swap: nA > nB })
+    }
+    withMatches.sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : 0))
+    let md = 2166136261
+    const mix = (v) => {
+      md = Math.imul(md ^ (v & 0xffff), 16777619) >>> 0
+      md = Math.imul(md ^ (v >>> 16), 16777619) >>> 0
+    }
+    for (const { id, e, key, swap } of withMatches) {
+      for (const c of key) mix(c.charCodeAt(0))
+      mix(e.rawCount ?? 0)
+      mix(e.inlierCount ?? 0)
+      const m = await matches.readPairMatches(id)
+      for (let i = 0; i + 1 < (m?.length ?? 0); i += 2) {
+        mix(swap ? m[i + 1] : m[i])
+        mix(swap ? m[i] : m[i + 1])
+      }
+    }
     return {
       settings,
       seconds: (performance.now() - t0) / 1000,
@@ -2682,6 +2707,7 @@ window.bench = {
       accepted,
       inliers,
       pairDigest: h.toString(16),
+      matchDigest: md.toString(16),
       perPair,
       gateScores,
       // Detect gaps again at full size (stores/matching/matchAll.js redetectGaps), if it ran.
