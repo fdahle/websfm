@@ -56,6 +56,8 @@ const SUMMED_SOLVER_KEYS = [
   'pcgNotPd',
   'pcgIters',
   'implicit',
+  'pointFailTries',
+  'pointFailPoints',
 ]
 
 export function createBundleSession(ctx) {
@@ -132,6 +134,8 @@ export function createBundleSession(ctx) {
     pcgIters: 0,
     pcgItersMax: 0,
     implicit: 0,
+    pointFailTries: 0,
+    pointFailPoints: 0,
     threads: 1,
   }
   const noteBaSolver = (label, result) => {
@@ -152,6 +156,10 @@ export function createBundleSession(ctx) {
             `${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / ` +
             `${s.pcgNotPd} not PD, ${s.pcgIters} CG it (max ${s.pcgItersMax})`
           : `${s.cholesky} Cholesky`) +
+        (s.pointFailTries
+          ? `; ${pluralize(s.pointFailTries, 'try', 'tries')} refused for ${pluralize(s.pointFailPoints, 'point')} ` +
+            'whose block could not be inverted'
+          : '') +
         `; ${((result.ms ?? 0) / 1000).toFixed(1)}s`,
       'debug',
       'Sparse',

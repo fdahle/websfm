@@ -327,7 +327,7 @@ fn bundle_adjust_impl(
         // 8 tries raise λ only from its working level to ~20 (docs/METHODS.md §4.5).
         let mut accepted = false;
         for _try in 0..LM_MAX_TRIES {
-            let Reduced { ok, rhs, cinv_store } = eliminate(&m, &plan, &st, dh, lambda, &nrm, &mut w);
+            let Reduced { ok, failed_points, rhs, cinv_store } = eliminate(&m, &plan, &st, dh, lambda, &nrm, &mut w);
             if cov_pass {
                 if ok {
                     if plan.implicit { last_implicit = Some((std::mem::take(&mut w.b_damped), std::mem::take(&mut w.s), cinv_store)); }
@@ -335,7 +335,12 @@ fn bundle_adjust_impl(
                 }
                 break;
             }
-            if !ok { lambda = (lambda * 4.0).min(LAMBDA_MAX); continue; }
+            if !ok {
+                solve_stats.point_fail_tries += 1;
+                solve_stats.point_fail_points += failed_points;
+                lambda = (lambda * 4.0).min(LAMBDA_MAX);
+                continue;
+            }
 
             prof::mark(2);
             let pattern = &plan.pattern;
@@ -483,7 +488,8 @@ fn bundle_adjust_impl(
     out.push(camera_prior_rms_after as f32);
     let ss = &solve_stats;
     for v in [n as f64, ss.solves as f64, ss.cholesky as f64, ss.pcg_converged as f64, ss.pcg_partial as f64,
-              ss.pcg_fallback as f64, ss.pcg_npd as f64, ss.pcg_iters as f64, ss.pcg_iters_max as f64, ss.implicit as f64] {
+              ss.pcg_fallback as f64, ss.pcg_npd as f64, ss.pcg_iters as f64, ss.pcg_iters_max as f64, ss.implicit as f64,
+              ss.point_fail_tries as f64, ss.point_fail_points as f64] {
         out.push(v as f32);
     }
     if solver.covariance {

@@ -251,6 +251,7 @@ export function logRunTotals({ hist, totalMs, stageTimes, solverTotals, baSolver
         `${T.solves} solves: ${T.cholesky} Cholesky, PCG ${T.pcgConverged} converged / ${T.pcgPartial} partial / ` +
         `${T.pcgFallback} → Cholesky / ${T.pcgNotPd} not PD (${T.pcgIters} CG it, max ${T.pcgItersMax})` +
         `${T.implicit ? `, ${T.implicit} implicit (past the memory budget)` : ''}; ` +
+        `${T.pointFailTries ? `${T.pointFailTries} tries refused for ${T.pointFailPoints} points whose block could not be inverted; ` : ''}` +
         `policy ${JSON.stringify(baSolver ?? {})}`,
       'debug',
       'Sparse',

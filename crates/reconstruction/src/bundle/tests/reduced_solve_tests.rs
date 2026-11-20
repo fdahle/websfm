@@ -650,6 +650,70 @@ fn a_far_point_does_not_hold_back_the_damping() {
     assert!(far_it <= near_it + 2, "{far_it} iterations with the far point, {near_it} without");
 }
 
+// A point whose block cannot be inverted refuses the try and is counted in the solver
+// stats (point_fail_tries, point_fail_points). The multiplicative damping keeps a rank-2
+// block invertible down to the damping floor (det/diag ≈ λ); a rank-1 one fails inv3 below
+// λ ≈ 6e-8 (det/diag ≈ 3λ²): a point seen once, by a turned camera (all three of its
+// Jacobian's entries non-zero), its observation weighted along x alone.
+#[test]
+fn a_point_that_cannot_be_inverted_is_counted() {
+    let n_cam = 9;
+    // Camera 8: turned 0.3 rad about (1, 1, 1)/√3, centre at (4, 1, 0).
+    let r8 = so3_exp(&[0.3 / 3f64.sqrt(); 3]);
+    let t8 = { let c = mat3_vec(&r8, &[4.0, 1.0, 0.0]); [-c[0], -c[1], -c[2]] };
+    let project = |c: usize, x: &[f64; 3]| -> [f64; 2] {
+        let q = if c < 8 { [x[0] - c as f64, x[1], x[2]] } else {
+            let q = mat3_vec(&r8, x);
+            [q[0] + t8[0], q[1] + t8[1], q[2] + t8[2]]
+        };
+        [1000.0 * q[0] / q[2], 1000.0 * q[1] / q[2]]
+    };
+    let run = |degenerate: bool| {
+        let mut rng = Lcg(11);
+        let (mut cams, mut intr) = (Vec::new(), Vec::new());
+        for c in 0..n_cam {
+            if c < 8 { cams.extend_from_slice(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -(c as f32), 0.0, 0.0]); }
+            else {
+                for row in &r8 { for &v in row { cams.push(v as f32); } }
+                for &v in &t8 { cams.push(v as f32); }
+            }
+            intr.extend_from_slice(&[1000.0, 1000.0, 0.0, 0.0]);
+        }
+        let (mut pts, mut idx, mut px, mut wt) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let truths: Vec<[f64; 3]> = (0..100).map(|_| [3.5 + 4.0 * rng.next(), 3.0 * rng.next(), 10.0 + 2.0 * rng.next()]).collect();
+        for (p, truth) in truths.iter().enumerate() {
+            for c in 0..n_cam {
+                let uv = project(c, truth);
+                idx.extend_from_slice(&[c as u32, p as u32]);
+                px.extend_from_slice(&[uv[0] as f32, uv[1] as f32]);
+                wt.extend_from_slice(&[1.0, 1.0]);
+            }
+            pts.extend(truth.iter().map(|v| (v * (1.0 + 0.2 * rng.next())) as f32));
+        }
+        let mut n_pts = truths.len();
+        if degenerate {
+            let uv = project(8, &[5.0, 2.0, 11.0]);
+            idx.extend_from_slice(&[8, n_pts as u32]);
+            px.extend_from_slice(&[uv[0] as f32 + 3.0, uv[1] as f32]);
+            wt.extend_from_slice(&[1.0, 1e-20]); // (a weight of 0 reads as 1)
+            pts.extend_from_slice(&[5.0, 2.0, 11.0]);
+            n_pts += 1;
+        }
+        let mut fixed = vec![0u8; n_cam];
+        fixed[0] = 1;
+        fixed[1] = 1;
+        let solver = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-12, f32::NAN, f32::NAN, f32::NAN, 0.0];
+        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &wt, &[], &[], &[], 50, &[], 0, &solver, &fixed, &[]);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+        (out[base + 1], out[base + 4 + 10], out[base + 4 + 11])
+    };
+    let (rms, tries, points) = run(false);
+    assert_eq!((tries, points), (0.0, 0.0), "no refused try without the degenerate point (rms {rms})");
+    let (rms, tries, points) = run(true);
+    assert!(tries > 0.0, "the rank-1 point refuses a try (rms {rms})");
+    assert_eq!(points, tries, "one point refused each try");
+}
+
 // A camera ring above DENSE_MAX_N (PCG only, no dense matrix ever built) still
 // converges: 900 cameras, each point seen by 3–4 neighbours, noisy start.
 #[test]

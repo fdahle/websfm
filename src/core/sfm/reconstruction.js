@@ -505,6 +505,10 @@ export const BA_SOLVER_KEYS = [
   'pcgIters',
   'pcgItersMax',
   'implicit',
+  // LM tries refused because a point's damped 3×3 block could not be inverted, and those
+  // points summed over the refused tries (bundle.rs SolveStats point_fail_*).
+  'pointFailTries',
+  'pointFailPoints',
 ]
 
 // bundle.rs LENS_SIGMA_LEN: per lens group, the standard deviations of these terms

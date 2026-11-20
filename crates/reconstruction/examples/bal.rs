@@ -159,8 +159,8 @@ fn main() {
     let (nc, np) = (b.n_cam, b.n_pts);
     let o_cost = nc * 12 + np * 3 + nc * 8;
     let (rms0, rms1) = (out[o_cost] as f64, out[o_cost + 1] as f64);
-    let stats = &out[o_cost + 4..o_cost + 4 + 10]; // BA_STATS_LEN
-    let trace = &out[o_cost + 4 + 10..];
+    let stats = &out[o_cost + 4..o_cost + 4 + 12]; // BA_STATS_LEN
+    let trace = &out[o_cost + 4 + 12..];
     let n_obs = b.obs.len() as f64;
     // BAL_TRACE=1: the cost after each accepted iteration (½·Σ‖r‖², from the RMS trace),
     // to set beside `BAL_TRACE=1 ceres_bal`'s.
@@ -179,9 +179,9 @@ fn main() {
     println!(
         "{{\"file\":\"{}\",\"solver\":\"websfm-{}\",\"cameras\":{},\"points\":{},\"observations\":{},\
 \"initial_cost\":{:.10e},\"start_cost_f32\":{:.10e},\"solver_initial_cost\":{:.10e},\"final_cost\":{:.10e},\
-\"mapping_ok\":{},\"iterations\":{},\"linear_solves\":{},\"cholesky\":{},\"implicit\":{},\"pcg_iters\":{},\"solve_s\":{:.3},\"read_s\":{:.3},\"peak_alloc_mb\":{:.0},\"threads\":{},\"out_hash\":\"{:016x}\"}}",
+\"mapping_ok\":{},\"iterations\":{},\"linear_solves\":{},\"cholesky\":{},\"implicit\":{},\"pcg_iters\":{},\"point_fail_tries\":{},\"point_fail_points\":{},\"solve_s\":{:.3},\"read_s\":{:.3},\"peak_alloc_mb\":{:.0},\"threads\":{},\"out_hash\":\"{:016x}\"}}",
         path, config, nc, np, b.obs.len(), cost0, cost0_f32, solver0, solver1, mapping_ok,
-        trace.len(), stats[1] as u32, stats[2] as u32, stats[9] as u32, stats[7] as u64, solve_s, read_s, peak_alloc_mb,
+        trace.len(), stats[1] as u32, stats[2] as u32, stats[9] as u32, stats[7] as u64, stats[10] as u32, stats[11] as u32, solve_s, read_s, peak_alloc_mb,
         if cfg!(feature = "threads") { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { 1 },
         out_hash,
     );

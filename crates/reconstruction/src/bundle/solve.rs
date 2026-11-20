@@ -167,14 +167,16 @@ pub(crate) struct SolveStats {
     pub pcg_iters: u64,     // CG iterations summed over all PCG attempts
     pub pcg_iters_max: u32, // most CG iterations in one attempt
     pub implicit: u32,      // of the PCG attempts, those on the implicit S (memory)
+    pub point_fail_tries: u32, // LM tries refused because a point's damped C failed inv3
+    pub point_fail_points: u32, // those points, summed over the refused tries
 }
 
 // Output floats after [cost_before, cost_after, anchor_rms, prior_rms]:
 // [n, solves, cholesky, pcg_converged, pcg_partial, pcg_fallback, pcg_npd,
-//  pcg_iters, pcg_iters_max, implicit], then, when the solver's slot 9 asks for it, the lens
+//  pcg_iters, pcg_iters_max, implicit, point_fail_tries, point_fail_points], then, when the solver's slot 9 asks for it, the lens
 // groups' standard deviations ([groups, then LENS_SIGMA_LEN per group]), then the
 // readout times (bundle_adjust_rs), then the per-iteration RMS trace.
-pub(crate) const BA_STATS_LEN: usize = 10;
+pub(crate) const BA_STATS_LEN: usize = 12;
 // Per lens group: σ of fx, cx, cy, k1, k2, k3, k4, p1, p2 (pixels for the first three);
 // NaN for a term the call did not refine.
 pub(crate) const LENS_SIGMA_LEN: usize = 9;

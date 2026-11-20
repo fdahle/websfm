@@ -216,10 +216,11 @@ pub(crate) struct Normal {
     pub gpv: Vec<V3>,
 }
 
-/// The Schur-reduced system at a damping: whether every point's C could be inverted, the
-/// right-hand side, and the points' C⁻¹ (S itself is in `Work::s`).
+/// The Schur-reduced system at a damping: whether every point's C could be inverted (and
+/// how many could not), the right-hand side, and the points' C⁻¹ (S itself is in `Work::s`).
 pub(crate) struct Reduced {
     pub ok: bool,
+    pub failed_points: u32,
     pub rhs: Vec<f64>,
     pub cinv_store: Vec<Option<M3>>,
 }
@@ -499,11 +500,11 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
     }
 
     let mut cinv_store: Vec<Option<M3>> = vec![None; n_pts];
-    let ok;
+    let (ok, failed_points);
     if let Some(rp) = plan.range_plan.as_ref() {
         // Range by range, on the thread pool when there is one (RangePlan: every
         // element has one writer, and gets its terms in Schur order).
-        let failed = std::sync::atomic::AtomicBool::new(false);
+        let failed = std::sync::atomic::AtomicU32::new(0);
         let (s_p, rhs_p) = (SyncPtr::of(s), SyncPtr::of(&mut rhs));
         let ci_p = SyncPtr::of(&mut cinv_store);
         // The other ranges' group partials in `work`, which the factor reuses next.
@@ -519,15 +520,19 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
             let mut el = EList::default();
             let mut ms: Vec<[f64; 3]> = Vec::new();
             for &pi in &rp.points[r] {
-                if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
                 let pi = pi as usize;
                 point_eblocks(m, plan, ec, ev, pi, st, dh, &mut el);
                 if el.is_empty() && !anchored[pi] { continue; }
                 let mut cp = cmat[pi];
                 for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
-                let cinv = match inv3(&cp) { Some(m) => m, None => { failed.store(true, std::sync::atomic::Ordering::Relaxed); return; } };
-                let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
                 let owner = rp.owner[pi] as usize == r;
+                // A point whose block cannot be inverted fails the try; every range
+                // counts it once (its owner), and the others go on for the count alone.
+                let Some(cinv) = inv3(&cp) else {
+                    if owner { failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+                    continue;
+                };
+                let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
                 // SAFETY (all writes below): RangePlan gives each element one writing range.
                 if owner { unsafe { *ci_p.at(pi) = Some(cinv); } }
                 for eb in &el.blocks {
@@ -575,7 +580,8 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                 }
             }
         });
-        ok = !failed.load(std::sync::atomic::Ordering::Relaxed);
+        failed_points = failed.load(std::sync::atomic::Ordering::Relaxed);
+        ok = failed_points == 0;
         // The other ranges' group shares, in range order.
         for part in work.chunks(pl.max(1)).take(rp.n - 1) {
             for &(base, len, o) in &rp.gg {
@@ -590,7 +596,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
         let (lower_only, implicit) = (plan.lower_only, plan.implicit);
         for v in w.share_s.iter_mut() { v.fill(0.0); }
         for v in w.share_r.iter_mut() { v.fill(0.0); }
-        let failed = std::sync::atomic::AtomicBool::new(false);
+        let failed = std::sync::atomic::AtomicU32::new(0);
         let s_ps: Vec<SyncPtr<f64>> = w.share_s.iter_mut().map(|v| SyncPtr::of(v)).collect();
         let r_ps: Vec<SyncPtr<f64>> = w.share_r.iter_mut().map(|v| SyncPtr::of(v)).collect();
         let ci_p = SyncPtr::of(&mut cinv_store);
@@ -599,7 +605,6 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
             let mut el = EList::default();
             let mut ms: Vec<[f64; 3]> = Vec::new();
             for pi in plan.chunk_range(c, n_pts) {
-                if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
                 point_eblocks(m, plan, ec, ev, pi, st, dh, &mut el);
                 // An anchored point with no camera coupling (edge case: every
                 // observing camera failed cheirality) still needs its C⁻¹·gp
@@ -607,7 +612,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                 if el.is_empty() && !anchored[pi] { continue; }
                 let mut cp = cmat[pi];
                 for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
-                let cinv = match inv3(&cp) { Some(m) => m, None => { failed.store(true, std::sync::atomic::Ordering::Relaxed); return; } };
+                let Some(cinv) = inv3(&cp) else { failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed); continue };
                 let tmp = mat3_vec(&cinv, &gpv[pi]); // C⁻¹·gp
                 // SAFETY (all writes below): chunk c alone writes its shares and its points.
                 unsafe { *ci_p.at(pi) = Some(cinv); }
@@ -644,7 +649,8 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                 }
             }
         });
-        ok = !failed.load(std::sync::atomic::Ordering::Relaxed);
+        failed_points = failed.load(std::sync::atomic::Ordering::Relaxed);
+        ok = failed_points == 0;
         if ok && implicit { w.b_damped.clone_from(s); }
         if ok {
             for c in 0..plan.point_chunks {
@@ -653,7 +659,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
             }
         }
     }
-    Reduced { ok, rhs, cinv_store }
+    Reduced { ok, failed_points, rhs, cinv_store }
 }
 
 /// Observation j's coupling rows into the cache (`Model::eblocks`' values, same products):
