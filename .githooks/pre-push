@@ -4,6 +4,8 @@
 # tree at that commit or a later one records "<sha> clean pass" in .git/websfm-gate.log.
 # Enable once per clone: npm run hooks (git config core.hooksPath .githooks).
 GATED="crates/sift crates/matching crates/reconstruction src/core/sfm src/core/features src/stores/matching"
+# Tests and notes there cannot change a result.
+SKIP=":(exclude)*.test.js :(exclude)*.md"
 ledger="$(git rev-parse --git-common-dir)/websfm-gate.log"
 zero=0000000000000000000000000000000000000000
 warned=0
@@ -11,7 +13,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
   if [ "$remote_sha" = "$zero" ]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
   # Newest commit in the push that touches a gated path.
-  touched=$(git rev-list -1 "$range" -- $GATED 2>/dev/null)
+  touched=$(git rev-list -1 "$range" -- $GATED $SKIP 2>/dev/null)
   [ -z "$touched" ] && continue
   covered=0
   if [ -f "$ledger" ]; then
@@ -25,7 +27,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$covered" = 0 ]; then
     warned=1
     echo "pre-push: $remote_ref gets changes to detection, matching or SfM with no passing gate run:" >&2
-    git log --format='  %h %s' "$range" -- $GATED >&2
+    git log --format='  %h %s' "$range" -- $GATED $SKIP >&2
   fi
 done
 if [ "$warned" = 1 ]; then
