@@ -42,6 +42,9 @@ const PAR_UPDATE_FLOPS: f64 = 2.0e6;
 // The elimination tree is cut into subtree tasks of at most this share of the factor's
 // work each (`Symbolic::schedule`).
 const TASK_SHARE: f64 = 1.0 / 64.0;
+// The scatter's tasks: block rows of A, and values of the factor zeroed, per task.
+const SCATTER_ROWS: usize = 64;
+const SCATTER_ZERO_CHUNK: usize = 1 << 18;
 
 thread_local! {
     // A pool thread's product buffer, kept between tasks.
@@ -482,39 +485,54 @@ impl Symbolic {
         (x, f.vals)
     }
 
+    // A into the panels, zeros elsewhere. Every block of A has its own place in the
+    // panels, so the rows go to the pool in chunks (a copy: no sum, nothing to round).
     fn scatter(&self, pat: &BlockPattern, a: &[f64], mut v: Vec<f64>) -> Vec<f64> {
         let nb = self.order.len();
+        // Zeros first, on the pool: the factor is tens of MB on a large block.
+        let n = self.n_vals;
         v.clear();
-        v.resize(self.n_vals, 0.0);
+        v.reserve(n);
+        let zp = SyncPtr::of(&mut v.spare_capacity_mut()[..n]);
+        // SAFETY: chunk k alone writes its range of the spare capacity.
+        for_each_index(n.div_ceil(SCATTER_ZERO_CHUNK), |k| {
+            let lo = k * SCATTER_ZERO_CHUNK;
+            for x in unsafe { zp.slice(lo, SCATTER_ZERO_CHUNK.min(n - lo)) } { x.write(0.0); }
+        });
+        // SAFETY: the first n values were all written above.
+        unsafe { v.set_len(n) }
         let mut pos = vec![0usize; nb];
         for (k, &b) in self.order.iter().enumerate() { pos[b] = k }
+        let vp = SyncPtr::of(&mut v);
         // Scatter A into the panels, reading only its lower triangle (block row ≥ block
         // column; the caller may leave the upper one empty): a block lands as it is when
         // its row comes later in the elimination order, transposed when its column does.
-        for r in 0..nb {
-            for k in pat.row_ptr[r]..pat.row_ptr[r + 1] {
-                let c = pat.cols[k] as usize;
-                if c > r { continue }
-                let (rd, cd) = (pat.dims[r], pat.dims[c]);
-                let blk = &a[pat.val_at[k]..pat.val_at[k] + rd * cd];
-                let (pr, pc) = (pos[r], pos[c]);
-                let (hi, lo, transposed) = if pr >= pc { (pr, pc, false) } else { (pc, pr, true) };
-                let t = self.sn_of[lo];
-                let w = self.width[t];
-                let row0 = self.panel_row(t, hi);
-                let col0 = self.off[lo] - self.off[self.sn_start[t]];
-                let base = self.panel_at[t];
-                if !transposed {
-                    for i in 0..rd {
-                        let dst = base + (row0 + i) * w + col0;
-                        v[dst..dst + cd].copy_from_slice(&blk[i * cd..(i + 1) * cd]);
+        for_each_index(nb.div_ceil(SCATTER_ROWS), |chunk| {
+            for r in chunk * SCATTER_ROWS..((chunk + 1) * SCATTER_ROWS).min(nb) {
+                for k in pat.row_ptr[r]..pat.row_ptr[r + 1] {
+                    let c = pat.cols[k] as usize;
+                    if c > r { continue }
+                    let (rd, cd) = (pat.dims[r], pat.dims[c]);
+                    let blk = &a[pat.val_at[k]..pat.val_at[k] + rd * cd];
+                    let (pr, pc) = (pos[r], pos[c]);
+                    let (hi, lo, transposed) = if pr >= pc { (pr, pc, false) } else { (pc, pr, true) };
+                    let t = self.sn_of[lo];
+                    let w = self.width[t];
+                    let row0 = self.panel_row(t, hi);
+                    let col0 = self.off[lo] - self.off[self.sn_start[t]];
+                    let base = self.panel_at[t];
+                    // SAFETY: block (r, c) has its own place in the panels; row r is this chunk's.
+                    if !transposed {
+                        for i in 0..rd {
+                            unsafe { vp.slice(base + (row0 + i) * w + col0, cd) }.copy_from_slice(&blk[i * cd..(i + 1) * cd]);
+                        }
+                    } else {
+                        // Block (c, r) = blockᵀ: cd rows of rd.
+                        for i in 0..cd { for j in 0..rd { unsafe { *vp.at(base + (row0 + i) * w + col0 + j) = blk[j * cd + i] } } }
                     }
-                } else {
-                    // Block (c, r) = blockᵀ: cd rows of rd.
-                    for i in 0..cd { for j in 0..rd { v[base + (row0 + i) * w + col0 + j] = blk[j * cd + i] } }
                 }
             }
-        }
+        });
         v
     }
 
