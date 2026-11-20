@@ -1,0 +1,110 @@
+{
+  "about": "The regression gate (gate.mjs): one block of each kind, detect + match + sparse on this machine's data. Never a held-out set (the scoreboard's `heldout` tables): the gate is run during development.",
+  "dumpDir": "/data1/websfm_testdata/sfm-dumps",
+  "sets": [
+    {
+      "id": "eth3d-courtyard",
+      "kind": "close range, outdoor",
+      "truth": "/data1/websfm_testdata/eth3d-full/courtyard",
+      "unit": "mm",
+      "config": {
+        "images": "/data1/websfm_testdata/eth3d-full/courtyard/images/dslr_images_undistorted",
+        "sceneType": "object",
+        "recon": { "posePriors": false }
+      }
+    },
+    {
+      "id": "eth3d-delivery_area",
+      "kind": "close range, outdoor",
+      "truth": "/data1/websfm_testdata/eth3d-full/delivery_area",
+      "unit": "mm",
+      "config": {
+        "images": "/data1/websfm_testdata/eth3d-full/delivery_area/images/dslr_images_undistorted",
+        "sceneType": "object",
+        "recon": { "posePriors": false }
+      }
+    },
+    {
+      "id": "eth3d-office",
+      "kind": "close range, indoor, low texture",
+      "truth": "/data1/websfm_testdata/eth3d-full/office",
+      "unit": "mm",
+      "config": {
+        "images": "/data1/websfm_testdata/eth3d-full/office/images/dslr_images_undistorted",
+        "sceneType": "object",
+        "recon": { "posePriors": false }
+      }
+    },
+    {
+      "id": "eth3d-pipes",
+      "kind": "close range, indoor, low texture",
+      "truth": "/data1/websfm_testdata/eth3d-full/pipes",
+      "unit": "mm",
+      "config": {
+        "images": "/data1/websfm_testdata/eth3d-full/pipes/images/dslr_images_undistorted",
+        "sceneType": "object",
+        "recon": { "posePriors": false }
+      }
+    },
+    {
+      "id": "eth3d-playground",
+      "kind": "close range, outdoor",
+      "truth": "/data1/websfm_testdata/eth3d-full/playground",
+      "unit": "mm",
+      "config": {
+        "images": "/data1/websfm_testdata/eth3d-full/playground/images/dslr_images_undistorted",
+        "sceneType": "object",
+        "recon": { "posePriors": false }
+      }
+    },
+    {
+      "id": "eth3d-terrace",
+      "kind": "close range, outdoor",
+      "truth": "/data1/websfm_testdata/eth3d-full/terrace",
+      "unit": "mm",
+      "config": {
+        "images": "/data1/websfm_testdata/eth3d-full/terrace/images/dslr_images_undistorted",
+        "sceneType": "object",
+        "recon": { "posePriors": false }
+      }
+    },
+    {
+      "id": "south-building",
+      "kind": "close range, repetitive facades, 128 photos",
+      "truth": "/data1/websfm_testdata/south-building-full/south-building/sparse/images.txt",
+      "unit": "model",
+      "config": {
+        "images": "/data1/websfm_testdata/south-building-full/south-building/images",
+        "sceneType": "object",
+        "recon": { "posePriors": false }
+      }
+    },
+    {
+      "id": "example-aukerman",
+      "kind": "drone, nadir, GPS",
+      "config": {
+        "images": "public/examples/aukerman",
+        "sceneType": "aerial",
+        "crs": "EPSG:32617"
+      }
+    },
+    {
+      "id": "film-casa-grande",
+      "kind": "historical aerial film scans",
+      "config": {
+        "images": "/data1/websfm_testdata/casa_grande/aerial/preproc/preprocessed_images",
+        "sceneType": "aerial",
+        "crs": "EPSG:6341",
+        "hist": {
+          "intrinsics": "/data1/websfm_testdata/casa_grande/aerial/preproc/camera_model_intrinsics.csv",
+          "mask": "/data1/websfm_testdata/casa_grande/aerial/preproc/image_mask.tif",
+          "maskPng": "/data1/websfm_eval/masks/cg_aerial.png",
+          "gcps": "/data1/websfm_testdata/casa_grande/aerial/preproc/gcp.csv",
+          "checkEvery": 4
+        },
+        "headed": true,
+        "chromeArgs": ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"]
+      }
+    }
+  ]
+}

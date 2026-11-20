@@ -67,6 +67,14 @@ Rules that are easy to miss:
   to `FORMAT_MIGRATIONS` (`src/core/formatMigrations.js`) with a unit test, and commits
   a new fixture (`node scripts/fixtures/make-project-fixture.mjs <dir>`), all in one
   commit. `PROJECT_FORMAT_MIN` rises only at a release.
+- A change to detection, matching, verification or SfM (`crates/sift`, `crates/matching`,
+  `crates/reconstruction`, `src/core/features/`, `src/core/sfm/`, `src/stores/matching/`,
+  or their sections of `tuning.js` and `defaults.user.js`) runs the regression gate before
+  it is called done: `npm run gate:sfm` (CPU, minutes) for SfM alone, `npm run gate`
+  (GPU, ~15 min, one block of each kind: close range, indoor, drone, film) for anything
+  that changes what matching produces. Give the gate's table in the commit message. A
+  synthetic test or a run on one kind of block is not evidence that nothing else broke
+  ([docs/conventions.md](docs/conventions.md) ▸ *An option or not*).
 - Pushing deploys: `main` goes to dev.websfm.app, the `experimental` branch to
   experimental.websfm.app, a `v*` tag to websfm.app and its pinned copy at
   websfm.app/v/<version>/ (CI ▸ `deploy`). Don't push, and never push a tag, unless asked.

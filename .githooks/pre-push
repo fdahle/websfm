@@ -1,0 +1,35 @@
+#!/bin/sh
+# Warns (never blocks) when a push carries changes to detection, matching or SfM that no
+# passing regression gate has covered: a full `node scripts/bench/gate.mjs` run on a clean
+# tree at that commit or a later one records "<sha> clean pass" in .git/websfm-gate.log.
+# Enable once per clone: npm run hooks (git config core.hooksPath .githooks).
+GATED="crates/sift crates/matching crates/reconstruction src/core/sfm src/core/features src/stores/matching"
+ledger="$(git rev-parse --git-common-dir)/websfm-gate.log"
+zero=0000000000000000000000000000000000000000
+warned=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  if [ "$remote_sha" = "$zero" ]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
+  # Newest commit in the push that touches a gated path.
+  touched=$(git rev-list -1 "$range" -- $GATED 2>/dev/null)
+  [ -z "$touched" ] && continue
+  covered=0
+  if [ -f "$ledger" ]; then
+    for g in $(awk '$2 == "clean" && $3 == "pass" { print $1 }' "$ledger"); do
+      if git merge-base --is-ancestor "$touched" "$g" 2>/dev/null && git merge-base --is-ancestor "$g" "$local_sha" 2>/dev/null; then
+        covered=1
+        break
+      fi
+    done
+  fi
+  if [ "$covered" = 0 ]; then
+    warned=1
+    echo "pre-push: $remote_ref gets changes to detection, matching or SfM with no passing gate run:" >&2
+    git log --format='  %h %s' "$range" -- $GATED >&2
+  fi
+done
+if [ "$warned" = 1 ]; then
+  echo "pre-push: run 'node scripts/bench/gate.mjs' (about 15 min, GPU) and give its table in the commit." >&2
+  echo "pre-push: pushing anyway (this hook only warns)." >&2
+fi
+exit 0

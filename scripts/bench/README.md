@@ -396,6 +396,35 @@ to. Don't run them while developing. If a change is ever made because of one, sa
 the CHANGELOG: the set is then no longer held out. Their reference cameras come from
 `strecha-prep.mjs` (Strecha's `.camera` files as COLMAP `images.txt`).
 
+## The regression gate (`gate.mjs`, `npm run gate`)
+
+One block of each kind (`gate.json`: the six ETH3D scenes, South Building, the example
+drone set, Casa Grande film scans) through detection, matching and the sparse model, held
+to `gate-baseline.json`. Run it for every change to detection, matching, verification or
+SfM, and quote its table in the commit; about 15 minutes on the GPU.
+
+```sh
+npm run gate                                  # every set; exit 1 on a failure
+node scripts/bench/gate.mjs --only eth3d-office,south-building
+node scripts/bench/gate.mjs --write-baseline --dump   # new baseline + fresh SfM inputs
+npm run gate:sfm                              # SfM only, on the CPU, from the saved inputs
+```
+
+- **Fails** on a camera lost, more cameras off the reference, a median camera error over
+  1.25× the baseline, or a different photo count. **Warns** on points seen in three or more
+  photos under 0.9× the baseline, a run over 1.5× as long, or more photos registered near
+  the correspondence floor.
+- A full run records `<sha> clean|dirty pass|FAIL` in `.git/websfm-gate.log`; the
+  pre-push hook (`npm run hooks` enables `.githooks/`) warns when a push carries changes to
+  the gated folders that no clean passing run covers. It never blocks.
+- `gate:sfm` replays each set's saved SfM input (`--dump` writes them to `dumpDir`) in Node:
+  a change under `src/core/sfm` is judged in minutes without the GPU. It replays each input
+  a second time with the pairs in reverse order and warns (KNIFE EDGE) when the camera
+  count changes: a set where any small change can cost cameras.
+- A new baseline (`--write-baseline`) needs a clean tree and every set, and goes with
+  `--dump` so the CPU gate's inputs match it. Say in the commit why the numbers moved.
+- The held-out sets (the scoreboard's `heldout` tables) are never in the gate.
+
 ## Historical blocks (`hist`)
 
 `hist/` scores film and satellite frame blocks (the HistoriX benchmark layout:
