@@ -148,6 +148,10 @@ export const SFM_TUNING = {
   // 8.16 / 8.18 → 7.87 / 7.80 cm, Casa Grande equal, the gate's ETH3D medians −11 … +3 %;
   // but the first global solve takes 2–3× the iterations: BA 114 → 160 s on quarry,
   // 131 → 145 s on PUTI. Geman–McClure: mixed (PUTI lost 756 points to filter pass 1 once).
+  // Cauchy on the interim solves alone (Huber from the first global solve on) keeps the
+  // time but not the gain: quarry 0.203 / 0.227 → 0.202 / 0.234 m, PUTI checkpoints
+  // 3.02 / 8.16, 3.19 / 8.00 → 3.05 / 8.06, 3.31 / 7.96 cm, Casa Grande equal; the gate's
+  // ETH3D medians −6 … +7 % (plan-ba-next ▸ round 6, item 3): not kept.
   baPreFilterLoss: 'huber',
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
