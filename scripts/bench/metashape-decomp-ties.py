@@ -5,6 +5,7 @@ tools' keypoints agree on the same photos.
     python metashape-decomp-ties.py ms <export dir> [--json out.json]
     python metashape-decomp-ties.py ws <replay dir> [--json out.json]
     python metashape-decomp-ties.py agree <export dir> <replay dir with allkp.*> [--photos 20]
+    python metashape-decomp-ties.py lens <export dir> <replay dir>
 
 Per model: tie points (≥2 views) and the share seen in ≥3 photos, observations per photo
 (median), the track length distribution, the reprojection error per observation (RMS,
@@ -15,7 +16,10 @@ in recorded pixels through its own frame model; WebSfM's in its BA frame (the le
 pixel units of K), which is how each solver sees them.
 agree: for a sample of photos, Metashape's tie point projections (pixel centres, −½) against
 every WebSfM keypoint of that photo: the share with one within 1 px, and the offset there
-(median, p95, mean dx/dy).
+(median, p95, mean dx/dy), and that share by Metashape's key point size (bySize).
+lens: the image displacement between the two self-calibrated lenses, the same ray through
+each (a grid over Metashape's frame, pixel centres): max, corner, RMS, and RMS after the
+best scale and shift (what a focal and principal point change can take up).
 """
 import json
 import struct
@@ -165,7 +169,7 @@ def agree(msd, wsd, nphotos=20):
     start = np.concatenate([[0], np.cumsum(meta["counts"])])
     where = {n: i for i, n in enumerate(meta["names"])}
     pick = np.linspace(0, len(labels) - 1, nphotos).astype(int)
-    rows, allo, alld = [], [], []
+    rows, allo, alld, allsz, allhit = [], [], [], [], []
     for ci in pick:
         s = labels[ci].rsplit(".", 1)[0].lower()
         j = where[s]
@@ -174,6 +178,8 @@ def agree(msd, wsd, nphotos=20):
         q = np.stack([pr["x"][m] - 0.5, pr["y"][m] - 0.5], 1)
         dist, nn = cKDTree(k).query(q)
         hit = dist <= 1.0
+        allsz.append(pr["s"][m])
+        allhit.append(hit)
         d = q[hit] - k[nn[hit]]
         alld.append(d)
         allo.append(dist[hit])
@@ -181,6 +187,13 @@ def agree(msd, wsd, nphotos=20):
     d = np.concatenate(alld)
     o = np.concatenate(allo)
     tot_ms = sum(r["msTies"] for r in rows)
+    sz, hits = np.concatenate(allsz), np.concatenate(allhit)
+    edges = [0, 2, 3, 4.6, 8, np.inf]
+    by_size = []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = (sz >= lo) & (sz < hi)
+        by_size.append({"size": f"{lo}-{hi}", "msTies": int(m.sum()), "share": round(float(m.mean()), 4),
+                        "within1px": round(float(hits[m].mean()), 4) if m.any() else None})
     return {
         "photos": len(rows),
         "msTies": tot_ms,
@@ -190,7 +203,57 @@ def agree(msd, wsd, nphotos=20):
         "offsetP95Px": round(float(np.percentile(o, 95)), 4),
         "meanDxDy": [round(float(d[:, 0].mean()), 4), round(float(d[:, 1].mean()), 4)],
         "wsScaleMedian": float(np.median(sc)),
+        "bySize": by_size,
         "rows": rows,
+    }
+
+
+def lens(msd, wsd):
+    """Same ray through Metashape's lens and WebSfM's: the displacement in pixels."""
+    cal = json.loads((Path(msd) / "model.json").read_text())["calibration"]
+    ws = json.loads((Path(wsd) / "model.json").read_text())
+    c = next(iter(ws["cameras"].values()))
+    K, dist = c["K"], c.get("dist") or {}
+    W, H = cal["width"], cal["height"]
+    u, v = np.meshgrid(np.linspace(0, W - 1, 121), np.linspace(0, H - 1, 81))
+    u, v = u.ravel(), v.ravel()
+
+    def ms_dist(x, y):
+        r2 = x * x + y * y
+        rad = 1 + cal["k1"] * r2 + cal["k2"] * r2**2 + cal["k3"] * r2**3 + cal.get("k4", 0) * r2**4
+        return x * rad + cal["p1"] * (r2 + 2 * x * x) + 2 * cal["p2"] * x * y, y * rad + cal["p2"] * (r2 + 2 * y * y) + 2 * cal["p1"] * x * y
+
+    # Metashape pixel centre → its normalised ray (fixed-point inversion of the distortion).
+    xd = (u + 0.5 - W / 2 - cal["cx"]) / cal["f"]
+    yd = (v + 0.5 - H / 2 - cal["cy"]) / cal["f"]
+    x, y = xd.copy(), yd.copy()
+    for _ in range(50):
+        dx, dy = ms_dist(x, y)
+        x, y = x + (xd - dx), y + (yd - dy)
+    # The same ray through WebSfM's lens (OpenCV order: its p1/p2 are Metashape's exchanged).
+    r2 = x * x + y * y
+    k1, k2, k3, p1, p2 = (dist.get(k, 0) for k in ("k1", "k2", "k3", "p1", "p2"))
+    rad = 1 + k1 * r2 + k2 * r2**2 + k3 * r2**3
+    wx = x * rad + 2 * p1 * x * y + p2 * (r2 + 2 * x * x)
+    wy = y * rad + p1 * (r2 + 2 * y * y) + 2 * p2 * x * y
+    wu, wv = K["fx"] * wx + K["cx"], K["fy"] * wy + K["cy"]
+    d = np.hypot(wu - u, wv - v)
+    corner = (u == 0) & (v == 0) | (u == W - 1) & (v == H - 1) | (u == 0) & (v == H - 1) | (u == W - 1) & (v == 0)
+    # Best scale about the centre and shift (a focal and principal point change).
+    A = np.zeros((2 * len(u), 3))
+    A[0::2, 0], A[1::2, 0] = u - W / 2, v - H / 2
+    A[0::2, 1], A[1::2, 2] = 1, 1
+    b = np.empty(2 * len(u))
+    b[0::2], b[1::2] = wu - u, wv - v
+    sol = np.linalg.lstsq(A, b, rcond=None)[0]
+    r = (b - A @ sol).reshape(-1, 2)
+    return {
+        "maxPx": round(float(d.max()), 3),
+        "cornerMeanPx": round(float(d[corner].mean()), 3),
+        "rmsPx": round(float(np.sqrt((d**2).mean())), 3),
+        "rmsAfterScaleShiftPx": round(float(np.sqrt((r**2).sum(1).mean())), 3),
+        "ws": {"f": K["fx"], "cx": K["cx"], "cy": K["cy"], **dist},
+        "ms": {k: cal[k] for k in ("f", "cx", "cy", "k1", "k2", "k3", "p1", "p2")},
     }
 
 
@@ -210,6 +273,8 @@ def main():
         r = ms_stats(a[1])
     elif a[0] == "ws":
         r = ws_stats(a[1])
+    elif a[0] == "lens":
+        r = lens(a[1], a[2])
     else:
         r = agree(a[1], a[2], nph)
     text = json.dumps(r, indent=1)

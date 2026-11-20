@@ -5,6 +5,7 @@
 //
 //   node scripts/bench/metashape-tiepoints.mjs --tie <dir> --template <puti.sfminput> --out <file.sfminput>
 //        [--detect-scale 1] [--min-matches 15] [--noise-px 0] [--keep-tracks 1] [--seed 1]
+//        [--min-size 0] [--keep-obs 1]
 //
 // <dir>: metashape_decomp.py export (tiepoints.bin, tiepoints-cameras.json). Each photo's
 // keypoints are its tie point projections (Metashape's pixel edges → WebSfM's pixel centres,
@@ -51,9 +52,14 @@ const nc = dv.getInt32(0, true),
 let o = 12 + 28 * np
 // Degraded variants (which property of the tie points matters): `--noise-px` adds Gaussian
 // noise of that σ per axis to every projection, `--keep-tracks` keeps that random share of
-// the tracks (both seeded, so a variant is reproducible).
+// the tracks (both seeded, so a variant is reproducible). `--min-size` drops every projection
+// whose key point size is below it (what a detector that cannot see finer features would
+// find), `--keep-obs` keeps that random share of the projections (its control, seeded).
 const noisePx = Number(args['noise-px'] ?? 0)
 const keepTracks = Number(args['keep-tracks'] ?? 1)
+const minSize = Number(args['min-size'] ?? 0)
+const keepObs = Number(args['keep-obs'] ?? 1)
+let droppedObs = 0
 let seed = Number(args.seed ?? 1) >>> 0
 const rand = () => {
   seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
@@ -73,6 +79,10 @@ for (let k = 0; k < npr; k++) {
   if (keepTracks < 1) {
     if (!dropTrack.has(tr)) dropTrack.set(tr, rand() >= keepTracks)
     if (dropTrack.get(tr)) continue
+  }
+  if (s < minSize || (keepObs < 1 && rand() >= keepObs)) {
+    droppedObs++
+    continue
   }
   if (noisePx > 0) {
     x += noisePx * gauss()
@@ -143,6 +153,7 @@ console.log(
     pairs: pairs.length,
     droppedPairs: dropped,
     matches: matchTotal,
+    droppedObs,
     bytes: out.length,
   }),
 )

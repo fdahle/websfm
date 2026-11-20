@@ -310,7 +310,9 @@ node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2
   replay's WebSfM tracks into a chunk for Optimize Cameras; `metashape-tiepoints.mjs`
   turns exported tie points into a `.sfminput` (optionally noisier or thinned);
   `metashape-decomp-score.mjs` scores either tool's cameras with the bench's own
-  camera-position and checkpoint check; `metashape-decomp-ties.py` compares the tie points.
+  camera-position and checkpoint check; `metashape-decomp-ties.py` compares the tie points,
+  the keypoint agreement by Metashape's key point size, and the two self-calibrated lenses
+  as an image displacement (`lens`).
 
 ## Notes
 
