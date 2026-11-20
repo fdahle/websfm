@@ -379,6 +379,12 @@ export const MATCH_TUNING = {
   // document (never more often than ten times that rewrite takes). `_journalMs` in a
   // run's settings overrides it; the tests use 0.
   journalIntervalMs: 60_000,
+  // Byte budget of a matching run's descriptor cache in the page
+  // (core/features/descriptorCache.js: each image's descriptors and subset-gate sample,
+  // the image whose next pair is furthest ahead evicted first). A smaller budget costs
+  // reloads from project storage; the gate samples (≤ 0.5 MB an image) keep a pair the
+  // gate skips from loading anything.
+  descCacheMiB: 2048,
   // WebGPU brute-force: byte budget of the per-run GPU descriptor cache (LRU). 1 GiB
   // holds a whole 128-image SIFT run at ~8.4k kp (≈ 4.3 MB/image); a smaller budget
   // only costs re-uploads (the worker answers a miss and the store resends).

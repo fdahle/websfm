@@ -16,7 +16,7 @@ import {
   turnProbeMatch,
 } from '../../workers/computeClient.js'
 import { createGpuMatchRun } from './gpuMatchRun.js'
-import { createDescriptorCache } from './descriptorCache.js'
+import { createDescriptorCache } from '../../core/features/descriptorCache.js'
 import {
   preselectPairs,
   positionsForProximity,
@@ -222,7 +222,7 @@ export function createMatchAll({
       tally(pid, old.entry)
       touch()
     }
-    const cache = createDescriptorCache({ pairs: work, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
+    const cache = createDescriptorCache({ pairs: work, budgetBytes: settings.descCacheMiB * 2 ** 20 })
     let cursor = 0
     let joined = 0,
       finished = 0
@@ -805,7 +805,8 @@ export function createMatchAll({
     log(
       `${pluralize(pairs.length, 'pair')} — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}` +
         `; matcher ${lightglue ? 'LightGlue (learned)' : 'brute-force'}` +
-        `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual nearest neighbours)' : 'off'}, ratio ${settings.ratioThreshold}`}`,
+        `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual nearest neighbours)' : 'off'}, ratio ${settings.ratioThreshold}`}` +
+        `; descriptors cached up to ${en(settings.descCacheMiB)} MiB in the page, the image used furthest ahead going first`,
       'info',
       'Matching',
     )
@@ -1035,10 +1036,10 @@ export function createMatchAll({
     }
 
     // Each image's descriptors load from OPFS once per run, and are released after its
-    // last pair or under a byte budget (stores/matching/descriptorCache.js).
+    // last pair or under a byte budget (core/features/descriptorCache.js).
     const descCache = createDescriptorCache({
       pairs: todo.map((i) => pairs[i]),
-      budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20,
+      budgetBytes: settings.descCacheMiB * 2 ** 20,
     })
     // Concurrency-limited dispatch: `concurrency` drain loops pull from a shared
     // cursor so up to POOL_SIZE pairs are matched at once (each matchPair issues its
@@ -1067,6 +1068,8 @@ export function createMatchAll({
       }
     }
     const runStarted = performance.now()
+    const kpStats = () => useImagesStore().keypointCacheStats()
+    const kpBefore = kpStats()
     let backendRecord = lightglue ? null : { backend: 'wasm', gpuRequested }
     beginBatch()
     try {
@@ -1140,7 +1143,7 @@ export function createMatchAll({
           }
           const rescueCache = createDescriptorCache({
             pairs: rescue,
-            budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20,
+            budgetBytes: settings.descCacheMiB * 2 ** 20,
           })
           let rc = 0,
             rescued = 0
@@ -1211,9 +1214,12 @@ export function createMatchAll({
       // A finished run leaves no journal; a cancelled one keeps it, to continue later.
       if (journal && !cancelled && !shouldCancel?.()) await opfs.deleteRunJournal(projectId, 'match').catch(() => {})
       const dc = descCache.stats()
+      const kpAfter = kpStats()
       log(
-        `Descriptors loaded ${dc.loads}× for ${pluralize(ready.length, 'image')}, ` +
-          `resident peak ${(dc.peakBytes / 2 ** 20).toFixed(0)} MiB`,
+        `Descriptors loaded ${en(dc.loads)}× for ${pluralize(ready.length, 'image')} ` +
+          `(${en(dc.hits)} hits, ${(dc.loadedBytes / 2 ** 30).toFixed(2)} GB read: storage ${(dc.readMs / 1000).toFixed(1)} s, ` +
+          `conversion ${(dc.convertMs / 1000).toFixed(1)} s, summed), resident peak ${(dc.peakBytes / 2 ** 20).toFixed(0)} MiB; ` +
+          `keypoints ${en(kpAfter.misses - kpBefore.misses)} loads, ${en(kpAfter.hits - kpBefore.hits)} hits`,
         'debug',
         'Matching',
       )

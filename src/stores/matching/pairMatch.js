@@ -158,9 +158,136 @@ export function createPairMatcher({
       // From here srcA/kpsA/descA are the MATCHING roles.
       const srcA = swapRoles ? storeB : storeA
       const srcB = swapRoles ? storeA : storeB
+      const images = useImagesStore()
+      // Cache the in-flight PROMISE (not just the result) so that concurrent pairs
+      // sharing an image load its descriptors from OPFS exactly once.
+      const loadDesc = (id, src) => {
+        if (descCache?.has(id)) return descCache.get(id)
+        // Persistent: OPFS is the copy (detection drops its in-memory one once
+        // saved); the in-memory copy only survives a failed save.
+        const t0 = performance.now()
+        let t1 = t0
+        const p = (
+          isPersisting()
+            ? opfs.loadDescriptors(projectId, id).then((d) => d ?? src.descriptors ?? null)
+            : Promise.resolve(src.descriptors ?? null)
+        )
+          // SIFT matches in RootSIFT; legacy L2 detections convert here, once per run
+          // (core/features/siftDescriptors.js). Never in place: `src.descriptors` is
+          // the image's live copy.
+          .then((d) => {
+            t1 = performance.now()
+            return toMatchSpace(d, src, src.descDim ?? 128)
+          })
+          .then((d) => {
+            descCache?.noteLoad?.({ readMs: t1 - t0, convertMs: performance.now() - t1 })
+            return d
+          })
+        descCache?.set(id, p)
+        return p
+      }
+
+      // Subset gate (brute-force only): a cheap coarse pre-test that rejects
+      // non-overlapping pairs before the full O(Na·Nb) match. Match a small
+      // spatially-uniform subset of each image's descriptors; if too few survive,
+      // skip the pair entirely. Keeps exhaustive *coverage* (loop closures are
+      // still found anywhere in the graph) at a fraction of the cost per pair —
+      // the win when there are no poses for proximity preselection. Only kicks in
+      // when both images have meaningfully more keypoints than the subset, so
+      // small images just pay the full match. See core/features/subsetGate.js.
+      //
+      // `_skipSubsetGate` is matchAll's per-run veto (see there): preselection already
+      // being the overlap prefilter, or too few pairs for the saving to be worth the
+      // false-negative risk. Set on the settings object rather than checked here
+      // because both reasons are properties of the *run*, not of this pair.
+      const gateEnabled = settings.subsetGate !== false && settings.matcher !== 'lightglue' && !settings._skipSubsetGate
+      // Size each image's sample from its OWN keypoint count (fraction × N, within the
+      // floor and ceiling): a real pair then reads (sA/NA)(sB/NB)·M = fraction²·M
+      // putatives whatever the counts, as the per-pair size did, but each image's sample
+      // is picked and sliced once per run (gateSample) instead of once per pair: the
+      // per-pair pick and slice were most of PUTI's matching time (444 images, 98k pairs:
+      // 112 of 251 s on the main thread). See core/features/subsetGate.js.
+      // `_gateScale` (matchAll's rescue pass): the same test on a k× larger sample —
+      // k² more expected putatives on a real pair, still a few % of the full match.
+      const k = settings._gateScale > 1 ? settings._gateScale : 1
+      const sizing = (n) =>
+        resolveSubsetGateSize(n, n, {
+          floorSize: settings.subsetGateSize,
+          ...(k > 1
+            ? {
+                fraction: SUBSET_GATE_SIZE_DEFAULTS.fraction * k,
+                minSize: SUBSET_GATE_SIZE_DEFAULTS.minSize * k,
+                maxSize: SUBSET_GATE_SIZE_DEFAULTS.maxSize * k,
+              }
+            : {}),
+        })
+      const dim = srcA.descDim ?? 128
+      // The gate on two images' samples: true when it skipped the pair (then done).
+      const gateSkips = async (sampleA, sampleB, sizeA, sizeB) => {
+        const gate = await bruteForce(
+          sampleA,
+          sampleB,
+          {
+            ratioThreshold: settings.ratioThreshold,
+            crossCheck: settings.crossCheck,
+            dim,
+          },
+          'gate',
+          // The GPU keeps each image's sample for the run, as it does full descriptors.
+          [`${srcA.uuid}@gate${sizeA}`, `${srcB.uuid}@gate${sizeB}`],
+        )
+        const gateThreshold = settings._gateThreshold ?? settings.subsetGateThreshold
+        entry.gateScore = gate.matches.length
+        if (gate.matches.length >= gateThreshold) return false
+        entry.rawCount = 0
+        entry.status = 'done'
+        entry.gated = true
+        // No line per gated pair: on PUTI the 96k of them cost 28 s of main thread.
+        // The count goes into the run's summary; the score stays on the entry.
+        touchSoon()
+        onDone?.(pid, entry)
+        return true
+      }
+
+      // A run's cache (matchAll) keeps each image's gate sample for the run, with its
+      // keypoint count, so a pair the gate skips (95 % of an exhaustive aerial block's)
+      // reads neither keypoints nor descriptors: the full sets load only for a pair that
+      // passes. Reading both for every pair was most of matching's time once the
+      // descriptors outgrew the cache (PUTI at 4,000 px). A sample that cannot be built
+      // (keypoints or descriptors missing or not agreeing) is null, and the full path
+      // below reports why.
+      let gateDone = false
+      const sameKind =
+        (srcA.descDim ?? 128) === (srcB.descDim ?? 128) &&
+        (srcA.detector ?? 'sift') === (srcB.detector ?? 'sift') &&
+        Number.isSafeInteger(dim) &&
+        dim > 0
+      if (gateEnabled && descCache && sameKind) {
+        const sampleOf = (src) => {
+          const key = `${src.uuid}@gate×${k}/${settings.subsetGateSize}`
+          if (descCache.has(key)) return descCache.get(key)
+          const p = (async () => {
+            const kps = await images.ensureKeypoints(src)
+            const desc = kps ? await loadDesc(src.uuid, src) : null
+            if (!kps || !desc || desc.length !== kps.length * dim) return null
+            const { size } = sizing(kps.length)
+            const sample = kps.length > size * 1.5 ? gateSample(kps, desc, size, dim).desc : null
+            return { n: kps.length, size, desc: sample, byteLength: sample?.byteLength ?? 0 }
+          })()
+          descCache.set(key, p, { owner: src.uuid })
+          return p
+        }
+        const sampleStarted = performance.now()
+        const [sA, sB] = await Promise.all([sampleOf(srcA), sampleOf(srcB)])
+        entry.timing.descriptorLoadMs += performance.now() - sampleStarted
+        if (sA && sB) {
+          gateDone = true
+          if (sA.desc && sB.desc && (await gateSkips(sA.desc, sB.desc, sA.size, sB.size))) return
+        }
+      }
+
       // Keypoints load per image on demand (useImagesStore.ensureKeypoints; LRU-kept
       // across a run's pairs), ordered the same way as the ids.
-      const images = useImagesStore()
       const [kpsA, kpsB] = await Promise.all([images.ensureKeypoints(srcA), images.ensureKeypoints(srcB)])
       if (!kpsA || !kpsB) {
         entry.status = 'error'
@@ -173,29 +300,11 @@ export function createPairMatcher({
         return
       }
 
-      // Cache the in-flight PROMISE (not just the result) so that concurrent pairs
-      // sharing an image load its descriptors from OPFS exactly once.
-      const loadDesc = (id, src) => {
-        if (descCache?.has(id)) return descCache.get(id)
-        // Persistent: OPFS is the copy (detection drops its in-memory one once
-        // saved); the in-memory copy only survives a failed save.
-        const p = (
-          isPersisting()
-            ? opfs.loadDescriptors(projectId, id).then((d) => d ?? src.descriptors ?? null)
-            : Promise.resolve(src.descriptors ?? null)
-        )
-          // SIFT matches in RootSIFT; legacy L2 detections convert here, once per run
-          // (core/features/siftDescriptors.js). Never in place: `src.descriptors` is
-          // the image's live copy.
-          .then((d) => toMatchSpace(d, src, src.descDim ?? 128))
-        descCache?.set(id, p)
-        return p
-      }
       const loadStarted = performance.now()
       const descA = await loadDesc(srcA.uuid, srcA)
       const descB = await loadDesc(srcB.uuid, srcB)
 
-      entry.timing.descriptorLoadMs = performance.now() - loadStarted
+      entry.timing.descriptorLoadMs += performance.now() - loadStarted
       entry.timing.descriptorBytes = (descA?.byteLength ?? 0) + (descB?.byteLength ?? 0)
       if (!descA || !descB) {
         entry.status = 'error'
@@ -219,71 +328,14 @@ export function createPairMatcher({
         throw new Error('Incompatible descriptors — detect both images with the same detector before matching')
       }
 
-      // Subset gate (brute-force only): a cheap coarse pre-test that rejects
-      // non-overlapping pairs before the full O(Na·Nb) match. Match a small
-      // spatially-uniform subset of each image's descriptors; if too few survive,
-      // skip the pair entirely. Keeps exhaustive *coverage* (loop closures are
-      // still found anywhere in the graph) at a fraction of the cost per pair —
-      // the win when there are no poses for proximity preselection. Only kicks in
-      // when both images have meaningfully more keypoints than the subset, so
-      // small images just pay the full match. See core/features/subsetGate.js.
-      //
-      // `_skipSubsetGate` is matchAll's per-run veto (see there): preselection already
-      // being the overlap prefilter, or too few pairs for the saving to be worth the
-      // false-negative risk. Set on the settings object rather than checked here
-      // because both reasons are properties of the *run*, not of this pair.
-      const gateEnabled = settings.subsetGate !== false && settings.matcher !== 'lightglue' && !settings._skipSubsetGate
-      if (gateEnabled) {
-        // Size each image's sample from its OWN keypoint count (fraction × N, within the
-        // floor and ceiling): a real pair then reads (sA/NA)(sB/NB)·M = fraction²·M
-        // putatives whatever the counts, as the per-pair size did, but each image's sample
-        // is picked and sliced once per run (gateSample) instead of once per pair: the
-        // per-pair pick and slice were most of PUTI's matching time (444 images, 98k pairs:
-        // 112 of 251 s on the main thread). See core/features/subsetGate.js.
-        // `_gateScale` (matchAll's rescue pass): the same test on a k× larger sample —
-        // k² more expected putatives on a real pair, still a few % of the full match.
-        const k = settings._gateScale > 1 ? settings._gateScale : 1
-        const sizing = (n) =>
-          resolveSubsetGateSize(n, n, {
-            floorSize: settings.subsetGateSize,
-            ...(k > 1
-              ? {
-                  fraction: SUBSET_GATE_SIZE_DEFAULTS.fraction * k,
-                  minSize: SUBSET_GATE_SIZE_DEFAULTS.minSize * k,
-                  maxSize: SUBSET_GATE_SIZE_DEFAULTS.maxSize * k,
-                }
-              : {}),
-          })
+      // Without a run's cache (one pair matched again), the gate on this pair's own load.
+      if (gateEnabled && !gateDone) {
         const sizingA = sizing(kpsA.length)
         const sizingB = sizing(kpsB.length)
-        const dim = srcA.descDim ?? 128
         if (kpsA.length > sizingA.size * 1.5 && kpsB.length > sizingB.size * 1.5) {
           const sampleA = gateSample(kpsA, descA, sizingA.size, dim)
           const sampleB = gateSample(kpsB, descB, sizingB.size, dim)
-          const gate = await bruteForce(
-            sampleA.desc,
-            sampleB.desc,
-            {
-              ratioThreshold: settings.ratioThreshold,
-              crossCheck: settings.crossCheck,
-              dim,
-            },
-            'gate',
-            // The GPU keeps each image's sample for the run, as it does full descriptors.
-            [`${srcA.uuid}@gate${sizingA.size}`, `${srcB.uuid}@gate${sizingB.size}`],
-          )
-          const gateThreshold = settings._gateThreshold ?? settings.subsetGateThreshold
-          entry.gateScore = gate.matches.length
-          if (gate.matches.length < gateThreshold) {
-            entry.rawCount = 0
-            entry.status = 'done'
-            entry.gated = true
-            // No line per gated pair: on PUTI the 96k of them cost 28 s of main thread.
-            // The count goes into the run's summary; the score stays on the entry.
-            touchSoon()
-            onDone?.(pid, entry)
-            return
-          }
+          if (await gateSkips(sampleA.desc, sampleB.desc, sizingA.size, sizingB.size)) return
         }
       }
 

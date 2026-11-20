@@ -416,6 +416,17 @@ Notable changes to WebSfM. The format follows
   still grouped by size.
 
 ### Performance
+- **Matching many keypoints is up to three times faster.** Detect and Match Features
+  now reads a photo's full keypoints and descriptors only for the pairs that pass the quick
+  overlap check, and keeps in memory the photos it needs again soonest, so a large block
+  detected at a high resolution no longer spends most of its matching time reading the
+  same descriptors from project storage again and again. GeoScan PUTI (444 photos at
+  4,000 px, 19,000 keypoints a photo, 4.4 GB of descriptors, exhaustive pairs on the GPU),
+  on one detection: matching 1,063 → 356 s, descriptors read 71,374 → 691 times (about
+  700 → 6.3 GB), the page's peak memory while matching 3.7 → 3.4 GB; every match the same
+  bits (the bench's match digest). Its first 150 photos with the cache scaled to the same
+  shortfall: 179 → 106 s. Projects whose descriptors fit the 2 GiB cache match as before
+  (South Building, 128 photos: 36.3 → 36.0 s, the same matches). What is left is GPU time.
 - **Sparse Model is faster on small projects.** A bundle adjustment of fewer than about
   100 photos now stops once its steps no longer change the model, as a larger project's
   already did, instead of running all its iterations, and a solve that improved the model
