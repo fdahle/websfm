@@ -753,7 +753,9 @@ fn a_point_that_cannot_be_inverted_is_counted() {
         let mut fixed = vec![0u8; n_cam];
         fixed[0] = 1;
         fixed[1] = 1;
-        let solver = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-12, f32::NAN, f32::NAN, f32::NAN, 0.0];
+        // Slot 4 = 0: no stop rule, so the damping falls far enough for the rank-1 block to
+        // fail (a positive tolerance is floored at DIRECT_FUNCTION_TOL on an exact solve).
+        let solver = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 0.0, f32::NAN, f32::NAN, f32::NAN, 0.0];
         let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &wt, &[], &[], &[], 50, &[], 0, &solver, &fixed, &[]);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
         (out[base + 1], out[base + 4 + 10], out[base + 4 + 11])
@@ -907,6 +909,54 @@ fn the_implicit_solve_reaches_the_direct_solves_minimum() {
         // The refined focal agrees (the camera's effective fx).
         let (fd, fi) = (d[n_cam * 12 + n_pts * 3] as f64, i[n_cam * 12 + n_pts * 3] as f64);
         assert!((fd - 800.0).abs() < 2.0 && (fi - fd).abs() < 0.05, "{what}: focal {fi} vs direct {fd}");
+    }
+}
+
+// Both exact solves stop by one rule. Points seen by two cameras with both pixels 2 px off
+// in opposite directions (δ is 1 px here) sit in Huber's linear part on both views: each
+// iteration slides them a little further along their rays (an IRLS step under-shoots on
+// |e|) and lowers the robust cost by a few 10⁻⁶, for as long as the solve runs. The sparse direct solve
+// stops that tail at DIRECT_FUNCTION_TOL (WARM_FUNCTION_TOL when warm); the dense
+// Cholesky of a small reduced system, as exact, must stop at the same iteration, not run
+// to the cap at the caller's looser 10⁻⁶.
+#[test]
+fn the_dense_solve_stops_where_the_sparse_direct_solve_does() {
+    let side = 4;
+    let (cams, intr, mut pts, mut idx, mut px) = focal_grid(side, 9);
+    let n_cam = side * side;
+    let mut rng = Lcg(77);
+    for k in 0..30 {
+        let c = (k * 5) % (n_cam - 1);
+        let p = (pts.len() / 3) as u32;
+        let (x, y) = ((c % side) as f64 + 0.5, (c / side) as f64 + 0.2 * rng.next());
+        pts.extend_from_slice(&[x as f32, y as f32, (0.5 * rng.next()) as f32]);
+        for (cc, sgn) in [(c, 1.0), (c + 1, -1.0)] {
+            let r = &cams[cc * 12..cc * 12 + 9];
+            let t = &cams[cc * 12 + 9..cc * 12 + 12];
+            let q: Vec<f64> = (0..3).map(|i| r[3 * i] as f64 * x + r[3 * i + 1] as f64 * y + r[3 * i + 2] as f64 * pts[pts.len() - 1] as f64 + t[i] as f64).collect();
+            let (u, v) = (808.0 * q[0] / q[2] + 320.0, 808.0 * q[1] / q[2] + 240.0);
+            idx.extend_from_slice(&[cc as u32, p]);
+            px.extend_from_slice(&[(u + sgn * 2.0) as f32, (v - sgn * 2.0) as f32]);
+        }
+    }
+    let n_pts = pts.len() / 3;
+    let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+    let sensor = vec![0i32; n_cam];
+    // Slot 0 = 0 and slot 6 = 1: the same small system on the sparse direct solve.
+    let run = |sparse: bool, warm: bool| {
+        let nan = f32::NAN;
+        let solver = [if sparse { 0.0 } else { nan }, nan, nan, nan, 1e-6, nan, if sparse { 1.0 } else { nan },
+                      if warm { 1.0 } else { nan }];
+        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &[], 40, &sensor, 1, &solver, &[], &[]);
+        let trace = out.len() - (base + 4 + BA_STATS_LEN);
+        (trace, out[base + 5], out[base + 6])
+    };
+    for warm in [false, true] {
+        let (dense_it, dense_solves, _) = run(false, warm);
+        let (sparse_it, _, sparse_chol) = run(true, warm);
+        assert!(sparse_chol > 0.0, "the reference runs the sparse direct solve");
+        assert!(dense_it < 40, "warm {warm}: the dense solve ran to the cap ({dense_solves} solves)");
+        assert_eq!(dense_it, sparse_it, "warm {warm}: dense {dense_it} iterations, sparse direct {sparse_it}");
     }
 }
 

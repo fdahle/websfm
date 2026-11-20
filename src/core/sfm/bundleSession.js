@@ -30,7 +30,7 @@ import {
   buildGcpAnchors,
 } from './surveyConstraints.js'
 import { surveyGradePositions } from './cameraPriors.js'
-import { compareRobustCost, projectFullXYZ } from './baAcceptance.js'
+import { compareRobustCost, projectFullXYZ, solveVerdict } from './baAcceptance.js'
 import {
   buildBaObservations,
   appendObservations,
@@ -540,18 +540,16 @@ export function createBundleSession(ctx) {
       return
     }
     // A correct bundle adjustment can only lower the cost; reject a worsening
-    // result rather than commit a diverged model. But a fully converged model
-    // can tick up by a float epsilon on a no-op re-solve — that's convergence,
-    // not divergence, so don't cry wolf (< 0.01px is below any real-world
-    // meaning). Only warn + reject when the cost genuinely grows (≥ 0.01px).
-    // The guard judges the solve by the cost it minimised. The crate descends a
-    // Huber-robust cost but reports plain RMS, and a correct robust solve can raise
-    // plain RMS by letting down-weighted outliers drift. Rejecting those kept newly
-    // registered cameras unrefined and seeded the later RMS 185–902 px interim
-    // starts (baAcceptance.js). So a plain-RMS rise is only a rejection when the
-    // robust cost rose too.
+    // result rather than commit a diverged model. The guard judges the solve by the cost
+    // it minimised (baAcceptance.js solveVerdict). The crate descends a Huber-robust cost
+    // but reports plain RMS, and a correct robust solve can raise plain RMS by letting
+    // down-weighted outliers drift. Rejecting those kept newly registered cameras
+    // unrefined and seeded the later RMS 185–902 px interim starts. So a plain-RMS rise
+    // is a rejection only when the robust cost rose too, and below 0.01 px it is a
+    // converged model ticking up on a no-op re-solve, not a divergence. A solve whose
+    // robust cost fell is kept however little the plain RMS rose: dropping those as
+    // "converged" threw away paid-for solves.
     if (!constrained && result.costBefore != null && result.costAfter != null && result.costAfter > result.costBefore) {
-      const delta = result.costAfter - result.costBefore
       const afterKs =
         refineMode !== 'none' && result.intrinsics ? kList.map((k, ci) => ({ ...k, ...result.intrinsics[ci] })) : kList
       const robust = compareRobustCost({
@@ -560,7 +558,8 @@ export function createBundleSession(ctx) {
         observations,
         loss: loss ?? 'huber',
       })
-      if (delta < 0.01) {
+      const verdict = solveVerdict({ rmsBefore: result.costBefore, rmsAfter: result.costAfter, robust })
+      if (verdict === 'converged') {
         log(
           `${capitalize(label)} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); ` +
             'the earlier estimate stays',
@@ -570,7 +569,7 @@ export function createBundleSession(ctx) {
         lastSolve = { mode: refineMode, converged: true }
         return
       }
-      if (!robust.improved) {
+      if (verdict === 'rejected') {
         log(
           `${capitalize(label)} not kept: RMS ${result.costBefore.toFixed(2)}px → ` +
             `${result.costAfter.toFixed(2)}px and robust cost ${robust.before.toFixed(2)} → ` +

@@ -416,6 +416,21 @@ Notable changes to WebSfM. The format follows
   still grouped by size.
 
 ### Performance
+- **Sparse Model is faster on small projects.** A bundle adjustment of fewer than about
+  100 photos now stops once its steps no longer change the model, as a larger project's
+  already did, instead of running all its iterations, and a solve that improved the model
+  is no longer thrown away because its plain reprojection RMS ticked up. The tail it ran
+  was mismatched tie points seen by two photos sliding a little further along their rays
+  each iteration (a few millionths of the robust cost a step), with the cameras still and
+  the plain RMS creeping up from those points alone. Replayed from the same matches in
+  both pair orders: Casa Grande (37 film scans) 235 / 299 → 87 / 81 linear solves, BA
+  30.8 / 39.6 → 10.4 / 10.1 s, checkpoints 1.087 / 1.014 and 1.085 / 1.012 m → 1.085 /
+  1.012 and 1.082 / 1.012 m (H / V; pair-order spread 0.002 m); Aukerman (42 photos)
+  276 / 247 → 115 / 94 solves, BA 21.4 / 19.4 → 8.4 / 7.8 s, the same final
+  reprojection; quarry and PUTI (346 and 444 photos) the same bits. Regression gate:
+  every set keeps its cameras, the ETH3D camera medians move within their ±3 % noise
+  (courtyard 6.12 → 6.26 mm) or better (pipes 1.60 → 1.48 mm), South Building 4.86 mm
+  as before. BAL's small problems end within 10⁻⁶ of their cost.
 - **Bundle adjustment is faster.** Every bundle adjustment (Sparse Model, Optimize
   Cameras, the solves with GCPs) repeats less work from one step to the next and shares
   more of it between processor cores, and the result is the same to the last bit. It

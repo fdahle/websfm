@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { distortPixel } from './distortion.js'
 
-import { compareRobustCost, projectFull, projectFullXYZ } from './baAcceptance.js'
+import { compareRobustCost, projectFull, projectFullXYZ, solveVerdict } from './baAcceptance.js'
 
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
 const I = [
@@ -71,6 +71,39 @@ describe('compareRobustCost', () => {
     const r = compareRobustCost({ before, after, observations })
     expect(r.improved).toBe(false)
     expect(r.after).toBeGreaterThan(r.before)
+  })
+})
+
+describe('solveVerdict', () => {
+  const noisy = exact.map((o, i) => ({ ...o, x: o.x + (i % 2 ? 0.5 : -0.5) }))
+  const observations = noisy.map((o, i) => (i < 5 ? { ...o, x: o.x + 40 } : o))
+  const state = (pts) => ({ cams: [cam], Ks: [K], points: pts })
+  const rms = (s) =>
+    Math.sqrt(
+      observations.reduce((acc, o) => {
+        const q = projectFull(s.cams[0], K, s.points[o.ptIdx])
+        return acc + (q.x - o.x) ** 2 + (q.y - o.y) ** 2
+      }, 0) / observations.length,
+    )
+
+  it('keeps a solve whose robust cost fell though its plain RMS rose by under 0.01 px', () => {
+    // The inliers move 0.5 px onto their observations, the 5 outlier points 0.1 px further
+    // out: plain RMS up by about 0.001 px, the Huber cost down (outliers pay linearly).
+    const before = state(points.map((p, i) => (i < 5 ? p : { ...p, x: p.x + 0.0025 })))
+    const after = state(points.map((p, i) => (i < 5 ? { ...p, x: p.x - 0.0005 } : p)))
+    const [rmsBefore, rmsAfter] = [rms(before), rms(after)]
+    expect(rmsAfter).toBeGreaterThan(rmsBefore)
+    expect(rmsAfter - rmsBefore).toBeLessThan(0.01)
+    const robust = compareRobustCost({ before, after, observations })
+    expect(robust.improved).toBe(true)
+    expect(solveVerdict({ rmsBefore, rmsAfter, robust })).toBe('kept')
+  })
+
+  it('calls a no-op re-solve converged and rejects one that worsened both costs', () => {
+    const worse = { improved: false }
+    expect(solveVerdict({ rmsBefore: 1.2, rmsAfter: 1.205, robust: worse })).toBe('converged')
+    expect(solveVerdict({ rmsBefore: 1.2, rmsAfter: 1.25, robust: worse })).toBe('rejected')
+    expect(solveVerdict({ rmsBefore: 1.2, rmsAfter: 1.1 })).toBe('kept')
   })
 })
 

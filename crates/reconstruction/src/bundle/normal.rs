@@ -82,11 +82,17 @@ impl Plan {
         // stops at 10⁻⁴: quarry the same RTK camera error, South Building the same
         // residuals. Not every solve: interim solves stopped that early hand the first
         // global BA a model it then needs 44 instead of 25 solves for (1,600 cameras).
-        // Only where the direct solve runs: an inexact PCG step needs the tighter rule.
-        let function_tol = match direct {
-            Some(_) => solver.function_tol.max(if solver.warm != 0 { WARM_FUNCTION_TOL } else { DIRECT_FUNCTION_TOL }),
-            None => solver.function_tol,
-        };
+        // Wherever the step is exact: the sparse direct solve, and the dense Cholesky of a
+        // small reduced system (`large` false). There the tail is the same: Huber's linear
+        // part makes a point with gross residuals on both of its views slide along its rays a
+        // little each iteration (an IRLS step under-shoots on |e|), the cameras still (Casa
+        // Grande, 37 cameras: all 30 iterations at 2–5·10⁻⁶ a step, plain RMS 1.752 → 1.760
+        // px from those points alone, the cameras moving 5·10⁻⁶ of the block). An inexact
+        // PCG step needs the tighter rule. A tolerance of 0 keeps its meaning, no stop rule
+        // (tests that must reach the damping floor).
+        let function_tol = if (direct.is_some() || !large) && solver.function_tol > 0.0 {
+            solver.function_tol.max(if solver.warm != 0 { WARM_FUNCTION_TOL } else { DIRECT_FUNCTION_TOL })
+        } else { solver.function_tol };
         let lower_only = direct.is_some();
         // With it, the Schur elimination visits the points grouped by their first camera, so
         // consecutive points write nearby blocks of S (21 MB at 1,600 cameras: scattered

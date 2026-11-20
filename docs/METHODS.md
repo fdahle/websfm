@@ -583,12 +583,16 @@ complement**, analytic Jacobians and **adaptive Huber** robustification (Triggs 
   end hard problems after one iteration (BAL's large Ladybug sets); Ceres' ratio-driven
   damping (Nielsen) ended worse on them.
 - **Stopping**: an accepted step lowering the cost by less than `functionTolerance` of that
-  iteration's cost (10⁻⁶, Ceres' default; ≥ 10⁻⁵ with the sparse direct solve, 10⁻⁴ on
-  re-solves of a converged model), no acceptable step, or the iteration cap. The
-  comparison stays within one iteration, because δ changes between iterations.
+  iteration's cost (10⁻⁶, Ceres' default; ≥ 10⁻⁵ wherever the step is exact, the sparse
+  direct solve and the dense Cholesky of a small project, 10⁻⁴ on re-solves of a
+  converged model), no acceptable step, or the iteration cap. The comparison stays within
+  one iteration, because δ changes between iterations. The tail past 10⁻⁵ is Huber's
+  linear part: a tie point with gross residuals in both its views slides a little further
+  along its rays each iteration (an IRLS step under-shoots on |e|), the cameras still.
 - **Guard** (`core/sfm/baAcceptance.js`): a solve is judged on the objective it minimised,
   not plain RMS. When RMS rises, one Huber cost with δ fixed from the pre-solve residuals is
-  evaluated before and after, and the solve is rejected only if that rose too. RMS is
+  evaluated before and after, and the solve is rejected only if that rose too; one whose
+  robust cost fell is kept however little its RMS rose (`solveVerdict`). RMS is
   dominated by the gross outliers Huber down-weights, so it can rise while every inlier
   fits better. Each solve logs RMS before and after and a per-iteration trace.
 

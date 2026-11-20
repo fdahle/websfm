@@ -134,3 +134,20 @@ export function compareRobustCost({ before, after, observations, loss = 'huber' 
     a = Math.sqrt(ca / n)
   return { delta, before: b, after: a, improved: a <= b }
 }
+
+/**
+ * What a guarded solve without survey constraints does with its result, judged by the
+ * robust cost it descended before the plain RMS: 'kept' when the plain RMS did not rise or
+ * the robust cost fell (however little the plain RMS rose: a solve that lowered its own
+ * cost was paid for, and its gross points moved, not its fit), 'converged' when the robust
+ * cost did not fall and the plain RMS rose by less than `noOpPx` (a re-solve of a
+ * converged model ticking up by rounding), else 'rejected'.
+ *
+ * @param {{ rmsBefore:number, rmsAfter:number, robust?:{improved:boolean}|null, noOpPx?:number }} o
+ *   `robust`: compareRobustCost of the two states; needed only when the plain RMS rose
+ * @returns {'kept'|'converged'|'rejected'}
+ */
+export function solveVerdict({ rmsBefore, rmsAfter, robust = null, noOpPx = 0.01 }) {
+  if (!(rmsAfter > rmsBefore) || robust?.improved) return 'kept'
+  return rmsAfter - rmsBefore < noOpPx ? 'converged' : 'rejected'
+}

@@ -13,8 +13,9 @@ import { fitSimilarity, frameFromSimilarity, applySimilarity } from '../products
 // drone's GPS (σ 2 m) and with half a pixel of noise: the classic doming of a block
 // without ground control, k1 and the focal trading against the block's curvature. Then
 // solved again with its points held to the true ground by demAnchors (σ 0.2 m).
-// Measured: shape 0.45 → 0.08 m RMS, height against the ground 0.70 → 0.07 m RMS, in
-// two rounds. (Without self-calibration the unmodelled k1 is a conflict no anchor
+// Measured: shape 0.30 → 0.08 m RMS, height against the ground 0.45 → 0.07 m RMS, in
+// two rounds. (The plain solve slides along that valley as long as it runs: 0.70 m at a
+// 10⁻⁶ stop, 11 m in 80 iterations without one; the app's 10⁻⁵ on an exact step.) (Without self-calibration the unmodelled k1 is a conflict no anchor
 // resolves: 3.3 → 1.3 m.)
 describe('bundle adjustment held to a reference DEM', () => {
   beforeAll(async () => {
@@ -124,7 +125,7 @@ describe('bundle adjustment held to a reference DEM', () => {
     }
     const bentShape = shapeError(plain.points3d)
     const bentHeight = heightError(plain.points3d, identity)
-    expect(bentHeight).toBeGreaterThan(0.5)
+    expect(bentHeight).toBeGreaterThan(0.3)
 
     // The model frame is the GPS's, so the georeference is the identity here.
     const frame = frameFromSimilarity(identity, 'local')
@@ -146,8 +147,8 @@ describe('bundle adjustment held to a reference DEM', () => {
     }
     const heldShape = shapeError(pts)
     const heldHeight = heightError(pts, identity)
-    expect(bentShape).toBeGreaterThan(0.3)
-    expect(heldHeight).toBeLessThan(0.15 * bentHeight)
-    expect(heldShape).toBeLessThan(0.25 * bentShape)
+    expect(bentShape).toBeGreaterThan(0.2)
+    expect(heldHeight).toBeLessThan(0.2 * bentHeight)
+    expect(heldShape).toBeLessThan(0.3 * bentShape)
   })
 })
