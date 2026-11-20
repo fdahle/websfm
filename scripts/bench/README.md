@@ -304,6 +304,13 @@ node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2
 - `metashape-datum.py` (WSL Python + numpy, not part of a run) checks a reference set
   against Metashape's own adjusted block: the camera-vs-GCP datum, the antenna convention
   and a bench run's checkpoints per GCP. Usage is in its header.
+- Swapping tie points and solvers with Metashape (dev/baselines.md ▸ B-decomp; usage in
+  each header): `metashape_decomp.py` aligns with the bench's control (RTK σ, antenna, no
+  GCP control), exports a project's calibration, cameras and valid tie points, and loads a
+  replay's WebSfM tracks into a chunk for Optimize Cameras; `metashape-tiepoints.mjs`
+  turns exported tie points into a `.sfminput` (optionally noisier or thinned);
+  `metashape-decomp-score.mjs` scores either tool's cameras with the bench's own
+  camera-position and checkpoint check; `metashape-decomp-ties.py` compares the tie points.
 
 ## Notes
 
