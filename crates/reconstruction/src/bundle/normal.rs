@@ -480,6 +480,9 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                 }));
                 for (i1, eb1) in el.iter().enumerate() {
                     let m = &ms[i1];
+                    // Row eb1 of the pattern, searched for each eb2.
+                    let k0 = pattern.row_ptr[eb1.blk];
+                    let row = &pattern.cols[k0..pattern.row_ptr[eb1.blk + 1]];
                     for eb2 in &el {
                         if eb2.blk > eb1.blk { continue; }
                         // Row eb1's owner for a camera row; the column camera's owner
@@ -488,7 +491,7 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                             else if eb2.blk < rp.n_free { (rp.range(eb2.blk) == r, true) }
                             else { (owner, r == 0) };
                         if !mine { continue; }
-                        let k = pattern.pos(eb1.blk, eb2.blk);
+                        let k = k0 + row.binary_search(&(eb2.blk as u32)).expect("block outside the reduced-system pattern");
                         let at = if direct { pattern.val_at[k] } else { rp.gg_part[k - rp.gg_k0] };
                         let dst = if direct { s_p } else { part };
                         for a in 0..eb1.dim {
@@ -556,10 +559,12 @@ pub(crate) fn eliminate(m: &Model, plan: &Plan, st: &State, dh: f64, lambda: f64
                 }));
                 for (i1, eb1) in el.iter().enumerate() {
                     let m = &ms[i1];
+                    let k0 = pattern.row_ptr[eb1.blk];
+                    let row = &pattern.cols[k0..pattern.row_ptr[eb1.blk + 1]];
                     for eb2 in &el {
                         if lower_only && eb2.blk > eb1.blk { continue; }
                         if implicit && eb2.blk != eb1.blk { continue; }
-                        let base = pattern.at(eb1.blk, eb2.blk);
+                        let base = pattern.val_at[k0 + row.binary_search(&(eb2.blk as u32)).expect("block outside the reduced-system pattern")];
                         if eb1.dim == 6 && eb2.dim == 6 {
                             // Camera × camera, fixed size (the same sums as below).
                             for a in 0..6 {
