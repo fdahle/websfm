@@ -289,6 +289,14 @@ export const SFM_TUNING = {
   // end images, never manufactures a pose. Set false to restore the strict sweep.
   rescueStalled: true,
   rescueRefineRatio: 0.2, // relaxed refine-recheck ratio used on the rescue retry
+  // The rescue's second retriangulation: only the points a stalled image is matched to,
+  // down to this angle instead of filterMinTriAngleDeg. Between nearby registered photos
+  // most shared points sit under 1.5°, so a photo with hundreds of verified inliers to the
+  // model found no 3D points to resect against, and half a close-range scene stayed
+  // unregistered (ETH3D playground 19/38, office 21/26). At 0.25° and a 0.5 px match the
+  // depth is still within ~3 % (enough for PnP); the interim filter drops what is still
+  // under filterMinTriAngleDeg once the new photo has added its view.
+  rescueMinTriAngleDeg: 0.25,
   // ── Secondary-model recovery ──
   secondaryModels: true, // reconstruct coherent blocks stranded outside the primary
   secondaryMinImages: 8, // avoid recursively solving tiny/noisy leftovers

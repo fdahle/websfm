@@ -432,6 +432,18 @@ Notable changes to WebSfM. The format follows
   memory live while placing photos fell from 178 to 50 MB.
 
 ### Fixed
+- **Close-range scenes no longer lose half their photos.** When the sparse model stops
+  growing while photos still match it, Sparse Model now also builds the 3D points those
+  photos need from points seen at small angles between nearby photos, so a photo with
+  hundreds of matches to the model registers instead of being left out. Since 0.8.0 a
+  close-range scene could stop at half its photos: on ETH3D playground 19 of 38 cameras
+  registered (0.8 took photo pairs' best matches first, which nudged the one photo that
+  half the scene hung on below the 20 points PnP needs), office 21 of 26 with 2 cameras
+  wrong. Now playground 35 / 38 and office 26 / 26, every camera within 1.3 cm of ETH3D's
+  laser-scan cameras (median 2.5 / 3.1 mm). Where the model does not stall, nothing
+  changes: delivery_area, pipes, terrace, South Building, quarry, GeoScan PUTI, Casa Grande
+  1978 and Iceland 1980 give byte-identical models. Courtyard is still 36 / 38 (a
+  different cause, under investigation).
 - **It says why a GCP is not used.** A GCP only constrains the georeference with X, Y, Z,
   an accuracy and marks in two photos, but a point placed by hand had no accuracy and
   nothing said so: the table showed a small "⚠ unknown" beside the datum, and Georeference

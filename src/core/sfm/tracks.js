@@ -51,6 +51,9 @@ export async function retriangulatePairs({
   maxReprojPx,
   triangulate,
   minTriAngleDeg = 0,
+  // Optional filter on a match's two endpoints, (imgA, kpA, imgB, kpB) → boolean: only the
+  // matches it accepts are triangulated (the rescue's targeted pass, register.js).
+  only = null,
 }) {
   // A fresh index, as the private one this function used to build.
   tracks.reindex()
@@ -65,7 +68,8 @@ export async function retriangulatePairs({
     const m = asPairList(e.matches)
     const fresh = [] // match indices whose endpoints are both unassigned
     for (let i = 0; i < m.length; i++)
-      if (tracks.pointAt(iA, m.a(i)) < 0 && tracks.pointAt(iB, m.b(i)) < 0) fresh.push(i)
+      if (tracks.pointAt(iA, m.a(i)) < 0 && tracks.pointAt(iB, m.b(i)) < 0 && (!only || only(iA, m.a(i), iB, m.b(i))))
+        fresh.push(i)
     if (!fresh.length) continue
 
     const KA = camA.K,

@@ -482,6 +482,17 @@ runs a **focal-only** BA (skipped at two cameras, where no intrinsic is identifi
 (`rescueRefineRatio`). The cameras it admits carry the model past the self-calibration
 threshold; Gate 1, the final BA and the track filter still apply.
 
+The retriangulation runs twice. The first pass covers every finished pair at the usual
+floor (`filterMinTriAngleDeg`, 1.5°). The second covers only the keypoints of registered
+photos that a stalled photo is matched to, down to `rescueMinTriAngleDeg` (0.25°). Between
+nearby photos in a close-range scene most shared points sit under 1.5°, so a photo with
+hundreds of verified inliers to the model could have fewer than
+`minMatchesForRegistration` 3D points to resect against (ETH3D playground: 537 of a
+photo's 895 matches to the model untriangulated, 11,024 points dropped under 1.5°). At
+0.25° and a 0.5 px match the depth is uncertain by a few per cent, enough for PnP. The
+interim track filter drops whatever is still under 1.5° once the new photo has added its
+view. Where the rescue does not fire, nothing changes.
+
 **Self-calibration is refused below 3 cameras** in every pass: a 2-camera model returns
 whatever k1 the noise prefers, and the keypoint view is derived from it.
 

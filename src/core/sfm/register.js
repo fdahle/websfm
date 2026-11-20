@@ -128,6 +128,7 @@ export async function registerImages(ctx) {
     localBaIterations = 6,
     rescueStalled,
     rescueRefineRatio,
+    rescueMinTriAngleDeg = 0,
   } = cfg
   // Fixed PnP gate for the whole run (never chases the model p95 upward).
   const pnpThresh = reprjThreshold * Math.max(1, Math.min(pnpGateScale, 2))
@@ -713,9 +714,43 @@ export async function registerImages(ctx) {
           triangulate: triangulateDlt,
         })
         refreshTracks()
+        // A second pass for the stalled images alone: the keypoints of registered photos
+        // they are matched to, triangulated down to rescueMinTriAngleDeg. Between nearby
+        // photos most shared points sit under the usual floor, so a photo with hundreds
+        // of verified inliers to the model can have too few 3D points to resect against.
+        let addedForStalled = 0
+        if (rescueMinTriAngleDeg > 0 && rescueMinTriAngleDeg < filterMinTriAngleDeg) {
+          const wanted = new Set() // `${img}:${kp}` of registered photos, matched to a stalled one
+          for (const img of stalledLinked) {
+            for (const entry of corrPairsOf(img.uuid)) {
+              const imgIsA = entry.idA === img.uuid
+              const reg = imgIsA ? entry.idB : entry.idA
+              if (!registeredUuids.has(reg)) continue
+              const r = ids.img(reg)
+              const m = asPairList(entry.matches)
+              for (let i = 0; i < m.length; i++) wanted.add(`${r}:${imgIsA ? m.b(i) : m.a(i)}`)
+            }
+          }
+          ;({ added: addedForStalled } = await retriangulatePairs({
+            tracks,
+            ids,
+            cameras,
+            pairs: donePairs,
+            keypointsAt,
+            maxReprojPx: filterMaxReprojPx,
+            minTriAngleDeg: rescueMinTriAngleDeg,
+            triangulate: triangulateDlt,
+            only: (iA, a, iB, b) => wanted.has(`${iA}:${a}`) || wanted.has(`${iB}:${b}`),
+          }))
+          refreshTracks()
+        }
         log(
-          `Rescue retriangulation +${pluralize(added, 'point')}; retrying with a relaxed ` +
-            `recheck (${pnpThresh.toFixed(1)}px, ${(100 * rescueRefineRatio).toFixed(0)}%)`,
+          `Rescue retriangulation +${pluralize(added, 'point')}` +
+            (addedForStalled
+              ? `, and +${pluralize(addedForStalled, 'point')} the stalled photos are matched to ` +
+                `(down to ${rescueMinTriAngleDeg}° between views)`
+              : '') +
+            `; retrying with a relaxed recheck (${pnpThresh.toFixed(1)}px, ${(100 * rescueRefineRatio).toFixed(0)}%)`,
           'info',
           'Sparse',
         )

@@ -1131,6 +1131,32 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     expect(tracks.liveCount()).toBe(0)
   })
 
+  it('triangulates only the matches `only` accepts (the rescue’s pass for stalled photos)', async () => {
+    const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
+    const run = async (only) => {
+      const { tracks, ids } = tracksFrom([], uuids)
+      const seen = []
+      const { added } = await retriangulatePairs({
+        tracks,
+        ids,
+        cameras,
+        pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+        keypointsAt,
+        maxReprojPx: 2,
+        triangulate,
+        only: (iA, a, iB, b) => (seen.push([iA, a, iB, b]), only(ids, iA, a, iB, b)),
+      })
+      return { added, seen, ids }
+    }
+    const refused = await run(() => false)
+    expect(refused.added).toBe(0)
+    // It is asked about each match with both endpoints (image index, keypoint index).
+    expect(refused.seen).toEqual([[refused.ids.img('c0'), 0, refused.ids.img('c1'), 0]])
+    // Wanted when one endpoint is a keypoint of c1 (a photo a stalled one matches).
+    const wanted = await run((ids, iA, a, iB, b) => iB === ids.img('c1') && b === 0)
+    expect(wanted.added).toBe(1)
+  })
+
   it('merges two points that are the same feature split across a match', () => {
     const p1 = {
       ...ptAt(W),
