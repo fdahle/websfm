@@ -86,8 +86,9 @@ you click.
 Sparse Model run. `sfm` holds the reconstruction knobs (`core/tuning.js` SFM_TUNING,
 including the [bundle adjustment](help:bundle-adjustment) solver under
 `sfm.baSolver.…`), `match` the matching ones. `set sfm` lists the keys and their
-values, `set` alone lists what you changed, and `set sfm.minPnpInlierRatio default`
-puts one back. The value must have the default's type (a number, true or false, or
-text). A setting that a dialog shows is refused, with the dialog's name: set it there.
+values, `set` alone lists what you changed, `set sfm.minPnpInlierRatio default`
+puts one back and `set default` puts back all of them. The value must have the
+default's type (a number, true or false, or text), and a value with a fixed set of
+choices (`sfm.baPreFilterLoss`: huber, cauchy or geman-mcclure) one of them. A setting that a dialog shows is refused, with the dialog's name: set it there.
 The run's log lists the overrides it used. They are not saved with the project and
 are gone after a reload.

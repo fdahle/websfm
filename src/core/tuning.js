@@ -404,6 +404,7 @@ export const SFM_TUNING = {
 // MatchFeaturesModal — the user-facing match defaults live in defaults.user.js ▸
 // MATCH_DEFAULTS. `settings` from the caller still overrides.
 export const MATCH_TUNING = {
+  // ── Pair verification ──
   // Draw F-RANSAC's samples best match first (PROSAC, crates/matching
   // ransac_fundamental_ordered) instead of uniformly. Off: in 0.8 it cost close-range
   // scenes cameras (ETH3D courtyard 38 → 36, office 26 → 21 and playground 38 → 19
@@ -413,6 +414,7 @@ export const MATCH_TUNING = {
   // quarry 6,592 pairs (6,589) at +5 % matching time. Its gain was on synthetic pairs
   // with 15–30 % true matches; turn it on to try a set that has such pairs.
   prosacSampling: false,
+  // ── Saving and caches ──
   // How often a matching run saves its matches and its journal (core/runJournal.js)
   // while pairs finish: what a dead tab's run can lose, against one rewrite of the match
   // document (never more often than ten times that rewrite takes). `_journalMs` in a
@@ -431,6 +433,7 @@ export const MATCH_TUNING = {
   // holds a whole 128-image SIFT run at ~8.4k kp (≈ 4.3 MB/image); a smaller budget
   // only costs re-uploads (the worker answers a miss and the store resends).
   gpuDescCacheMiB: 1024,
+  // ── Pair acceptance ──
   lgMinConf: 0, // LightGlue min match confidence
   overrideInliers: 30, // inlier count that overrides a failed ratio/H-F gate
   hfDegenerateRatio: 0.8, // homography-vs-fundamental ratio flagging a degenerate fit
@@ -490,6 +493,7 @@ export const MATCH_TUNING = {
   // with ≥ 50 inliers (one with 498). 0 = off.
   subsetGateNearMiss: 0.5,
   subsetGateNearMissScale: 2,
+  // ── Bridge repair ──
   // Bridge repair (MATCH_DEFAULTS.repairSplits; core/features/bridgeRepair.js): a match
   // graph left in pieces of at least bridgeMinComponent images gets up to
   // bridgePerComponent pairs per piece (bridgeMaxPairs in all) between it and the main
@@ -510,6 +514,7 @@ export const MATCH_TUNING = {
   bridgeMinInlierRatio: 0.08,
   bridgeVerifier: 'magsac',
   bridgeLgKeypointScale: 2,
+  // ── Detecting gaps again ──
   // Detecting gaps again (MATCH_DEFAULTS.gapRedetect; core/features/gapRedetect.js): the
   // SIFT photos of the pieces still apart after bridge repair, detected at under
   // gapMaxScale of their size, are detected again at full size with ≤gapMaxKeypoints
@@ -521,6 +526,7 @@ export const MATCH_TUNING = {
   gapMaxKeypoints: 40000,
   gapPartnerShare: 0.65,
   gapMaxShare: 0.5,
+  // ── Finding turned photos ──
   // Finding turned photos (MATCH_DEFAULTS.turnSearch; core/features/turnSearch.js): each
   // photo of a piece still apart, and the main-block photos it is probed against (those
   // with overlap evidence, else an even spread, ≤turnProbesPerImage), gets a SIFT look
@@ -535,6 +541,7 @@ export const MATCH_TUNING = {
   turnProbeThreshFrac: 0.01,
   turnMinInliers: 20,
   turnMinShare: 0.6,
+  // ── Progress ──
   // Share of the progress bar kept for the gate rescue and bridge repair, which follow
   // the pair pass when they can run (core/features/matchProgress.js).
   progressPostShare: 0.1,

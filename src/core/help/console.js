@@ -26,7 +26,14 @@ import { RUN_STAGE_NAMES, parseRunArgs, runStageHelp } from './consoleRun.js'
 import { EDITS, parseEditArgs, findNamed, quoteArg } from './consoleEdits.js'
 import { createWorkflow } from '../workflow.js'
 import { stepValue } from './ribbonTabs.js'
-import { TUNING_GROUPS, parseTuningKey, parseTuningValue, getPath, tuningKeys } from './consoleSettings.js'
+import {
+  TUNING_GROUPS,
+  TUNING_CHOICES,
+  parseTuningKey,
+  parseTuningValue,
+  getPath,
+  tuningKeys,
+} from './consoleSettings.js'
 
 /** Split arguments on whitespace, keeping "quoted names" together. */
 export function splitArgs(text) {
@@ -362,6 +369,18 @@ const VERB_HANDLERS = {
       if (!any) log(`No overrides. Groups: ${Object.keys(TUNING_GROUPS).join(', ')} — "set sfm" lists its keys.`)
       return
     }
+    // `set default`: every override back to its default (Debug ▸ Flags ▸ Reset all).
+    if (args.length === 1 && /^(default|reset)$/i.test(args[0])) {
+      const keys = Object.keys(TUNING_GROUPS).flatMap((g) =>
+        tuningKeys(g).filter((k) => getPath(env.tuning.get(g), k.split('.').slice(1)) !== undefined),
+      )
+      for (const k of keys) {
+        const [g, ...path] = k.split('.')
+        env.tuning.set(g, path, undefined)
+      }
+      log(keys.length ? `Every value back to its default: ${keys.join(', ')}` : 'No overrides to reset.', 'info')
+      return
+    }
     const key = parseTuningKey(args[0])
     if (key.error) {
       log(key.error, 'error')
@@ -392,7 +411,7 @@ const VERB_HANDLERS = {
       log(`${name}: ${JSON.stringify(old)} → ${JSON.stringify(current(key.path))} (default)`, 'info')
       return
     }
-    const value = parseTuningValue(raw, key.def)
+    const value = parseTuningValue(raw, key.def, TUNING_CHOICES[name] ?? null)
     if (value.error) {
       log(`${name} ${value.error}`, 'error')
       return

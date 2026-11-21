@@ -312,8 +312,9 @@ export const VERBS = [
       'set <group>   (sfm, match: list the keys)',
       'set <group>.<key> <value>',
       'set <group>.<key> default',
+      'set default   (every value back to its default)',
     ],
-    help: 'Override an internal tuning value for this session',
+    help: 'Override an internal tuning value for this session, as Other ▸ Debug ▸ Flags does',
   },
   {
     verb: 'pair',

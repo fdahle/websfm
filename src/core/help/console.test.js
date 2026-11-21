@@ -8,6 +8,13 @@ import {
   setPath,
   describeOverrides,
   tuningKeys,
+  TUNING_CHOICES,
+  checkTuningValue,
+  tuningEntries,
+  changedTuning,
+  describeChanged,
+  validateKeptOverrides,
+  getPath,
 } from './consoleSettings.js'
 import { SFM_TUNING } from '../tuning.js'
 
@@ -238,6 +245,16 @@ describe('set', () => {
     env.lines = []
     runConsoleLine('set sfm.baSolver', env)
     expect(text(env)).toContain('sfm.baSolver.pcgMaxIter = 400  (set; default 200)')
+    runConsoleLine('set sfm.baSolver.direct implicit', env)
+    expect(env.tuning.get('sfm').baSolver).toEqual({ pcgMaxIter: 400, direct: 'implicit' })
+    runConsoleLine('set default', env)
+    expect(last(env)[1]).toBe(
+      'Every value back to its default: sfm.baSolver.pcgMaxIter, sfm.baSolver.direct, sfm.rescueStalled, match.lgMinConf',
+    )
+    expect(env.tuning.get('sfm')).toEqual({})
+    expect(env.tuning.get('match')).toEqual({})
+    runConsoleLine('set default', env)
+    expect(last(env)[1]).toBe('No overrides to reset.')
     expect(text(env)).toContain('sfm.baSolver.direct = true')
   })
 
@@ -372,6 +389,82 @@ describe('consoleSettings', () => {
     expect(parseTuningValue('600', null)).toEqual({ value: 600 })
     expect(parseTuningValue('"response"', 'coarse-first')).toEqual({ value: 'response' })
     expect(parseTuningValue('maybe', true).error).toMatch(/true or false/)
+  })
+
+  it('offers each fixed set of values with its default among them, and refuses others', () => {
+    for (const [key, choices] of Object.entries(TUNING_CHOICES)) {
+      const k = parseTuningKey(key)
+      expect(k.error).toBeUndefined()
+      expect(choices).toContain(k.def)
+    }
+    const direct = TUNING_CHOICES['sfm.baSolver.direct']
+    expect(parseTuningValue('implicit', true, direct)).toEqual({ value: 'implicit' })
+    expect(parseTuningValue('false', true, direct)).toEqual({ value: false })
+    expect(parseTuningValue('Cauchy', 'huber', TUNING_CHOICES['sfm.baPreFilterLoss'])).toEqual({ value: 'cauchy' })
+    expect(parseTuningValue('tukey', 'huber', TUNING_CHOICES['sfm.baPreFilterLoss']).error).toMatch(
+      /one of huber, cauchy, geman-mcclure/,
+    )
+  })
+
+  it('checks a typed value as set checks text: same type as the default, finite', () => {
+    expect(checkTuningValue(0.5, 0.3)).toEqual({ value: 0.5 })
+    expect(checkTuningValue(NaN, 0.3).error).toMatch(/number/)
+    expect(checkTuningValue(Infinity, 0.3).error).toMatch(/number/)
+    expect(checkTuningValue('0.5', 0.3).error).toMatch(/number/)
+    expect(checkTuningValue(null, null)).toEqual({ value: null })
+    expect(checkTuningValue(null, 3).error).toMatch(/number/)
+    expect(checkTuningValue(1, true).error).toMatch(/true or false/)
+    expect(checkTuningValue(' auto ', 'none')).toEqual({ value: 'auto' })
+    expect(checkTuningValue('', 'none').error).toMatch(/value/)
+    expect(checkTuningValue('magsac', 'ransac', ['ransac', 'magsac'])).toEqual({ value: 'magsac' })
+    expect(checkTuningValue('lmeds', 'ransac', ['ransac', 'magsac']).error).toMatch(/one of/)
+    // Lists, as JSON: the elements take the default's element type.
+    expect(parseTuningValue('[1, 2.5]', [1, 2])).toEqual({ value: [1, 2.5] })
+    expect(parseTuningValue('[1, "a"]', [1, 2]).error).toMatch(/list of numbers/)
+    expect(parseTuningValue('[1,', [1, 2]).error).toMatch(/JSON list/)
+    expect(parseTuningValue('{"a":1}', [1, 2]).error).toMatch(/list/)
+  })
+
+  it('lists every knob with its type, and what was changed', () => {
+    const entries = tuningEntries()
+    expect(entries.length).toBe(tuningKeys('sfm').length + tuningKeys('match').length)
+    const byKey = Object.fromEntries(entries.map((e) => [e.key, e]))
+    expect(byKey['sfm.minPnpInlierRatio']).toMatchObject({ type: 'number', def: 0.3, group: 'sfm' })
+    expect(byKey['sfm.rescueStalled'].type).toBe('boolean')
+    expect(byKey['sfm.baSolver.pcgMinN'].type).toBe('number')
+    expect(byKey['sfm.baSolver.direct'].type).toBe('choice')
+    expect(byKey['sfm.cameraPriorRefineIntrinsics'].type).toBe('text')
+    const changed = changedTuning({ sfm: { baSolver: { pcgMaxIter: 400 }, minPnpInlierRatio: 0.5 } })
+    expect(changed.map((c) => c.key)).toEqual(['sfm.baSolver.pcgMaxIter', 'sfm.minPnpInlierRatio'])
+    expect(describeChanged(changed)).toBe(
+      'sfm.baSolver.pcgMaxIter=400 (default 200), sfm.minPnpInlierRatio=0.5 (default 0.3)',
+    )
+  })
+
+  it('drops a kept value whose key is gone or whose type changed, saying why', () => {
+    const { byGroup, dropped } = validateKeptOverrides({
+      sfm: {
+        minPnpInlierRatio: 0.5,
+        rescueStalled: 'yes',
+        noSuchKnob: 1,
+        reprjThreshold: 2,
+        baSolver: { pcgMaxIter: 400 },
+      },
+      match: { bridgeVerifier: 'lmeds' },
+      dense: { x: 1 },
+    })
+    expect(byGroup).toEqual({ sfm: { minPnpInlierRatio: 0.5, baSolver: { pcgMaxIter: 400 } } })
+    expect(dropped.map((d) => d.key)).toEqual([
+      'sfm.rescueStalled',
+      'sfm.noSuchKnob',
+      'sfm.reprjThreshold',
+      'match.bridgeVerifier',
+      'dense',
+    ])
+    expect(dropped[0].reason).toMatch(/no longer fits.*true or false/)
+    expect(dropped[1].reason).toMatch(/no longer an internal tuning value/)
+    expect(validateKeptOverrides('garbage')).toEqual({ byGroup: {}, dropped: [] })
+    expect(getPath(byGroup.sfm, ['baSolver', 'pcgMaxIter'])).toBe(400)
   })
 
   it('merges nested overrides key by key and describes them', () => {
