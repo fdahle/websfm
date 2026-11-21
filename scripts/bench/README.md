@@ -239,6 +239,9 @@ node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2
 - `dumpSfmInput: true`: save each recon's exact SfM worker payload as
   `<out>.<stage>.sfminput` (`tests/bench/sfmInputDump.js`). Node replays it bit for bit
   as a real-data golden scene (`WEBSFM_SFM_GOLDEN_INPUTS`, `src/core/sfm/sfmGolden.test.js`).
+  The page writes it straight into a Blob, part by part, so it needs no second copy in
+  the page heap (whose usage the sparse watchdog reads) and may pass 2 GB (PUTI at
+  5,000 px: 2.3 GB). Node's `readFileSync` stops at 2 GiB: read a larger dump in chunks.
 - `export:<tag>` stages run one export through the app's dialog dispatch, with config
   key `export:<tag>` = `{ kind, settings, cloud? }`. Each download is saved as
   `<out>.<tag>.<file>`. Besides the dialog kinds (`cloud`, `mesh`, `colmap`, `dem`,

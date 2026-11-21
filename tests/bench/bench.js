@@ -54,7 +54,7 @@ import { applySimilarity, frameFromSimilarity } from '/src/core/products/georef.
 import { frameFromSpec } from '/src/core/products/frameSpec.js'
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '/src/core/sfm/displayFrame.js'
 import { triangulateGcp } from '/src/core/sfm/gcpTriangulation.js'
-import { encodeSfmInput } from './sfmInputDump.js'
+import { encodeSfmInputParts } from './sfmInputDump.js'
 import { demToGeoTiff } from '/src/core/products/exporters.js'
 import { crsTagInfo } from '/src/core/products/geotiff.js'
 import { emptyFiducialCalibration, calibratedFiducialPairs } from '/src/core/sfm/fiducialModel.js'
@@ -111,7 +111,10 @@ const postMessage = Worker.prototype.postMessage
 Worker.prototype.postMessage = function (message, ...rest) {
   if (sfmCaptureArmed && message?.op === 'reconstruct') {
     sfmCaptureArmed = false
-    sfmCapture = encodeSfmInput(message.args[0])
+    // Straight into a Blob from views of the payload (before its buffers are transferred):
+    // no copy in the page heap, whose usage the sparse watchdog reads, and no single
+    // ArrayBuffer over the 2 GB a Blob part may hold.
+    sfmCapture = new Blob(encodeSfmInputParts(message.args[0], { copy: false }), { type: 'application/octet-stream' })
   }
   return postMessage.call(this, message, ...rest)
 }
@@ -2733,18 +2736,18 @@ window.bench = {
     sfmCapture = null
   },
   sfmCaptureBytes() {
-    return sfmCapture?.byteLength ?? 0
+    return sfmCapture?.size ?? 0
   },
   // Starts a download of the captured input; the runner saves it. Returns its size.
   downloadSfmCapture(name) {
     if (!sfmCapture) return 0
     const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([sfmCapture], { type: 'application/octet-stream' }))
+    a.href = URL.createObjectURL(sfmCapture)
     a.download = name
     document.body.appendChild(a)
     a.click()
     a.remove()
-    const n = sfmCapture.byteLength
+    const n = sfmCapture.size
     sfmCapture = null
     return n
   },

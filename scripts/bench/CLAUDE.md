@@ -11,7 +11,8 @@ reaching the GPU*). The traps below each cost a run before they were written dow
 - Two runs at once need their own `"port"`. A kept `profile` reopens only on the port
   that saved it (OPFS is per origin). Avoid ports Fetch blocks (4190 is one).
 - Keep `out` and `profile` off `/tmp` (a tmpfs: runs die with QuotaExceededError). Never
-  delete a profile after an ABORTED stage: it is the only way to resume.
+  delete a profile after an ABORTED stage: it is the only way to resume. Without a
+  `"profile"` key the run deletes its own when a stage fails: set one on a long run.
 - Runs use the GPU by default. Before quoting a timing, check the log's
   `backend = WebGPU (…)` line: a run that fell back to SwiftShader is slow without error.
 - From a git worktree, symlink the gitignored `public/models` in, and never `git add -A`

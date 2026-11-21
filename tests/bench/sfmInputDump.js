@@ -66,6 +66,24 @@ const matchData = (m) =>
 
 /** @returns {Uint8Array} */
 export function encodeSfmInput(input) {
+  const parts = encodeSfmInputParts(input)
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0))
+  let at = 0
+  for (const p of parts) {
+    out.set(p, at)
+    at += p.byteLength
+  }
+  return out
+}
+
+/**
+ * The same bytes as encodeSfmInput, as a list of parts (header first). A large input
+ * (PUTI at 5,000 px: 2.3 GB) fits no single ArrayBuffer a Blob accepts, nor twice in the
+ * page heap; the bench page passes the parts straight to a Blob. `copy: false` keeps
+ * views of the input's own arrays (valid only until they are transferred).
+ * @returns {Uint8Array[]}
+ */
+export function encodeSfmInputParts(input, { copy = true } = {}) {
   const chunks = []
   let offset = 0
   const put = (typed) => {
@@ -76,7 +94,7 @@ export function encodeSfmInput(input) {
       offset += pad
     }
     const ref = { offset, length: typed.length }
-    chunks.push(bytes.slice())
+    chunks.push(copy ? bytes.slice() : bytes)
     offset += bytes.byteLength
     return ref
   }
@@ -108,14 +126,7 @@ export function encodeSfmInput(input) {
   pre.set(json, 12)
   // The binary section starts 8-byte aligned after the header.
   const lead = (8 - (pre.length % 8)) % 8
-  const out = new Uint8Array(pre.length + lead + offset)
-  out.set(pre, 0)
-  let at = pre.length + lead
-  for (const c of chunks) {
-    out.set(c, at)
-    at += c.byteLength
-  }
-  return out
+  return [pre, new Uint8Array(lead), ...chunks]
 }
 
 /**
