@@ -317,11 +317,13 @@ export function completeTracks({ tracks, ids, cameras, pairs, keypointsAt, maxRe
 // maxReprojPx, then drops points left under-supported (<2 views) or whose
 // viewing rays are too parallel to triangulate stably (< minTriAngleDeg).
 // Removes the views and points from `tracks`; returns { obsRemoved, ptsRemoved }.
-export function filterTracks({ tracks, ids, cameras, keypointsAt, maxReprojPx, minTriAngleDeg }) {
+// `only` (a Set of point ids) limits the pass to those points.
+export function filterTracks({ tracks, ids, cameras, keypointsAt, maxReprojPx, minTriAngleDeg, only = null }) {
   let obsRemoved = 0,
     ptsRemoved = 0
   const centres = new Map() // camera → its centre
   tracks.forEachPoint((p) => {
+    if (only && !only.has(p)) return
     const x = tracks.x(p),
       y = tracks.y(p),
       z = tracks.z(p)

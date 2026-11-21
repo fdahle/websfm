@@ -46,6 +46,8 @@ import { demAnchors } from './demAnchors.js'
 import { demHoldSampler } from './demHoldGrid.js'
 import { frameFromSimilarity } from '../products/georef.js'
 import { cameraCenter } from './geometry.js'
+import { splitCoarseTies, retriangulatePoints } from './coarseTies.js'
+import { filterTracks } from './tracks.js'
 
 // The solver stats (core/sfm/reconstruction.js BA_SOLVER_KEYS) the run record sums.
 const SUMMED_SOLVER_KEYS = [
@@ -110,6 +112,50 @@ export function createBundleSession(ctx) {
     }
     return obs
   }
+  // Coarse tie points out of the survey-held solves (coarseTies.js, SFM_TUNING
+  // heldTieMaxScaleRatio): the points a held solve uses. The split is the same in every
+  // held solve of a run (keypoint scales do not change, and no held solve adds or removes
+  // points), so the DEM hold's anchor indices and its solve agree. The points left out
+  // are kept in `coarseOut` and triangulated again by restoreCoarsePoints. Camera positions
+  // hold a solve to survey data only when they are survey grade (RTK, PPK: the same test
+  // as the decentring hold, surveyGradePositions); GCP anchors and a DEM hold always do.
+  const coarseRatio = cfg.heldTieMaxScaleRatio > 1 ? cfg.heldTieMaxScaleRatio : 0
+  const coarseByPositions =
+    !!coarseRatio &&
+    surveyGradePositions(cameraPriors ?? [], cfg.selfCalDecentringHeldSigma, cfg.cameraPriorBaMinCameras).held
+  let coarseOut = null
+  let coarseLogged = false
+  const heldIds = () => {
+    const live = tracks.liveIds()
+    if (!coarseRatio) return live
+    const split = splitCoarseTies(tracks, live, keypointsAt, {
+      maxRatio: coarseRatio,
+      minObsPerPhoto: cfg.heldTieMinObsPerPhoto ?? 0,
+    })
+    if (!split.active || !split.out.length) return live
+    coarseOut = new Set(split.out)
+    if (!coarseLogged) {
+      coarseLogged = true
+      const st = split.stats
+      const en = (v) => v.toLocaleString('en')
+      log(
+        `Survey-held bundle adjustment: tie points whose keypoints are coarser than ${coarseRatio}× their photo's ` +
+          `finest keypoint scale (median ${st.s0Median.toFixed(2)} px → ${(coarseRatio * st.s0Median).toFixed(2)} px) ` +
+          `left out: ${en(st.points - st.pointsKept)} of ${en(st.points)} points, ${en(st.obs - st.obsKept)} of ` +
+          `${en(st.obs)} observations; ${en(st.obsKept)} kept, ${en(st.obsPerPhotoMedian)} a photo (median, ` +
+          `fewest ${en(st.obsPerPhotoMin)})` +
+          (st.relaxed
+            ? `; ${pluralize(st.relaxed, 'photo')} kept coarser points (up to ${st.relaxedMaxRatio.toFixed(2)}×) ` +
+              `to keep ${en(cfg.heldTieMinObsPerPhoto)} observations each`
+            : '') +
+          '. They are triangulated again on the final cameras.',
+        'info',
+        'Sparse',
+      )
+    }
+    return split.keep
+  }
+
   if (tieWeight !== 1 && (cameraPriors?.length || gcps?.length || demHold))
     log(
       `Bundle adjustment: a tie point counts as ${Math.sqrt(1 / tieWeight).toFixed(2)} px (one detection pixel) ` +
@@ -363,7 +409,8 @@ export function createBundleSession(ctx) {
     }
     // With fixed cameras: the points a free camera sees, and the fixed cameras that see
     // them (the rest of the model is already solved and cannot move).
-    let ptIds = tracks.liveIds()
+    // The held solves leave the coarse tie points out (heldIds).
+    let ptIds = (cameraPriors && coarseByPositions) || gcp ? heldIds() : tracks.liveIds()
     let uuidList = [...cameras.keys()]
     if (fixedCameras?.size) {
       refineMode = 'none'
@@ -823,7 +870,7 @@ export function createBundleSession(ctx) {
         )
         continue
       }
-      const ptIds = tracks.liveIds()
+      const ptIds = coarseByPositions ? heldIds() : tracks.liveIds()
       const lf = lensFrame(
         uuidList,
         camList.map((c) => c.K),
@@ -891,7 +938,7 @@ export function createBundleSession(ctx) {
       const kList = camList.map((c) => c.K)
       const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
       const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
-      const ptIds = tracks.liveIds()
+      const ptIds = heldIds()
       const setup = await buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPointIndex: ptIds.length })
       if (setup.error) {
         log(`GCP anchoring stopped (${setup.error})`, 'warn', 'Sparse')
@@ -1066,7 +1113,7 @@ export function createBundleSession(ctx) {
     for (let round = 0; round < rounds; round++) {
       if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && baIterations > 0)) return null
       const uuidList = [...cameras.keys()]
-      const ptIds = tracks.liveIds()
+      const ptIds = heldIds()
       const held = await frameNow(uuidList, ptIds.length)
       if (!held) {
         log(
@@ -1122,7 +1169,7 @@ export function createBundleSession(ctx) {
     }
     // Where the tie points sit against the DEM now, in the frame they were held in.
     const uuidList = [...cameras.keys()]
-    const ptIds = tracks.liveIds()
+    const ptIds = heldIds()
     const held = last?.source === 'cameras' ? last : await frameNow(uuidList, ptIds.length)
     if (held) {
       record.after = anchorsNow(ptIds, held.frame).stats
@@ -1179,9 +1226,40 @@ export function createBundleSession(ctx) {
     return record
   }
 
+  // After the held solves: the coarse points they left out, triangulated on the final
+  // cameras and put through the track filter's gates (only they), so the sparse cloud and
+  // every later stage see them. Returns { points, moved, obsRemoved, ptsRemoved } or null
+  // when no held solve left any out. The caller compacts the track store.
+  function restoreCoarsePoints() {
+    if (!coarseOut?.size) return null
+    const out = Int32Array.from(coarseOut)
+    const moved = retriangulatePoints(tracks, out, { cameras, ids, keypointsAt })
+    const { obsRemoved, ptsRemoved } = filterTracks({
+      tracks,
+      ids,
+      cameras,
+      keypointsAt,
+      maxReprojPx: cfg.filterMaxReprojPx,
+      minTriAngleDeg: cfg.filterMinTriAngleDeg,
+      only: coarseOut,
+    })
+    const record = { points: out.length, moved, obsRemoved, ptsRemoved }
+    const en = (v) => v.toLocaleString('en')
+    log(
+      `Survey-held bundle adjustment: ${en(out.length)} coarse tie points triangulated again on the final ` +
+        `cameras; the track filter (≤${cfg.filterMaxReprojPx.toFixed(1)} px, ≥${cfg.filterMinTriAngleDeg}° parallax) ` +
+        `removed ${en(obsRemoved)} of their observations and ${en(ptsRemoved)} of them`,
+      'info',
+      'Sparse',
+    )
+    coarseOut = null
+    return record
+  }
+
   return {
     runBundleAdjust,
     runLocalBundleAdjust,
+    restoreCoarsePoints,
     runCameraPriorBundleAdjust,
     runGcpAnchoredBundleAdjust,
     runDemAnchoredBundleAdjust,

@@ -95,6 +95,12 @@ const NADIR = [
  *                                        metres off, its metadata recording `recordedDeg`. It
  *                                        is matched with its own capture's reference photo
  *                                        only, or with nothing (`pairs: false`, a thermal band)
+ * @param {object} [o.coarse]             { frac, scale, shift }: that share of the terrain points
+ *                                        is found at a coarse keypoint scale (`scale`× the fine
+ *                                        1.0–1.2 px), its keypoints moved radially about the
+ *                                        principal point by `shift` (a share of the radius), as a
+ *                                        coarse blob's centre can be; every keypoint then has a
+ *                                        `scale`, and truth.coarse flags those points
  */
 export function aerialBlock({
   seed,
@@ -115,6 +121,7 @@ export function aerialBlock({
   film = false,
   ppOffset = [3.5, -2.5],
   rig = null,
+  coarse = null,
 }) {
   const rng = mulberry32(seed)
   const gauss = () => {
@@ -218,6 +225,9 @@ export function aerialBlock({
     return d
   }
 
+  // Drawn only with `coarse`, so every other scene keeps its random sequence.
+  const isCoarse = coarse ? world.map(() => rng() < coarse.frac) : null
+  const fineScale = coarse ? world.map(() => 1 + 0.2 * rng()) : null
   const images = []
   const kpOfWorld = [] // per image: Map worldIdx → kpIdx
   for (const cam of cams) {
@@ -234,11 +244,25 @@ export function aerialBlock({
     const obs = []
     world.forEach((X, wi) => {
       const p = project(cam, X)
-      if (p) obs.push({ wi, x: p.x + gauss() * noisePx, y: p.y + gauss() * noisePx })
+      if (!p) return
+      const o = { wi, x: p.x + gauss() * noisePx, y: p.y + gauss() * noisePx }
+      if (coarse) {
+        o.scale = isCoarse[wi] ? coarse.scale * fineScale[wi] : fineScale[wi]
+        if (isCoarse[wi]) {
+          o.x = Ktrue.cx + (o.x - Ktrue.cx) * (1 + coarse.shift)
+          o.y = Ktrue.cy + (o.y - Ktrue.cy) * (1 + coarse.shift)
+        }
+      }
+      obs.push(o)
     })
     const nDistract = Math.floor(obs.length * distractorFrac)
     for (let i = 0; i < nDistract; i++)
-      obs.push({ wi: -1, x: 8 + rng() * (meta.width - 16), y: 8 + rng() * (meta.height - 16) })
+      obs.push({
+        wi: -1,
+        x: 8 + rng() * (meta.width - 16),
+        y: 8 + rng() * (meta.height - 16),
+        ...(coarse ? { scale: 1.1 } : {}),
+      })
     for (let i = obs.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1))
       ;[obs[i], obs[j]] = [obs[j], obs[i]]
@@ -257,7 +281,7 @@ export function aerialBlock({
       // A few keypoints carry no colour, as on a grey image.
       const color = rng() < 0.02 ? undefined : o.wi >= 0 ? colorOf[o.wi] : [128, 128, 128]
       const p = toScan(o.x, o.y)
-      return { x: p.x, y: p.y, color }
+      return { x: p.x, y: p.y, color, ...(o.scale ? { scale: o.scale } : {}) }
     })
     kpOfWorld.push(map)
     const bandSpec = cam.band != null ? rig[cam.band] : null
@@ -415,5 +439,5 @@ export function aerialBlock({
       }))
     : []
 
-  return { images, pairs, gcps: gcpList, cameraPriors, truth: { cams, world, Ktrue } }
+  return { images, pairs, gcps: gcpList, cameraPriors, truth: { cams, world, Ktrue, coarse: isCoarse } }
 }

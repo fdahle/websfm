@@ -760,6 +760,9 @@ export async function reconstructSingleModel(input, hooks = {}) {
       report('gcpBundle', 1, 'Holding the model to the reference DEM…', { done: cameras.size, total: imgs.length })
       demHoldRecord = await bundles.runDemAnchoredBundleAdjust()
     }
+    // The coarse tie points the held solves left out (coarseTies.js), back in the model.
+    const coarseRestore = bundles.restoreCoarsePoints()
+    if (coarseRestore) refreshTracks()
     markStage('bundleAdjust')
 
     const finalTrackPrune = pruneFinalTracks({ cfg, tracks, refreshTracks, keypointsAt, log })
@@ -889,6 +892,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
     }
     summary.registrationCheck = registrationCheck
     if (demHoldRecord) summary.demHold = demHoldRecord
+    if (coarseRestore) summary.heldCoarseTies = coarseRestore
     if (rig) summary.rig = { bands: rig.summary(), placed: rigCompleted.length }
     // Rolling shutter (cfg.rollingShutter): each camera group's estimated readout time.
     if (cfg.rollingShutter === 'on') {

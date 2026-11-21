@@ -137,6 +137,24 @@ export const SFM_TUNING = {
   // cap 4 / 8; PUTI with RTK checkpoints 3.0 / 8.2 → 2.7 / 8.3 cm (cap 4); Casa Grande
   // GCP checkpoints 1.09 / 1.02 → 1.11 / 1.04 m. Not gated with it on.
   tieScaleWeightCap: 0,
+  // ── Coarse tie points out of the survey-held solves (coarseTies.js) ──
+  // > 1: the solves held to survey data (survey-grade camera positions, GCP anchors, the
+  // DEM hold) leave out every tie point whose median keypoint scale over its views exceeds
+  // this multiple of each photo's finest keypoint scale (keypointSet.js minKeypointScale);
+  // the points are triangulated again on the final cameras afterwards and filtered with
+  // the track filter's gates, so the cloud keeps them. A coarse blob's centre may shift
+  // with the viewing angle, which trades with focal and height and biases a held block in
+  // height (inferred). Keypoints without a scale (learned detectors) count as fine.
+  // 0 = off. Off: measured 2026-11-21 at 1.3 (dev/baselines.md ▸ B-coarse-2026-11-21, same
+  // matches, both pair orders) it is mixed: GCP checkpoints V on PUTI with RTK 7.43 / 7.40 →
+  // 6.79 / 6.76 cm at 4,000 px detection and 7.92 → 6.68 at native, quarry with RTK
+  // 11.18 / 11.13 → 10.18 / 10.03 cm, Casa Grande 1.025 → 0.991 m, but PUTI at 2,400 px
+  // 8.16 / 8.00 → 8.72 / 8.56 cm.
+  heldTieMaxScaleRatio: 0,
+  // A photo left with fewer observations than this in the held solves keeps its finest
+  // points up to the count (a higher threshold for that photo), so a weak block is not
+  // stripped bare.
+  heldTieMinObsPerPhoto: 1000,
   // ── The robust loss of the solves before the track filter (plan-ba-next ▸ C3) ──
   // The interim solves of registration, the first global solve and the one after
   // retriangulation run before the tight filter, on observations that still hold gross
