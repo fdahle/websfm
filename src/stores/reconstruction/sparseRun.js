@@ -8,6 +8,7 @@ import {
   makeFrameModelResolver,
   calibrationSnapshot,
   withFocalSigma,
+  withFocalHeight,
 } from '../../core/sfm/displayFrame.js'
 import { formatBytes, deviceBudget } from '../../core/dense/memBudget.js'
 import { SFM_TUNING } from '../../core/tuning.js'
@@ -32,6 +33,7 @@ import { createTrackCensus } from '../../core/sfm/trackCensus.js'
 import * as opfs from '../../utils/opfs.js'
 import { toMatchSpace, rootSiftToU8 } from '../../core/features/siftDescriptors.js'
 import { unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
+import { focalHeightNote } from '../../core/sfm/focalHeight.js'
 import {
   aerialUpRotation,
   camerasLookUp,
@@ -784,7 +786,11 @@ export function createSparseRun({
           makeFrameModelResolver({ summary: runSummary ?? null, sensors: sensors.value })
         const calibrationFor = (cams, runSummary) => {
           const fromRun = runResolver(runSummary)
-          if (!base) return withFocalSigma(calibrationSnapshot({ resolve: fromRun, images: refsOf(cams) }), runSummary)
+          if (!base)
+            return withFocalHeight(
+              withFocalSigma(calibrationSnapshot({ resolve: fromRun, images: refsOf(cams) }), runSummary),
+              runSummary,
+            )
           const fromBase = makeFrameModelResolver({
             calibration: base.calibration ? toRaw(base.calibration) : null,
             summary: toRaw(summary.value),
@@ -910,6 +916,10 @@ export function createSparseRun({
           lastModelChange.value = `Sparse Model: ${(result.summary?.nCameras ?? 0).toLocaleString('en')} cameras`
         healthDirty.value++
         reconStatus.value = 'done'
+        // The focal weakly fixed by survey-grade positions over a flat nadir block
+        // (focalHeight.js): the heights can be off by the flying height × the focal error.
+        const focalNote = base ? '' : focalHeightNote(result.summary?.focalHeight)
+        if (focalNote) log(focalNote, 'warn', 'Sparse')
         const saved = await save()
         log(
           saved

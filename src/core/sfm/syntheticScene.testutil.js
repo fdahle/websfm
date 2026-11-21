@@ -95,6 +95,8 @@ const NADIR = [
  *                                        metres off, its metadata recording `recordedDeg`. It
  *                                        is matched with its own capture's reference photo
  *                                        only, or with nothing (`pairs: false`, a thermal band)
+ * @param {number} [o.altitudeStep]      odd strips flown this many metres higher (default 0:
+ *                                        one flying height, 60 m, ±1.5 m)
  * @param {object} [o.coarse]             { frac, scale, shift }: that share of the terrain points
  *                                        is found at a coarse keypoint scale (`scale`× the fine
  *                                        1.0–1.2 px), its keypoints moved radially about the
@@ -122,6 +124,7 @@ export function aerialBlock({
   ppOffset = [3.5, -2.5],
   rig = null,
   coarse = null,
+  altitudeStep = 0,
 }) {
   const rng = mulberry32(seed)
   const gauss = () => {
@@ -168,7 +171,11 @@ export function aerialBlock({
   blockSpecs.forEach((b, bi) => {
     for (let r = 0; r < b.rows; r++) {
       for (let c = 0; c < b.cols; c++) {
-        const C = [b.offsetX + c * B + gauss() * 0.6, b.offsetY + r * S + gauss() * 0.6, H + gauss() * 1.5]
+        const C = [
+          b.offsetX + c * B + gauss() * 0.6,
+          b.offsetY + r * S + gauss() * 0.6,
+          H + (r % 2) * altitudeStep + gauss() * 1.5,
+        ]
         const tilt = mul(rotZ((r % 2 ? Math.PI : 0) + gauss() * 0.05), mul(rotX(gauss() * 0.06), rotY(gauss() * 0.06)))
         const R = mul(T(tilt), NADIR)
         const t = mv(R, C).map((v) => -v)

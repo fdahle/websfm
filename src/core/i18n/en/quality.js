@@ -33,6 +33,14 @@ export default {
     focalSigmaNote:
       'The focal’s ± is how far heights can move from it alone: about ± {pct, number} % of the distance from the ' +
       'cameras to the ground.',
+    // The focal–height check of the run (core/sfm/focalHeight.js).
+    focalHeight:
+      'Survey-grade camera positions fix the cameras but not this focal length: they span {spread, number, ::.0} m ' +
+      'in height against {height, number, ::.} m of flying height ({ratio, number, ::.0} %), the photos look ' +
+      'straight down and no GCPs control the model. Each 0.01 % of focal error moves the heights by ' +
+      '{cm, number, ::.0} cm, and the residuals do not show it. Use GCPs as control, or a calibration from a block ' +
+      'flown with control (<strong>Import ▸ Calibration</strong>, or Use for next run on the group’s Estimated ' +
+      'values in the Sensor table).',
     fitRms: 'Dense warp fit RMS',
     fitRmsValue: '{v, number, ::.000} px',
     term: '{v, number, ::.0000}',

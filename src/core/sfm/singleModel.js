@@ -56,6 +56,8 @@ import {
 } from './runRecord.js'
 import { pluralize } from '../textFormat.js'
 import { surveyRotationFromOpk } from './cameraPriors.js'
+import { focalHeightCheck } from './focalHeight.js'
+import { trackPositions } from './baObservations.js'
 import { sparseSnapshot, createSnapshotPacer } from './liveSnapshot.js'
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
@@ -894,6 +896,45 @@ export async function reconstructSingleModel(input, hooks = {}) {
     if (demHoldRecord) summary.demHold = demHoldRecord
     if (coarseRestore) summary.heldCoarseTies = coarseRestore
     if (rig) summary.rig = { bands: rig.summary(), placed: rigCompleted.length }
+    // Whether survey-grade positions alone held a nadir block's self-calibrated focal
+    // (focalHeight.js): the store warns from it, the Quality Report shows it per group.
+    if (!extension && cameraPriors.length) {
+      const focalSensors = new Set()
+      for (const a of selfCalRecord.adjustments)
+        if (a.accepted && a.held === 'positions' && String(a.mode).split(',').includes('f'))
+          for (const p of a.sensors) if (p.accepted && p.sensorId != null) focalSensors.add(p.sensorId)
+      summary.focalHeight = focalHeightCheck(
+        {
+          cameras: [...cameras].map(([uuid, c]) => ({
+            uuid,
+            R: c.R,
+            t: c.t,
+            sensorId: imageByUuid(uuid)?.sensorId ?? null,
+          })),
+          points: trackPositions(tracks, tracks.liveIds()),
+          cameraPriors,
+          focalSensors,
+          control: bundles.controlHeld() || !!demHoldRecord,
+        },
+        {
+          maxSigma: cfg.selfCalDecentringHeldSigma,
+          minCameras: cfg.cameraPriorBaMinCameras,
+          maxRatio: cfg.focalHeightMaxSpreadRatio,
+          maxTiltDeg: cfg.focalHeightNadirMaxTiltDeg,
+          maxObliqueShare: cfg.focalHeightMaxObliqueShare,
+        },
+      )
+      const fh = summary.focalHeight
+      if (fh.ratio != null)
+        log(
+          `Focal–height check: camera heights' robust spread ${fh.spreadM.toFixed(2)} m over ` +
+            `${fh.flyingHeightM.toFixed(1)} m of flying height (${(100 * fh.ratio).toFixed(1)} %), ` +
+            `${(100 * fh.obliqueShare).toFixed(1)} % of the photos tilted beyond ${cfg.focalHeightNadirMaxTiltDeg}° ` +
+            `(median ${fh.medianTiltDeg.toFixed(1)}°): ${fh.weak ? 'the focal is weakly fixed' : `fixed enough (${fh.reason})`}`,
+          'debug',
+          'Sparse',
+        )
+    }
     // Rolling shutter (cfg.rollingShutter): each camera group's estimated readout time.
     if (cfg.rollingShutter === 'on') {
       const groups = readoutSummary(cameras, (u) => imageByUuid(u)?.sensorId ?? `image:${u}`)

@@ -378,6 +378,9 @@ export function createBundleSession(ctx) {
   // tracks, their mark observations and the anchor residuals — so a GCP-anchored solve
   // can refine intrinsics through the same validation + fold path as every other pass.
   let lastSolve = null // see runBundleAdjust
+  // Whether a solve held by GCPs (or a DEM) was kept: the ground's height is then
+  // controlled, not only the cameras' (focalHeight.js).
+  let controlHeld = false
   const LOSS_LABEL = { 'huber': 'Huber', 'cauchy': 'Cauchy', 'geman-mcclure': 'Geman–McClure' }
   // `warm`: the model is already converged (a re-solve after a filter, a
   // retriangulation or with survey constraints added), so the solve may stop earlier.
@@ -697,7 +700,15 @@ export function createBundleSession(ctx) {
         })
         if (!verdict.ok && !rejected) rejected = verdict
       }
-      selfCalRecord.adjustments.push({ label, mode: refineMode, accepted: !rejected, sensors: proposals })
+      // `held`: what held the solve, 'control' (GCPs or a DEM) or 'positions' (camera
+      // positions alone); the focal–height check reads it (focalHeight.js).
+      selfCalRecord.adjustments.push({
+        label,
+        mode: refineMode,
+        accepted: !rejected,
+        held: gcp ? 'control' : cameraPriors ? 'positions' : null,
+        sensors: proposals,
+      })
       if (rejected) {
         log(
           `${capitalize(label)}: the lens fit is not kept (${rejected.reason}); ` +
@@ -977,6 +988,7 @@ export function createBundleSession(ctx) {
           { cameraPriors: constrainedCameras?.priors ?? null, gcp: setup, lensSigma: true },
         )
         if (!r) return
+        controlHeld = true
         log(
           `GCP-anchored bundle adjustment anchor residual → ${(r.anchorRmsAfter * fit.scale).toPrecision(3)} project units`,
           'info',
@@ -1027,6 +1039,7 @@ export function createBundleSession(ctx) {
       // Only the original (non-anchor) points are kept — the synthetic anchor
       // points were scratch space for this BA pass, not real SIFT tracks.
       setTrackPositions(ptIds, result.pos)
+      controlHeld = true
       log(
         `GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → ` +
           `${result.costAfter.toFixed(2)}px, anchor residual → ${(result.anchorRmsAfter * fit.scale).toPrecision(3)} project units` +
@@ -1265,6 +1278,8 @@ export function createBundleSession(ctx) {
     runDemAnchoredBundleAdjust,
     // { mode, converged } of the last runBundleAdjust, or null (none, rejected, skipped).
     lastSolve: () => lastSolve,
+    // A GCP-anchored solve was kept (the DEM hold returns its own record).
+    controlHeld: () => controlHeld,
     solverTotals: baSolverTotals,
   }
 }

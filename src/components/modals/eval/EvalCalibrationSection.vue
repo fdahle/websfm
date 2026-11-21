@@ -9,12 +9,15 @@ import { radialCurve, focalDelta } from '../../../core/eval/calibration.js'
 import { EVAL_THRESHOLDS } from '../../../core/eval/health.js'
 import { FOCAL_UNFIXED_SHARE, focalSigmaShare, focalSigmaPct } from '../../../core/sfm/focalSigma.js'
 import { useI18n } from '../../../composables/useI18n.js'
+import I18nText from '../../I18nText.vue'
 
 // Quality Report ▸ Calibration: per camera group the BA-refined focal vs nominal, the lens
 // the main model was solved with (its own calibration, displayFrame.js
 // calibrationSnapshot) and a Δr(r) curve of its radial part. A model from before the lens
 // was solved whole shows its self-cal correction and that correction's fit health.
-// Thresholds come from the shared EVAL_THRESHOLDS table (WS2.6).
+// Thresholds come from the shared EVAL_THRESHOLDS table (WS2.6). A group whose focal the
+// run found weakly fixed by survey-grade positions over a flat nadir block carries
+// `focalHeight` (core/sfm/focalHeight.js, displayFrame.js withFocalHeight).
 const { t } = useI18n()
 const recon = useReconstructionStore()
 const imagesStore = useImagesStore()
@@ -62,6 +65,7 @@ const rows = computed(() => {
       // How well the solve fixed the focal (bundle.rs ▸ lens σ); heights move with it.
       const focalSigma = own.value?.groups?.find((g) => g.sensorId === sensor.id)?.focalSigmaPx ?? null
       const sigmaShare = focalSigmaShare(refinedFx, focalSigma)
+      const focalHeight = own.value?.groups?.find((g) => g.sensorId === sensor.id)?.focalHeight ?? null
       return {
         id: sensor.id,
         label: sensor.label,
@@ -69,6 +73,7 @@ const rows = computed(() => {
         refinedFx,
         focalSigma,
         sigmaShare,
+        focalHeight,
         nominalFx,
         delta,
         dist,
@@ -142,6 +147,17 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
         </div>
       </div>
 
+      <div v-if="s.focalHeight" class="warn-box">
+        <I18nText
+          k="quality.calibration.focalHeight"
+          :params="{
+            spread: s.focalHeight.spreadM,
+            height: s.focalHeight.flyingHeightM,
+            ratio: 100 * s.focalHeight.ratio,
+            cm: 100 * s.focalHeight.heightPer0_01PctM,
+          }"
+        />
+      </div>
       <div v-if="s.sigmaShare != null && s.sigmaShare >= FOCAL_UNFIXED_SHARE" class="warn-box">
         {{ t('quality.calibration.focalUnfixed', { pct: sigmaPct(s.sigmaShare) }) }}
       </div>

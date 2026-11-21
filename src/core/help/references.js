@@ -225,6 +225,24 @@ export const REFERENCES = {
     venue: 'IEEE Transactions on Pattern Analysis and Machine Intelligence 28(8), 1335–1340',
     doi: '10.1109/TPAMI.2006.153',
   },
+  // Focal–height correlation of a nadir UAV block (core/sfm/focalHeight.js): over a
+  // flat block the principal distance and the camera heights are strongly correlated
+  // (δz = m_b·δc); cross strips at another height, or a GCP, separate them.
+  benassi2017: {
+    authors: [
+      'Francesco Benassi',
+      "Elisa Dall'Asta",
+      'Fabrizio Diotri',
+      'Gianfranco Forlani',
+      'Morra di Cella, Umberto',
+      'Riccardo Roncella',
+      'Marina Santise',
+    ],
+    year: 2017,
+    title: 'Testing accuracy and repeatability of UAV blocks oriented with GNSS-supported aerial triangulation',
+    venue: 'Remote Sensing 9(2), 172',
+    doi: '10.3390/rs9020172',
+  },
   horn1987: {
     authors: ['Berthold K. P. Horn'],
     year: 1987,

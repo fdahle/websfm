@@ -258,6 +258,27 @@ export const SFM_TUNING = {
   // (gcpw-night / gcpw-3ctl-2026-11-18).
   gcpRefineIntrinsics: 'auto',
   gcpRefineIntrinsicsMinGcps: 4,
+  // ── Focal–height check (focalHeight.js; a warning, it changes no result) ──
+  // A nadir block held by survey-grade positions alone (no GCPs, no DEM hold), its focal
+  // self-calibrated: a focal error ε moves the ground by ε·H and the cameras' height
+  // differences by ε·Δh, so the positions see the share r = Δh / H of it. Warned below
+  // this r, the camera heights' NMAD over the flying height above the sparse cloud. Least
+  // squares on the camera heights gives σ_ε ≈ σ_z / (NMAD·√N), so the focal's share of the
+  // ground's height error is σ_z / (r·√N): at 5 % it equals the positions' own vertical σ_z
+  // for a block of about 400 photos. 5 % is also what a second flight 7 % of H higher
+  // gives (two heights: NMAD = 1.48 × half the step), short of the 10–20 % apart the
+  // remedy asks for, and above what one height holds (altitude hold, wind and gentle
+  // terrain: ±1–3 m at 100 m). Chosen from the geometry, not fitted; checked
+  // (dev/baselines.md ▸ B-focal-2026-11-21): PUTI RTK 3.1 % warns (σ_z / (NMAD·√N) =
+  // 166 ppm against the 170 ppm its focal profile measured), quarry RTK 5.5 % does not.
+  focalHeightMaxSpreadRatio: 0.05,
+  // A camera counts as oblique beyond this tilt from straight down. Nadir capture stays
+  // within a few degrees with a gimbal and within about 15° on a fixed wing in wind
+  // (PUTI 0 %, quarry 0.6 % of the photos beyond 20°); oblique capture tilts 25–45°.
+  // More than this share of obliques and the block is not nadir: their depth varies
+  // across the frame, which fixes the focal.
+  focalHeightNadirMaxTiltDeg: 20,
+  focalHeightMaxObliqueShare: 0.05,
   // ── F13: held to a reference DEM (bundleSession.js runDemAnchoredBundleAdjust) ──
   // Rounds of the DEM-held solve, the anchors rebuilt between them (a point that moves
   // sideways meets the DEM elsewhere): the synthetic doming block settles in two

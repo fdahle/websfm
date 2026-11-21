@@ -293,6 +293,28 @@ export function withFocalSigma(calibration, summary) {
   return calibration
 }
 
+/**
+ * The calibration with the focal–height warning (`focalHeight`: flying height, spread,
+ * ratio, height per 0.01 % of focal, metres) on each sensor group the run's check
+ * flagged (`summary.focalHeight`, focalHeight.js): the Quality Report shows it with the
+ * group's lens. Mutates and returns `calibration`.
+ */
+export function withFocalHeight(calibration, summary) {
+  const fh = summary?.focalHeight
+  if (!fh?.weak) return calibration
+  const flagged = new Set(fh.sensorIds ?? [])
+  for (const g of calibration?.groups ?? []) {
+    if (g.sensorId != null && flagged.has(g.sensorId))
+      g.focalHeight = {
+        flyingHeightM: fh.flyingHeightM,
+        spreadM: fh.spreadM,
+        ratio: fh.ratio,
+        heightPer0_01PctM: fh.heightPer0_01PctM,
+      }
+  }
+  return calibration
+}
+
 function resolverFromCalibration(calibration, sensors) {
   const sensorById = new Map((sensors || []).map((s) => [s.id, s]))
   const groupBy = new Map(

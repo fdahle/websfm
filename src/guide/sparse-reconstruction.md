@@ -56,11 +56,13 @@ from too few iterations.
 
 ## Self-calibration
 <!-- param: refineIntrinsics default: Auto -->
-**Auto** solves focal length and lens distortion (including decentring, where it clearly
-helps or RTK camera positions hold the block) for cameras known only from EXIF, and keeps a calibration you entered. Turn it off (**None**) when the calibration is
-trustworthy. Many parameters need many well-spread views: on a weak network, such as a
-short strip of wide-angle frames, Auto can bend the block towards its ends. If
-checkpoint errors grow towards the edges under Auto but not under None, keep None.
+**Auto** solves focal length and lens distortion (decentring too, where it clearly helps
+or RTK positions hold the block) for cameras known only from EXIF, and keeps a
+calibration you entered; **None** never solves it. A weak network (a short strip of
+wide-angle frames) can bend under Auto: keep None if checkpoint errors grow towards the
+edges under Auto only. RTK positions over nadir photos at one height leave the focal,
+and the heights, loose ([focal–height correlation](help:focal-height-correlation)): the
+log warns; add GCPs or a known calibration.
 
 ## Rolling shutter
 <!-- param: rollingShutter default: Estimate the readout time -->

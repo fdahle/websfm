@@ -28,6 +28,13 @@ export default {
     focalSigmaNote:
       'Das ± der Brennweite ist, wie weit sich die Höhen allein durch sie verschieben können: etwa ± {pct, number} % ' +
       'des Abstands der Kameras zum Boden.',
+    focalHeight:
+      'Vermessungsgenaue Kamerapositionen legen die Kameras fest, aber nicht diese Brennweite: Sie streuen in der Höhe ' +
+      'um {spread, number, ::.0} m bei {height, number, ::.} m Flughöhe ({ratio, number, ::.0} %), die Fotos blicken ' +
+      'senkrecht nach unten, und keine GCPs stützen das Modell. Jede 0,01 % Brennweitenfehler verschiebt die Höhen um ' +
+      '{cm, number, ::.0} cm, und die Residuen zeigen es nicht. GCPs als Passpunkte verwenden oder eine Kalibrierung ' +
+      'aus einem Block mit Passpunkten (<strong>Import ▸ Kalibrierung</strong>, oder „Für nächsten Lauf verwenden“ bei ' +
+      'den geschätzten Werten der Gruppe in der Sensortabelle).',
     fitRms: 'RMS der Dense-Warp-Anpassung',
     fitRmsValue: '{v, number, ::.000} px',
     term: '{v, number, ::.0000}',

@@ -1174,6 +1174,34 @@ buy at the images' expense.
   the wrapped rotation vector `Log(R R_targetᵀ)`, with per-axis 1σ turned into a full
   tangent-space precision matrix. Incomplete orientations act as position priors only.
 
+**Focal–height check** (`core/sfm/focalHeight.js`, a warning that changes no result). Over
+a flat block of nadir photos the focal and the camera distance trade one for the other: a
+camera with a focal (1 + ε) longer at a distance (1 + ε) greater takes the same photo, so
+with every camera at one height the block can move its ground by ε·H (H the flying height)
+at no image cost [Benassi et al. 2017: δz = m_b·δc]. Survey-grade positions fix the
+cameras, so the error lands on the heights. With the ground fixed in the network, a focal
+error changes the cameras' height differences by ε·Δh, which the positions see: they see
+the share r = Δh / H of what the focal does to the ground. Least squares on the camera
+heights alone gives σ_ε ≈ σ_z / (NMAD_h·√N) (N photos, σ_z their vertical σ), so the focal's
+part of the ground's height error is σ_z / (r·√N). On PUTI (444 photos, σ_z 1.8 cm, NMAD 5.1
+m) that is 166 ppm, against the 170 ppm its focal profile measured (dev baselines
+B-lens-2026-11-21). The check runs at the end of Sparse Model and warns when: at least half
+the camera positions are survey grade (≤ 0.1 m on every axis, the decentring hold's test,
+`surveyGradePositions`); a solve held by them refined and kept a group's focal; no
+GCP-anchored or DEM-held solve was kept; at most 5 % of the photos tilt more than 20° from
+straight down (nadir capture: a few degrees with a gimbal, up to about 15° on a fixed wing
+in wind; oblique capture 25–45°, and the depth across an oblique frame fixes the focal);
+and r = NMAD of the positions' heights / (their median − the sparse cloud's median height,
+in the SfM → survey similarity of the cameras onto their positions) is under 5 %
+(`focalHeightMaxSpreadRatio`). 5 % is where σ_z / (r·√N) equals σ_z for a block of about 400
+photos, and what a second flight 7 % of H higher gives (a two-height block's NMAD is 1.48 ×
+half the step); one flying height holds 1–3 %. The log line and the Quality Report's
+Calibration section give H, the spread, r and H × 10⁻⁴, the height a focal 0.01 % off
+moves the model. Measured (Node replays, B-focal-2026-11-21): PUTI RTK 3.1 % warns (2,400 and
+4,000 px); quarry with RTK 5.5 % does not (its positions pin the focal at ±70 ppm, more than
+its heights alone would: its fixed-wing tilts help); Aukerman's consumer GPS (1.1 %) is not
+survey grade; the GCP-held film blocks carry no camera positions.
+
 **GCP anchors.** `bundle_adjust` accepts an **anchor residual** `δᵀPδ` on chosen 3D points
 with the full GCP precision matrix `P` (CRS covariance rotated and scaled into the SfM
 frame). Each anchored GCP is an extra 3D point with its real marks, pulled toward its CRS
@@ -2073,6 +2101,9 @@ nothing, to show the user *where* a reconstruction is weak.
   grid, each cell with its point count and **max view count** (2 = the triangulation
   minimum, ≥ 3 comfortable): the "where is my overlap thin" map, read off the oriented
   sparse points.
+- **Focal weakly fixed** (§6.4, focal–height check): on a camera group whose focal survey-grade
+  positions alone held over a flat nadir block, Calibration shows the flying height, the
+  positions' height spread and what 0.01 % of focal error does to the heights.
 - **DEM vs reference** (§6.10): Nuth & Kääb shift, bias and NMAD on stable ground.
 - **Accuracy at the checkpoints** (`core/eval/asprsAccuracy.js`), after the ASPRS Positional
   Accuracy Standards, Edition 2 (2023): per axis the mean error, standard deviation (n − 1)
@@ -2128,6 +2159,7 @@ Report's *Methods and references*). A unit test keeps this section in step with 
 - Arandjelović, R. & Zisserman, A. (2013). All about VLAD. IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 1578–1585. https://doi.org/10.1109/CVPR.2013.207
 - ASPRS (2023). ASPRS Positional Accuracy Standards for Digital Geospatial Data, Edition 2, Version 1.0. American Society for Photogrammetry and Remote Sensing. https://publicdocuments.asprs.org/PositionalAccuracyStd-Ed2-V1
 - Barath, D., Noskova, J., Ivashechkin, M. & Matas, J. (2020). MAGSAC++, a fast, reliable and accurate robust estimator. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). https://arxiv.org/abs/1912.05909
+- Benassi, F., Dall'Asta, E., Diotri, F., Forlani, G., Morra di Cella, U., Roncella, R. & Santise, M. (2017). Testing accuracy and repeatability of UAV blocks oriented with GNSS-supported aerial triangulation. Remote Sensing 9(2), 172. https://doi.org/10.3390/rs9020172
 - Besl, P. J. & McKay, N. D. (1992). A method for registration of 3-D shapes. IEEE Transactions on Pattern Analysis and Machine Intelligence 14(2), 239–256. https://doi.org/10.1109/34.121791
 - Bleyer, M., Rhemann, C. & Rother, C. (2011). PatchMatch stereo — stereo matching with slanted support windows. British Machine Vision Conference (BMVC). https://doi.org/10.5244/C.25.14
 - Boykov, Y. & Kolmogorov, V. (2004). An experimental comparison of min-cut/max-flow algorithms for energy minimization in vision. IEEE Transactions on Pattern Analysis and Machine Intelligence 26(9), 1124–1137. https://doi.org/10.1109/TPAMI.2004.60

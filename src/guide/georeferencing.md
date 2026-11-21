@@ -36,9 +36,13 @@ residual about the offset's length.
 Camera positions alone fix the cameras, not the focal length. In a block of nadir
 photos at one flying height, a slightly wrong [self-calibrated](help:self-calibration)
 focal length moves the ground up or down by the same share of the flying height, and
-the residuals cannot show it. For heights to a few centimetres, add a few GCPs, some
-oblique photos, or a second flight at another height; keep the GCPs as checkpoints to
-measure it.
+the residuals cannot show it ([focal–height correlation](help:focal-height-correlation)).
+Sparse Model warns when survey-grade positions alone hold such a block (their heights
+spread by under 5 % of the flying height), and Quality Report ▸ Calibration says how far
+0.01 % of focal moves the heights. For heights to a few centimetres, add a few GCPs as
+control, some oblique photos, or a second flight at another height, or hold a calibration
+from a block flown with control (**Import ▸ Calibration**, or **Estimated** ▸ **Use for
+next run** in the Sensor table); keep some GCPs as checkpoints to measure it.
 
 Positions along one straight line (a single strip, a corridor) do not fix how the model
 is rolled about that line. In an aerial project the photos looking down fix it, as do
