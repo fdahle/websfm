@@ -2,8 +2,9 @@
 // Debug ▸ Flags: the internal tuning values (core/tuning.js) the console's `set` reaches,
 // as a registry-style dialog. A tree of the groups (and the sections tuning.js marks with
 // `// ── … ──`) on the left, a table of the selected group's values on the right, and the
-// comment above the selected value in tuning.js under it, read from the file itself
-// (core/tuningHelp.js), so the help is the code's own. Every change goes through the one
+// help of the selected value under it: the first paragraph of its comment in tuning.js,
+// read from the file itself (core/tuningHelp.js), so the help is the code's own; the
+// evidence below that paragraph stays in the code. Every change goes through the one
 // store the console uses (stores/tuningOverrides.js), which logs it on the Activity channel
 // with the `set` command that makes it. User-facing defaults (defaults.user.js) are not
 // here: those are the dialogs' settings.

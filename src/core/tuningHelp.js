@@ -15,6 +15,11 @@
 //   - `// ── Title ──` starts a section: the keys under it, to the next title, are
 //     filed under it, and the title line is not part of anyone's help.
 //   - a `// (…)` line right after a key with a same-line comment continues that comment.
+//   - only a comment's first paragraph is help: an empty `//` line ends it, and what
+//     follows is the evidence (measurements, test sets, dates, the code that reads the
+//     value), which stays in the code and is never shown. A comment on the key's own line
+//     is help. The rule is written at the top of tuning.js; tuningHelp.test.js keeps the
+//     shown help free of evidence.
 
 const OPEN_GROUP = /^export const ([A-Z0-9_]+)\s*=\s*\{\s*$/
 const KEY = /^\s*([A-Za-z_$][\w$]*)\s*:\s*(.*)$/
@@ -42,10 +47,23 @@ const joinLines = (lines) =>
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
+// A comment's help: its lines up to the first empty one (leading empty lines skipped).
+// The rest is the evidence, which is not returned.
+function firstParagraph(lines) {
+  const out = []
+  for (const l of lines) {
+    if (l.trim() === '') {
+      if (out.length) break
+    } else out.push(l)
+  }
+  return out
+}
+
 /**
  * tuning.js text → { [EXPORT_NAME]: { intro, keys: { 'a' | 'a.b': { help, section, sharedWith } } } }.
- * `help` is plain text with its line breaks; `sharedWith` names the key (dotted, without
- * the group) whose comment it shares, or is null for a key's own comment.
+ * `help` is plain text with its line breaks, the first paragraph of the comment (plus a
+ * comment on the key's own line); `sharedWith` names the key (dotted, without the group)
+ * whose comment it shares, or is null for a key's own comment.
  */
 export function parseTuningHelp(source) {
   const out = {}
@@ -60,7 +78,10 @@ export function parseTuningHelp(source) {
       const m = OPEN_GROUP.exec(trimmed)
       if (m) {
         group = { name: m[1], keys: {}, stack: [{ prefix: '', last: null, help: '' }], section: null }
-        out[m[1]] = { intro: joinLines(pending.filter((l) => !SECTION.test(`//${l}`))), keys: group.keys }
+        out[m[1]] = {
+          intro: joinLines(firstParagraph(pending.filter((l) => !SECTION.test(`//${l}`)))),
+          keys: group.keys,
+        }
         pending = []
       } else if (COMMENT.test(line)) pending.push(COMMENT.exec(line)[1])
       else pending = []
@@ -112,7 +133,7 @@ export function parseTuningHelp(source) {
     const [, name, rest] = key
     const path = level.prefix ? `${level.prefix}.${name}` : name
     const trailing = trailingComment(rest)
-    const own = joinLines([...pending, ...(trailing ? [trailing] : [])])
+    const own = joinLines([...firstParagraph(pending), ...(trailing ? [trailing] : [])])
     pending = []
     let help = own
     let sharedWith = null

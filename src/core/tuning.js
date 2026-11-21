@@ -9,6 +9,22 @@
 // pointer notes below rather than duplicating those values here.
 //
 // Pure data module: no Vue/Pinia/OPFS, so it bundles into the worker unchanged.
+//
+// How a value's comment is written. Debug ▸ Flags shows each value's help, read from
+// this file (core/tuningHelp.js), so a comment has two parts:
+//   - the help: the comment's first paragraph, up to its first empty `//` line. It is
+//     shown to users who know photogrammetry (Metashape, COLMAP, ODM): what the value
+//     does, which way to move it and what that costs or risks, in one to three
+//     sentences, in the words of docs/terms.md. No test dataset, bench number, date,
+//     plan or note reference, commit or file name.
+//   - the evidence: everything after that empty line, read only here: the measurements
+//     and the sets they were made on, dates, plan items, the code that reads the value.
+//     Keep it when you rewrite the help.
+// A comment on the key's own line is help too. A key without a comment shares the help
+// of the key above it (or of its sub-group). A `// ── Title ──` line names a section of
+// the dialog's tree, in the user's words. tuningHelp.test.js holds the help and the
+// section titles of every value the dialog shows (SFM_TUNING, MATCH_TUNING) to this;
+// the other groups follow the same rule.
 
 // Tie-point detection — SuperPoint safety ceiling. Read by core/features/learnedDetect.js
 // (backstop error on OrtRun) AND DetectFeaturesModal.vue (pre-flight tiling prompt), so

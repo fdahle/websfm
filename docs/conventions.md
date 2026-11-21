@@ -64,6 +64,14 @@ adds, removes or renames a setting, operation or user-visible feature:
    name, and add the same line to the References section of
    [docs/METHODS.md](METHODS.md). The unit tests fail on a key that does not
    resolve, an entry nothing cites, or one missing from METHODS.md.
+6. An internal tuning value (`src/core/tuning.js`) is help too: Debug ▸ Flags shows the
+   first paragraph of the comment above it, up to the comment's first empty `//` line.
+   Write that paragraph as a setting's guide section, shorter (one to three sentences:
+   what it does, which way to move it, what that costs), and put the evidence after the
+   empty line: the measurements, the sets they were made on, dates, plan items and the
+   code that reads the value, which stay in the code. A section title (`// ── … ──`) is
+   in the user's words too. `tuningHelp.test.js` fails on shown help with a date, a test
+   set's name, a before/after number, a plan or note reference or a file name.
 
 ## Third-party code and data
 
