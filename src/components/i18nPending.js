@@ -49,7 +49,6 @@ export const I18N_PENDING = [
   'src/components/modals/cloud/SectionModal.vue',
   'src/components/modals/cloud/TransformCloudModal.vue',
   'src/components/modals/eval/EvalAccuracySection.vue',
-  'src/components/modals/eval/EvalCalibrationSection.vue',
   'src/components/modals/eval/EvalCoverageSection.vue',
   'src/components/modals/eval/EvalDenseSection.vue',
   'src/components/modals/eval/EvalMatchingSection.vue',

@@ -8,12 +8,14 @@ import { resolveK } from '../../../core/sfm/reconstruction.js'
 import { radialCurve, focalDelta } from '../../../core/eval/calibration.js'
 import { EVAL_THRESHOLDS } from '../../../core/eval/health.js'
 import { FOCAL_UNFIXED_SHARE, focalSigmaShare, focalSigmaPct } from '../../../core/sfm/focalSigma.js'
+import { useI18n } from '../../../composables/useI18n.js'
 
 // Quality Report ▸ Calibration: per camera group the BA-refined focal vs nominal, the lens
 // the main model was solved with (its own calibration, displayFrame.js
 // calibrationSnapshot) and a Δr(r) curve of its radial part. A model from before the lens
 // was solved whole shows its self-cal correction and that correction's fit health.
 // Thresholds come from the shared EVAL_THRESHOLDS table (WS2.6).
+const { t } = useI18n()
 const recon = useReconstructionStore()
 const imagesStore = useImagesStore()
 const sensorsStore = useSensorsStore()
@@ -77,7 +79,11 @@ const rows = computed(() => {
     .filter((r) => r.nCams > 0 || r.dist)
 })
 
-const fmt = (v, d = 1) => (v == null ? '—' : v.toFixed(d))
+const num = (key, v) => (v == null ? '—' : t(key, { v }))
+// The focal σ as a percentage, rounded as the log writes it (focalSigma.js).
+const sigmaPct = (share) => Number(focalSigmaPct(share))
+const BROWN = ['k1', 'k2', 'k3']
+const DECENTRING = ['p1', 'p2']
 
 function polyline(curve) {
   if (!curve.length) return ''
@@ -95,89 +101,77 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
 </script>
 
 <template>
-  <div v-if="!rows.length" class="eval-loading">No reconstructed sensors.</div>
+  <div v-if="!rows.length" class="eval-loading">{{ t('quality.calibration.noSensors') }}</div>
   <template v-else>
-    <div v-if="selfCalWasOff" class="warn-box">
-      Self-calibration was off for this run — no solved lens to report. Focal comparison below still applies.
-    </div>
-    <div v-if="notRecorded" class="warn-box">
-      This model was saved before WebSfM kept each model's own lens, so the lens shown is the last Sparse Model run's.
-      Run Sparse Model again for this model's own.
-    </div>
+    <div v-if="selfCalWasOff" class="warn-box">{{ t('quality.calibration.selfCalOff') }}</div>
+    <div v-if="notRecorded" class="warn-box">{{ t('quality.calibration.notRecorded') }}</div>
 
     <div v-for="s in rows" :key="s.id" class="sensor-card">
       <div class="sensor-head">
         <span class="sensor-label">{{ s.label }}</span>
-        <span class="sensor-cams">{{ s.nCams }} cam{{ s.nCams === 1 ? '' : 's' }}</span>
+        <span class="sensor-cams">{{ t('quality.calibration.cameras', { n: s.nCams }) }}</span>
       </div>
 
       <div class="cal-grid">
         <div class="cal-item">
-          <div class="cal-k">Refined fx</div>
+          <div class="cal-k">{{ t('quality.calibration.refinedFx') }}</div>
           <div class="cal-v">
-            {{ fmt(s.refinedFx) }}<template v-if="s.focalSigma != null"> ± {{ fmt(s.focalSigma) }}</template>
+            {{
+              s.refinedFx != null && s.focalSigma != null
+                ? t('quality.calibration.fxSigma', { v: s.refinedFx, s: s.focalSigma })
+                : num('quality.calibration.fxValue', s.refinedFx)
+            }}
             <span class="unit">px</span>
           </div>
         </div>
         <div class="cal-item">
-          <div class="cal-k">Nominal fx</div>
-          <div class="cal-v">{{ fmt(s.nominalFx) }} <span class="unit">px</span></div>
+          <div class="cal-k">{{ t('quality.calibration.nominalFx') }}</div>
+          <div class="cal-v">{{ num('quality.calibration.fxValue', s.nominalFx) }} <span class="unit">px</span></div>
         </div>
         <div class="cal-item">
           <div class="cal-k">
-            Δ focal <span class="unit">(warn > ±{{ FOCAL_WARN }}%)</span>
+            {{ t('quality.calibration.focalDelta') }}
+            <span class="unit">({{ t('quality.threshold.aboveAbs', { warn: FOCAL_WARN, unit: '%' }) }})</span>
           </div>
           <div class="cal-v" :class="{ warn: s.delta.deltaPct != null && Math.abs(s.delta.deltaPct) > FOCAL_WARN }">
-            {{ fmt(s.delta.deltaPx) }} px<span v-if="s.delta.deltaPct != null" class="unit">
-              ({{ s.delta.deltaPct > 0 ? '+' : '' }}{{ s.delta.deltaPct.toFixed(1) }}%)</span
-            >
+            {{ num('quality.calibration.deltaPx', s.delta.deltaPx) }}
+            <span v-if="s.delta.deltaPct != null" class="unit">{{
+              t('quality.calibration.deltaPct', { v: s.delta.deltaPct })
+            }}</span>
           </div>
         </div>
       </div>
 
       <div v-if="s.sigmaShare != null && s.sigmaShare >= FOCAL_UNFIXED_SHARE" class="warn-box">
-        These photos do not fix the focal (± {{ focalSigmaPct(s.sigmaShare) }} %), and the model's heights scale with
-        it. Camera positions with their accuracies, GCPs or some oblique photos fix it.
+        {{ t('quality.calibration.focalUnfixed', { pct: sigmaPct(s.sigmaShare) }) }}
       </div>
       <div v-else-if="s.sigmaShare != null" class="cal-note">
-        The focal's ± is how far heights can move from it alone: about ±
-        {{ focalSigmaPct(s.sigmaShare) }} % of the distance from the cameras to the ground.
+        {{ t('quality.calibration.focalSigmaNote', { pct: sigmaPct(s.sigmaShare) }) }}
       </div>
 
       <template v-if="s.dist">
         <div class="cal-grid">
-          <div class="cal-item">
-            <div class="cal-k">k1</div>
-            <div class="cal-v">{{ s.dist.k1?.toFixed(4) ?? '—' }}</div>
-          </div>
-          <div class="cal-item">
-            <div class="cal-k">k2</div>
-            <div class="cal-v">{{ s.dist.k2?.toFixed(4) ?? '—' }}</div>
-          </div>
-          <div class="cal-item">
-            <div class="cal-k">k3</div>
-            <div class="cal-v">{{ s.dist.k3?.toFixed(4) ?? '—' }}</div>
+          <div v-for="k in BROWN" :key="k" class="cal-item">
+            <div class="cal-k">{{ k }}</div>
+            <div class="cal-v">{{ num('quality.calibration.term', s.dist[k]) }}</div>
           </div>
           <div v-if="s.dist.fisheye" class="cal-item">
-            <div class="cal-k">k4</div>
-            <div class="cal-v">{{ s.dist.k4?.toFixed(4) ?? '—' }}</div>
+            <div class="cal-k">{{ 'k4' }}</div>
+            <div class="cal-v">{{ num('quality.calibration.term', s.dist.k4) }}</div>
           </div>
           <template v-if="s.dist.p1 || s.dist.p2">
-            <div class="cal-item">
-              <div class="cal-k">p1</div>
-              <div class="cal-v">{{ s.dist.p1?.toFixed(5) ?? '—' }}</div>
-            </div>
-            <div class="cal-item">
-              <div class="cal-k">p2</div>
-              <div class="cal-v">{{ s.dist.p2?.toFixed(5) ?? '—' }}</div>
+            <div v-for="k in DECENTRING" :key="k" class="cal-item">
+              <div class="cal-k">{{ k }}</div>
+              <div class="cal-v">{{ num('quality.calibration.termP', s.dist[k]) }}</div>
             </div>
           </template>
           <div v-if="!s.dist.whole && s.dist.fitRmsPx != null" class="cal-item">
             <div class="cal-k">
-              Dense warp fit RMS <span class="unit">(warn > {{ FIT_RMS_WARN }})</span>
+              {{ t('quality.calibration.fitRms') }}
+              <span class="unit">({{ t('quality.threshold.above', { warn: FIT_RMS_WARN, unit: 'px' }) }})</span>
             </div>
             <div class="cal-v" :class="{ warn: s.dist.fitRmsPx > FIT_RMS_WARN }">
-              {{ s.dist.fitRmsPx?.toFixed(3) ?? '—' }} <span class="unit">px</span>
+              {{ num('quality.calibration.fitRmsValue', s.dist.fitRmsPx) }}
             </div>
           </div>
         </div>
@@ -188,11 +182,11 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
             <polyline :points="polyline(s.curve)" class="curve-line" />
           </svg>
           <div class="curve-cap">
-            Δr(r) — {{ drAtEdge(s.curve)?.toFixed(3) ?? '—' }} at edge (r≈{{ s.rMax.toFixed(2) }})
+            {{ t('quality.calibration.curve', { dr: drAtEdge(s.curve) ?? 0, r: s.rMax }) }}
           </div>
         </div>
       </template>
-      <div v-else class="cal-empty">No lens distortion for this camera group.</div>
+      <div v-else class="cal-empty">{{ t('quality.calibration.noLens') }}</div>
     </div>
   </template>
 </template>
