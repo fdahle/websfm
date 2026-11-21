@@ -6,7 +6,7 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
-- **Debug ▸ Flags, for testing the internal tuning values.** Other ▸ Debug ▸ Flags… lists the values WebSfM is tuned with, by group, with their defaults and the note on each from the source code, and changes them for this session, as the console's `set` does. A changed value is bold with a Reset beside it, a search finds a value by name or note, and **Keep after reload** keeps them in this browser (never in the project; one a later version no longer has is dropped with a warning). Each change shows in Activity with the `set` command that makes it, and the console gains `set default` to put back every value. While any value is changed, the ribbon shows how many, and the Quality Report (and its HTML export), the Project Summary, System info ▸ Copy for bug report, the console's Save TXT and the log of every project opened and every run name them, so a result is never judged without them. These are not settings: what a project should choose stays in the dialogs. With no flag changed nothing runs differently (no gate needed).
+- **Debug ▸ Flags, for testing the internal tuning values.** Other ▸ Debug ▸ Flags… lists the values WebSfM is tuned with, by group, with their defaults and a short help on each (what it does, which way to move it, what that costs), and changes them for this session, as the console's `set` does. A changed value is bold with a Reset beside it, a search finds a value by name or help, and **Keep after reload** keeps them in this browser (never in the project; one a later version no longer has is dropped with a warning). Each change shows in Activity with the `set` command that makes it, and the console gains `set default` to put back every value. While any value is changed, the ribbon shows how many, and the Quality Report (and its HTML export), the Project Summary, System info ▸ Copy for bug report, the console's Save TXT and the log of every project opened and every run name them, so a result is never judged without them. These are not settings: what a project should choose stays in the dialogs. With no flag changed nothing runs differently (no gate needed).
 - **A warning when RTK positions cannot fix the focal length.** After Sparse Model, when survey-grade camera positions alone hold a block of nadir photos flown at about one height and the focal length was self-calibrated, the log warns and Quality Report ▸ Calibration says how far 0.01 % of focal error moves the heights, with what to do: GCPs as control, or a calibration from a block flown with control. Over a flat nadir block a longer focal and a higher camera take the same photo, so the positions fix the cameras and the focal error lands on the ground's height; only the cameras' height differences let the positions see it. The check compares the robust spread (NMAD) of the positions' heights with the flying height above the sparse cloud and warns under 5 % (photos tilted more than 20° count as obliques; with more than 5 % of them it stays quiet, as it does with GCP or DEM control or with consumer GPS). It changes no result (`gate:sfm` the same bits). Measured on Node replays of saved inputs: PUTI with RTK, no GCPs (444 photos, 5.1 m of spread over 166 m: 3.1 %) warns, where the solved focal sat 270 ppm short, 4–5 cm of vertical bias at the checkpoints, while its statistical σ said 34 ppm; PUTI at 4,000 px warns the same (3.1 %); quarry with RTK (12.5 m over 229 m: 5.5 %) does not, its positions pinning the focal to ±70 ppm; Aukerman (consumer GPS, 1.1 %) stays quiet, and Casa Grande, Iceland (GCP control) and the other gate sets carry no camera positions, so the check does not run. Every replay gave the same cameras and points as before, bit for bit.
 - **Saved views of the 3D view.** View ▸ Camera ▸ Views keeps where the camera stands under a name, perspective or orthographic, and brings it back with a click; the views are saved with the project, and one saved on an earlier sparse model is marked. In the console: `view save`, `view go`, `view rename`, `view remove`.
 - **An orthographic 3D view.** View ▸ Camera ▸ Orthographic (key 5) shows the scene without perspective, so heights and distances read the same across the view: for checking a façade, a profile or a plan. Picking, selecting, measuring and the presets work in it as in the perspective view.
@@ -454,31 +454,13 @@ Notable changes to WebSfM. The format follows
   bits (the bench's match digest). Its first 150 photos with the cache scaled to the same
   shortfall: 179 → 106 s. Projects whose descriptors fit the 2 GiB cache match as before
   (South Building, 128 photos: 36.3 → 36.0 s, the same matches). What is left is GPU time.
-- **Sparse Model is faster on small projects.** A bundle adjustment of fewer than about
+- **Bundle adjustment is faster, most on small projects.** Every bundle adjustment
+  (Sparse Model, Optimize Cameras, the solves with GCPs) repeats less work from one step
+  to the next and shares more of it between processor cores, and one of fewer than about
   100 photos now stops once its steps no longer change the model, as a larger project's
-  already did, instead of running all its iterations, and a solve that improved the model
-  is no longer thrown away because its plain reprojection RMS ticked up. The tail it ran
-  was mismatched tie points seen by two photos sliding a little further along their rays
-  each iteration (a few millionths of the robust cost a step), with the cameras still and
-  the plain RMS creeping up from those points alone. Replayed from the same matches in
-  both pair orders: Casa Grande (37 film scans) 235 / 299 → 87 / 81 linear solves, BA
-  30.8 / 39.6 → 10.4 / 10.1 s, checkpoints 1.087 / 1.014 and 1.085 / 1.012 m → 1.085 /
-  1.012 and 1.082 / 1.012 m (H / V; pair-order spread 0.002 m); Aukerman (42 photos)
-  276 / 247 → 115 / 94 solves, BA 21.4 / 19.4 → 8.4 / 7.8 s, the same final
-  reprojection; quarry and PUTI (346 and 444 photos) the same bits. Regression gate:
-  every set keeps its cameras, the ETH3D camera medians move within their ±3 % noise
-  (courtyard 6.12 → 6.26 mm) or better (pipes 1.60 → 1.48 mm), South Building 4.86 mm
-  as before. BAL's small problems end within 10⁻⁶ of their cost. The camera system of a
-  small project is also factored in place with the sparse solver's four-lane sums: the
-  solve itself 2–3× faster (Aukerman's global solve 0.10–0.16 → 0.06 s of 1.9 s natively),
-  a 49-photo synthetic block 0.060 → 0.054 s and 0.068 → 0.056 s with self-calibration in
-  the browser's single-threaded build; whole replays equal within their timing noise, the
-  results the same within noise (gate: South Building 4.86 → 4.87 mm, the rest equal).
-- **Bundle adjustment is faster.** Every bundle adjustment (Sparse Model, Optimize
-  Cameras, the solves with GCPs) repeats less work from one step to the next and shares
-  more of it between processor cores, and the result is the same to the last bit. It
-  projects each observation once per iteration and keeps what a step worked out for the
-  next attempt; on several cores, a large block's camera system is factored in
+  already did. The work it no longer repeats leaves the result the same to the last bit:
+  it projects each observation once per iteration and keeps what a step worked out for
+  the next attempt; on several cores, a large block's camera system is factored in
   independent parts side by side, the setup of each solve runs on every core, and a
   solve on the same camera graph as the one before reuses its ordering; a small project
   stays on one core, where handing work to the others cost more than it saved. A
@@ -491,6 +473,25 @@ Notable changes to WebSfM. The format follows
   more per observation, and where the memory budget has room (at most a quarter of it)
   about 150 B more: 293 instead of 138 MB at 966,755 observations; the kept ordering
   0.45 MB at 1,600 photos.
+  The earlier stop on small projects, and a solve that improved the model no longer
+  thrown away because its plain reprojection RMS ticked up, change the result within
+  noise. The tail it ran was mismatched tie points seen by two photos sliding a little
+  further along their rays each iteration (a few millionths of the robust cost a step),
+  with the cameras still and the plain RMS creeping up from those points alone. Replayed
+  from the same matches in both pair orders: Casa Grande (37 film scans) 235 / 299 →
+  87 / 81 linear solves, BA 30.8 / 39.6 → 10.4 / 10.1 s, checkpoints 1.087 / 1.014 and
+  1.085 / 1.012 m → 1.085 / 1.012 and 1.082 / 1.012 m (H / V; pair-order spread
+  0.002 m); Aukerman (42 photos) 276 / 247 → 115 / 94 solves, BA 21.4 / 19.4 → 8.4 /
+  7.8 s, the same final reprojection; quarry and PUTI (346 and 444 photos) the same
+  bits. Regression gate: every set keeps its cameras, the ETH3D camera medians move
+  within their ±3 % noise (courtyard 6.12 → 6.26 mm) or better (pipes 1.60 → 1.48 mm),
+  South Building 4.86 mm as before. BAL's small problems end within 10⁻⁶ of their cost.
+  The camera system of a small project is also factored in place with the sparse
+  solver's four-lane sums, which changes its rounding: the solve itself 2–3× faster
+  (Aukerman's global solve 0.10–0.16 → 0.06 s of 1.9 s natively), a 49-photo synthetic
+  block 0.060 → 0.054 s and 0.068 → 0.056 s with self-calibration in the browser's
+  single-threaded build; whole replays equal within their timing noise, the results the
+  same within noise (gate: South Building 4.86 → 4.87 mm, the rest equal).
 - **Texturing a mesh is about four times faster.** Tools ▸ Mesh ▸ Texture now spreads its
   photo work over every processor core: finding which photos see each face, and copying
   the photos' pixels into the atlas, run side by side, one share of the photos per core;
