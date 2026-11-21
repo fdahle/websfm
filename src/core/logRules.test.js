@@ -262,5 +262,8 @@ const CALLER_TAGS = {
     source: 'Matching',
     why: 'matchAll.js passes (msg, level) => log(msg, level, "Matching")',
   },
-  'src/stores/tuningOverrides.js': { source: null, why: 'each caller passes a wrapper with its own source' },
+  'src/stores/tuningOverrides.js': {
+    source: null,
+    why: "applyTuningOverrides's log is its caller's wrapper; the file's own lines name their source",
+  },
 }
