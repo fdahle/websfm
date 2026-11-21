@@ -112,7 +112,7 @@ export const DETECT_TUNING = {
 // bundle-adjustment / track filtering). `settings` from the caller still overrides.
 // NOT here (owned by its module): init-pair thresholds → core/sfm/initPair.js.
 export const SFM_TUNING = {
-  // ── A film scan's focal when nothing gives it ──
+  // ── Film scan focal guess ──
   // The focal length (mm) a film scan starts from when its sensor gives no focal, format
   // or pixel size: a 6-inch lens, the usual aerial mapping camera. Set the camera's
   // calibrated focal here when the sensor lacks it; bundle adjustment refines it from there.
@@ -132,7 +132,7 @@ export const SFM_TUNING = {
   // corner fiducials span 9084 px of a 9872–10200 px short side.
   filmScanShortMm: 254,
 
-  // ── Bundle adjustment's linear solver ──
+  // ── Bundle adjustment solver ──
   // How each bundle adjustment solves for its steps: an iterative solver (PCG) that may
   // stop early, or an exact sparse factorisation on larger blocks. These trade time
   // against how exactly each step is solved; the cameras and points come out the same.
@@ -175,7 +175,7 @@ export const SFM_TUNING = {
   // The result is the same bits either way. Fixed by the first call in a worker.
   baSolver: {
     // The size of the camera system (unknowns) from which the iterative solver replaces
-    // the dense solve; null uses the built-in 600, about 100 cameras. A very large value
+    // the dense solve; empty (automatic) uses 600, about 100 cameras. A very large value
     // forces the dense solve: exact, but slow on a large block.
     pcgMinN: null,
     // The relative residual at which the iterative solver ends a step. Smaller solves
@@ -202,7 +202,7 @@ export const SFM_TUNING = {
     // Takes effect in a fresh worker.
     threads: 16,
   },
-  // ── Tie point weights by keypoint scale ──
+  // ── Weights by keypoint scale ──
   // Above 1, an observation from a coarse keypoint weighs less in bundle adjustment, down
   // to 1/cap² of the weight of its photo's finest keypoints, and the outlier cut reads each
   // observation in its own precision. 0 = off: every observation weighs the same.
@@ -220,7 +220,7 @@ export const SFM_TUNING = {
   // cap 4 / 8; PUTI with RTK checkpoints 3.0 / 8.2 → 2.7 / 8.3 cm (cap 4); Casa Grande
   // GCP checkpoints 1.09 / 1.02 → 1.11 / 1.04 m. Not gated with it on.
   tieScaleWeightCap: 0,
-  // ── Coarse tie points out of the survey-held solves ──
+  // ── Coarse points in held solves ──
   // Above 1, the bundle adjustments held to survey data (survey-grade camera positions,
   // GCPs, a reference DEM) leave out tie points whose keypoints are coarser than this
   // multiple of their photo's finest; they are triangulated again on the final cameras, so
@@ -248,7 +248,7 @@ export const SFM_TUNING = {
   // A photo left with fewer observations than this in the held solves keeps its finest
   // points up to the count (a higher threshold for that photo).
   heldTieMinObsPerPhoto: 1000,
-  // ── The robust loss before the track filter ──
+  // ── Loss before the filter ──
   // The robust loss of the bundle adjustments that run while gross mismatches remain
   // (before the track filter): 'huber' limits a mismatch's pull but keeps it; 'cauchy' and
   // 'geman-mcclure' let it go, which can help accuracy but takes more iterations. Later
@@ -269,7 +269,7 @@ export const SFM_TUNING = {
   // 3.02 / 8.16, 3.19 / 8.00 → 3.05 / 8.06, 3.31 / 7.96 cm, Casa Grande equal; the gate's
   // ETH3D medians −6 … +7 % (plan-ba-next ▸ round 6, item 3): not kept.
   baPreFilterLoss: 'huber',
-  // ── Bundle adjustment and track filtering ──
+  // ── Track filtering ──
   // Observations with a reprojection error above this (pixels at the detection size) are
   // removed between bundle adjustments. Lower it for a tighter sparse cloud, at the risk of
   // losing tie points on weak photos; raise it while the lens model does not fit yet.
@@ -457,7 +457,7 @@ export const SFM_TUNING = {
   // Four suffice, three do not (three fit the similarity exactly): with 3, Casa Grande
   // 28 → 18 m, Iceland 331 m either way (gcpw-3ctl-2026-11-18).
   gcpRefineIntrinsicsMinGcps: 4,
-  // ── Focal–height check (a warning; it changes no result) ──
+  // ── Focal–height warning ──
   // A nadir block held by survey-grade camera positions alone, its focal self-calibrated,
   // gets a warning when the camera heights vary by less than this share of the flying
   // height: the positions then barely fix the focal, and a focal error moves the ground in
@@ -509,7 +509,7 @@ export const SFM_TUNING = {
   //
   // See demHoldRounds.
   demHoldGridSide: 400,
-  // ── Distortion self-calibration during registration ──
+  // ── Self-calibration ──
   // From this many photos on, the bundle adjustments during registration refine a shared
   // focal and radial distortion (k1), instead of leaving them to the passes after it.
   // Below it, distortion cannot be told apart from the points' positions. Only when the
@@ -688,7 +688,7 @@ export const SFM_TUNING = {
   //
   // below this registered share, seed choice is still suspect
   seedRetryMinFraction: 0.5,
-  // ── Image pairs checked against the finished model ──
+  // ── Pairs checked on the model ──
   // A match agrees with the finished model when its epipolar error under the solved poses
   // is within this many pixels (at the detection size). Image pairs that disagree point to
   // photos the model may have placed wrong.
@@ -731,7 +731,7 @@ export const SFM_TUNING = {
   //
   // See pairCheckEpiPx.
   pairCheckMaxHolders: 2,
-  // ── GCP triangulation, robust mode ──
+  // ── GCP triangulation ──
   // In robust GCP triangulation, a mark is dropped as a misclick when its reprojection
   // error exceeds three times the median or this floor (px), whichever is larger. The
   // floor is a misclick's size, not a marking accuracy.
@@ -750,7 +750,7 @@ export const MATCH_TUNING = {
   // ── Image pair verification ──
   // On: RANSAC draws its samples best match first (PROSAC) instead of at random. It can
   // find a fit sooner on image pairs with few true matches, but it can also settle on a
-  // smaller set of inliers and cost close-range scenes photos.
+  // smaller set of inliers and leave photos of close-range scenes unregistered.
   //
   // PROSAC, crates/matching ransac_fundamental_ordered. Off: in 0.8 it cost close-range
   // scenes cameras (ETH3D courtyard 38 → 36, office 26 → 21 and playground 38 → 19
@@ -820,7 +820,7 @@ export const MATCH_TUNING = {
   //
   // …or into a pinhead region (epipole degeneracy), in px
   minInlierSpreadPx: 8,
-  // ── Acceptance floors besides Min matches per pair ──
+  // ── Other acceptance floors ──
   // With Ignore stationary points on, a match that moves at most this percentage of the
   // image diagonal between the two photos counts as stationary (frame marks, burnt-in
   // text) and is dropped.
@@ -892,7 +892,7 @@ export const MATCH_TUNING = {
   //
   // skip a tile with fewer keypoints than this on either side
   lgTileMinKps: 32,
-  // ── When the subset gate runs ──
+  // ── Subset gate ──
   // The subset gate runs only with at least this many image pairs. On fewer, matching
   // every pair in full takes seconds, and a skipped real pair could split the photos into
   // pieces.
@@ -995,7 +995,7 @@ export const MATCH_TUNING = {
   //
   // See bridgeRounds.
   bridgeLgKeypointScale: 2,
-  // ── Detect gaps again at full size ──
+  // ── Detect gaps again ──
   // Photos of the pieces still apart after the repair that were detected at less than
   // this share of their size are detected again at full size.
   //
