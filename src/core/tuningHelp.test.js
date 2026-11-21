@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { parseTuningHelp } from './tuningHelp.js'
+import { parseTuningHelp, helpParagraphs } from './tuningHelp.js'
 import { TUNING_GROUPS, tuningKeys } from './help/consoleSettings.js'
 
 const SAMPLE = `// Not a group.
@@ -58,6 +58,13 @@ describe('parseTuningHelp', () => {
     expect(k.d).toMatchObject({ section: 'Second part' })
     expect(k.d.help).toBe('') // nothing is shared across a section title
     expect(Object.values(k).some((v) => v.help.includes('──'))).toBe(false)
+  })
+})
+
+describe('helpParagraphs', () => {
+  it("undoes the source's line wrapping and keeps blank lines as breaks", () => {
+    expect(helpParagraphs('One\nsentence.\n\nTwo')).toEqual(['One sentence.', 'Two'])
+    expect(helpParagraphs('')).toEqual([])
   })
 })
 

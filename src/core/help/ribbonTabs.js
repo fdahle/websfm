@@ -1312,6 +1312,16 @@ export const TABS = [
             icon: 'summary',
             needs: ['project'],
           },
+          // Debug ▸ Flags: the internal tuning values (stores/tuningOverrides.js), the
+          // console's `set` with a mouse. `badge`: the count of changed flags.
+          {
+            id: 'open-flags',
+            guide: 'command-console',
+            tip: 'The internal tuning values, for testing: look at them and change them for this session',
+            label: 'Flags…',
+            icon: 'flags',
+            badge: 'flags',
+          },
         ],
       },
     ],

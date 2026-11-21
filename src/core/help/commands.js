@@ -234,6 +234,7 @@ export const CONSOLE_NAMES = {
   'open-guide': ['guide'],
   'open-about': ['about'],
   'open-system-info': ['system info', 'diagnostics'],
+  'open-flags': ['flags'],
 }
 
 // Dispatch ids the console reaches that have no ribbon button of their own.

@@ -1,9 +1,11 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import Icon from '../Icon.vue'
+import FlagsMarker from './FlagsMarker.vue'
 import RibbonMenu from './RibbonMenu.vue'
 import BetaBadge from './BetaBadge.vue'
 import { newCount } from '../../composables/useWhatsNew.js'
+import { flagCount } from '../../stores/tuningOverrides.js'
 import { commandReasonKey } from '../../core/help/commands.js'
 import { cmdKey, slug } from '../../core/help/ribbonText.js'
 import { useI18n } from '../../composables/useI18n.js'
@@ -162,7 +164,7 @@ const VIEW_KEYS = new Set([
 
 // A count on the button (What's New: entries shipped since it was last opened), and
 // a dot on the tab that holds it, so it is seen without opening that tab.
-const badgeCount = (cmd) => (cmd.badge === 'whatsNew' ? newCount.value : 0)
+const badgeCount = (cmd) => (cmd.badge === 'whatsNew' ? newCount.value : cmd.badge === 'flags' ? flagCount.value : 0)
 const tabHasBadge = (tab) => tab.groups?.some((g) => g.commands?.some((c) => badgeCount(c) > 0))
 
 function isActive(cmd) {
@@ -316,6 +318,9 @@ function step(cmd, dir) {
           {{ activeRaster.name || words.tab(rasterTab.label) }}
         </button>
       </template>
+
+      <!-- The status of Debug ▸ Flags: in sight while any internal value is changed. -->
+      <FlagsMarker class="ribbon-flags" />
     </div>
 
     <div class="ribbon-body">
@@ -414,6 +419,10 @@ function step(cmd, dir) {
 
 .ribbon-beta {
   margin-right: 10px;
+}
+
+.ribbon-flags {
+  margin-left: auto;
 }
 
 .brand {

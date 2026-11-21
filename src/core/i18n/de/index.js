@@ -8,6 +8,7 @@ import consolePanel from './console.js'
 import dialog from './dialog.js'
 import exportDialog from './export.js'
 import filterCloud from './filterCloud.js'
+import flags from './flags.js'
 import gcps from './gcps.js'
 import importSfm from './importSfm.js'
 import mapLayers from './mapLayers.js'
@@ -32,6 +33,7 @@ export default {
   dialog,
   export: exportDialog,
   filterCloud,
+  flags,
   gcps,
   importSfm,
   mapLayers,

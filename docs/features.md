@@ -171,6 +171,7 @@ product or an imported raster is open in front.
 | Other ▸ App | System info | What this browser and machine support: GPU, memory, storage. |  |
 | Other ▸ App | About | Version, license and third-party licenses. |  |
 | Other ▸ Debug | Project Summary | A technical summary of the project's data, for a bug report. |  |
+| Other ▸ Debug | Flags… | The internal tuning values, for testing: look at them and change them for this session. | [Command Console](../src/guide/command-console.md) |
 
 ## Picture
 

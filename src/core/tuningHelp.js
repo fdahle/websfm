@@ -141,3 +141,11 @@ export function parseTuningHelp(source) {
   }
   return out
 }
+
+/** A help text as paragraphs: the source's line wrapping undone, blank lines kept as breaks. */
+export function helpParagraphs(help) {
+  return String(help ?? '')
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\s*\n\s*/g, ' ').trim())
+    .filter(Boolean)
+}

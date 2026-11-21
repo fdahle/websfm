@@ -19,6 +19,7 @@ import ProjectSettingsModal from './project/ProjectSettingsModal.vue'
 import SaveProjectModal from './project/SaveProjectModal.vue'
 import SettingsModal from './app/SettingsModal.vue'
 const DebugSummaryModal = defineAsyncComponent(() => import('./app/DebugSummaryModal.vue'))
+const FlagsModal = defineAsyncComponent(() => import('./app/FlagsModal.vue'))
 const SystemInfoModal = defineAsyncComponent(() => import('./app/SystemInfoModal.vue'))
 const WhatsNewModal = defineAsyncComponent(() => import('./app/WhatsNewModal.vue'))
 const WorkflowBuilderModal = defineAsyncComponent(() => import('./pipeline/WorkflowBuilderModal.vue'))
@@ -48,6 +49,7 @@ const { crsSuggestion, sparseRunning } = storeToRefs(reconstructionStore)
 const {
   aboutOpen,
   debugSummaryOpen,
+  flagsOpen,
   newProjectCanCancel,
   newProjectOpen,
   projectPickerOpen,
@@ -364,6 +366,10 @@ const progressSpotlight = computed(() =>
 
   <Teleport to="body">
     <DebugSummaryModal v-if="debugSummaryOpen" @close="debugSummaryOpen = false" />
+  </Teleport>
+
+  <Teleport to="body">
+    <FlagsModal v-if="flagsOpen" @close="flagsOpen = false" />
   </Teleport>
 </template>
 

@@ -493,6 +493,10 @@ export default {
       tip: 'Was dieser Browser und dieser Rechner können: GPU, Speicher, Ablage',
     },
     'open-about': { label: 'Über', tip: 'Version, Lizenz und Lizenzen von Drittanbietern' },
+    'open-flags': {
+      label: 'Flags…',
+      tip: 'Die internen Abstimmungswerte, zum Testen: ansehen und für diese Sitzung ändern',
+    },
     'open-debug-summary': {
       label: 'Projekt-\nübersicht',
       tip: 'Eine technische Übersicht der Projektdaten, für einen Fehlerbericht',

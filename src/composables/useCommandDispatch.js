@@ -129,6 +129,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     shortcutsOpen,
     whatsNewOpen,
     debugSummaryOpen,
+    flagsOpen,
     filterCloudPreset,
     toolModal,
     gcpTableOpen,
@@ -225,6 +226,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     'open-shortcuts': shortcutsOpen,
     'open-whats-new': whatsNewOpen,
     'open-debug-summary': debugSummaryOpen,
+    'open-flags': flagsOpen,
   }
 
   // Quality Report hub deep-links: each ribbon id opens the hub on its section.

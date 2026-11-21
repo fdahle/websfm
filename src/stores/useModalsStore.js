@@ -137,6 +137,8 @@ export const useModalsStore = defineStore('modals', () => {
   const qualitySection = ref('overview')
   // Debug ▸ Project Summary — compact copy-pasteable reconstruction-health digest.
   const debugSummaryOpen = ref(false)
+  // Debug ▸ Flags (FlagsModal): the internal tuning values; the status bar's marker opens it too.
+  const flagsOpen = ref(false)
 
   return {
     settingsOpen,
@@ -218,5 +220,6 @@ export const useModalsStore = defineStore('modals', () => {
     qualityOpen,
     qualitySection,
     debugSummaryOpen,
+    flagsOpen,
   }
 })

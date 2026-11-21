@@ -1,7 +1,7 @@
 ---
 id: command-console
 title: Command Console
-summary: Read the log, and type commands instead of clicking: every ribbon command, every processing step with its settings, the edits you make by hand, statistics and session tuning.
+summary: Read the log, and type commands instead of clicking: every ribbon command, every processing step with its settings, the edits you make by hand, statistics and session tuning (Debug ▸ Flags).
 category: Start here
 order: 6
 ---
@@ -91,4 +91,15 @@ puts one back and `set default` puts back all of them. The value must have the
 default's type (a number, true or false, or text), and a value with a fixed set of
 choices (`sfm.baPreFilterLoss`: huber, cauchy or geman-mcclure) one of them. A setting that a dialog shows is refused, with the dialog's name: set it there.
 The run's log lists the overrides it used. They are not saved with the project and
-are gone after a reload.
+are gone after a reload, unless you keep them (below).
+
+**Other ▸ Debug ▸ Flags…** does the same with the mouse. The groups are on the left, the
+values of one on the right with their defaults: a changed value is bold, with **Reset**
+beside it, and under the table is the note on the selected value from WebSfM's source.
+The search box finds a value by its name or its note. Each change appears in Activity with
+the `set` command that makes it. While any value is changed, the ribbon shows how many
+(click it to open Flags), and the Quality Report, the Project Summary and **System info ▸
+Copy for bug report** list them. **Keep after reload** keeps them in this browser, never
+in the project; a kept value a later version no longer has is dropped with a warning.
+These are the values WebSfM is tuned with, for testing: changing one changes results.
+The settings to choose for a project are in the dialogs.

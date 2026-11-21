@@ -78,6 +78,10 @@ export const icons = {
     <rect x="5" y="4" width="14" height="17" rx="2" />
     <rect x="9" y="2.5" width="6" height="3" rx="1" />
     <path d="M8 13h2l1.5 3 2-6 1.5 3h1" />`,
+  // Debug ▸ Flags: a pennant on a pole — internal values marked as changed.
+  'flags': `
+    <path d="M6 21V3.5" />
+    <path d="M6 4h11.5l-2.5 4 2.5 4H6" />`,
 
   // ── Import ──────────────────────────────────────────────────────────────────
   'image': `

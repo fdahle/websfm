@@ -37,6 +37,9 @@ export const STORED_KEYS = {
   'websfm.dense.memBudgetGb': 'machine',
   'websfm.compute.useGpu': 'machine',
   'websfm.compute.workerCount': 'machine',
+  // Debug ▸ Flags kept after reload: an experiment in this browser, so reset with the
+  // settings and never carried to another computer.
+  'websfm.flags.v1': 'machine',
 
   'sidebarWidth': 'layout',
   'consoleOpen': 'layout',
