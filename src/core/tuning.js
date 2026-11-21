@@ -68,30 +68,44 @@ export const DETECT_TUNING = {
 // bundle-adjustment / track filtering). `settings` from the caller still overrides.
 // NOT here (owned by its module): init-pair thresholds → core/sfm/initPair.js.
 export const SFM_TUNING = {
-  // ── A film scan's focal when nothing gives it (reconstruction.js resolveK) ──
-  // A sensor marked film without a format or pixel size: fx = focal ÷ filmScanShortMm ×
-  // the scan's short side, the focal defaulting to filmGuessFocalMm, a 6-inch lens (the
-  // usual aerial mapping camera). The short side is the 9-inch frame plus the margins the
-  // archive keeps: Rachel's corner fiducials span 9084 px of a 9872–10200 px short side.
-  // Against its certificates (153.46 / 154.40 mm at 25 µm ≈ 6,140 px) the guess is
-  // −3.5 % on the verticals and −0.3 % on the obliques; the digital default, the scan
-  // width, was +65 %.
+  // ── A film scan's focal when nothing gives it ──
+  // The focal length (mm) a film scan starts from when its sensor gives no focal, format
+  // or pixel size: a 6-inch lens, the usual aerial mapping camera. Set the camera's
+  // calibrated focal here when the sensor lacks it; bundle adjustment refines it from there.
+  //
+  // reconstruction.js resolveK. A sensor marked film without a format or pixel size:
+  // fx = focal ÷ filmScanShortMm × the scan's short side, the focal defaulting to
+  // filmGuessFocalMm, a 6-inch lens (the usual aerial mapping camera). Against its
+  // certificates (153.46 / 154.40 mm at 25 µm ≈ 6,140 px) the guess is −3.5 % on the
+  // verticals and −0.3 % on the obliques; the digital default, the scan width, was +65 %.
   filmGuessFocalMm: 152.4,
+  // The width (mm) the scan's short side is taken to span when a film scan has no format
+  // or pixel size: the 9-inch frame plus the margins archives keep. The starting focal in
+  // pixels is the focal over this width times the short side; lower it for scans cropped
+  // close to the frame.
+  //
+  // The short side is the 9-inch frame plus the margins the archive keeps: Rachel's
+  // corner fiducials span 9084 px of a 9872–10200 px short side.
   filmScanShortMm: 254,
 
-  // ── Bundle-adjustment linear solver (bundle/solve.rs SolverOpts) ──
-  // Policy for the reduced camera system of every bundle adjustment. null ⇒ the crate
-  // default: PCG from n ≥ 600 (≈ 100 cameras), rel_tol 1e-10, 2,000 iterations, Cholesky
-  // fallback at the cap. The policy here is inexact Newton instead: CG to 1e-6, at most
-  // 200 iterations, and the capped iterate taken as the step (it still lowers the
-  // quadratic model; LM accepts it only if the true cost falls). HANDOVER ▸ B-parity,
-  // corrected sweep: SfM −50 % (PUTI), −24 % (quarry), −14 % (South Building) with the
-  // same LM solve counts, camera/checkpoint accuracy and point counts — the exact default
-  // spent much of its time hitting the 2,000 cap and then paying a dense Cholesky too.
-  // Every BA logs what its solves did and the run totals land in summary.baSolver, so a
-  // bench compares by overriding keys per run (merged key by key, sfm.js): { pcgMinN: 1e9 }
-  // (Cholesky only), { pcgRelTol: 1e-10, pcgMaxIter: 2000, pcgAcceptPartial: false }
-  // (the exact solve), { pcgPreconditioner: 'ic0' } (block IC(0), ≤ 12 % in the sweep).
+  // ── Bundle adjustment's linear solver ──
+  // How each bundle adjustment solves for its steps: an iterative solver (PCG) that may
+  // stop early, or an exact sparse factorisation on larger blocks. These trade time
+  // against how exactly each step is solved; the cameras and points come out the same.
+  //
+  // bundle/solve.rs SolverOpts. Policy for the reduced camera system of every bundle
+  // adjustment. null ⇒ the crate default: PCG from n ≥ 600 (≈ 100 cameras), rel_tol 1e-10,
+  // 2,000 iterations, Cholesky fallback at the cap. The policy here is inexact Newton
+  // instead: CG to 1e-6, at most 200 iterations, and the capped iterate taken as the step
+  // (it still lowers the quadratic model; LM accepts it only if the true cost falls).
+  // HANDOVER ▸ B-parity, corrected sweep: SfM −50 % (PUTI), −24 % (quarry), −14 % (South
+  // Building) with the same LM solve counts, camera/checkpoint accuracy and point counts —
+  // the exact default spent much of its time hitting the 2,000 cap and then paying a dense
+  // Cholesky too. Every BA logs what its solves did and the run totals land in
+  // summary.baSolver, so a bench compares by overriding keys per run (merged key by key,
+  // sfm.js): { pcgMinN: 1e9 } (Cholesky only), { pcgRelTol: 1e-10, pcgMaxIter: 2000,
+  // pcgAcceptPartial: false } (the exact solve), { pcgPreconditioner: 'ic0' } (block
+  // IC(0), ≤ 12 % in the sweep).
   // functionTolerance: LM stops once an accepted step lowers the robust cost by less than
   // this fraction (Ceres' function_tolerance; 0 ⇒ run to the iteration cap, the old
   // behaviour). St Nazaire SIFT (HANDOVER ▸ B-ba-ftol): BA 608 → 205 s at 1e-6 with the
@@ -116,49 +130,89 @@ export const SFM_TUNING = {
   // threadedWasm; one fewer than the machine's cores), 0 = the single-threaded build.
   // The result is the same bits either way. Fixed by the first call in a worker.
   baSolver: {
+    // The size of the camera system (unknowns) from which the iterative solver replaces
+    // the dense solve; null uses the built-in 600, about 100 cameras. A very large value
+    // forces the dense solve: exact, but slow on a large block.
     pcgMinN: null,
+    // The relative residual at which the iterative solver ends a step. Smaller solves
+    // each step more exactly in more iterations; a step only has to lower the cost.
     pcgRelTol: 1e-6,
+    // The most iterations the iterative solver spends on one step. Higher solves each
+    // step more exactly, at more time per step.
     pcgMaxIter: 200,
+    // On: a step that reaches the iteration cap is used as it stands when it lowers the
+    // cost. Off: such a step is solved again by a dense factorisation, which is exact but
+    // slow on a large block.
     pcgAcceptPartial: true,
+    // Bundle adjustment stops once a step lowers the robust cost by less than this
+    // fraction (Ceres' function tolerance). Raise it to stop sooner at a small loss of
+    // accuracy; 0 runs every iteration up to the cap.
     functionTolerance: 1e-6,
+    // On: from about 100 cameras each step is solved exactly by a sparse factorisation,
+    // which takes fewer, surer steps on a large block, and the solver switches by itself
+    // to 'implicit' (the camera system never stored) where that would not fit in memory.
+    // 'implicit' forces that; off uses the iterative solver.
     direct: true,
+    // The most threads one bundle adjustment uses (at most one fewer than the machine's
+    // cores); 0 runs it on one thread. The result is identical; only the time changes.
+    // Takes effect in a fresh worker.
     threads: 16,
   },
-  // ── Tie point weights by keypoint scale (baObservations.js tieScaleWeight) ──
-  // > 1: a tie observation weighs 1 / (f · clamp(scale / s₀, 1, cap))² instead of 1 / f²
-  // (f the detection scale factor, tieWeightOf), s₀ the finest keypoint scale of its image
-  // (keypointSet.js minKeypointScale): a keypoint from a coarse pyramid level counts as
-  // proportionally less precise, up to `cap` times its image's finest. With it on, the
-  // robust loss reads each observation in its own σ (bundle/model.rs `sig`, solver
-  // `sigmaUnits`), so a coarse keypoint is not also cut by a threshold made for fine ones.
+  // ── Tie point weights by keypoint scale ──
+  // Above 1, an observation from a coarse keypoint weighs less in bundle adjustment, down
+  // to 1/cap² of the weight of its photo's finest keypoints, and the outlier cut reads each
+  // observation in its own precision. 0 = off: every observation weighs the same.
+  //
+  // baObservations.js tieScaleWeight. > 1: a tie observation weighs
+  // 1 / (f · clamp(scale / s₀, 1, cap))² instead of 1 / f² (f the detection scale factor,
+  // tieWeightOf), s₀ the finest keypoint scale of its image (keypointSet.js
+  // minKeypointScale): a keypoint from a coarse pyramid level counts as proportionally less
+  // precise, up to `cap` times its image's finest. With it on, the robust loss reads each
+  // observation in its own σ (bundle/model.rs `sig`, solver `sigmaUnits`), so a coarse
+  // keypoint is not also cut by a threshold made for fine ones.
   // 0 = off: every tie weighs 1 / f², the loss is in pixels. Off: measured 2026-11-20
   // (plan-ba-next ▸ C1, same matches per set) it is mixed and inside the noise: quarry
   // without priors RTK rms3d 0.203 m (0.233 with the pairs reversed) → 0.198 / 0.197 at
   // cap 4 / 8; PUTI with RTK checkpoints 3.0 / 8.2 → 2.7 / 8.3 cm (cap 4); Casa Grande
   // GCP checkpoints 1.09 / 1.02 → 1.11 / 1.04 m. Not gated with it on.
   tieScaleWeightCap: 0,
-  // ── Coarse tie points out of the survey-held solves (coarseTies.js) ──
-  // > 1: the solves held to survey data (survey-grade camera positions, GCP anchors, the
-  // DEM hold) leave out every tie point whose median keypoint scale over its views exceeds
-  // this multiple of each photo's finest keypoint scale (keypointSet.js minKeypointScale);
-  // the points are triangulated again on the final cameras afterwards and filtered with
-  // the track filter's gates, so the cloud keeps them. A coarse blob's centre may shift
-  // with the viewing angle, which trades with focal and height and biases a held block in
-  // height (inferred). Keypoints without a scale (learned detectors) count as fine.
+  // ── Coarse tie points out of the survey-held solves ──
+  // Above 1, the bundle adjustments held to survey data (survey-grade camera positions,
+  // GCPs, a reference DEM) leave out tie points whose keypoints are coarser than this
+  // multiple of their photo's finest; they are triangulated again on the final cameras, so
+  // the sparse cloud keeps them. A coarse keypoint can shift with the viewing angle and
+  // bias a held block in height. 0 = off.
+  //
+  // coarseTies.js. > 1: the solves held to survey data (survey-grade camera positions, GCP
+  // anchors, the DEM hold) leave out every tie point whose median keypoint scale over its
+  // views exceeds this multiple of each photo's finest keypoint scale (keypointSet.js
+  // minKeypointScale); the points are triangulated again on the final cameras afterwards
+  // and filtered with the track filter's gates, so the cloud keeps them. A coarse blob's
+  // centre may shift with the viewing angle, which trades with focal and height and biases
+  // a held block in height (inferred). Keypoints without a scale (learned detectors) count
+  // as fine.
   // 0 = off. Off: measured 2026-11-21 at 1.3 (dev/baselines.md ▸ B-coarse-2026-11-21, same
   // matches, both pair orders) it is mixed: GCP checkpoints V on PUTI with RTK 7.43 / 7.40 →
   // 6.79 / 6.76 cm at 4,000 px detection and 7.92 → 6.68 at native, quarry with RTK
   // 11.18 / 11.13 → 10.18 / 10.03 cm, Casa Grande 1.025 → 0.991 m, but PUTI at 2,400 px
   // 8.16 / 8.00 → 8.72 / 8.56 cm.
   heldTieMaxScaleRatio: 0,
+  // With coarse tie points left out (heldTieMaxScaleRatio), a photo left with fewer
+  // observations than this keeps its finest tie points up to this count, so a weak photo
+  // is not stripped bare.
+  //
   // A photo left with fewer observations than this in the held solves keeps its finest
-  // points up to the count (a higher threshold for that photo), so a weak block is not
-  // stripped bare.
+  // points up to the count (a higher threshold for that photo).
   heldTieMinObsPerPhoto: 1000,
-  // ── The robust loss of the solves before the track filter (plan-ba-next ▸ C3) ──
-  // The interim solves of registration, the first global solve and the one after
-  // retriangulation run before the tight filter, on observations that still hold gross
-  // mismatches. Huber bounds a mismatch's pull at δ but keeps it; 'cauchy' or
+  // ── The robust loss before the track filter ──
+  // The robust loss of the bundle adjustments that run while gross mismatches remain
+  // (before the track filter): 'huber' limits a mismatch's pull but keeps it; 'cauchy' and
+  // 'geman-mcclure' let it go, which can help accuracy but takes more iterations. Later
+  // solves, and any solve with GCP marks, always use Huber.
+  //
+  // plan-ba-next ▸ C3. The interim solves of registration, the first global solve and the
+  // one after retriangulation run before the tight filter, on observations that still hold
+  // gross mismatches. Huber bounds a mismatch's pull at δ but keeps it; 'cauchy' or
   // 'geman-mcclure' (redescending, same δ: 2.5 × the median residual) release it. Every
   // later solve, and any solve with GCP marks, keeps Huber. 'huber' = as before. Off:
   // measured 2026-11-20 (plan-ba-next ▸ C3, same matches, both pair orders) Cauchy is a
@@ -171,7 +225,11 @@ export const SFM_TUNING = {
   // 3.02 / 8.16, 3.19 / 8.00 → 3.05 / 8.06, 3.31 / 7.96 cm, Casa Grande equal; the gate's
   // ETH3D medians −6 … +7 % (plan-ba-next ▸ round 6, item 3): not kept.
   baPreFilterLoss: 'huber',
-  // ── Interleaved bundle-adjustment / track filtering ──
+  // ── Bundle adjustment and track filtering ──
+  // Observations with a reprojection error above this (pixels at the detection size) are
+  // removed between bundle adjustments. Lower it for a tighter sparse cloud, at the risk of
+  // losing tie points on weak photos; raise it while the lens model does not fit yet.
+  //
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
   // native px against the run's detection scale (core/scaleContext.js, which owns
   // the maxFactor/minFactor knobs) before any pass reads it. Bounded separately by
@@ -179,17 +237,46 @@ export const SFM_TUNING = {
   // residual distribution is shifted by wrong intrinsics — different root cause,
   // and the two compose (the quantile bound applies to the resolved threshold).
   filterMaxReprojPx: 4.0,
-  filterMinTriAngleDeg: 1.5, // drop points whose rays are too parallel
+  // Tie points whose rays meet at less than this angle (degrees) are dropped: their depth
+  // is poorly fixed. Lower it to keep points between photos taken close together, at less
+  // precise depths.
+  //
+  // drop points whose rays are too parallel
+  filterMinTriAngleDeg: 1.5,
+  // The fewest photos a tie point must be seen in to stay in the finished sparse cloud.
+  // Two-view points help while the model grows and are always kept until then; 2 keeps
+  // them in the result too, at more noise.
+  //
   // Final sparse-cloud corroboration gate. Keep 2-view tracks while incremental SfM
   // needs them, then omit them from the delivered model once a sufficiently large
   // multi-view core proves that doing so will not erase a two-camera/tiny dataset.
   finalMinTrackViews: 3,
+  // The final prune of tie points seen in too few photos runs only when at least this many
+  // tie points are seen in enough photos, so a tiny project keeps its cloud.
+  //
+  // Part of the final corroboration gate (finalMinTrackViews): the multi-view core must
+  // hold this many tracks (tracks.js minSupportedTracks).
   finalTrackPruneMinCount: 50,
+  // The final prune of tie points seen in too few photos runs only when at least this
+  // share of the tie points is seen in enough photos, so a weakly linked project keeps its
+  // two-view points.
+  //
+  // Part of the final corroboration gate (finalMinTrackViews): the multi-view core must
+  // be this share of the tracks (tracks.js minSupportedShare).
   finalTrackPruneMinShare: 0.2,
+  // The final prune removes a two-view tie point only where tie points seen in more photos
+  // already cover that part of the photo, on a grid of this many cells a side. 0 prunes
+  // everywhere, which can leave empty patches.
+  //
   // …and only where corroborated tracks already cover the image area (a grid of this
   // many cells a side per image; 0 = the old blanket prune). Casa Grande 1978: the
   // blanket prune left a lattice of strips around empty squares (tracks.js).
   finalTrackPruneCoverageGrid: 16,
+  // Rounds of track completion after the final bundle adjustment: a verified match with
+  // one keypoint in a tie point adds the other when it reprojects within the filter's
+  // gate, turning two-view points into points seen in three or more photos. Rounds repeat
+  // until nothing is added; later rounds add little.
+  //
   // Track completion (tracks.js `completeTracks`, COLMAP's CompleteTracks) after the
   // final BA and before each post-filter pass: verified matches with one endpoint in a
   // point add the other endpoint when it reprojects within the track-filter gate.
@@ -197,6 +284,10 @@ export const SFM_TUNING = {
   // add almost nothing. On 2026-10-05 SB the final prune still dropped 38,990 two-view
   // points (41 %); completion is the step that turns tracks into ≥3-view ones.
   completeTracksMaxRounds: 5,
+  // On: after the first self-calibrated pass, each tie point's projection is searched in
+  // every photo that misses it for a keypoint with a matching descriptor, which lengthens
+  // tracks. Costs memory for the descriptors (128 bytes a keypoint) and some time.
+  //
   // Projection-guided track extension (guidedExtension.js): after the first
   // self-calibrated post-filter BA, search each point's projection in every registered
   // camera that misses it for a keypoint with a matching descriptor. Ships the
@@ -204,114 +295,233 @@ export const SFM_TUNING = {
   // sparse memory preflight). Bench (HANDOVER ▸ B-bench): ≥3-view points +5 % SB, +28 %
   // building, +7 % eagle, +5.9 % quarry, median error and RTK accuracy unchanged.
   guidedTrackExtension: true,
+  // The guided search's radius: the filter gate, capped at this multiple of the model's
+  // 90th-percentile reprojection error. Higher finds more points at a looser fit; 0 uses
+  // the filter gate alone, which a coarse detection size makes very wide.
+  //
   // Search radius = the filter gate capped at this × the model's p90 residual: a coarse
   // detection scale makes the native-px gate far wider than the model resolves (TMA:
   // 16.9 px gate, 1 px median). Capped, SB additions sit at 0.39/0.98 px median/p90 vs
   // the model's 0.31/0.96 (uncapped 0.43/1.42) for −0.6 % points. 0 = gate only.
   guidedRadiusP90Mult: 3,
+  // The guided search takes a keypoint only when its descriptor distance is within this
+  // quantile of the distances along tracks seen in three or more photos. Higher adds more
+  // points and more false ones.
+  //
   // Acceptance: best candidate ≤ this quantile of ≥3-view track descriptor distances and
   // ≤ ratio × the runner-up in the same window (0.95 gave +1 % more on SB, untested
   // elsewhere; 0.9 ratio and running in both passes changed nothing).
   guidedQuantile: 0.9,
+  // The guided search also takes a keypoint only when its descriptor distance is at most
+  // this ratio of the next-best candidate's in the search window (a ratio test). Lower is
+  // stricter.
+  //
+  // See guidedQuantile.
   guidedRatio: 0.8,
-  interimBaEvery: 5, // run a global BA after this many newly-registered cameras
-  // …and only once the model has also grown by this factor since the last one (COLMAP's
-  // ba_global_images_ratio is 1.1). Each solve costs the whole model, so every-5 alone
-  // is quadratic: quarry (347 images) registration 1,005 → 143 s, SB 106 → 45 s, points
-  // and RTK accuracy unchanged (SB −0.4 %). 0 = every interimBaEvery cameras.
+  // A global bundle adjustment runs after this many newly registered photos (and once the
+  // model has grown by interimBaGrowth). Lower refines more often at more time.
+  //
+  // run a global BA after this many newly-registered cameras
+  interimBaEvery: 5,
+  // A global bundle adjustment during registration also waits until the model has grown
+  // by this factor since the last one, as in COLMAP. Each solve costs the whole model, so
+  // this keeps a large project from slowing down quadratically; 0 solves every
+  // interimBaEvery photos.
+  //
+  // COLMAP's ba_global_images_ratio is 1.1. Each solve costs the whole model, so every-5
+  // alone is quadratic: quarry (347 images) registration 1,005 → 143 s, SB 106 → 45 s,
+  // points and RTK accuracy unchanged (SB −0.4 %). 0 = every interimBaEvery cameras.
   // 2 since 2026-10-11 (HANDOVER ▸ B-parity, interim-BA spacing): against 1.2, SfM −25…33 %
   // on PUTI, quarry, South Building and St Nazaire with every camera kept and camera /
   // checkpoint accuracy unchanged, and the hard sets (building's weak bridge, eagle) lose
   // nothing either. Local BA between the solves bought nothing on top.
   interimBaGrowth: 2,
-  interimBaIterations: 12, // fewer iters for the interim solves than the final BA
-  // Local BA after each registration (sfm.js runLocalBundleAdjust): the new camera + its
-  // localBaWindow − 1 most co-visible cameras free, their neighbours fixed. 0 = off: on six
-  // bench sets it only added 5–10 % time at growth 2 (B-parity); kept opt-in for a
-  // thousands-of-cameras set, where the gaps between global solves get long.
+  // Iterations of each bundle adjustment during registration, fewer than the final one
+  // runs. More settles each step better at more time.
+  //
+  // fewer iters for the interim solves than the final BA
+  interimBaIterations: 12,
+  // Local bundle adjustment after each registration: the new photo and this many − 1 of
+  // its most co-visible photos are refined, their neighbours held. 0 = off; try it on a
+  // project of thousands of photos, where the gaps between global solves grow long.
+  //
+  // sfm.js runLocalBundleAdjust: the new camera + its localBaWindow − 1 most co-visible
+  // cameras free, their neighbours fixed. 0 = off: on six bench sets it only added 5–10 %
+  // time at growth 2 (B-parity); kept opt-in for a thousands-of-cameras set, where the gaps
+  // between global solves get long.
   localBaWindow: 0,
+  // Iterations of each local bundle adjustment (localBaWindow).
+  //
+  // See localBaWindow.
   localBaIterations: 6,
+  // How tracks are stored while the model is built: 'typed' (compact arrays, the fast one)
+  // or 'map' (the reference it is tested against). The result is identical.
+  //
   // Track storage (core/sfm/trackStore.js): 'typed' is the arena the solver runs on;
   // 'map' is the Map-based reference it is tested against. Same output, bit for bit.
   trackStore: 'typed',
+  // Rounds of the final bundle adjustment held to camera positions (imported or from
+  // EXIF GPS); the second lets the fit of the positions into the model settle after the
+  // first one bends it.
+  //
   // Camera-centre priors (imported poses / EXIF GPS) enter one final fixed-K BA.
   // Targets are mapped into the current arbitrary SfM frame by a similarity fit;
   // two rounds let that mapping settle after the first constrained deformation.
   cameraPriorBaRounds: 2,
+  // The fewest photos with a camera position for the solve held to camera positions to
+  // run.
+  //
+  // See cameraPriorBaRounds.
   cameraPriorBaMinCameras: 3,
+  // How far (px) the solve held to camera positions may raise the reprojection error, so
+  // noisy GNSS cannot visibly damage the tie point fit. Raise it to let positions pull
+  // harder.
+  //
   // A position-constrained solution may trade a little image residual for better
   // geometry. Bound that trade so noisy GPS cannot visibly damage tie-point fit.
   cameraPriorMaxReprojIncreasePx: 0.25,
+  // The solve held to camera positions may also raise the reprojection error by at most
+  // this fraction of the error before it.
+  //
+  // See cameraPriorMaxReprojIncreasePx.
   cameraPriorMaxReprojIncreaseFrac: 0.1,
+  // The calibration terms the solve held to camera positions refines: 'auto' those the
+  // last self-calibrated pass refined, 'none' a fixed calibration, or a comma list
+  // (f,k1,…). A fixed calibration cannot remove a dome a slightly wrong focal or
+  // distortion leaves in a nadir block.
+  //
   // Intrinsics the camera-prior BA refines: 'auto' = the last post-filter pass's
   // self-cal terms, 'none' = fixed K, or a comma list. Fixed K cannot undo a dome caused
   // by slightly wrong f/k (nadir focal–height correlation): RTK benches quarry camera
   // residual 0.43 → 0.20 m, GeoScan checkpoints H 6.1 → 4.4 cm, V 16.4 → 10.8 cm.
   // Loose priors (5 m default, consumer GNSS) carry too little weight to move K.
   cameraPriorRefineIntrinsics: 'auto',
+  // The same for the solve held to GCPs, once gcpRefineIntrinsicsMinGcps control points
+  // qualify: over a nadir block only control fixes the focal. 'none' keeps the calibration
+  // fixed.
+  //
   // Same for the GCP-anchored BA (bundleSession.js), once at least
   // gcpRefineIntrinsicsMinGcps control points qualify: over a nadir block only control
-  // pins the focal (Casa Grande 1978 film, HANDOVER ▸ B-hist). Four suffice, three do
-  // not (three fit the similarity exactly): checkpoint V with 4 control GCPs, fixed K
-  // → refined, Casa Grande 1978 24.8 → 1.14 m, Iceland 26.4 → 6.5 m, DJI Mavic Air 2
-  // 52 → 47 cm; with 3, Casa Grande 28 → 18 m, Iceland 331 m either way
-  // (gcpw-night / gcpw-3ctl-2026-11-18).
+  // pins the focal (Casa Grande 1978 film, HANDOVER ▸ B-hist). Checkpoint V with 4 control
+  // GCPs, fixed K → refined, Casa Grande 1978 24.8 → 1.14 m, Iceland 26.4 → 6.5 m, DJI
+  // Mavic Air 2 52 → 47 cm (gcpw-night).
   gcpRefineIntrinsics: 'auto',
+  // The fewest control GCPs for the GCP-held solve to refine the calibration. Four
+  // suffice; three do not, since three fit the similarity exactly and leave nothing over
+  // for the calibration.
+  //
+  // Four suffice, three do not (three fit the similarity exactly): with 3, Casa Grande
+  // 28 → 18 m, Iceland 331 m either way (gcpw-3ctl-2026-11-18).
   gcpRefineIntrinsicsMinGcps: 4,
-  // ── Focal–height check (focalHeight.js; a warning, it changes no result) ──
-  // A nadir block held by survey-grade positions alone (no GCPs, no DEM hold), its focal
-  // self-calibrated: a focal error ε moves the ground by ε·H and the cameras' height
-  // differences by ε·Δh, so the positions see the share r = Δh / H of it. Warned below
-  // this r, the camera heights' NMAD over the flying height above the sparse cloud. Least
-  // squares on the camera heights gives σ_ε ≈ σ_z / (NMAD·√N), so the focal's share of the
-  // ground's height error is σ_z / (r·√N): at 5 % it equals the positions' own vertical σ_z
-  // for a block of about 400 photos. 5 % is also what a second flight 7 % of H higher
-  // gives (two heights: NMAD = 1.48 × half the step), short of the 10–20 % apart the
-  // remedy asks for, and above what one height holds (altitude hold, wind and gentle
-  // terrain: ±1–3 m at 100 m). Chosen from the geometry, not fitted; checked
+  // ── Focal–height check (a warning; it changes no result) ──
+  // A nadir block held by survey-grade camera positions alone, its focal self-calibrated,
+  // gets a warning when the camera heights vary by less than this share of the flying
+  // height: the positions then barely fix the focal, and a focal error moves the ground in
+  // height. Raise it to warn more readily.
+  //
+  // focalHeight.js. A nadir block held by survey-grade positions alone (no GCPs, no DEM
+  // hold), its focal self-calibrated: a focal error ε moves the ground by ε·H and the
+  // cameras' height differences by ε·Δh, so the positions see the share r = Δh / H of it.
+  // Warned below this r, the camera heights' NMAD over the flying height above the sparse
+  // cloud. Least squares on the camera heights gives σ_ε ≈ σ_z / (NMAD·√N), so the focal's
+  // share of the ground's height error is σ_z / (r·√N): at 5 % it equals the positions'
+  // own vertical σ_z for a block of about 400 photos. 5 % is also what a second flight 7 %
+  // of H higher gives (two heights: NMAD = 1.48 × half the step), short of the 10–20 %
+  // apart the remedy asks for, and above what one height holds (altitude hold, wind and
+  // gentle terrain: ±1–3 m at 100 m). Chosen from the geometry, not fitted; checked
   // (dev/baselines.md ▸ B-focal-2026-11-21): PUTI RTK 3.1 % warns (σ_z / (NMAD·√N) =
   // 166 ppm against the 170 ppm its focal profile measured), quarry RTK 5.5 % does not.
   focalHeightMaxSpreadRatio: 0.05,
-  // A camera counts as oblique beyond this tilt from straight down. Nadir capture stays
-  // within a few degrees with a gimbal and within about 15° on a fixed wing in wind
-  // (PUTI 0 %, quarry 0.6 % of the photos beyond 20°); oblique capture tilts 25–45°.
-  // More than this share of obliques and the block is not nadir: their depth varies
-  // across the frame, which fixes the focal.
+  // A camera counts as oblique beyond this tilt from straight down (degrees). Nadir
+  // capture stays within a few degrees on a gimbal and about 15° on a fixed wing in wind;
+  // oblique capture tilts 25–45°.
+  //
+  // PUTI 0 %, quarry 0.6 % of the photos beyond 20°.
   focalHeightNadirMaxTiltDeg: 20,
+  // With more than this share of oblique photos the block is not nadir and gets no
+  // warning: the obliques' depth varies across the frame, which fixes the focal.
+  //
+  // See focalHeightNadirMaxTiltDeg.
   focalHeightMaxObliqueShare: 0.05,
-  // ── F13: held to a reference DEM (bundleSession.js runDemAnchoredBundleAdjust) ──
-  // Rounds of the DEM-held solve, the anchors rebuilt between them (a point that moves
-  // sideways meets the DEM elsewhere): the synthetic doming block settles in two
-  // (demAnchors.ba.test.js). At most demHoldMaxAnchors tie points, spread over the area;
-  // fewer than demHoldMinAnchors over stable ground and the pass is skipped. The
+  // ── Held to a reference DEM ──
+  // Rounds of the bundle adjustment held to a reference DEM, the anchors rebuilt between
+  // them, since a point that moves sideways meets the DEM elsewhere. Two usually settle it.
+  //
+  // F13: bundleSession.js runDemAnchoredBundleAdjust. The synthetic doming block settles in
+  // two (demAnchors.ba.test.js). At most demHoldMaxAnchors tie points, spread over the
+  // area; fewer than demHoldMinAnchors over stable ground and the pass is skipped. The
   // reference is sampled on at most demHoldGridSide² places over the block.
   demHoldRounds: 2,
+  // The most tie points held to the DEM, spread over the area. More holds the block more
+  // evenly at more time.
+  //
+  // See demHoldRounds.
   demHoldMaxAnchors: 4000,
+  // With fewer tie points than this over stable ground, the DEM hold is skipped.
+  //
+  // See demHoldRounds.
   demHoldMinAnchors: 20,
+  // The reference DEM is sampled on at most this many places a side over the block.
+  //
+  // See demHoldRounds.
   demHoldGridSide: 400,
-  // ── In-registration distortion self-calibration (D3) ──
-  // Once the model has this many cameras, the interim BA refines a shared focal + radial
-  // k1 and folds the distortion out of the keypoints (+ Kmap) mid-registration, instead
-  // of deferring it to the post-filter passes. A 2-view model hides distortion in its
-  // points (init reproj looks perfect, 3rd-view PnP collapses at ~13% inliers), so k1 is
-  // only identifiable once several cameras at different angles are in — below this count
-  // the interim BA stays pose/points-only and the fold (which mutates keypoints) is held
-  // back. Only active when refineIntrinsics self-calibrates (no calibrated model at ingest).
+  // ── Distortion self-calibration during registration ──
+  // From this many photos on, the bundle adjustments during registration refine a shared
+  // focal and radial distortion (k1), instead of leaving them to the passes after it.
+  // Below it, distortion cannot be told apart from the points' positions. Only when the
+  // calibration is self-calibrated.
+  //
+  // D3. Once the model has this many cameras, the interim BA refines a shared focal +
+  // radial k1 and folds the distortion out of the keypoints (+ Kmap) mid-registration,
+  // instead of deferring it to the post-filter passes. A 2-view model hides distortion in
+  // its points (init reproj looks perfect, 3rd-view PnP collapses at ~13% inliers), so k1
+  // is only identifiable once several cameras at different angles are in — below this
+  // count the interim BA stays pose/points-only and the fold (which mutates keypoints) is
+  // held back. Only active when refineIntrinsics self-calibrates (no calibrated model at
+  // ingest).
   distortionCalMinCams: 6,
+  // Self-calibration guard: a solve that moves the focal by more than this fraction in
+  // one step is rejected. These are broad plausibility bounds against runaway solves, not
+  // calibration priors.
+  //
   // Transactional self-cal guard. These are deliberately broad plausibility bounds,
   // not calibration priors: normal EXIF recovery remains free, while the observed
   // thin-block runaways (focal +48…88%, k1 ≈ -0.5) are rejected before their
   // distortion is destructively folded into every image's keypoints.
   selfCalMaxFocalStepFrac: 0.25,
+  // Self-calibration guard: the focal may move at most this fraction from its starting
+  // (EXIF or entered) value.
+  //
+  // See selfCalMaxFocalStepFrac.
   selfCalMaxFocalNominalFrac: 0.35,
+  // Self-calibration guard: the principal point may move at most this fraction of the
+  // photo's size from the centre.
+  //
+  // See selfCalMaxFocalStepFrac.
   selfCalMaxPrincipalOffsetFrac: 0.1,
+  // Self-calibration guard: the radial distortion may shift a photo's corner by at most
+  // this fraction of its diagonal.
+  //
+  // See selfCalMaxFocalStepFrac.
   selfCalMaxCornerShiftFrac: 0.25,
+  // The focal step bound when the starting focal is only a field-of-view guess (no EXIF
+  // focal, no sensor format), which is no evidence: wider, so the solve can reach the
+  // real focal.
+  //
   // The same two focal bounds when the starting focal is only resolveK's default-FOV
   // guess (no EXIF focal, no sensor format). That guess is not evidence: a 153 mm lens
   // on a 230 mm film frame sits 33% below it, and the 25% step bound rejected the focal
   // pre-solve on the CA213732V strip (29.9%), leaving fx at the guess (SFM-12).
   selfCalGuessFocalStepFrac: 0.6,
+  // The bound on the focal's move from its start when that start is only a field-of-view
+  // guess.
+  //
+  // See selfCalGuessFocalStepFrac.
   selfCalGuessFocalNominalFrac: 0.7,
+  // The decentring terms (p1, p2) are kept only when freeing them lowers the reprojection
+  // error by at least this fraction. On undistorted photos they would only trade with the
+  // camera poses; lower it to keep them more readily.
+  //
   // Brown's decentring terms (p1, p2) under the auto schedule are kept only when the
   // first solve that frees them lowers the reprojection RMS by at least this fraction
   // against the same solve without them (bundleSession.js). Measured 2026-11-06: quarry
@@ -319,6 +529,10 @@ export const SFM_TUNING = {
   // vertical; South Building, ETH3D playground and UseGeo (undistorted photos) 0.0 %,
   // where freeing them moved the cameras 9–24 % further from the reference.
   selfCalDecentringMinGain: 0.01,
+  // Under survey-grade camera positions (at least half within this σ in metres on every
+  // axis) p1 and p2 are always kept: with the heights held, a small real decentring
+  // trades with the focal and so with the ground height, even when it lowers no error.
+  //
   // …but no trial under survey-grade camera positions (cameraPriors.js
   // surveyGradePositions: at least half the priors within this σ on every axis, metres):
   // p1, p2 stay. With the camera heights held, a small real decentring that lowers no RMS
@@ -329,25 +543,49 @@ export const SFM_TUNING = {
   // checkpoints H 9 → 45 cm. GCP-held film blocks keep the trial (kept: Casa Grande
   // 1.09/1.01 → 1.12/1.05 m, Iceland even).
   selfCalDecentringHeldSigma: 0.1,
+  // Adding photos to a saved sparse model stops when the old photos' keypoints differ
+  // from those the model was solved from by more than this median (px): their features
+  // were detected again, so the model no longer fits them.
+  //
   // Adding images to a saved model (extendModel.js) rebuilds the old images' keypoints in
   // the model's frame and compares them with the pixels the model saved: above this
   // median gap (px) they are not the keypoints the model was solved from (re-detected
   // features) and the run stops.
   extendFrameMaxMedianPx: 0.5,
   // ── PnP registration gate ──
-  pnpGateScale: 2, // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
-  minPnpInliers: 15, // absolute PnP-inlier floor to accept a pose
-  // …and a fraction of the correspondences. Raised 0.15 → 0.3: on the 2026-07-10
-  // building run every mis-registration was admitted in the 10–25% band. With
-  // self-calibration on by default (refineIntrinsics 'auto' → 'f,k1'), true poses
-  // clear 0.3 comfortably; the band below it is where coincidence fits live.
+  // Scales the inlier gate of a new photo's pose (PnP) from the reprojection threshold,
+  // capped at 2. Higher admits more correspondences as inliers, and more false ones.
+  //
+  // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
+  pnpGateScale: 2,
+  // The fewest PnP inliers for a new photo's pose to be accepted. Lower registers weak
+  // photos more readily, at the risk of a wrong pose.
+  //
+  // absolute PnP-inlier floor to accept a pose
+  minPnpInliers: 15,
+  // The least share of a new photo's correspondences that must be PnP inliers for its pose
+  // to be accepted. Wrong poses fit by coincidence sit below it; lower it only for photos
+  // you know are right.
+  //
+  // Raised 0.15 → 0.3: on the 2026-07-10 building run every mis-registration was admitted
+  // in the 10–25% band. With self-calibration on by default (refineIntrinsics 'auto' →
+  // 'f,k1'), true poses clear 0.3 comfortably; the band below it is where coincidence
+  // fits live.
   minPnpInlierRatio: 0.3,
+  // A second check after the pose is refined: the inlier share counted again at the
+  // tighter reprojection threshold. A pose that only fits at the loose gate waits for a
+  // later round.
+  //
   // Second acceptance gate: after the pose is polished, recount inliers at the
   // (tighter) reprjThreshold rather than the looser PnP gate and require the ratio
   // again — a pose that only fits at the loose gate is deferred (P4.3).
   minPnpRefineInlierRatio: 0.3,
-  // ── Stalled-strip rescue (S1) ──
-  // When a full sweep registers nothing but images still link to the model, the
+  // ── Stalled-strip rescue ──
+  // On: when a pass registers nothing but photos still link to the model, one rescue round
+  // refines the focal, triangulates again and retries those photos once with a looser
+  // second check. The usual cause is a short film strip; off keeps the strict passes.
+  //
+  // S1. When a full sweep registers nothing but images still link to the model, the
   // usual causes on short film strips are (a) a ~10% wrong focal the post-filter
   // self-cal hasn't corrected yet and (b) strip-end structure gaps. One rescue
   // round runs a focal-only BA + a retriangulation, then retries the stalled
@@ -356,7 +594,16 @@ export const SFM_TUNING = {
   // filter clean any loose observations, so this only rescues genuinely-linked
   // end images, never manufactures a pose. Set false to restore the strict sweep.
   rescueStalled: true,
-  rescueRefineRatio: 0.2, // relaxed refine-recheck ratio used on the rescue retry
+  // The inlier share the rescue's second check asks for, instead of
+  // minPnpRefineInlierRatio.
+  //
+  // relaxed refine-recheck ratio used on the rescue retry
+  rescueRefineRatio: 0.2,
+  // The rescue triangulates the points a stalled photo is matched to down to this angle
+  // (degrees), so a photo taken close to its neighbours finds 3D points to register
+  // against. Points still under filterMinTriAngleDeg are dropped once it has added its
+  // view.
+  //
   // The rescue's second retriangulation: only the points a stalled image is matched to,
   // down to this angle instead of filterMinTriAngleDeg. Between nearby registered photos
   // most shared points sit under 1.5°, so a photo with hundreds of verified inliers to the
@@ -365,38 +612,90 @@ export const SFM_TUNING = {
   // depth is still within ~3 % (enough for PnP); the interim filter drops what is still
   // under filterMinTriAngleDeg once the new photo has added its view.
   rescueMinTriAngleDeg: 0.25,
-  // A photo registered with fewer than this × minMatchesForRegistration correspondences is
-  // counted as near the floor (summary.registrationMargin, a log line, the regression
-  // gate's warning): the knife edge a small upstream change can push it over. ETH3D
+  // A photo registered with fewer than this multiple of the minimum correspondences is
+  // reported as near the limit (in the log and the summary): a small change upstream could
+  // lose it. Changes no result.
+  //
+  // summary.registrationMargin, a log line, the regression gate's warning. ETH3D
   // playground's hinge photo registered at 34 against 20 (1.7×).
   registrationMarginFactor: 2,
   // ── Secondary-model recovery ──
-  secondaryModels: true, // reconstruct coherent blocks stranded outside the primary
-  secondaryMinImages: 8, // avoid recursively solving tiny/noisy leftovers
-  secondaryBoundaryImages: 12, // registered overlap halo used to align arbitrary frames
-  seedRetryMax: 4, // retry alternate initial pairs when the primary stalls tiny
-  seedRetryMinFraction: 0.5, // below this registered share, seed choice is still suspect
-  // ── Pairs checked against the finished model (core/sfm/pairAgreement.js) ──
-  // A match agrees when its Sampson error under the solved relative pose is within
-  // pairCheckEpiPx (detection px, scaled like the reprojection gates); a pair agrees
-  // when at least pairCheckAgreeFrac of its matches do and it does not join more
-  // keypoints of *different* model points than of the same one (≥ pairCheckMinSplit).
-  // A photo is contested when more than pairCheckContestedFrac of its scored pairs
-  // conflict with the model (≥ pairCheckMinPairs scored pairs); pairs, not matches,
-  // so one strong false pair cannot outvote several true ones; and at most
-  // pairCheckMaxHolders of them agree, since a photo with many agreeing pairs is not
-  // held in place by any one of them.
+  // On: photos left outside the main model that link to each other are reconstructed as
+  // a second model and aligned to the first through the photos they share.
+  //
+  // reconstruct coherent blocks stranded outside the primary
+  secondaryModels: true,
+  // The fewest photos a group needs to become a secondary model; smaller leftovers are
+  // usually noise.
+  //
+  // avoid recursively solving tiny/noisy leftovers
+  secondaryMinImages: 8,
+  // How many photos of the main model next to a secondary one are used to align the two.
+  //
+  // registered overlap halo used to align arbitrary frames
+  secondaryBoundaryImages: 12,
+  // How many other starting pairs are tried when the model stops growing while still
+  // small. More tries cost time but rescue a bad start.
+  //
+  // retry alternate initial pairs when the primary stalls tiny
+  seedRetryMax: 4,
+  // A model holding less than this share of the photos counts as stalled small, and
+  // another starting pair is tried.
+  //
+  // below this registered share, seed choice is still suspect
+  seedRetryMinFraction: 0.5,
+  // ── Image pairs checked against the finished model ──
+  // A match agrees with the finished model when its epipolar error under the solved poses
+  // is within this many pixels (at the detection size). Image pairs that disagree point to
+  // photos the model may have placed wrong.
+  //
+  // core/sfm/pairAgreement.js. A match agrees when its Sampson error under the solved
+  // relative pose is within pairCheckEpiPx (detection px, scaled like the reprojection
+  // gates); a pair agrees when at least pairCheckAgreeFrac of its matches do and it does
+  // not join more keypoints of *different* model points than of the same one
+  // (≥ pairCheckMinSplit). A photo is contested when more than pairCheckContestedFrac of
+  // its scored pairs conflict with the model (≥ pairCheckMinPairs scored pairs); pairs, not
+  // matches, so one strong false pair cannot outvote several true ones; and at most
+  // pairCheckMaxHolders of them agree, since a photo with many agreeing pairs is not held
+  // in place by any one of them.
   pairCheckEpiPx: 4,
+  // An image pair agrees with the model when at least this share of its matches do.
+  //
+  // See pairCheckEpiPx.
   pairCheckAgreeFrac: 0.5,
+  // An image pair also disagrees when it joins keypoints of different tie points more
+  // often than of the same one, counted from this many on.
+  //
+  // See pairCheckEpiPx.
   pairCheckMinSplit: 5,
+  // Image pairs with fewer matches than this are not scored.
+  //
+  // See pairCheckEpiPx.
   pairCheckMinMatches: 15,
+  // A photo is flagged as contested when more than this share of its scored image pairs
+  // disagree with the model.
+  //
+  // See pairCheckEpiPx.
   pairCheckContestedFrac: 0.5,
+  // A photo is flagged as contested only when it has at least this many scored image
+  // pairs.
+  //
+  // See pairCheckEpiPx.
   pairCheckMinPairs: 2,
+  // A photo is flagged as contested only when at most this many of its image pairs agree
+  // with the model: a photo with many agreeing pairs is not held in place by any one.
+  //
+  // See pairCheckEpiPx.
   pairCheckMaxHolders: 2,
-  // ── GCP triangulation, robust mode (gcpTriangulation.js; guides and target detection) ──
-  // Absolute floor (native px) of the median cut max(3 × median, floor): on a clean set
-  // the median is ~0, and a pure multiple would reject honest marks over noise. The cut
-  // is for misclicks, so the floor is a misclick's size, not a marking accuracy.
+  // ── GCP triangulation, robust mode ──
+  // In robust GCP triangulation, a mark is dropped as a misclick when its reprojection
+  // error exceeds three times the median or this floor (px), whichever is larger. The
+  // floor is a misclick's size, not a marking accuracy.
+  //
+  // gcpTriangulation.js; guides and target detection. Absolute floor (native px) of the
+  // median cut max(3 × median, floor): on a clean set the median is ~0, and a pure
+  // multiple would reject honest marks over noise. The cut is for misclicks, so the floor
+  // is a misclick's size, not a marking accuracy.
   gcpRobustFloorPx: 25,
 }
 
@@ -404,9 +703,12 @@ export const SFM_TUNING = {
 // MatchFeaturesModal — the user-facing match defaults live in defaults.user.js ▸
 // MATCH_DEFAULTS. `settings` from the caller still overrides.
 export const MATCH_TUNING = {
-  // ── Pair verification ──
-  // Draw F-RANSAC's samples best match first (PROSAC, crates/matching
-  // ransac_fundamental_ordered) instead of uniformly. Off: in 0.8 it cost close-range
+  // ── Image pair verification ──
+  // On: RANSAC draws its samples best match first (PROSAC) instead of at random. It can
+  // find a fit sooner on image pairs with few true matches, but it can also settle on a
+  // smaller set of inliers and cost close-range scenes photos.
+  //
+  // PROSAC, crates/matching ransac_fundamental_ordered. Off: in 0.8 it cost close-range
   // scenes cameras (ETH3D courtyard 38 → 36, office 26 → 21 and playground 38 → 19
   // registered; on courtyard a 743-match pair kept 475 inliers where uniform sampling
   // finds 558) and gained nothing measured on real data (quarry and PUTI kept their
@@ -415,11 +717,17 @@ export const MATCH_TUNING = {
   // with 15–30 % true matches; turn it on to try a set that has such pairs.
   prosacSampling: false,
   // ── Saving and caches ──
-  // How often a matching run saves its matches and its journal (core/runJournal.js)
-  // while pairs finish: what a dead tab's run can lose, against one rewrite of the match
-  // document (never more often than ten times that rewrite takes). `_journalMs` in a
-  // run's settings overrides it; the tests use 0.
+  // How often (ms) a matching run saves its matches while image pairs finish: what a
+  // closed or crashed tab can lose, against the time each save takes (never more often
+  // than ten times that time).
+  //
+  // core/runJournal.js: the matches and the run's journal. `_journalMs` in a run's
+  // settings overrides it; the tests use 0.
   journalIntervalMs: 60_000,
+  // The memory (MiB) a matching run keeps descriptors in, so an image used by many image
+  // pairs is read from project storage once. A smaller budget saves memory and costs
+  // reloads; 2,048 holds about 16 million SIFT keypoints.
+  //
   // Byte budget of a matching run's descriptor cache in the page
   // (core/features/descriptorCache.js: each image's descriptors and subset-gate sample,
   // the image whose next pair is furthest ahead evicted first). A smaller budget costs
@@ -428,47 +736,123 @@ export const MATCH_TUNING = {
   // is stored as bytes (128 B a keypoint), so 2 GiB holds 16 M keypoints of it (PUTI at
   // 4,000 px is 8.5 M) and a quarter as many of floats.
   descCacheMiB: 2048,
+  // The GPU memory (MiB) brute-force matching on WebGPU keeps descriptors in. A smaller
+  // budget only costs uploading descriptors again; 1,024 holds about 2 million SIFT
+  // keypoints.
+  //
   // WebGPU brute-force: byte budget of the per-run GPU descriptor cache (LRU). The GPU
   // holds floats (stored bytes are widened on upload, 512 B a SIFT keypoint): 1 GiB
   // holds a whole 128-image SIFT run at ~8.4k kp (≈ 4.3 MB/image); a smaller budget
   // only costs re-uploads (the worker answers a miss and the store resends).
   gpuDescCacheMiB: 1024,
-  // ── Pair acceptance ──
-  lgMinConf: 0, // LightGlue min match confidence
-  overrideInliers: 30, // inlier count that overrides a failed ratio/H-F gate
-  hfDegenerateRatio: 0.8, // homography-vs-fundamental ratio flagging a degenerate fit
-  minInlierUniqueFrac: 0.5, // reject a pair whose inliers collapse to few unique locations
-  minInlierSpreadPx: 8, // …or into a pinhead region (epipole degeneracy), in px
-  // ── Decoupled match-acceptance floors (WS1) ──
-  // `minMatches` (defaults.user.js, user-facing) is the ACCEPT floor + the H-skip floor.
-  // These two are the other two gates it used to conflate, split out so raising minMatches
-  // (e.g. to 500) can never widen the pre-verification kill zone or sever the match graph:
-  // filterStationary: a match moving at most this % of the image diagonal between
-  // the two images is stationary (1 % = 130 px on a 9139² film scan).
+  // ── Image pair acceptance ──
+  // LightGlue matches below this confidence (0–1) are dropped. Raise it for fewer, surer
+  // matches.
+  //
+  // LightGlue min match confidence
+  lgMinConf: 0,
+  // An image pair with at least this many RANSAC inliers is accepted even when its
+  // inlier ratio is below Min inlier ratio: dozens of inliers are real geometry, such as a
+  // narrow overlap.
+  //
+  // inlier count that overrides a failed ratio/H-F gate (pairGate.js R5 absolute-inlier
+  // override: a medium-overlap façade bridge, not the ~12/100 spurious fit the ratio gate
+  // targets)
+  overrideInliers: 30,
+  // An image pair whose homography holds at least this share of its inliers is labelled
+  // degenerate (a plane or a pure rotation): it still links photos but is not used to
+  // start a model.
+  //
+  // homography-vs-fundamental ratio flagging a degenerate fit; a quality label, not a
+  // rejection (pairGate.js)
+  hfDegenerateRatio: 0.8,
+  // An image pair is rejected when its inliers land on fewer distinct spots than this
+  // share of their count (many keypoints matched to one place).
+  //
+  // reject a pair whose inliers collapse to few unique locations
+  minInlierUniqueFrac: 0.5,
+  // An image pair is rejected when its inliers all lie within a patch this small (px) in
+  // one photo, which is no real geometry.
+  //
+  // …or into a pinhead region (epipole degeneracy), in px
+  minInlierSpreadPx: 8,
+  // ── Acceptance floors besides Min matches per pair ──
+  // With Ignore stationary points on, a match that moves at most this percentage of the
+  // image diagonal between the two photos counts as stationary (frame marks, burnt-in
+  // text) and is dropped.
+  //
+  // Decoupled match-acceptance floors (WS1). `minMatches` (defaults.user.js, user-facing)
+  // is the ACCEPT floor + the H-skip floor. This and the next two are the other gates it
+  // used to conflate, split out so raising minMatches (e.g. to 500) can never widen the
+  // pre-verification kill zone or sever the match graph. filterStationary: a match moving
+  // at most this % of the image diagonal between the two images is stationary (1 % =
+  // 130 px on a 9139² film scan).
   stationaryTolPct: 1,
-  rawSkipFloor: 15, // skip verification below this many RAW putatives (clamped to ≤ minMatches)
-  weakMinInliers: 15, // valid-F pairs with ≥ this many inliers but below the accept gate → WEAK
-  // (kept for PnP registration only; never seed init or triangulate)
-  // ── Tiled guided matching (core/features/guidedTiles.js, gated by lgTiled) ──
-  lgCoarseKeypoints: 1024, // per-image cap for the coarse pass that fits the guide H
+  // An image pair with fewer matches than this before verification is skipped (at most
+  // Min matches per pair).
+  //
+  // skip verification below this many RAW putatives (clamped to ≤ minMatches)
+  rawSkipFloor: 15,
+  // An image pair with a valid fit and at least this many inliers that misses the accept
+  // gate is kept as weak: used to register photos, never to start a model or triangulate.
+  //
+  // valid-F pairs with ≥ this many inliers but below the accept gate → WEAK (kept for PnP
+  // registration only; never seed init or triangulate)
+  weakMinInliers: 15,
+  // ── Tiled guided matching ──
+  // LightGlue's Full matching density first matches up to this many of each photo's
+  // strongest keypoints to find how the two photos line up. More fits that alignment more
+  // surely, at more time.
+  //
+  // core/features/guidedTiles.js, gated by lgTiled. per-image cap for the coarse pass
+  // that fits the guide H
+  lgCoarseKeypoints: 1024,
+  // With fewer coarse matches than this, the image pair is taken not to overlap and is
+  // skipped, rather than matched again in full. Lower it if overlapping pairs are skipped.
+  //
   // The coarse pass doubles as the LightGlue pair GATE (the brute-force subset gate
   // is skipped for LightGlue): a near-empty coarse result on 1024×1024 strong
   // keypoints means the pair doesn't overlap, so it's returned as-is (~0.3 s, the
   // store's minMatches then skips it) instead of escalating to the plain capped
   // match — the single most expensive path — just to confirm the non-overlap.
-  lgCoarseGateMin: 8, // coarse matches below this ⇒ no overlap, skip (don't fall back)
-  lgGuideMinMatches: 24, // min coarse matches before attempting a homography guide
-  lgGuideMinInliers: 15, // min H-inliers for the guide to be trusted (else fall back)
+  // coarse matches below this ⇒ no overlap, skip (don't fall back)
+  lgCoarseGateMin: 8,
+  // The fewest coarse matches before a homography is fitted to guide the tiles; below it
+  // the image pair is matched without tiles.
+  //
+  // min coarse matches before attempting a homography guide
+  lgGuideMinMatches: 24,
+  // The fewest homography inliers for the guide to be trusted; below it the image pair is
+  // matched without tiles.
+  //
+  // min H-inliers for the guide to be trusted (else fall back)
+  lgGuideMinInliers: 15,
+  // The guide homography's RANSAC threshold, as a fraction of the image diagonal (at least
+  // 3 px). The guide only has to predict where a tile lands, so it is loose by design;
+  // lower it only for flat scenes.
+  //
   // The guide H only needs to predict *where a tile lands* (locality), not fit the
   // scene tightly — the residual-derived margin absorbs looseness by design. So the
   // guide RANSAC threshold scales with image size (a fixed ~3 px on a 10k-px aerial
   // frame with terrain relief rejects nearly every real pair: the 2026-07-10 CA…V
   // run fell back on 9/10 pairs at ratio 0.04–0.21 while F-RANSAC showed 0.5–0.84
   // inlier ratios), and the inlier-fraction gate is correspondingly permissive.
-  lgGuideRelThresh: 0.001, // guide-H RANSAC threshold as a fraction of image diagonal (≥3 px)
-  lgGuideMinInlierRatio: 0.15, // min H-inlier fraction (scene too 3D / no overlap ⇒ fall back)
-  lgTileMinKps: 32, // skip a tile with fewer keypoints than this on either side
-  // ── Subset gate applicability ──
+  // guide-H RANSAC threshold as a fraction of image diagonal (≥3 px)
+  lgGuideRelThresh: 0.001,
+  // The least share of coarse matches the guide homography must hold; below it (a scene
+  // too 3D, or no overlap) the image pair is matched without tiles.
+  //
+  // min H-inlier fraction (scene too 3D / no overlap ⇒ fall back)
+  lgGuideMinInlierRatio: 0.15,
+  // A tile with fewer keypoints than this in either photo is skipped.
+  //
+  // skip a tile with fewer keypoints than this on either side
+  lgTileMinKps: 32,
+  // ── When the subset gate runs ──
+  // The subset gate runs only with at least this many image pairs. On fewer, matching
+  // every pair in full takes seconds, and a skipped real pair could split the photos into
+  // pieces.
+  //
   // The gate trades a small false-negative rate for skipping O(Na·Nb) matches, which is
   // only a good trade when there are many pairs to skip. Below this count the full
   // exhaustive match costs seconds, so the trade is all risk and no saving — and the
@@ -480,20 +864,38 @@ export const MATCH_TUNING = {
   // more severe as keypoint counts rise. The CA…V gating above is consistent with
   // that failure mode as well as with the low pair count.
   subsetGateMinPairs: 50,
+  // Photos left with fewer accepted image pairs than this test their skipped pairs again
+  // on a larger sample (subsetGateRescueScale). Raise it to rescue more photos at more
+  // time; 0 = off.
+  //
   // Gate rescue (useMatchesStore.matchAll): images left with fewer than this many
   // accepted pairs re-test their gated pairs on a subsetGateRescueScale× larger subset
   // (scale² more expected putatives). 0 = off. Iceland 1980 film: 7 images stranded.
   subsetGateRescueDegree: 6,
+  // How many times larger the sample of the rescue test is.
+  //
+  // See subsetGateRescueDegree.
   subsetGateRescueScale: 4,
+  // A skipped image pair whose sample reached at least this share of Min subset matches
+  // is tested again on a larger sample (subsetGateNearMissScale), against a threshold
+  // raised in step. 0 = off.
+  //
   // Near misses (matchAll's gate rescue): a gated pair whose sample reached at least
   // subsetGateNearMiss × the threshold is tested again on a subsetGateNearMissScale×
   // larger sample against a threshold as many times higher (the count a real pair
   // reaches grows with the sample size squared, a chance count about linearly).
   // South Building: 102 of the 918 pairs gated at 6–7 of 8 are pairs COLMAP verifies
-  // with ≥ 50 inliers (one with 498). 0 = off.
+  // with ≥ 50 inliers (one with 498).
   subsetGateNearMiss: 0.5,
+  // How many times larger the sample of a near miss's second test is.
+  //
+  // See subsetGateNearMiss.
   subsetGateNearMissScale: 2,
-  // ── Bridge repair ──
+  // ── Repair a split graph ──
+  // How many rounds Repair a split graph runs while the main block grows, each with fresh
+  // image pairs between the pieces and the main block, matched without the subset gate
+  // and with looser gates.
+  //
   // Bridge repair (MATCH_DEFAULTS.repairSplits; core/features/bridgeRepair.js): a match
   // graph left in pieces of at least bridgeMinComponent images gets up to
   // bridgePerComponent pairs per piece (bridgeMaxPairs in all) between it and the main
@@ -503,18 +905,56 @@ export const MATCH_TUNING = {
   // A piece hanging on the main block by a thread is repaired too: one apart from it
   // without the pairs of fewer than bridgeWeakInliers inliers, and joined to it by fewer
   // than bridgeWeakCut inliers in all (Starbuck, Jorum: TMA flight lines SfM leaves out).
-  bridgeRounds: 3, // again while the main block grows, each round with fresh pairs
+  // again while the main block grows, each round with fresh pairs
+  bridgeRounds: 3,
+  // The smallest piece of photos the repair links back to the main block.
+  //
+  // See bridgeRounds.
   bridgeMinComponent: 2,
+  // The repair also links a piece hanging on the main block by a thread: one apart from it
+  // without the image pairs of fewer inliers than this (and joined by fewer than
+  // bridgeWeakCut inliers in all).
+  //
+  // See bridgeRounds.
   bridgeWeakInliers: 30,
+  // A piece joined to the main block by fewer than this many inliers in all, counting the
+  // image pairs under bridgeWeakInliers, is repaired too.
+  //
+  // See bridgeRounds.
   bridgeWeakCut: 100,
+  // The most image pairs the repair matches again in one round, over all pieces.
+  //
+  // See bridgeRounds.
   bridgeMaxPairs: 48,
+  // The most image pairs it matches again per piece.
+  //
+  // See bridgeRounds.
   bridgePerComponent: 12,
+  // Rejected image pairs with at least this many matches before verification are tried
+  // first.
+  //
+  // See bridgeRounds.
   bridgeRetryMinRaw: 8,
+  // The ratio test threshold of the repair's matching, looser than the dialog's.
+  //
+  // See bridgeRounds.
   bridgeRatioThreshold: 0.9,
+  // The least inlier ratio an image pair of the repair needs, looser than the dialog's.
+  //
+  // See bridgeRounds.
   bridgeMinInlierRatio: 0.08,
+  // The estimator that verifies the repair's image pairs: 'magsac' or 'ransac'.
+  //
+  // See bridgeRounds.
   bridgeVerifier: 'magsac',
+  // How many times as many keypoints LightGlue uses in the repair.
+  //
+  // See bridgeRounds.
   bridgeLgKeypointScale: 2,
-  // ── Detecting gaps again ──
+  // ── Detect gaps again at full size ──
+  // Photos of the pieces still apart after the repair that were detected at less than
+  // this share of their size are detected again at full size.
+  //
   // Detecting gaps again (MATCH_DEFAULTS.gapRedetect; core/features/gapRedetect.js): the
   // SIFT photos of the pieces still apart after bridge repair, detected at under
   // gapMaxScale of their size, are detected again at full size with ≤gapMaxKeypoints
@@ -523,10 +963,24 @@ export const MATCH_TUNING = {
   // more than gapMaxShare of the photos: detecting everything at full size is then the
   // better run. Starbuck subset, 46 gap photos + 30 partners at 10,400 px: 32 posed.
   gapMaxScale: 0.8,
+  // The most keypoints a photo detected again gets (its cap scaled with the area).
+  //
+  // See gapMaxScale.
   gapMaxKeypoints: 40000,
+  // How many photos of the main block are detected again with them, as a share of their
+  // count: those with candidate image pairs to most of them.
+  //
+  // See gapMaxScale.
   gapPartnerShare: 0.65,
+  // Skipped when the photos to detect again would be more than this share of all photos:
+  // running Detect Features at full size is then the better choice.
+  //
+  // See gapMaxScale.
   gapMaxShare: 0.5,
-  // ── Finding turned photos ──
+  // ── Find turned photos ──
+  // Rounds of Find turned photos, repeated while photos join. Each photo of a piece still
+  // apart is tested for a quarter turn against photos of the main block.
+  //
   // Finding turned photos (MATCH_DEFAULTS.turnSearch; core/features/turnSearch.js): each
   // photo of a piece still apart, and the main-block photos it is probed against (those
   // with overlap evidence, else an even spread, ≤turnProbesPerImage), gets a SIFT look
@@ -535,15 +989,36 @@ export const MATCH_TUNING = {
   // counts with ≥turnMinInliers inliers, and a photo takes the quarter turn holding
   // turnMinShare of its probes' inliers. Rounds repeat while photos join.
   turnRounds: 2,
+  // The most main-block photos each photo is tested against.
+  //
+  // See turnRounds.
   turnProbesPerImage: 40,
+  // The size (px, long side) the test detects keypoints at.
+  //
+  // See turnRounds.
   turnProbeMaxDim: 1536,
+  // The most keypoints per photo in the test.
+  //
+  // See turnRounds.
   turnProbeKeypoints: 2000,
+  // The test's homography threshold, as a fraction of the photo's long side: loose, as it
+  // only has to hold the rotation.
+  //
+  // See turnRounds.
   turnProbeThreshFrac: 0.01,
+  // The fewest inliers for a test to count.
+  //
+  // See turnRounds.
   turnMinInliers: 20,
+  // A photo takes the quarter turn that holds at least this share of its tests' inliers.
+  //
+  // See turnRounds.
   turnMinShare: 0.6,
   // ── Progress ──
-  // Share of the progress bar kept for the gate rescue and bridge repair, which follow
-  // the pair pass when they can run (core/features/matchProgress.js).
+  // The share of the progress bar kept for the gate rescue and the split-graph repair,
+  // which follow the pass over the image pairs when they run.
+  //
+  // core/features/matchProgress.js.
   progressPostShare: 0.1,
 }
 
