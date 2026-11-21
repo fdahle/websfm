@@ -1,12 +1,13 @@
 // What System info shows and the bug-report summary says (core/systemSummary.js), probed
-// once per call: GPU, browser and OS, capabilities, storage. Nothing about the project
-// beyond where it is stored.
+// once per call: GPU, browser and OS, capabilities, storage, and the changed flags. Nothing
+// about the project beyond where it is stored.
 import { version as appVersion } from '../../package.json'
 import { featureReport } from '../core/browserSupport.js'
 import { describeBrowser } from '../core/systemSummary.js'
 import { isFolderProject } from '../core/io/folderProject.js'
 import { browserCaps } from './browserCaps.js'
 import * as opfs from './opfs.js'
+import { changedFlags } from '../stores/tuningOverrides.js'
 
 // The renderer WebGL names, or the adapter WebGPU names where WebGL masks it. The
 // extension constant is UNMASKED_RENDERER_WEBGL (the WEBGL_-prefixed spelling is the
@@ -74,6 +75,8 @@ export async function collectSystemInfo({ project = null } = {}) {
     simd: caps.simd,
     isolated: caps.isolated,
     storage,
+    // Debug ▸ Flags changed now: a bug report without them cannot reproduce the run.
+    flags: changedFlags.value,
     support: featureReport(caps),
     missing: featureReport(caps)
       .filter((f) => !f.ok)

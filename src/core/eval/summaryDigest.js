@@ -34,9 +34,12 @@ import { GATE_HEADROOM_WARN, KP_CAP_WARN_PCT } from '../sfm/verdict.js'
 //                   `mixed` flag rather than this module guessing),
 //     matchRun:     matchesStore.matchRun | null (last match run: settings + gate tally),
 //     verdict:      buildVerdict() output | null (core/sfm/verdict.js),
+//     flags:        the internal tuning values changed when the digest was made (Debug ▸
+//                   Flags, stores/tuningOverrides.js): [{ key, value, def }]; omitted or
+//                   empty when none are,
 //   }
 // → digest: { project, date, crsUnit, status, verdict, health, offenders, config,
-//             diagnostics, run }
+//             diagnostics, run, flags }
 export function buildProjectDigest(input = {}) {
   const {
     projectName = 'untitled',
@@ -52,6 +55,7 @@ export function buildProjectDigest(input = {}) {
     matchRun = null,
     verdict = null,
     scaleFit = null,
+    flags = [],
   } = input
 
   // Status roll-up across the classified health rows.
@@ -99,6 +103,8 @@ export function buildProjectDigest(input = {}) {
     date,
     crsUnit,
     status,
+    // Changed internal tuning values: a result made with one is not a default run.
+    flags: (flags || []).map((f) => ({ key: f.key, value: f.value, default: f.def })),
     verdict: verdict
       ? {
           level: verdict.level ?? null,
@@ -512,6 +518,14 @@ export function digestToMarkdown(digest) {
   L.push(`${digest.date} · CRS unit: ${digest.crsUnit}`)
   L.push(`STATUS: **${digest.status.overall}** — ${statusLine(digest.status)}`)
   L.push('')
+
+  // Changed flags first after the status: every number below may depend on them.
+  if (digest.flags?.length) {
+    L.push('## Changed flags (Other ▸ Debug ▸ Flags)')
+    for (const f of digest.flags)
+      L.push(`- ${f.key} = ${JSON.stringify(f.value)} (default ${JSON.stringify(f.default)})`)
+    L.push('')
+  }
 
   // Verdict first: it is the one section that says what to DO about the numbers.
   if (digest.verdict) {

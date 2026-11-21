@@ -7,6 +7,7 @@
 // open (async, for the GCP report) from useQualityReport().computeDigest.
 import { ref, computed, onMounted } from 'vue'
 import ModalShell from '../ui/ModalShell.vue'
+import FlagsNote from '../../layout/FlagsNote.vue'
 import SegmentedControl from '../ui/SegmentedControl.vue'
 import { useQualityReport } from '../../../composables/useQualityReport.js'
 import { useProjectsStore } from '../../../stores/useProjectsStore.js'
@@ -61,6 +62,7 @@ function copy() {
       A compact, classified digest of this project's reconstruction health — copy it to share a run's outcome without
       the full log. Same numbers as the Quality Report.
     </p>
+    <FlagsNote class="flags" />
 
     <div class="toolbar">
       <SegmentedControl v-model="format" :options="formatOptions" />
@@ -93,6 +95,9 @@ function copy() {
   margin: 0 0 14px;
 }
 .toolbar {
+  margin-bottom: 12px;
+}
+.flags {
   margin-bottom: 12px;
 }
 .state {

@@ -6,6 +6,7 @@ import { useProjectsStore } from '../../../stores/useProjectsStore.js'
 import { useQualityReport } from '../../../composables/useQualityReport.js'
 import { useLog } from '../../../composables/useLog.js'
 import ModalShell from '../ui/ModalShell.vue'
+import FlagsNote from '../../layout/FlagsNote.vue'
 import EvalOverviewSection from './EvalOverviewSection.vue'
 import EvalSparseSection from './EvalSparseSection.vue'
 import EvalCalibrationSection from './EvalCalibrationSection.vue'
@@ -106,6 +107,7 @@ async function onExport() {
       </nav>
 
       <div class="qsection">
+        <FlagsNote />
         <div v-if="!activeMeta.avail" class="qempty">
           <div class="qempty-icon">◔</div>
           <div class="qempty-text">{{ activeMeta.prereq }}</div>

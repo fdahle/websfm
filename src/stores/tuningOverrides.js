@@ -20,6 +20,7 @@ import {
 } from '../core/help/consoleSettings.js'
 import { editCommand } from '../core/help/consoleEdits.js'
 import { useLog } from '../composables/useLog.js'
+import { registerProjectStore } from './projectStores.js'
 
 // This browser's copy, with "Keep after reload" on: { keep: true, overrides }.
 const STORAGE_KEY = 'websfm.flags.v1'
@@ -107,10 +108,12 @@ export function applyTuningOverrides(group, settings, log = null) {
 
 /**
  * At start: the flags kept in this browser, each checked against today's tuning.js. A key
- * that is gone, or a value whose type changed, is dropped with a warning; the rest are
- * in effect again, and the log says so. `storage` and `log` are injectable for the tests.
+ * that is gone, or a value whose type changed, is dropped; the rest are in effect again.
+ * What was dropped is logged when the first project opens (a line logged before that is
+ * cleared with the console as the project's own log loads). `storage` is injectable for
+ * the tests.
  */
-export function restoreKeptFlags({ storage = globalThis.localStorage, log = useLog().log } = {}) {
+export function restoreKeptFlags({ storage = globalThis.localStorage } = {}) {
   let saved = null
   try {
     saved = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null')
@@ -120,7 +123,7 @@ export function restoreKeptFlags({ storage = globalThis.localStorage, log = useL
   if (!saved?.keep) return
   keep.value = true
   const { byGroup, dropped } = validateKeptOverrides(saved.overrides)
-  for (const d of dropped) log(`Kept flag ${d.key} dropped: ${d.reason}`, 'warn', 'System')
+  droppedAtStart = dropped
   state.value = byGroup
   if (dropped.length) {
     try {
@@ -129,17 +132,36 @@ export function restoreKeptFlags({ storage = globalThis.localStorage, log = useL
       /* storage blocked: dropped again at the next start */
     }
   }
-  const changed = changedTuning(byGroup)
+}
+
+let droppedAtStart = []
+
+/**
+ * As a project opens, its log records the flags in effect (kept from an earlier session
+ * or set in this one), and, once, the kept flags dropped at start. `log` is injectable
+ * for the tests.
+ */
+export function logFlagsOnOpen(log = useLog().log) {
+  for (const d of droppedAtStart) log(`Kept flag ${d.key} dropped: ${d.reason}`, 'warn', 'System')
+  droppedAtStart = []
+  const changed = changedFlags.value
   if (changed.length)
     log(
-      `Flags kept from an earlier session are in effect (Other ▸ Debug ▸ Flags): ${changed.map((c) => `${c.key}=${JSON.stringify(c.value)}`).join(', ')}`,
+      `Changed flags in effect (Other ▸ Debug ▸ Flags${keep.value ? ', kept in this browser' : ''}): ` +
+        changed.map((c) => `${c.key}=${JSON.stringify(c.value)}`).join(', '),
       'warn',
       'System',
     )
 }
 
+// Not project state (flags are never saved with a project): this only takes part in a
+// project's opening, for the log lines above.
+const ON_OPEN = { $id: 'flags', restore: async () => logFlagsOnOpen(), clear() {} }
+registerProjectStore(() => ON_OPEN)
+
 /** Tests only: back to no flags, not kept. */
 export function _resetFlagsForTests() {
   state.value = {}
   keep.value = false
+  droppedAtStart = []
 }

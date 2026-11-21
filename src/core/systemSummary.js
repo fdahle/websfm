@@ -1,8 +1,10 @@
 // The short text System info ▸ Copy for bug report puts on the clipboard, and the head
 // of the console's Save TXT: what a bug report needs to know about the machine, and
-// nothing about the project (no names, paths, coordinates or images). Pure: the probe
-// that fills `info` is utils/systemInfo.js.
+// nothing about the project (no names, paths, coordinates or images), but the internal
+// tuning values changed in Debug ▸ Flags, without which a run cannot be reproduced. Pure:
+// the probe that fills `info` is utils/systemInfo.js.
 import { formatBytes } from './formatBytes.js'
+import { describeChanged } from './help/consoleSettings.js'
 
 // Browser and OS from the user-agent string, and from User-Agent Client Hints where the
 // browser gives them (Chromium: `brands`, and `platformVersion`, the only way to tell
@@ -81,7 +83,8 @@ const yesNo = (v) => (v == null ? 'unknown' : v ? 'yes' : 'no')
 
 /**
  * info = { appVersion, browser, os, gpu, cores, deviceMemoryGB, webgpu, simd, isolated,
- *          storage: { mode: 'browser' | 'folder' | null, used, quota, durable }, missing: [label] }
+ *          storage: { mode: 'browser' | 'folder' | null, used, quota, durable }, missing: [label],
+ *          flags: [{ key, value, def }] (stores/tuningOverrides.js changedFlags) }
  * → the summary's lines.
  */
 export function systemSummaryLines(info = {}) {
@@ -100,6 +103,7 @@ export function systemSummaryLines(info = {}) {
       : ''
   lines.push(`Project: ${where}${room}${s.durable == null ? '' : ` · durable: ${yesNo(s.durable)}`}`)
   if (info.missing?.length) lines.push(`Missing: ${info.missing.join(', ')}`)
+  if (info.flags?.length) lines.push(`Flags changed (Other ▸ Debug ▸ Flags): ${describeChanged(info.flags)}`)
   return lines
 }
 

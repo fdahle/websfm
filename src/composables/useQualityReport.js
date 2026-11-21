@@ -34,6 +34,7 @@ import { citeShort, formatReference } from '../core/help/references.js'
 import { isFisheyeModel } from '../core/sfm/distortion.js'
 import { buildProjectDigest, digestToMarkdown, digestToJson } from '../core/eval/summaryDigest.js'
 import { buildVerdict } from '../core/sfm/verdict.js'
+import { changedFlags } from '../stores/tuningOverrides.js'
 import {
   featureHasher,
   matchHasher,
@@ -341,6 +342,24 @@ export function useQualityReport() {
     const { rows, gcpReport, demCheck } = await computeHealth()
     const f2 = (v, d = 2) => (v == null ? '—' : v.toFixed(d))
     const sections = []
+
+    // Changed internal tuning values (Debug ▸ Flags) first: every figure below may depend on them.
+    if (changedFlags.value.length) {
+      sections.push({
+        title: 'Changed flags',
+        columns: [
+          { key: 'key', label: 'Flag' },
+          { key: 'value', label: 'Value' },
+          { key: 'def', label: 'Default' },
+        ],
+        rows: changedFlags.value.map((f) => ({
+          key: f.key,
+          value: JSON.stringify(f.value),
+          def: JSON.stringify(f.def),
+        })),
+        note: 'Internal tuning values changed in Other ▸ Debug ▸ Flags when this report was exported. Runs made with them say so in the log, and their results may differ from a run with the defaults.',
+      })
+    }
 
     // Sparse
     const d = reproj.value
@@ -698,6 +717,8 @@ export function useQualityReport() {
       // to hand stale metres to a product.
       scaleFit: recon.scaleFit ?? null,
       verdict,
+      // Debug ▸ Flags changed now: the summary is read as a record of what produced it.
+      flags: changedFlags.value,
     })
     return { digest, markdown: digestToMarkdown(digest), json: digestToJson(digest) }
   }

@@ -96,6 +96,20 @@ describe('digestToMarkdown', () => {
     expect(md).toContain('cameras 118')
     expect(md).toContain('culls {sky=1200, grazing=300}')
   })
+
+  it('names changed flags right after the status, and says nothing when there are none', () => {
+    expect(md).not.toContain('Changed flags')
+    expect(buildProjectDigest(INPUT).flags).toEqual([])
+    const flagged = buildProjectDigest({
+      ...INPUT,
+      flags: [{ key: 'sfm.minPnpInlierRatio', group: 'sfm', value: 0.5, def: 0.3 }],
+    })
+    expect(flagged.flags).toEqual([{ key: 'sfm.minPnpInlierRatio', value: 0.5, default: 0.3 }])
+    const lines = digestToMarkdown(flagged).split('\n')
+    const at = lines.indexOf('## Changed flags (Other ▸ Debug ▸ Flags)')
+    expect(at).toBe(lines.findIndex((l) => l.startsWith('STATUS:')) + 2)
+    expect(lines[at + 1]).toBe('- sfm.minPnpInlierRatio = 0.5 (default 0.3)')
+  })
 })
 
 describe('digestToJson', () => {

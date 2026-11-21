@@ -6,6 +6,7 @@ import {
   resetAllFlags,
   setKeepFlags,
   restoreKeptFlags,
+  logFlagsOnOpen,
   applyTuningOverrides,
   changedFlags,
   flagCount,
@@ -92,17 +93,21 @@ describe('flags store', () => {
     expect(flagCount.value).toBe(2) // still in effect for this session
   })
 
-  it('restores kept flags at start, dropping what no longer fits with a warning', () => {
+  it('restores kept flags at start, and logs what it dropped and what is in effect as a project opens', () => {
     const storage = memoryStorage({
       [KEY]: JSON.stringify({
         keep: true,
         overrides: { sfm: { minPnpInlierRatio: 0.5, rescueStalled: 3, goneKnob: 1 } },
       }),
     })
-    const lines = []
-    restoreKeptFlags({ storage, log: (m, level, source) => lines.push([level, source, m]) })
+    restoreKeptFlags({ storage })
     expect(keepFlags.value).toBe(true)
     expect(tuningOverrides('sfm')).toEqual({ minPnpInlierRatio: 0.5 })
+    // What was dropped is gone from storage too.
+    expect(JSON.parse(storage.data[KEY]).overrides).toEqual({ sfm: { minPnpInlierRatio: 0.5 } })
+    const lines = []
+    const log = (m, level, source) => lines.push([level, source, m])
+    logFlagsOnOpen(log)
     expect(lines.map((l) => l.slice(0, 2))).toEqual([
       ['warn', 'System'],
       ['warn', 'System'],
@@ -110,26 +115,30 @@ describe('flags store', () => {
     ])
     expect(lines[0][2]).toMatch(/^Kept flag sfm.rescueStalled dropped: the value no longer fits/)
     expect(lines[1][2]).toMatch(/^Kept flag sfm.goneKnob dropped: no longer an internal tuning value/)
-    expect(lines[2][2]).toMatch(/in effect.*sfm.minPnpInlierRatio=0.5/)
-    // What was dropped is gone from storage too.
-    expect(JSON.parse(storage.data[KEY]).overrides).toEqual({ sfm: { minPnpInlierRatio: 0.5 } })
+    expect(lines[2][2]).toBe(
+      'Changed flags in effect (Other ▸ Debug ▸ Flags, kept in this browser): sfm.minPnpInlierRatio=0.5',
+    )
+    // The next project's log hears only what is in effect; nothing once all are reset.
+    lines.length = 0
+    logFlagsOnOpen(log)
+    expect(lines).toHaveLength(1)
+    resetAllFlags()
+    lines.length = 0
+    logFlagsOnOpen(log)
+    expect(lines).toEqual([])
   })
 
   it('starts empty from storage that is missing, unreadable or throws', () => {
-    const lines = []
-    const log = (m) => lines.push(m)
-    restoreKeptFlags({ storage: memoryStorage(), log })
-    restoreKeptFlags({ storage: memoryStorage({ [KEY]: '{not json' }), log })
+    restoreKeptFlags({ storage: memoryStorage() })
+    restoreKeptFlags({ storage: memoryStorage({ [KEY]: '{not json' }) })
     restoreKeptFlags({
       storage: {
         getItem() {
           throw new Error('blocked')
         },
       },
-      log,
     })
-    restoreKeptFlags({ storage: undefined, log })
-    expect(lines).toEqual([])
+    restoreKeptFlags({ storage: undefined })
     expect(flagCount.value).toBe(0)
     expect(keepFlags.value).toBe(false)
     globalThis.localStorage = {

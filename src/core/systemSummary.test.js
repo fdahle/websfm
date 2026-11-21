@@ -70,4 +70,10 @@ describe('systemSummaryLines', () => {
     expect(text).toMatch(/Project: none open/)
     expect(text).toMatch(/Missing: WebGPU, Folder projects$/)
   })
+
+  it('names the changed flags, which a run cannot be reproduced without', () => {
+    expect(systemSummaryText(info)).not.toMatch(/Flags/)
+    const lines = systemSummaryLines({ ...info, flags: [{ key: 'sfm.minPnpInlierRatio', value: 0.5, def: 0.3 }] })
+    expect(lines.at(-1)).toBe('Flags changed (Other ▸ Debug ▸ Flags): sfm.minPnpInlierRatio=0.5 (default 0.3)')
+  })
 })
