@@ -23,8 +23,8 @@
 // A comment on the key's own line is help too. A key without a comment shares the help
 // of the key above it (or of its sub-group). A `// ── Title ──` line names a section of
 // the dialog's tree, in the user's words. tuningHelp.test.js holds the help and the
-// section titles of every value the dialog shows (SFM_TUNING, MATCH_TUNING) to this;
-// the other groups follow the same rule.
+// section titles of every value the dialog shows (SFM_TUNING, MATCH_TUNING) and of
+// DETECT_TUNING to this; the other groups follow the same rule.
 
 // Tie-point detection — SuperPoint safety ceiling. Read by core/features/learnedDetect.js
 // (backstop error on OrtRun) AND DetectFeaturesModal.vue (pre-flight tiling prompt), so
@@ -35,46 +35,74 @@
 // Conservative: a 5000×4735 (23.7 MP) input was the observed failure; ≈4000×4000 leaves
 // margin, and the worker's rethrow is the true backstop if a larger input slips past.
 export const DETECT_TUNING = {
-  // The largest image one untiled SIFT pass holds (pixels at the detection size). The
-  // crate's peak is ~60 B/px of wasm memory (measured 2026-11-04, Node, synthetic
+  // The largest image (pixels at the detection size) one SIFT pass detects without
+  // tiles; above it Detect Features asks for Tiling. Memory grows with the pixels and
+  // the browser's 4 GB limit for the detector sits a little above this.
+  //
+  // The crate's peak is ~60 B/px of wasm memory (measured 2026-11-04, Node, synthetic
   // texture: 4 MP 231 MB, 16 MP 917 MB, 36 MP 2.06 GB, 64 MP 3.66 GB), and wasm32 stops
   // at 4 GiB: 74 MP and 100 MP failed ("unreachable"). Above this the Detect Features
   // dialog asks for Tiling (core/features/detectPlan.js); a tile is far below it.
   siftOnePassMaxPx: 64e6,
+  // How often (ms) a detection run's progress record is saved while images finish (each
+  // image's features are saved as it finishes): what a closed or crashed tab must redo.
+  //
   // How often a detection run's journal (core/runJournal.js) is rewritten while images
-  // finish (each image's features are saved as it finishes). `_journalMs` in a run's
-  // settings overrides it; the tests use 0.
+  // finish. `_journalMs` in a run's settings overrides it; the tests use 0.
   journalIntervalMs: 5000,
-  // SIFT keypoints per scale-space extremum: the dominant orientation plus secondary
-  // histogram peaks within 80 % of it (Lowe 2004 §5; COLMAP max_num_orientations = 2).
-  // A feature with two near-equal peaks otherwise gets a different orientation in
-  // different images and stops matching — the short-track failure the 2026-10-05 SB
-  // runs pointed at (38.7k two-view points with no third correspondence). Siblings
-  // count toward maxKeypoints, as in COLMAP. 1 = the pre-2026-10 detector exactly.
-  // Default 1, measured: on South Building with identical matching settings, 2 gave
-  // 60,480 vs 60,189 >=3-view points (+0.5 %, MAT-08 vs MAT-10) for ~20 % more
-  // descriptors to match. Set 2 to reproduce COLMAP's detector.
+  // SIFT keypoints per scale-space extremum: 2 adds a second keypoint for a secondary
+  // orientation peak within 80 % of the strongest, as COLMAP does, so a feature with two
+  // near-equal peaks still matches. It costs about a fifth more descriptors to match.
+  //
+  // Dominant orientation plus secondary histogram peaks within 80 % of it (Lowe 2004 §5;
+  // COLMAP max_num_orientations = 2). A feature with two near-equal peaks otherwise gets
+  // a different orientation in different images and stops matching — the short-track
+  // failure the 2026-10-05 SB runs pointed at (38.7k two-view points with no third
+  // correspondence). Siblings count toward maxKeypoints, as in COLMAP. 1 = the
+  // pre-2026-10 detector exactly. Default 1, measured: on South Building with identical
+  // matching settings, 2 gave 60,480 vs 60,189 >=3-view points (+0.5 %, MAT-08 vs MAT-10)
+  // for ~20 % more descriptors to match. Set 2 to reproduce COLMAP's detector.
   siftMaxOrientations: 1,
-  // Which SIFT keypoints survive maxKeypoints (core/features/keypointCap.js):
+  // Which SIFT keypoints are kept when a photo has more than the keypoint limit:
   // 'coarse-first' keeps the largest scales (COLMAP's rule), 'response' the strongest
-  // |DoG| (the pre-2026-10 rule). Measured on an 8-image SB strip (node bench, ≥3-image
-  // tracks): +1.4 % at 2400 px / 10k, where the cap barely binds, and +10 % at native
-  // 3072 px / 10k, where it binds hard. Response-ranked native 10k scored BELOW 2400 px
-  // 10k: fine-scale texture filled the budget. It matters most where the cap binds.
+  // contrast, which lets fine texture fill the budget. It matters most where the limit
+  // is tight.
+  //
+  // core/features/keypointCap.js. 'response' ranks by |DoG| (the pre-2026-10 rule).
+  // Measured on an 8-image SB strip (node bench, ≥3-image tracks): +1.4 % at 2400 px /
+  // 10k, where the cap barely binds, and +10 % at native 3072 px / 10k, where it binds
+  // hard. Response-ranked native 10k scored BELOW 2400 px 10k: fine-scale texture filled
+  // the budget. It matters most where the cap binds.
   siftCapRule: 'coarse-first',
+  // With the faint-photo retry on, a photo that yields fewer keypoints than this share of
+  // the keypoint limit is detected again at a lower contrast threshold
+  // (siftFaintRetryContrast). Untiled SIFT only.
+  //
   // A faint image — fewer keypoints than this share of the cap at the set contrast —
   // is detected again at siftFaintRetryContrast × that contrast (core/features/
-  // faintRetry.js, which has the measurements). Untiled SIFT only. On or off is the
-  // user's (DETECT_SIFT_DEFAULTS.faintRetry): its cost is in matching, quarry 347
-  // exhaustive +31 %.
+  // faintRetry.js, which has the measurements). On or off is the user's
+  // (DETECT_SIFT_DEFAULTS.faintRetry): its cost is in matching, quarry 347 exhaustive
+  // +31 %.
   siftFaintRetryShare: 0.5,
+  // The retry's contrast threshold, as a multiple of the one set. Lower finds more
+  // keypoints in a faint photo, and more noise.
+  //
+  // See siftFaintRetryShare.
   siftFaintRetryContrast: 0.5,
-  spMaxUntiledInputPx: 16_000_000, // ≈4000×4000; above this (tiling off) → prompt / clean fail
+  // The largest input (pixels) SuperPoint takes in one pass, about 4000 × 4000; above it
+  // detection asks for tiles, since one pass would fail.
+  //
+  // ≈4000×4000; above this (tiling off) → prompt / clean fail. See the group's comment.
+  spMaxUntiledInputPx: 16_000_000,
+  // The largest input (pixels) DISK takes in one pass; above it detection needs tiles.
+  //
   // DISK's U-Net holds 128 float channels at FULL input resolution (SuperPoint
   // downsamples 8× first), i.e. 512 B per input pixel in one tensor, so ORT's int32
   // byte math overflows near 2³¹ / 512 ≈ 4.2 MP. Derived, not yet observed; the
   // worker's overflow rethrow is the backstop either way.
   diskMaxUntiledInputPx: 4_000_000,
+  // The largest input (pixels) ALIKED takes in one pass; above it detection needs tiles.
+  //
   // ALIKED: the same 128 full-resolution channels (its concatenated feature map),
   // so the same derived ceiling.
   alikedMaxUntiledInputPx: 4_000_000,

@@ -178,23 +178,32 @@ describe('tuning.js as it is', () => {
     })
 
     it(`shows ${group} help and section titles a user may read: no dataset, bench number, date or plan`, () => {
-      const keys = parsed[g.exportName]?.keys ?? {}
-      const found = []
-      for (const [k, v] of Object.entries(keys)) {
-        for (const e of evidenceIn(v.help)) found.push(`${group}.${k}: ${e}`)
-      }
-      const sections = [
-        ...new Set(
-          Object.values(keys)
-            .map((v) => v.section)
-            .filter(Boolean),
-        ),
-      ]
-      for (const s of sections) for (const e of evidenceIn(s)) found.push(`section "${s}": ${e}`)
-      expect(found).toEqual([])
+      expect(evidenceInGroup(group, parsed[g.exportName]?.keys ?? {})).toEqual([])
+    })
+  }
+
+  // Groups the dialog does not show (yet), whose comments are written to the same rule.
+  for (const exportName of ['DETECT_TUNING']) {
+    it(`keeps the help of ${exportName} free of evidence too`, () => {
+      const keys = parsed[exportName]?.keys ?? {}
+      expect(Object.keys(keys).length).toBeGreaterThan(0)
+      expect(Object.keys(keys).filter((k) => keys[k].help.length < 10)).toEqual([])
+      expect(evidenceInGroup(exportName, keys)).toEqual([])
     })
   }
 })
+
+// Every piece of evidence in a group's shown help and section titles, as
+// ['sfm.key: a date: "2026-07-10"', …].
+function evidenceInGroup(group, keys) {
+  const found = []
+  for (const [k, v] of Object.entries(keys)) {
+    for (const e of evidenceIn(v.help)) found.push(`${group}.${k}: ${e}`)
+  }
+  const sections = [...new Set(Object.values(keys).map((v) => v.section))].filter(Boolean)
+  for (const s of sections) for (const e of evidenceIn(s)) found.push(`section "${s}": ${e}`)
+  return found
+}
 
 describe('the evidence check', () => {
   // Each line is a piece of evidence the first paragraph of a comment once held.
