@@ -1,4 +1,4 @@
-import { ensureProjection, isGeographic, metresPerCrsUnit } from '../../core/crs.js'
+import { ensureProjection, isGeographic, metresPerCrsUnit, transform } from '../../core/crs.js'
 import { isGroundControl } from '../../core/io/gcp.js'
 import { isImageEnabled, disabledUuids } from '../../core/imageEnabled.js'
 import { precisionFromGcp } from '../../core/gcpAccuracy.js'
@@ -51,7 +51,7 @@ import { useFootprintsStore } from '../useFootprintsStore.js'
 import { demLayerTest } from '../../composables/demLayerTest.js'
 import { demHoldExtent, buildDemHoldGrid } from '../../core/sfm/demHoldGrid.js'
 import { localToGrid, gridToLocal } from '../../core/products/localFrame.js'
-import { datumLabel, isConvertible } from '../../core/verticalDatum.js'
+import { datumLabel, isConvertible, heightShifter, shiftRange } from '../../core/verticalDatum.js'
 
 // The sparse reconstruction run, split out of useReconstructionStore: packing the
 // keypoints, matches and survey constraints for the SfM worker, the memory
@@ -145,6 +145,7 @@ export function createSparseRun({
             correlationXY: g.correlationXY,
             correlationXZ: g.correlationXZ,
             correlationYZ: g.correlationYZ,
+            verticalDatum: g.verticalDatum ?? 'unknown',
             observations: (g.observations || [])
               .map((o) => ({
                 uuid: imgById.get(o.imageId)?.uuid,
@@ -160,7 +161,8 @@ export function createSparseRun({
     // A sensor's GNSS antenna offset makes its images' priors antenna positions.
     const armBySensor = new Map(sensors.value.map((s) => [s.id, normalizeLeverArm(s.gnssLeverArm)]))
     const leverArmFor = (imageId) => armBySensor.get(imgById.get(imageId)?.sensorId) ?? null
-    const cameraPriors = buildCameraPriors(posesStore.poses, images.value, crs, { surveyFrame, leverArmFor })
+    const poses = await posesInControlDatum(posesStore.poses, control, crs)
+    const cameraPriors = buildCameraPriors(poses, images.value, crs, { surveyFrame, leverArmFor })
     if (isGeographic(crs) && cameraPriors.length) {
       log(
         `Camera priors: ${pluralize(cameraPriors.length, 'geographic position')} converted to a ` +
@@ -181,6 +183,53 @@ export function createSparseRun({
       )
     }
     return { gcps, cameraPriors, surveyFrame }
+  }
+
+  // The camera positions with their heights in the GCPs' vertical datum, when both sets
+  // declare one datum each and both convert (core/verticalDatum.js): the solve held to
+  // GCPs then holds the camera heights too (core/sfm/surveyConstraints.js
+  // priorHeightRule). Only imported positions carry a datum (a Metashape project); EXIF
+  // ones are unknown, and the solve tests their heights instead.
+  async function posesInControlDatum(poses, control, crs) {
+    const only = (list) => {
+      const set = new Set(list.map((d) => d ?? 'unknown'))
+      return set.size === 1 ? [...set][0] : null
+    }
+    const from = only(poses.filter((p) => p.enabled !== false).map((p) => p.verticalDatum))
+    const to = only(control.map((g) => g.verticalDatum))
+    if (!from || !to || from === to || !isConvertible(from) || !isConvertible(to)) return poses
+    if (!crs || crs === 'local' || isGeographic(crs)) return poses
+    let shift = null
+    try {
+      shift = await heightShifter(from, to)
+    } catch (err) {
+      log(
+        `Converting the camera heights to the GCPs' datum failed: ${err?.message ?? err}; ` +
+          "Sparse Model moves them onto the GCPs' by the offset it measures between the two",
+        'warn',
+        'Poses',
+      )
+      return poses
+    }
+    const perUnit = metresPerCrsUnit(crs) ?? 1
+    let min = Infinity,
+      max = -Infinity
+    const out = poses.map((p) => {
+      if (p.enabled === false || ![p.x, p.y, p.z].every(Number.isFinite)) return p
+      const dz = shift(...transform([p.x, p.y], crs, 'EPSG:4326'))
+      if (!Number.isFinite(dz)) return p
+      min = Math.min(min, dz)
+      max = Math.max(max, dz)
+      return { ...p, z: p.z + dz / perUnit, verticalDatum: to }
+    })
+    if (Number.isFinite(min))
+      log(
+        `Camera positions: heights converted ${datumLabel(from)} → ${datumLabel(to)} ` +
+          `(${shiftRange({ min, max })}) to match the GCPs in bundle adjustment`,
+        'info',
+        'Poses',
+      )
+    return out
   }
 
   // F13: the frame a model held to a reference DEM by its camera positions was solved

@@ -67,7 +67,6 @@ export const I18N_PENDING = [
   'src/components/modals/images/PanoramicModal.vue',
   'src/components/modals/images/ReduceOverlapModal.vue',
   'src/components/modals/images/ReseauModal.vue',
-  'src/components/modals/import/CameraImportModal.vue',
   'src/components/modals/import/FeatureImportModal.vue',
   'src/components/modals/import/FiducialImportModal.vue',
   'src/components/modals/import/FootprintImportModal.vue',

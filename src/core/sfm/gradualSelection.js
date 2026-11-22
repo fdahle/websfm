@@ -136,7 +136,7 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
     cameraPriors,
     uuidList,
     minCameras: SFM_TUNING.cameraPriorBaMinCameras,
-    reference: anchorSetup ? { fit: anchorSetup.fit, frame: anchorSetup.frame } : null,
+    reference: anchorSetup ? { fit: anchorSetup.fit, frame: anchorSetup.frame, control: anchorSetup.control } : null,
   })
   const constrained = !!(anchorSetup || priorSet)
   const lenses = entries.map(([id]) => lensOf?.(id) ?? null)

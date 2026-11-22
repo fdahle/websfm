@@ -206,6 +206,7 @@ export function buildCameraPriors(poses, images, crs, { surveyFrame = null, leve
       accuracyPhi: pose.accuracyPhi,
       accuracyKappa: pose.accuracyKappa,
       source: pose.source,
+      verticalDatum: pose.verticalDatum ?? 'unknown',
       ...(geographic ? { metricFrame: 'local-geographic' } : frame ? { metricFrame: 'local-projected' } : {}),
     }
   })

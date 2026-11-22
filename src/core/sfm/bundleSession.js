@@ -28,6 +28,7 @@ import {
   buildCameraPriorConstraints as buildSurveyPriorConstraints,
   qualifyingGcps,
   buildGcpAnchors,
+  priorHeightResidual,
 } from './surveyConstraints.js'
 import { surveyGradePositions } from './cameraPriors.js'
 import { compareRobustCost, projectFullXYZ, solveVerdict } from './baAcceptance.js'
@@ -345,7 +346,50 @@ export function createBundleSession(ctx) {
       uuidList,
       minCameras: cfg.cameraPriorBaMinCameras,
       reference,
+      heightTest: {
+        sigmas: cfg.priorHeightOffsetSigmas,
+        heightFrac: cfg.priorHeightOffsetHeightFrac,
+      },
     })
+
+  // Whether the camera heights joined the GCPs in the anchored solve
+  // (surveyConstraints.js priorHeightRule), said once per run when they did not.
+  let heightsNoted = false
+  const noteHeldHeights = (heights) => {
+    if (!heights || heights.held || heightsNoted) return
+    heightsNoted = true
+    const m = (v) => `${(v / heights.perMetre).toFixed(2)} m`
+    const why =
+      heights.rule === 'plan'
+        ? `their heights are in ${heights.datums.priors.join(' / ')} and the GCPs' in ` +
+          `${heights.datums.gcps.join(' / ')}, which do not convert into each other`
+        : `their heights sit ${m(Math.abs(heights.offset))} ${heights.offset > 0 ? 'above' : 'below'} the cameras ` +
+          `the GCPs place (median of ${heights.n}), more than noise or a focal error explains ` +
+          `(${m(heights.limit)}): most likely another vertical datum, such as ellipsoidal heights from ` +
+          `the drone and orthometric heights from the survey`
+    log(
+      `GCP-anchored bundle adjustment: the camera heights are moved by ${m(-heights.offset)} onto the GCPs', ` +
+        `as ${why}. The GCPs set the heights; the cameras' height differences still hold the block`,
+      'warn',
+      'Sparse',
+    )
+  }
+
+  // After a joint solve that held the camera heights: a mean offset of several σ Z
+  // between them and the cameras is a datum offset too small for the test before it.
+  const noteHeightResidual = (uuidList, frame) => {
+    const r = priorHeightResidual({ cameras, cameraPriors, uuidList, frame })
+    if (!r || !(Math.abs(r.offset) > cfg.priorHeightResidualSigmas * r.sigmaZ)) return
+    const perMetre = cameraPriors.find((p) => p.unitsPerMetre)?.unitsPerMetre ?? 1
+    log(
+      `GCP-anchored bundle adjustment: the camera positions sit ${(Math.abs(r.offset) / perMetre).toFixed(2)} m ` +
+        `${r.offset > 0 ? 'above' : 'below'} the solved cameras on average (${r.n} cameras, σ Z ` +
+        `${(r.sigmaZ / perMetre).toFixed(2)} m). Check that the camera positions, their GNSS antenna offset ` +
+        `and the GCPs share one vertical datum`,
+      'warn',
+      'Sparse',
+    )
+  }
 
   // Survey-grade positions that a prior solve can use on these cameras, or null.
   const positionsHoldBlock = (uuidList) => {
@@ -684,6 +728,7 @@ export function createBundleSession(ctx) {
             maxGuessFocalNominalFrac: cfg.selfCalGuessFocalNominalFrac,
             maxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
             maxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
+            maxDecentring: cfg.selfCalMaxDecentring,
           },
         )
         proposals.push({
@@ -942,6 +987,8 @@ export function createBundleSession(ctx) {
       return
     }
 
+    // The last solve that held the camera heights with the GCPs, checked after both rounds.
+    let heldHeights = null
     for (let round = 0; round < 2; round++) {
       const uuidList = [...cameras.keys()]
       prepareRollingShutter()
@@ -953,12 +1000,14 @@ export function createBundleSession(ctx) {
       const setup = await buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPointIndex: ptIds.length })
       if (setup.error) {
         log(`GCP anchoring stopped (${setup.error})`, 'warn', 'Sparse')
-        return
+        break
       }
       const { fit, frame, anchorPts, anchors } = setup
       // GCPs define the one project↔SfM similarity for all survey constraints
-      // in this joint pass, keeping point and camera targets in the same gauge.
-      const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame })
+      // in this joint pass, keeping point and camera targets in the same gauge. The
+      // camera heights join only in the GCPs' vertical datum (priorHeightRule).
+      const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame, control: setup.control })
+      noteHeldHeights(constrainedCameras?.heights)
 
       log(
         `GCP-anchored bundle adjustment (round ${round + 1}/2) — ` +
@@ -987,8 +1036,9 @@ export function createBundleSession(ctx) {
           gcpMode,
           { cameraPriors: constrainedCameras?.priors ?? null, gcp: setup, lensSigma: true },
         )
-        if (!r) return
+        if (!r) break
         controlHeld = true
+        heldHeights = constrainedCameras?.heights?.held ? { uuidList, frame } : null
         log(
           `GCP-anchored bundle adjustment anchor residual → ${(r.anchorRmsAfter * fit.scale).toPrecision(3)} project units`,
           'info',
@@ -1017,7 +1067,7 @@ export function createBundleSession(ctx) {
       noteBaSolver(`GCP-anchored bundle adjustment (round ${round + 1})`, result)
       if (!result) {
         log('GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Sparse')
-        return
+        break
       }
       // Like a camera-prior solve, an anchored solve is SUPPOSED to trade some image
       // residual for geometry: pulling a domed or bent free network onto its control
@@ -1031,7 +1081,7 @@ export function createBundleSession(ctx) {
           'warn',
           'Sparse',
         )
-        return
+        break
       }
       uuidList.forEach((uuid, ci) => {
         cameras.set(uuid, { ...cameras.get(uuid), ...result.cameras[ci] })
@@ -1040,6 +1090,7 @@ export function createBundleSession(ctx) {
       // points were scratch space for this BA pass, not real SIFT tracks.
       setTrackPositions(ptIds, result.pos)
       controlHeld = true
+      heldHeights = constrainedCameras?.heights?.held ? { uuidList, frame } : null
       log(
         `GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → ` +
           `${result.costAfter.toFixed(2)}px, anchor residual → ${(result.anchorRmsAfter * fit.scale).toPrecision(3)} project units` +
@@ -1050,6 +1101,7 @@ export function createBundleSession(ctx) {
         'Sparse',
       )
     }
+    if (heldHeights) noteHeightResidual(heldHeights.uuidList, heldHeights.frame)
   }
 
   // F13 — Georeference ▸ Hold to a reference DEM: the settled model solved again with
@@ -1087,7 +1139,7 @@ export function createBundleSession(ctx) {
       }
       const priorSet = buildCameraPriorConstraints(
         uuidList,
-        gcpSetup ? { fit: gcpSetup.fit, frame: gcpSetup.frame } : null,
+        gcpSetup ? { fit: gcpSetup.fit, frame: gcpSetup.frame, control: gcpSetup.control } : null,
       )
       if (gcpSetup) return { gcpSetup, priorSet, frame: gcpSetup.frame, fit: gcpSetup.fit, source: 'gcps' }
       if (priorSet) {

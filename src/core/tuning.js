@@ -457,6 +457,37 @@ export const SFM_TUNING = {
   // Four suffice, three do not (three fit the similarity exactly): with 3, Casa Grande
   // 28 → 18 m, Iceland 331 m either way (gcpw-3ctl-2026-11-18).
   gcpRefineIntrinsicsMinGcps: 4,
+  // ── Camera heights and GCP heights ──
+  // When the vertical datum of the camera positions or of the GCPs is unknown, the
+  // positions' heights join the solve held to GCPs only if they agree with the GCPs
+  // within this many of their own height σ. Above it (and above
+  // priorHeightOffsetHeightFrac), their heights are moved onto the GCPs' by the
+  // offset between the two. Lower it to
+  // drop disagreeing heights sooner.
+  //
+  // surveyConstraints.js priorHeights. Over a nadir block a datum offset N between RTK
+  // heights and GCP heights is settled through the focal (error ≈ N / flying height) with
+  // every residual small: in the 11-22 review's synthetic block (27 cameras at 60 m, σ 2 cm
+  // GCPs, σ 3 cm heights), N = 5 m gave fx +8 % and relief +8 %, N = 43 m fx +70 %.
+  priorHeightOffsetSigmas: 5,
+  // The other half of that test: an offset under this share of the cameras' height above
+  // the GCPs is left to the solve, since a focal error of that size moves the cameras as
+  // much. Lower it to drop disagreeing heights sooner, at the cost of the heights no longer
+  // correcting a focal error that large.
+  //
+  // See priorHeightOffsetSigmas. A datum offset and a focal error ε both shift every
+  // camera height of a nadir block alike (ε·H), so only the size tells them apart: 2 %
+  // is a large self-calibration focal error, and geoid undulations are mostly tens of
+  // metres (the Netherlands about 43 m) against flying heights of 50–150 m.
+  priorHeightOffsetHeightFrac: 0.02,
+  // After the solve held to GCPs and camera heights, a warning when the camera positions
+  // sit on average more than this many of their height σ above or below the cameras: a
+  // datum or antenna-offset error too small to drop them. Raise it to warn less.
+  //
+  // bundleSession.js noteHeightResidual. Meant for offsets like the quarry block's
+  // suspected one (+18 cm in Metashape, BENCHMARKS ▸ quarry), which the test before the
+  // solve leaves held.
+  priorHeightResidualSigmas: 5,
   // ── Focal–height warning ──
   // A nadir block held by survey-grade camera positions alone, its focal self-calibrated,
   // gets a warning when the camera heights vary by less than this share of the flying
@@ -543,11 +574,19 @@ export const SFM_TUNING = {
   //
   // See selfCalMaxFocalStepFrac.
   selfCalMaxPrincipalOffsetFrac: 0.1,
-  // Self-calibration guard: the radial distortion may shift a photo's corner by at most
-  // this fraction of its diagonal.
+  // Self-calibration guard: the lens distortion (radial and decentring) may shift a
+  // photo's corner by at most this fraction of its diagonal.
   //
   // See selfCalMaxFocalStepFrac.
   selfCalMaxCornerShiftFrac: 0.25,
+  // Self-calibration guard: the largest decentring term (p1, p2) a solve may propose.
+  // Real lenses are a few ten-thousandths; lower it to reject a decentring that trades
+  // against the principal point sooner.
+  //
+  // Review of 2026-11-22 (finding B): the corner check measured the radial terms only,
+  // and p1 = p2 = 0.1 moved a 4,000 × 3,000 corner by 876 px (17.5 % of the diagonal) and
+  // passed. PUTI's are 0.00019 / −0.00006 (BENCHMARKS ▸ PUTI).
+  selfCalMaxDecentring: 0.01,
   // The focal step bound when the starting focal is only a field-of-view guess (no EXIF
   // focal, no sensor format), which is no evidence: wider, so the solve can reach the
   // real focal.

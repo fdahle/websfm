@@ -19,8 +19,18 @@ Mixing the two is a systematic error the size of a building. A whole DEM then
 looks uniformly too high or too low, and a fit tilts or rescales to absorb it.
 
 WebSfM converts between ellipsoidal heights, EGM96 and EGM2008 with the NGA
-geoid grids it ships at 15′ spacing. Against the full models that is good to
-5 mm for EGM96, and for EGM2008 to 1 cm typically and 8 cm (p95) over Antarctica.
-Under high mountains it can be off by up to half a metre. A national height system
-(NAVD88, DHHN2016 …) or a local datum is recorded but never converted, because
-its own geoid model is not built in.
+geoid grids it ships: EGM96 at 15′, EGM2008 at 5′. Against the full models that is
+good to 5 mm for EGM96, and for EGM2008 to a few millimetres typically and 4 cm in
+all but the steepest mountain geoid. A national height system (NAVD88, DHHN2016 …)
+or a local datum is recorded but never converted, because its own geoid model is
+not built in.
+
+**Camera positions and GCPs together.** A drone's RTK heights are usually
+ellipsoidal and surveyed GCPs often orthometric. Held in one bundle adjustment, the
+difference would be absorbed by the focal length, and the whole model's relief
+scaled with it. So WebSfM converts the camera heights into the GCPs' datum when both
+are declared (Import ▸ Camera Poses ▸ Height datum, the GCP table's Height datum)
+and convertible. When either is unknown, as with heights read from
+EXIF, it compares them: if they disagree by more than their noise, it moves the
+camera heights onto the GCPs' by the offset between the two. The GCPs then set the
+heights, the cameras' height differences still hold the block, and the log says so.

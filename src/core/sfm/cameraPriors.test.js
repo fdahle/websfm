@@ -56,6 +56,7 @@ describe('buildCameraPriors', () => {
         accuracyOmega: 0.1,
         accuracyPhi: 0.2,
         accuracyKappa: 0.3,
+        verticalDatum: 'unknown',
       },
     ])
   })

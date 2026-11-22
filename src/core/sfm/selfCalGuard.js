@@ -5,13 +5,19 @@
 // sparse pipeline folds accepted distortion into every keypoint, so validation must run
 // before cameras, points, Kmap, or keypoints are mutated.
 
+import { distortNormalized } from './distortion.js'
+
 const finite = (v) => Number.isFinite(v)
 
 export const SELF_CAL_GUARD_DEFAULTS = {
   maxFocalStepFrac: 0.25, // one BA pass may not move focal by more than 25%
   maxFocalNominalFrac: 0.35, // nor end >35% from the ingest/EXIF focal
   maxPrincipalOffsetFrac: 0.1, // principal point must remain within 10% of image size of centre
-  maxCornerShiftFrac: 0.25, // radial displacement at a corner, relative to image diagonal
+  maxCornerShiftFrac: 0.25, // lens displacement at a corner (radial + decentring), relative to image diagonal
+  // Decentring p1, p2: real lenses are ~1e-4 (an RTK drone's 0.00019 / −0.00006). They
+  // free with the principal point, earlier than k3, where the two trade off; 0.1 moves a
+  // 4000×3000 corner by 876 px and still passed the radial-only corner check.
+  maxDecentring: 0.01,
   // When the starting focal is resolveK's default-FOV guess (fx = max(w,h): no EXIF focal,
   // no sensor format), that "nominal" is not evidence. A 153 mm lens on a 230 mm film
   // frame sits 33% below it, an 88 mm super-wide 62%. The 25% / 35% bounds above rejected
@@ -150,8 +156,17 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
       return bad ? fail(bad.reason, bad.code) : { ok: true, code: null, reason: null, stepFrac, nominalFrac }
     }
 
-    // Check the proposed forward radial map at all four corners. A negative scale
+    const pMax = Math.max(Math.abs(proposed.p1 || 0), Math.abs(proposed.p2 || 0))
+    if (!finite(pMax) || pMax > c.maxDecentring) {
+      return fail(
+        `decentring |p| ${pMax.toPrecision(2)} exceeds the ${c.maxDecentring} plausibility limit`,
+        'decentring',
+      )
+    }
+
+    // Check the proposed forward lens map at all four corners. A negative radial scale
     // folds the image; a very large displacement is almost always thin-block overfit.
+    // The shift counts the decentring terms with the radial ones (bundle.rs distort_norm).
     let maxShift = 0
     for (const [x, y] of [
       [0, 0],
@@ -166,12 +181,19 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
       if (!finite(scale) || scale <= 0 || !invertibleTo(proposed, Math.sqrt(r2))) {
         return fail('radial curve folds or becomes non-finite before the image corner', 'radial-fold')
       }
-      maxShift = Math.max(maxShift, Math.hypot(nx * (scale - 1) * proposed.fx, ny * (scale - 1) * proposed.fy))
+      const [xd, yd] = distortNormalized(nx, ny, {
+        k1: proposed.k1,
+        k2: proposed.k2,
+        k3: proposed.k3,
+        p1: proposed.p1,
+        p2: proposed.p2,
+      })
+      maxShift = Math.max(maxShift, Math.hypot((xd - nx) * proposed.fx, (yd - ny) * proposed.fy))
     }
     const shiftFrac = maxShift / Math.hypot(width, height)
-    if (shiftFrac > c.maxCornerShiftFrac) {
+    if (!(shiftFrac <= c.maxCornerShiftFrac)) {
       return fail(
-        `radial corner shift ${(100 * shiftFrac).toFixed(1)}% exceeds the ${(100 * c.maxCornerShiftFrac).toFixed(0)}% image-diagonal limit`,
+        `lens corner shift ${(100 * shiftFrac).toFixed(1)}% exceeds the ${(100 * c.maxCornerShiftFrac).toFixed(0)}% image-diagonal limit`,
         'radial-shift',
       )
     }

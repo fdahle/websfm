@@ -10,6 +10,7 @@ import exportDialog from './export.js'
 import filterCloud from './filterCloud.js'
 import flags from './flags.js'
 import gcps from './gcps.js'
+import importCameras from './importCameras.js'
 import importSfm from './importSfm.js'
 import mapLayers from './mapLayers.js'
 import matchList from './matchList.js'
@@ -35,6 +36,7 @@ export default {
   filterCloud,
   flags,
   gcps,
+  importCameras,
   importSfm,
   mapLayers,
   matchList,

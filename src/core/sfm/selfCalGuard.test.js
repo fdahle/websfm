@@ -45,6 +45,34 @@ describe('validateSelfCalUpdate', () => {
     expect(at({ k1: -0.15, k2: 0.02 }).ok).toBe(true)
   })
 
+  // Review of 2026-11-22, finding B: the corner check saw the radial terms only.
+  describe('decentring p1, p2', () => {
+    const at = (p, opts) =>
+      validateSelfCalUpdate(
+        {
+          before: { fx: 3000, fy: 3000, cx: 2000, cy: 1500 },
+          proposed: { fx: 3000, fy: 3000, cx: 2000, cy: 1500, ...p },
+          nominalFx: 3000,
+          width: 4000,
+          height: 3000,
+        },
+        opts,
+      )
+    it('rejects decentring far beyond a real lens, keeps a real one', () => {
+      expect(at({ p1: 0.1, p2: 0.1 }).code).toBe('decentring')
+      expect(at({ p1: -0.02 }).code).toBe('decentring')
+      expect(at({ p1: 0.00019, p2: -0.00006 }).ok).toBe(true)
+    })
+    it('counts the decentring shift at the corners', () => {
+      // p1 = p2 = 0.1 at a 4000×3000 corner: Δ = 0.1·(2ab + r² + 2a²) ≈ 0.29 in normalised
+      // units, 876 px, 17.5 % of the diagonal. Above a 15 % limit, rejected as a shift.
+      const v = at({ p1: 0.1, p2: 0.1 }, { maxDecentring: 1, maxCornerShiftFrac: 0.15 })
+      expect(v.code).toBe('radial-shift')
+      expect(v.reason).toMatch(/17\.5%/)
+      expect(at({ p1: 0.1, p2: 0.1 }, { maxDecentring: 1, maxCornerShiftFrac: 0.2 }).ok).toBe(true)
+    })
+  })
+
   it('rejects a folded radial curve and a runaway principal point', () => {
     expect(validateSelfCalUpdate(input({ k1: -10 })).code).toBe('radial-fold')
     expect(validateSelfCalUpdate(input({ cx: 2200 })).code).toBe('principal-point')

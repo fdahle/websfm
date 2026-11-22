@@ -22,7 +22,13 @@ import {
   guessPoseCrs,
 } from '../../../core/io/pose.js'
 import { useDelimitedImport } from '../../../composables/useDelimitedImport.js'
+import { useI18n } from '../../../composables/useI18n.js'
 import { axisLabels } from '../../../core/crs.js'
+import { VERTICAL_DATUMS } from '../../../core/verticalDatum.js'
+import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
+import I18nText from '../../I18nText.vue'
+
+const { t } = useI18n()
 
 // Imports camera parameters from delimited text in one of two modes:
 //   - 'sensor' : intrinsics — one row per sensor, or per image with an image
@@ -50,6 +56,12 @@ const props = defineProps({
 const emit = defineEmits(['close', 'import', 'switch-kind'])
 
 const mode = ref(props.detectedMode === 'sensor' ? 'sensor' : 'pose')
+// The positions' height datum (core/verticalDatum.js), "Not set" first: with GCPs in
+// another datum, Sparse Model converts declared heights (sparseRun.js
+// posesInControlDatum) and tests undeclared ones (surveyConstraints.js priorHeights).
+const verticalDatum = ref('unknown')
+const DATUM_IDS = ['unknown', ...VERTICAL_DATUMS.map((d) => d.id).filter((id) => id !== 'unknown')]
+const datumLabel = (id) => t(`gcps.datum.${id.replace(':', '')}`)
 // The positions' CRS: the project CRS unless the mapped columns are lon/lat (then
 // WGS 84), until the user picks one.
 const sourceCrsChoice = ref(null)
@@ -81,13 +93,13 @@ const axes = computed(() => axisLabels(sourceCrs.value))
 const roleLabel = (id) => {
   if (mode.value === 'pose') {
     const axis = { x: 0, y: 1, z: 2 }[id]
-    if (axis != null) return `Abs ${axes.value[axis]}`
+    if (axis != null) return t('importCameras.abs', { axis: axes.value[axis] })
   }
   return ROLE_LABELS.value[id]
 }
 
 const roleOptions = computed(() => [
-  { id: 'ignore', label: 'Ignore' },
+  { id: 'ignore', label: t('importCameras.ignore') },
   ...ROLES.value.map((id) => ({ id, label: roleLabel(id) })),
 ])
 
@@ -152,27 +164,25 @@ const outcomes = computed(() =>
 // The file's label, else the images it covers, else its place in the file.
 function sensorName(s, i) {
   if (s.label) return s.label
-  if (s.images?.length) return s.images.length > 1 ? `${s.images[0]} +${s.images.length - 1} more` : s.images[0]
-  return outcomes.value.length > 1 ? `Sensor ${i + 1} in file` : 'Sensor in file'
+  if (s.images?.length)
+    return s.images.length > 1
+      ? t('importCameras.sensorImages', { first: s.images[0], n: s.images.length - 1 })
+      : s.images[0]
+  return outcomes.value.length > 1 ? t('importCameras.sensorAt', { n: i + 1 }) : t('importCameras.sensorOnly')
 }
 const fmt = (v) => (Number.isInteger(v) ? String(v) : String(+v.toFixed(6)))
 function describeSensor(s) {
   const parts = []
-  if (s.focal != null) parts.push(`f ${fmt(s.focal)} ${s.focalUnit}`)
-  if (s.width != null && s.height != null) parts.push(`${s.width}×${s.height} px`)
-  if (s.pixelSize != null) parts.push(`pixel ${fmt(s.pixelSize)} mm`)
-  if (s.cx != null || s.cy != null || s.ppxMm != null || s.ppyMm != null) parts.push('principal point')
-  if (s.distortionModel) parts.push(`lens ${s.distortionModel}`)
-  if (['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2'].some((k) => s[k] != null)) parts.push('distortion')
-  if (s.marks) parts.push(`${s.marks.length} fiducial marks`)
+  const part = (key, params) => parts.push(t(`importCameras.part.${key}`, params))
+  if (s.focal != null) part('focal', { f: fmt(s.focal), unit: s.focalUnit })
+  if (s.width != null && s.height != null) part('size', { w: s.width, h: s.height })
+  if (s.pixelSize != null) part('pixel', { size: fmt(s.pixelSize) })
+  if (s.cx != null || s.cy != null || s.ppxMm != null || s.ppyMm != null) part('principal')
+  if (s.distortionModel) part('lens', { model: s.distortionModel })
+  if (['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2'].some((k) => s[k] != null)) part('distortion')
+  if (s.marks) part('marks', { n: s.marks.length })
   return parts.join(' · ')
 }
-const REASON = {
-  label: 'same label',
-  images: 'the sensor of exactly these images',
-  sole: "the project's only sensor",
-}
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 // Sensors every one of whose images this import moves elsewhere: they stay in the
 // project (with their values) but are left without images, which the user should know.
@@ -188,12 +198,14 @@ const emptied = computed(() => {
   return props.sensors.filter((s) => left.get(s.id) === 0)
 })
 
+// Why a target was chosen by itself: same label, exactly these images, the only sensor.
+const AUTO_REASONS = new Set(['label', 'images', 'sole'])
 function describeOutcome(o, i) {
-  const moved = o.imageIds.length ? `, ${plural(o.imageIds.length, 'image')} assigned` : ''
-  if (!o.target) return `New sensor${moved || ', no images assigned yet'}`
-  const t = sensorById.value.get(o.target)
-  const auto = o.target === plan.value[i]?.target && REASON[o.reason] ? ` (${REASON[o.reason]})` : ''
-  return `Updates ${t?.label ?? 'sensor'}${auto}${moved}`
+  const n = o.imageIds.length
+  if (!o.target) return t('importCameras.outcomeNew', { n })
+  const target = sensorById.value.get(o.target)
+  const why = o.target === plan.value[i]?.target && AUTO_REASONS.has(o.reason) ? o.reason : 'none'
+  return t('importCameras.outcomeUpdate', { name: target?.label ?? o.target, why, n })
 }
 
 const sensorCount = computed(() => (mode.value === 'sensor' ? built.value.sensors.length : 0))
@@ -208,10 +220,10 @@ const canImport = computed(() =>
 // Why Import is greyed (its tooltip).
 const importReason = computed(() => {
   if (canImport.value) return null
-  if (mode.value === 'sensor') return 'No camera calibrations found in the file'
-  if (!hasImage.value) return 'Choose the column with the image names'
-  if (!hasXY.value) return 'Choose the X and Y columns'
-  return 'No rows with a position were found'
+  if (mode.value === 'sensor') return t('importCameras.reason.noSensors')
+  if (!hasImage.value) return t('importCameras.reason.noImage')
+  if (!hasXY.value) return t('importCameras.reason.noXY')
+  return t('importCameras.reason.noRows')
 })
 
 function doImport() {
@@ -221,14 +233,19 @@ function doImport() {
       mode: 'sensor',
       items: outcomes.value.map((o) => ({ sensor: o.sensor, targetId: o.target, imageIds: o.imageIds })),
     })
-  } else emit('import', { mode: 'pose', poses: built.value.poses, sourceCrs: sourceCrs.value })
+  } else {
+    const datum = verticalDatum.value
+    const poses =
+      datum === 'unknown' ? built.value.poses : built.value.poses.map((p) => ({ ...p, verticalDatum: datum }))
+    emit('import', { mode: 'pose', poses, sourceCrs: sourceCrs.value })
+  }
 }
 </script>
 
 <template>
   <ModalShell
-    title="Import Camera Parameters"
-    aria-label="Import camera parameters"
+    :title="t('importCameras.title')"
+    :aria-label="t('importCameras.title')"
     width="760px"
     flush
     @close="emit('close')"
@@ -240,33 +257,38 @@ function doImport() {
 
       <div class="controls">
         <div class="ctrl">
-          <label class="ctrl-label">Delimiter</label>
+          <label class="ctrl-label">{{ t('importCameras.delimiter') }}</label>
           <select v-model="delimiter" class="ctrl-input">
             <option v-for="d in DELIMITER_OPTIONS" :key="d.id" :value="d.id">{{ d.label }}</option>
           </select>
         </div>
         <label class="ctrl-check">
           <input type="checkbox" v-model="hasHeader" />
-          First row is a header
+          {{ t('importCameras.header') }}
         </label>
         <div v-if="mode === 'sensor' && mapping.focal != null" class="ctrl">
-          <label class="ctrl-label" for="focal-unit">Focal length in</label>
+          <label class="ctrl-label" for="focal-unit">{{ t('importCameras.focalUnit') }}</label>
           <select id="focal-unit" v-model="focalUnit" class="ctrl-input">
-            <option value="mm">mm</option>
-            <option value="px">pixels</option>
+            <option value="mm">{{ t('importCameras.unit.mm') }}</option>
+            <option value="px">{{ t('importCameras.unit.px') }}</option>
           </select>
         </div>
         <div v-if="mode === 'pose'" class="ctrl ctrl-crs">
-          <label class="ctrl-label">Source CRS of these positions</label>
+          <label class="ctrl-label">{{ t('importCameras.sourceCrs') }}</label>
           <CrsPicker v-model="sourceCrs" />
+        </div>
+        <div v-if="mode === 'pose'" class="ctrl" :title="t('importCameras.datumTip')">
+          <label class="ctrl-label" for="pose-datum"
+            ><GlossaryTerm id="vertical-datum">{{ t('importCameras.datum') }}</GlossaryTerm></label
+          >
+          <select id="pose-datum" v-model="verticalDatum" class="ctrl-input">
+            <option v-for="id in DATUM_IDS" :key="id" :value="id">{{ datumLabel(id) }}</option>
+          </select>
         </div>
       </div>
 
-      <label class="section-label">Column mapping</label>
-      <p v-if="mode === 'pose'" class="kind-note">
-        Accuracies are 1σ values. Position accuracies constrain reconstruction; orientation accuracies constrain omega,
-        phi and kappa.
-      </p>
+      <label class="section-label">{{ t('importCameras.mapping') }}</label>
+      <p v-if="mode === 'pose'" class="kind-note">{{ t('importCameras.poseNote') }}</p>
       <ColumnMappingTable
         :column-count="columnCount"
         :column-roles="columnRoles"
@@ -278,7 +300,7 @@ function doImport() {
       />
 
       <template v-if="mode === 'sensor' && outcomes.length">
-        <label class="section-label targets-label">Where it goes</label>
+        <label class="section-label targets-label">{{ t('importCameras.targets') }}</label>
         <ul class="targets">
           <li v-for="(o, i) in outcomes" :key="i" class="target-row">
             <div class="target-what">
@@ -288,58 +310,52 @@ function doImport() {
             <select
               class="ctrl-input target-select"
               :value="o.target ?? ''"
-              :aria-label="`Target for imported sensor ${i + 1}`"
+              :aria-label="t('importCameras.targetFor', { n: i + 1 })"
               @change="setTarget(i, $event.target.value)"
             >
-              <option value="">New sensor</option>
+              <option value="">{{ t('importCameras.newSensor') }}</option>
               <option v-for="s in sensors" :key="s.id" :value="s.id">
-                Update {{ s.label }} ({{ plural(imageCount.get(s.id) ?? 0, 'image') }})
+                {{ t('importCameras.updateSensor', { name: s.label, n: imageCount.get(s.id) ?? 0 }) }}
               </option>
             </select>
             <div class="target-outcome">
               {{ describeOutcome(o, i) }}
               <span v-if="o.unmatched.length" class="warn">
-                · {{ o.unmatched.length }} image name{{ o.unmatched.length === 1 ? '' : 's' }} not in the project</span
+                {{ t('importCameras.unmatched', { n: o.unmatched.length }) }}</span
               >
             </div>
           </li>
         </ul>
         <p v-if="emptied.length" class="kind-note emptied">
-          {{ emptied.map((s) => s.label).join(', ') }} will have no images left; remove
-          {{ emptied.length === 1 ? 'it' : 'them' }}
-          in the sensor table if no longer needed.
+          {{ t('importCameras.emptied', { names: emptied.map((s) => s.label).join(', '), n: emptied.length }) }}
         </p>
       </template>
 
       <div class="summary">
         <template v-if="mode === 'sensor'">
           <span v-if="sensorCount" class="ok"
-            >{{ sensorCount }} sensor{{ sensorCount === 1 ? '' : 's'
-            }}<template v-if="built.skipped">
-              · {{ built.skipped }} row{{ built.skipped === 1 ? '' : 's' }} skipped</template
-            ></span
+            >{{ t('importCameras.sensors', { n: sensorCount })
+            }}{{ built.skipped ? t('importCameras.skipped', { n: built.skipped }) : '' }}</span
           >
-          <span v-else class="warn">Assign at least one intrinsic column (focal, dimensions…).</span>
+          <span v-else class="warn">{{ t('importCameras.needIntrinsic') }}</span>
         </template>
         <template v-else>
-          <span v-if="!hasImage" class="warn">Assign an <b>Image name</b> column.</span>
+          <span v-if="!hasImage" class="warn"><I18nText k="importCameras.needImage" /></span>
           <span v-else-if="!hasXY" class="warn"
-            >Assign <b>Abs {{ axes[0] }}</b> and <b>Abs {{ axes[1] }}</b> columns.</span
-          >
+            ><I18nText k="importCameras.needXY" :params="{ x: axes[0], y: axes[1] }"
+          /></span>
           <span v-else class="ok"
-            >{{ poseCount }} pose{{ poseCount === 1 ? '' : 's'
-            }}<template v-if="built.skipped">
-              · {{ built.skipped }} row{{ built.skipped === 1 ? '' : 's' }} skipped</template
-            ></span
+            >{{ t('importCameras.poses', { n: poseCount })
+            }}{{ built.skipped ? t('importCameras.skipped', { n: built.skipped }) : '' }}</span
           >
         </template>
       </div>
     </div>
 
     <template #footer>
-      <button class="btn" @click="emit('close')">Cancel</button>
+      <button class="btn" @click="emit('close')">{{ t('common.cancel') }}</button>
       <button class="btn btn-primary" :disabled="!canImport" :title="importReason" @click="doImport">
-        {{ mode === 'sensor' ? 'Import calibration' : 'Import poses' }}
+        {{ mode === 'sensor' ? t('importCameras.importCalibration') : t('importCameras.importPoses') }}
       </button>
     </template>
   </ModalShell>
