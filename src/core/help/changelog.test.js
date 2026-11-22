@@ -165,6 +165,13 @@ describe('CHANGELOG.md', () => {
     expect(latestRelease(rel)).toBe(pkg.version)
   })
 
+  it('names the version package-lock.json has too', () => {
+    const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
+    const newest = latestRelease(rel)
+    expect(lock.version).toBe(newest)
+    expect(lock.packages[''].version).toBe(newest)
+  })
+
   it('uses only the Keep a Changelog section names', () => {
     const known = new Set(['Added', 'Changed', 'Performance', 'Fixed', 'Removed', 'Deprecated', 'Security', null])
     for (const r of rel) for (const s of r.sections) expect(known.has(s.title), `${r.version}: ${s.title}`).toBe(true)
