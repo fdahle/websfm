@@ -102,7 +102,7 @@ export default {
     pose: 'Kamerapositionen',
     sensor: 'Innere Orientierung',
     declared:
-      'Import als <strong>{kind}</strong>. Nicht richtig? Als <first>{first}</first> oder <second>{second}</second> importieren.',
+      'Import als <strong>{kind}</strong>. Nicht richtig? Als <first>{firstKind}</first> oder <second>{secondKind}</second> importieren.',
   },
 
   fileName: {

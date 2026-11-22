@@ -92,6 +92,32 @@ describe('catalogues', () => {
         expect(() => new IntlMessageFormat(source, lang), `${lang} ${key}`).not.toThrow()
   })
 
+  // Tags and parameters reach the formatter in one object, so a parameter named like a
+  // tag replaces the tag's function and the message throws as it renders. In 0.9.0 the
+  // "Importing as … Not right? Import as <first>{first}</first>" note did, and the dialog
+  // of every ribbon Import of camera poses, calibration or GCPs never opened.
+  it('never name a parameter like a tag', () => {
+    const TAG = 8
+    for (const [lang, cat] of Object.entries(CATALOGS))
+      for (const [key, source] of Object.entries(cat)) {
+        const tags = new Set(),
+          args = new Set()
+        const walk = (els) => {
+          for (const el of els) {
+            if (el.type === TAG) tags.add(el.value)
+            else if (el.type !== 0 && typeof el.value === 'string') args.add(el.value)
+            for (const opt of Object.values(el.options ?? {})) walk(opt.value)
+            if (el.children) walk(el.children)
+          }
+        }
+        walk(new IntlMessageFormat(source, lang).getAst())
+        expect(
+          [...tags].filter((tag) => args.has(tag)),
+          `${lang} ${key}`,
+        ).toEqual([])
+      }
+  })
+
   it('hold, in every other language, only English keys, with the same arguments', () => {
     for (const [lang, cat] of Object.entries(CATALOGS)) {
       if (lang === FALLBACK) continue

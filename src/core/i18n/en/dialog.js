@@ -99,9 +99,10 @@ export default {
     gcp: 'Ground Control Points',
     pose: 'Camera Positions',
     sensor: 'Camera Intrinsics',
-    // <first> and <second>: the two other kinds, drawn as links.
+    // <first> and <second>: the two other kinds, drawn as links. A tag and a parameter
+    // never share a name: both go to the formatter in one object (i18n.test.js).
     declared:
-      'Importing as <strong>{kind}</strong>. Not right? Import as <first>{first}</first> or <second>{second}</second>.',
+      'Importing as <strong>{kind}</strong>. Not right? Import as <first>{firstKind}</first> or <second>{secondKind}</second>.',
   },
 
   fileName: {

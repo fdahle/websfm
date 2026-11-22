@@ -41,7 +41,7 @@ const corrections = computed(() => CORRECTION_ORDER.filter((id) => id !== props.
   <p v-else class="kind-note">
     <I18nText
       k="dialog.importKind.declared"
-      :params="{ kind: labelOf(active), first: labelOf(corrections[0]), second: labelOf(corrections[1]) }"
+      :params="{ kind: labelOf(active), firstKind: labelOf(corrections[0]), secondKind: labelOf(corrections[1]) }"
     >
       <template #first="{ text }"
         ><button class="kind-link" @click="emit('pick', corrections[0])">{{ text }}</button></template
