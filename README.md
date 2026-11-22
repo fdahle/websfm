@@ -137,27 +137,31 @@ surveyed GCPs held out as checkpoints, ETH3D ground truth and airborne LiDAR. CO
 Metashape and OpenDroneMap (ODM) run on the same images on the same machine for
 comparison.
 
-Latest results (October–November 2026):
+Results, each from the run dated in [docs/BENCHMARKS.md](docs/BENCHMARKS.md):
 
+<!-- results:start: made by `npm run docs:readme` from docs/BENCHMARKS.md -->
 | Dataset | Images registered | Result | Compared against |
 | --- | --- | --- | --- |
-| Aerial survey block with RTK and 15 surveyed GCPs | 444 / 444 | Checkpoints: 3.4 cm horizontal, 11.1 cm vertical; cameras 1.8 / 1.2 cm (RTK camera priors, no GCP used as control) | Metashape, same priors: cameras 0.5 / 1.0 cm |
-| Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 26.5 cm H / 14.6 cm V; 351 s from detection to sparse model | COLMAP: 24.0 / 65.0 cm, 1,511 s; ODM: 35.8 / 94.7 cm |
-| Quarry, Pix4D example (RTK in EXIF), pure SfM | 346 / 347 | Cameras vs RTK: 20.3 cm H / 13.4 cm V | COLMAP: 49.5 / 84.7 cm; Metashape: 13 / 12 cm; ODM: 58.0 / 11.6 cm |
+| Aerial survey block with RTK and 15 GCPs (GeoScan PUTI): RTK positions in the solve, every GCP a checkpoint | 444 / 444 | Checkpoints 3.7 / 7.8 cm (H / V); cameras vs RTK 0.5 / 0.9 cm | Metashape, same positions and marks: checkpoints 2.4 / 6.4 cm, cameras 0.5 / 1.0 cm |
+| Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK 26.5 / 14.6 cm (H / V) | COLMAP: 24.0 / 65.0 cm; ODM: 35.8 / 94.7 cm |
+| Quarry, Pix4D example (RTK in EXIF), pure SfM | 346 / 347 | Cameras vs RTK 20.3 / 13.4 cm (H / V) | Metashape: 13 / 12 cm; COLMAP: 49.5 / 84.7 cm; ODM: 58.0 / 11.6 cm |
 | Three drone blocks (224–444 photos), whole pipeline at defaults: dense cloud, DSM, ortho, textured mesh | all | 35–50 min, 13–23 GiB (smaller mesh and ortho than the others make by default) | Metashape: 48–68 min, 10–14 GiB; ODM: 65–102 min, 28–41 GiB |
-| COLMAP South Building | 128 / 128 | 64,662 sparse points | COLMAP: 84,954 points |
-| Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone) | – | Final cost a median 0.00004 % from Ceres', 84 of 95 within 1 % of it or lower, at 1.4× its time; the 3 largest not solved in 2 h | Ceres 2.2 |
-| ETH3D high-res, 6 training scenes (dense, from ground-truth cameras, ETH3D's evaluator) | – | Mean F1 66.2 at 2 cm; 827 s for all six on WebGPU | COLMAP dense: 58.4; Metashape Medium: 447 s, about 2.5 points of F1 higher (approximate scorer) |
-| Casa Grande 1978 aerial film (37 scans, 11 GCP checkpoints) | 37 / 37 | DEM vs 1 m reference: RMSE 1.42 m, NMAD 0.73 m | COLMAP: 13.0 / 13.5 m; Metashape defaults: 13 / 37 cameras |
+| ETH3D high-res (6 training scenes) and COLMAP South Building, sparse | 311 / 311 | Median camera error level with Metashape's: lower on 3 of 7 | Metashape: 311 / 311; COLMAP: 182 / 183 on ETH3D, median errors 3–10× WebSfM's |
+| ETH3D high-res, dense from the ground-truth cameras | – | Mean F1 66.2 at 2 cm (ETH3D's evaluator) | COLMAP: 58.4. Metashape Medium: 2.5 points higher in half the time (447 s against 827 s; approximate scorer) |
+| Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone) | – | Final cost a median +0.00004 % from Ceres' on 95 of 98 problems, at 1.40× its time | Ceres 2.2 |
+| Casa Grande 1978 aerial film (37 scans, GCPs in the solve, every fourth a checkpoint) | 37/37 | Checkpoints 1.09 / 1.01 m (H / V); DEM vs 1 m reference RMSE / NMAD 1.42 / 0.59 m on the cells every tool's DEM covers (WebSfM's covers 41 %) | Metashape defaults: 32/37 cameras, checkpoints 1.20 / 0.95 m (9 checks), DEM 1.55 / 0.70 m (covers 69 %); with guided matching 37/37, DEM 1.46 / 0.75 m (65 %) |
+| Iceland 1980 aerial film (125 scans, GCPs in the solve) | 123/125 | Checkpoints 1.74 / 1.02 m (18 checks); DEM RMSE / NMAD 19.99 / 1.28 m on the cells both DEMs cover (WebSfM's covers 27 %) | Metashape defaults: 125/125, checkpoints 1.54 / 0.97 m, DEM 13.96 / 1.11 m (covers 62 %) |
+<!-- results:end -->
 
 Every table, with its date, method and the weak results, is in
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-Known gaps: COLMAP and Metashape register every image of ETH3D's low-texture
-interiors at their defaults (WebSfM: 20 / 26 and 8 / 14; all of them when detecting at
-4,000 px). COLMAP keeps 40–260 % more sparse points. Metashape's dense clouds are more
-accurate at 2 cm and more complete on open outdoor scenes, and take about half
-WebSfM's time at the same quality setting.
+Known gaps: Metashape's checkpoint heights are closer on both RTK blocks, and its
+dense clouds are more accurate at 2 cm and more complete on open outdoor scenes, in
+about half WebSfM's time at the same quality setting. COLMAP keeps 40–260 % more sparse
+points. WebSfM's DEMs leave cells without texture empty instead of interpolating them,
+so they cover less ground; the film rows compare the DEMs on the cells all of them
+cover, where Metashape's Iceland DEM is the more accurate.
 
 Not yet verified:
 
@@ -262,9 +266,10 @@ tests and formatting.
 
 WebSfM is developed with substantial help from AI coding tools, mainly
 [Claude Code](https://claude.com/claude-code); commits written with AI assistance
-are marked as such in the git history. The direction, the choice of photogrammetric
-methods and the review of every change rest with the maintainer: the tools speed up
-implementation, they do not decide what the software does or vouch for its
+are marked as such in the git history. The direction and the choice of photogrammetric
+methods rest with the maintainer. Changes are gated by the test suite and the regression
+gate; numerical changes to `crates/` and `src/core/sfm/` are reviewed by hand. The tools
+speed up implementation, they do not decide what the software does or vouch for its
 correctness.
 
 In practice:

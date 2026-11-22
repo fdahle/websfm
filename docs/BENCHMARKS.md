@@ -2,7 +2,9 @@
 
 How WebSfM compares with COLMAP, Metashape, OpenDroneMap (ODM) and reference data on
 public datasets. Every number is a measured run; the weak results stand beside the strong
-ones. [METHODS.md](METHODS.md) explains the methods.
+ones. [METHODS.md](METHODS.md) explains the methods. The README's results table is made
+from the tables below (`npm run docs:readme`; a unit test fails when the two differ), so
+change a number here, not there.
 
 **Setup.** One Linux workstation: Intel i9-10900X (20 threads), 64 GB RAM, NVIDIA Quadro
 RTX 5000. WebSfM runs in Chromium through the headless bench (`scripts/bench/`, the app's
@@ -355,9 +357,18 @@ keeps its bend; it is shown with a GCP similarity fit.
 | Metashape defaults | 32/37 | 1.20 / 0.95 m (9 checks) | 9.06 / 0.82 m | **69 %** |
 | Metashape, 80,000 points + guided matching | **37/37** | 1.20 / 1.29 m | 3.79 / 0.90 m | 65 % |
 
-With every photo aligned, the checkpoints of the two tools are level. WebSfM's DEM is
-more accurate, but it covers less ground: where matching finds no texture, WebSfM leaves
-the cell empty rather than interpolating.
+With every photo aligned, the checkpoints of the two tools are level. WebSfM's DEM
+covers less ground: where matching finds no texture, WebSfM leaves the cell empty rather
+than interpolating, and those are the cells where every tool does worst. Scored only on
+the cells all three DEMs cover (180 M cells of the 1 m reference; `score_dem.py --also`,
+2026-11-22, the same DEMs), WebSfM's is still the more accurate, by centimetres rather
+than metres:
+
+| run | DEM vs reference on the common cells, RMSE / NMAD |
+| --- | --- |
+| WebSfM, preprocessed scans | 1.42 / 0.59 m |
+| Metashape defaults | 1.55 / 0.70 m |
+| Metashape, 80,000 points + guided matching | 1.46 / 0.75 m |
 
 ### Iceland 1980: 125 scans of 11425² px, 70 GCPs
 
@@ -375,9 +386,16 @@ Metashape leads here:
   at a fifth of the scan's size counted 23 times what it measured against the GCPs
   (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly), and WebSfM's height
   error was two and a half times Metashape's. Horizontal, Metashape is 0.2 m ahead.
-- **DEM:** since the tie weighting WebSfM's is the sharper one (NMAD 1.28 against 1.38 m,
-  2.44 m before), but Metashape's covers twice the area. Its RMSE comes from outliers that
-  WebSfM leaves out.
+- **DEM:** Metashape's is the more accurate and covers twice the area. Each scored on its
+  own cells, WebSfM's looked the sharper (NMAD 1.28 against 1.38 m; 2.44 m before the tie
+  weighting), but Metashape's own cells include the hard ground WebSfM leaves empty. On the
+  cells both DEMs cover (264 M cells; `score_dem.py --also`, 2026-11-22, the same DEMs):
+
+  | run | DEM vs reference on the common cells, RMSE / NMAD |
+  | --- | --- |
+  | WebSfM (11-11; DEM 11-12) | 19.99 / 1.28 m |
+  | Metashape defaults | 13.96 / 1.11 m |
+
 - **Tracks:** WebSfM's are short. 65 % of its points are seen in three or more photos,
   and its reprojection median is 1.38 px.
 - **October to 11-10:** the heights looked 0.37 m worse (2.46 against 2.09 m), but the two runs

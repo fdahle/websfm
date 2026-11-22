@@ -401,12 +401,19 @@ That archive is the release asset for that benchmark date. A job with `truth` is
 `camera-check.mjs` (an ETH3D scene folder or a COLMAP `images.txt`), one with `eth3d` by
 `eth3d_score.py`.
 
-**Held-out tables** (`"heldout": true`, today Strecha's six multi-view sets) run only with
+**Held-out tables** (`"heldout": true`: Strecha's six multi-view sets, and since 2026-11-22
+the KH-9 mapping camera block of Iceland 1980, `film-heldout`) run only with
 `--heldout`, in the scoreboard run of a release. Their sets are never used to choose a
 default or tune a method, so their numbers show how WebSfM does on data nobody fitted it
 to. Don't run them while developing. If a change is ever made because of one, say so in
 the CHANGELOG: the set is then no longer held out. Their reference cameras come from
-`strecha-prep.mjs` (Strecha's `.camera` files as COLMAP `images.txt`).
+`strecha-prep.mjs` (Strecha's `.camera` files as COLMAP `images.txt`). The KH-9 block runs
+from `/data1/websfm_eval/inputs/il_kh9mc_q` (HistoriX's scans at a quarter of their size).
+
+**Repeats.** `--repeat 3` runs each WebSfM job three times (`<job id>~2`, `~3`), and the
+table gives the median of each number with every run's cell beside it in brackets: a run
+varies with thread timing and the GPU's summation order, most on a knife-edge block. The
+release run uses it; the other tools run once (their versions are pinned).
 
 ## The regression gate (`gate.mjs`, `npm run gate`)
 

@@ -6,6 +6,7 @@
 //        [--only <table>[,<table>…]]                    some tables
 //        [--jobs <id>[,<id>…]]                          some jobs
 //        [--heldout]                                    also the held-out tables (a release run)
+//        [--repeat <n>]                                 each WebSfM job n times (a release run: 3)
 //        [--dry-run]                                    print the commands, run nothing
 //        [--tabulate]                                   no runs: tables from what <out> holds
 //        [--pack]                                       <out>.tar.gz: configs, logs, summaries
@@ -32,6 +33,11 @@
 // --occlusion min into eth3d.json, for the `f1` column: the websfm run's exportDense cloud,
 // or metashape-dense's (metashape_dense.py: Metashape's cloud from the scene's
 // ground-truth cameras). Every run is sequential: two at once and both timings lie.
+//
+// --repeat n runs each WebSfM job n times, the repeats in <job id>~2, <job id>~3 … (a run
+// varies: thread timing and the GPU reorder sums, and a knife-edge block shows it), and the
+// table gives the median of each number with every run's cell beside it. The other tools'
+// versions are pinned, so they run once.
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -60,7 +66,14 @@ const pick = args.jobs ? new Set(String(args.jobs).split(',')) : null
 const heldBack = manifest.tables.filter((t) => t.heldout && !args.heldout && (!only || only.has(t.id)))
 if (heldBack.length) console.log(`held out (add --heldout at a release): ${heldBack.map((t) => t.id).join(', ')}`)
 const tables = manifest.tables.filter((t) => (!only || only.has(t.id)) && (!t.heldout || args.heldout))
-const jobs = tables.flatMap((t) => t.jobs.map((j) => ({ ...j, table: t.id }))).filter((j) => !pick || pick.has(j.id))
+const repeat = Math.max(1, Number(args.repeat) || 1)
+// A job and its repeats (WebSfM only): the ids whose folders hold its runs.
+const runIdsOf = (j) =>
+  j.tool === 'websfm' ? Array.from({ length: repeat }, (_, r) => (r ? `${j.id}~${r + 1}` : j.id)) : [j.id]
+const jobs = tables
+  .flatMap((t) => t.jobs.map((j) => ({ ...j, table: t.id })))
+  .filter((j) => !pick || pick.has(j.id))
+  .flatMap((j) => runIdsOf(j).map((id) => ({ ...j, id })))
 const ids = new Set()
 for (const j of jobs) {
   if (ids.has(j.id)) throw new Error(`job id ${j.id} twice in the manifest`)
@@ -288,6 +301,24 @@ function fmt(v) {
   return Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2)
 }
 
+// The median of several runs' scores, number by number (one run: itself; none: null).
+export function medianScore(runs) {
+  if (runs.length < 2) return runs[0] ?? null
+  const merge = (vals) => {
+    const v = vals.find((x) => x != null)
+    if (typeof v === 'number') {
+      const s = vals.filter(Number.isFinite).sort((a, b) => a - b)
+      const m = s.length >> 1
+      return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null
+    }
+    if (Array.isArray(v)) return v.map((_, i) => merge(vals.map((x) => x?.[i])))
+    if (v && typeof v === 'object')
+      return Object.fromEntries(Object.keys(v).map((key) => [key, merge(vals.map((x) => x?.[key]))]))
+    return v ?? null
+  }
+  return merge(runs)
+}
+
 async function tabulate() {
   const lines = [`# Scoreboard ${out.split('/').pop()}`, '', `Manifest: ${manifestPath.replace(repo + '/', '')}`, '']
   for (const t of tables) {
@@ -301,15 +332,26 @@ async function tabulate() {
     ]
     lines.push(`## ${t.title}`, '', `| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`)
     for (const j of t.jobs) {
-      const dir = join(out, j.id)
-      const s = await read(join(dir, SUMMARY_FILE[j.tool] ?? 'summary.json'))
-      const x = scoreOf(j.tool, s, {
-        checkpoints: await read(join(dir, 'checkpoints.json')),
-        cameraCheck: await read(join(dir, 'camera-check.json')),
-        eth3d: await read(join(dir, 'eth3d.json')),
-      })
+      const runs = []
+      for (const id of runIdsOf(j)) {
+        const dir = join(out, id)
+        const s = await read(join(dir, SUMMARY_FILE[j.tool] ?? 'summary.json'))
+        const x = scoreOf(j.tool, s, {
+          checkpoints: await read(join(dir, 'checkpoints.json')),
+          cameraCheck: await read(join(dir, 'camera-check.json')),
+          eth3d: await read(join(dir, 'eth3d.json')),
+        })
+        if (x) runs.push(x)
+      }
       const k = SCALE[j.unit ?? unit] ?? 1
-      const cells = x ? cols.map((c) => COLUMNS[c].cell(x, k)) : cols.map(() => 'not run')
+      const x = medianScore(runs)
+      const cell = (c) => {
+        const mid = COLUMNS[c].cell(x, k)
+        if (runs.length < 2) return mid
+        const each = runs.map((r) => COLUMNS[c].cell(r, k))
+        return new Set(each).size === 1 ? `${mid} [${runs.length} runs, alike]` : `${mid} [${each.join('; ')}]`
+      }
+      const cells = x ? cols.map(cell) : cols.map(() => 'not run')
       const label = `${j.label ?? j.tool}${j.unit && j.unit !== unit ? ` (${j.unit === 'model' ? 'model units' : j.unit})` : ''}`
       lines.push(`| ${j.block} | ${label} | ${cells.join(' | ')} | \`${j.config}\` |`)
     }

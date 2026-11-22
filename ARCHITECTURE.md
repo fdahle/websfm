@@ -129,6 +129,7 @@ to the algorithm; the other steps differ only in file names.
 | mark a feature experimental | an entry in `core/help/experimental.js` | an `ExperimentalBadge` where the feature shows; remove both once it is checked on real data |
 | explain a concept | a new entry in `src/glossary/<category>/` | aliases auto-link it in all help text |
 | take in third-party code, a model or data | an entry in `core/help/licenses.js` | its license text under `licenses/`, a line in [THIRD_PARTY.md](THIRD_PARTY.md) ([conventions](docs/conventions.md#third-party-code-and-data)) |
+| publish a benchmark result | its table in [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | `npm run docs:readme` rewrites the README's results table from those tables (`core/help/readmeResults.js` picks the cells); never type a number into the README |
 | add an example dataset | `core/examples.js` | `scripts/examples/make-example.py`, `scripts/fetch-examples.mjs`, a walkthrough in `src/guide/` |
 
 ## Conventions worth knowing

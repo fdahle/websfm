@@ -391,7 +391,11 @@ self-calibration update passes a plausibility guard (`core/sfm/selfCalGuard.js`)
 may move the focal by at most 25 % and end at most 35 % from the nominal focal, which stops
 thin-block runaways. A guessed focal is no measurement (a 153 mm lens on 230 mm film sits
 33 % below the guess), so it gets wide bounds instead: 60 % per pass, within [0.3, 1.7] ×
-the guess.
+the guess. The lens may move a photo's corner by at most 25 % of its diagonal, counting the
+decentring terms with the radial ones (as `distort_norm` applies them), and p1, p2 may not
+exceed 0.01 (real lenses: a few 10⁻⁴). They free with the principal point, earlier than k3,
+and trade against it; a radial-only corner check passed p1 = p2 = 0.1, 876 px at the corner
+of a 4,000 × 3,000 photo.
 
 ### 4.2 Two-view initialisation
 
@@ -1215,6 +1219,33 @@ control pins the focal, and a fixed wrong focal leaves its height error in place
 similarity exactly and leave nothing to pin it (28 → 18 m), so three keep K fixed. The
 **final** georeference for products is a fresh post-hoc fit (§6.3);
 anchoring only has to be good enough to correct the shape.
+
+**Camera heights beside GCP heights.** The joint pass holds camera positions in the GCPs'
+similarity, so both sets must give heights in one vertical datum (§9.1). They often do
+not: a drone's RTK heights are ellipsoidal, a survey's GCPs orthometric, the two apart by
+the geoid undulation N (tens of metres). With both at centimetre σ the solve settles the
+conflict through the focal–height trade-off of a nadir block, focal error ≈ N / flying
+height with relief scaled by it, and every residual stays small (a synthetic 27-camera
+block at 60 m, `priorHeights.ba.test.js`: N = 5 m gives fx +9 % and 0.29 m height scatter;
+the review that found it reported +8 % at N = 5 m, +70 % at 43 m). So
+(`surveyConstraints.js` `priorHeightRule`, `priorHeights`):
+
+- both sets declare one datum each and both convert: the store converts the camera heights
+  into the GCPs' datum before the solve (`sparseRun.js` `posesInControlDatum`);
+- one known datum: the positions hold all three axes;
+- known to differ and not convertible: the positions' heights are moved onto the GCPs' by
+  the median offset between them (position − camera placed by the GCP fit), and held;
+- either unknown (every EXIF position): that offset is compared with max(5 σ Z, 2 % of the
+  height above the GCPs). Above it, the heights are moved likewise, with a warning.
+
+Moving keeps what the heights still know: their differences, which hold the block against
+bending. Giving them no weight lost it: on quarry with LN02 GCPs (49.95 m below the RTK
+heights) checkpoints V 5.2 cm dropped, 3.3 cm moved, 2.9 cm in one datum. A datum offset and a focal error both
+  shift every camera height alike over a nadir block, so only the size tells them apart:
+  2 % is a large self-calibration focal error, geoid undulations are mostly far above it.
+
+After the two rounds, a mean camera-height residual above 5 σ Z is warned about as a
+possible datum or antenna-offset error too small for the test.
 
 The constraint builders (`core/sfm/surveyConstraints.js`) also serve §4.11.
 
@@ -2054,10 +2085,15 @@ ground values (grid ÷ k, area and volume ÷ k², heights unscaled) with k shown
 ### 9.1 Vertical datums and the geoid
 
 h = H + N. `core/verticalDatum.js` converts ellipsoidal ↔ EGM96 ↔ EGM2008 with NGA's grids
-reduced to 15′ nodes (`scripts/build-geoid-grids.mjs`: every node exact, Int16 cm, 1.6 MB
-each, precached for offline use), bilinear between nodes. Against PROJ with the full grids
-EGM96 agrees to 5 mm and EGM2008 to 14 cm at p95 (47 cm at worst, short-wavelength geoid
-under high relief), negligible against reference DEMs accurate to ≥ 1 m. National and local
+(`scripts/build-geoid-grids.mjs`: every node exact, Int16 cm, precached for offline use):
+EGM96 at its own 15′ (1.6 MB), bilinear between nodes as PROJ reads it, which it matches to
+5 mm; EGM2008 at 5′, every second node of its 2.5′ grid (5.8 MB, each row stored as
+differences along it), bicubic (Catmull–Rom) between nodes. Against every 2.5′ node (a
+fifth of them sampled), the 5′ bicubic read is 4.4 mm RMS, 1.8 cm at p99, 3.8 cm at p99.9
+and 0.22 m at worst (the Sierra Nevada de Santa Marta, where the geoid bends sharpest).
+The 15′ grid read bilinearly, shipped until 0.9, was 7.2 cm RMS, 30 cm at p99 and 2.5 m at
+worst there, and bicubic would not have saved it (5.1 cm, 1.6 m): the short wavelengths
+EGM2008 adds are not in 15′ nodes. 5′ bilinear is 1.2 cm RMS, 0.45 m at worst. National and local
 height systems are recorded, never converted.
 
 Where it applies: sampling a reference DEM into the asker's datum (Fill Z, Check Z,

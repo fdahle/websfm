@@ -5,6 +5,9 @@ every cell valid in both.
 
     python score_dem.py <dem.tif> <reference.tif> [--out stats.json] [--diff diff.tif]
                         [--mask stable.tif]   cells where mask == 1 only (e.g. stable terrain)
+                        [--also other.tif …]  cells valid in each of these DEMs too: score every
+                                              tool on the same cells (the common mask), so a DEM
+                                              that leaves hard cells empty gains nothing by it
 
 Prints and writes: mean, median, std, rmse, nmad (1.4826 * MAD), count, plus the share
 of the test DEM's bounding box that is valid (coverage). Streams the reference in row
@@ -27,6 +30,7 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--diff")
     ap.add_argument("--mask")
+    ap.add_argument("--also", nargs="+", default=[])
     ap.add_argument("--block-rows", type=int, default=2048)
     a = ap.parse_args()
 
@@ -49,6 +53,13 @@ def main():
             s[s == src.nodata] = np.nan
         valid_box = float(np.isfinite(s).mean())
         mask_ds = rasterio.open(a.mask) if a.mask else None
+        others = []
+        for path in a.also:
+            with rasterio.open(path) as o:
+                arr = o.read(1).astype(np.float32)
+                if o.nodata is not None:
+                    arr[arr == o.nodata] = np.nan
+                others.append((arr, o.transform, o.crs or ref_crs))
         diff_ds = None
         if a.diff:
             diff_ds = rasterio.open(a.diff, "w", driver="GTiff", height=H, width=W, count=1, dtype="float32", crs=ref_crs,
@@ -73,6 +84,11 @@ def main():
                 reproject(mask_ds.read(1).astype(np.float32), mm, src_transform=mask_ds.transform,
                           src_crs=mask_ds.crs or ref_crs, dst_transform=bt, dst_crs=ref_crs, resampling=Resampling.nearest)
                 t[mm != 1] = np.nan
+            for arr, otr, ocrs in others:
+                oo = np.full(r.shape, np.nan, np.float32)
+                reproject(arr, oo, src_transform=otr, src_crs=ocrs, src_nodata=np.nan,
+                          dst_transform=bt, dst_crs=ref_crs, dst_nodata=np.nan, resampling=Resampling.bilinear)
+                t[~np.isfinite(oo)] = np.nan
             if diff_ds is not None:
                 diff_ds.write(t, 1, window=Window(0, r0, W, h))
             v = t[np.isfinite(t)]
@@ -109,6 +125,8 @@ def main():
     out["dem_valid_share_of_bbox"] = round(valid_box, 4)
     out["dem"] = a.dem
     out["ref"] = a.ref
+    if a.also:
+        out["common_with"] = a.also
     print(json.dumps(out, indent=2))
     if a.out:
         with open(a.out, "w") as f:

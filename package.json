@@ -41,6 +41,7 @@
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run typecheck && npm test",
     "docs:features": "node scripts/docs-features.mjs",
+    "docs:readme": "node scripts/docs-readme.mjs",
     "screenshots": "node scripts/screenshots/shoot.mjs",
     "test:mutation": "stryker run",
     "gate": "node scripts/bench/gate.mjs",

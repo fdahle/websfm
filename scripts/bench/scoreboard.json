@@ -672,6 +672,45 @@
           "truth": "/data1/websfm_testdata/strecha/websfm/castle-P30/images.txt"
         }
       ]
+    },
+    {
+      "id": "film-heldout",
+      "heldout": true,
+      "title": "Historical satellite film (held out: run only at a release): KH-9 mapping camera, Iceland 1980, scans at a quarter of their size, the same GCPs in both bundle adjustments",
+      "unit": "m",
+      "columns": ["cameras", "checkpoints", "dem", "coverage"],
+      "jobs": [
+        {
+          "id": "il-kh9mc-websfm",
+          "block": "Iceland 1980 KH-9",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "heldout-il-kh9mc-q"
+        },
+        {
+          "id": "il-kh9mc-metashape",
+          "block": "Iceland 1980 KH-9",
+          "label": "Metashape defaults",
+          "tool": "metashape-hist",
+          "config": "heldout-il-kh9mc-q"
+        }
+      ]
+    },
+    {
+      "id": "drone-heldout",
+      "heldout": true,
+      "title": "Drone block with RTK positions (held out: run only at a release): helenenschacht, Autel EVO II Pro RTK, its RTK positions in the solve, every GCP a checkpoint",
+      "unit": "cm",
+      "columns": ["cameras", "checkpoints", "meanHeight", "time"],
+      "jobs": [
+        {
+          "id": "helenenschacht-websfm",
+          "block": "helenenschacht (176)",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "heldout-helenenschacht"
+        }
+      ]
     }
   ]
 }
