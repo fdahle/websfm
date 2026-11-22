@@ -461,21 +461,6 @@ export function createGeoreferencing({
       log('Georeference: needs 3 or more GCPs, or camera positions of registered photos', 'warn', 'Georeferencing')
       return null
     }
-    if (usingGcps) {
-      const xs = pairs.map((p) => p.dst[0]),
-        ys = pairs.map((p) => p.dst[1]),
-        zs = pairs.map((p) => p.dst[2])
-      const horizontalSpan = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))
-      const verticalSpan = Math.max(...zs) - Math.min(...zs)
-      const verticalSigma = Math.max(...qualifyingGcps().map((g) => g.accuracyZ ?? 0))
-      if (horizontalSpan > 0 && verticalSpan < 3 * verticalSigma) {
-        log(
-          `Georeference: GCP vertical range (${verticalSpan.toPrecision(3)}) is small relative to vertical uncertainty; scale/tilt may be weakly constrained`,
-          'warn',
-          'Georeferencing',
-        )
-      }
-    }
     const local = await metricFrameFor(pairs.map((p) => p.dst))
     if (evidenceKey.value !== evidenceAtStart) return null
     const poseFit = usingGcps ? null : fitPosePairs(local)
@@ -499,6 +484,16 @@ export function createGeoreferencing({
         'Georeferencing',
       )
       return null
+    }
+    // GCPs on a flat site fix tilt and scale fully (a similarity needs points off one
+    // line, not a spread in height); GCPs close to one line leave the roll about it weak.
+    if (usingGcps && stripRollOpen(fit)) {
+      log(
+        `Georeference: the GCPs lie close to one line, which fixes the model's roll about it only to ` +
+          `±${fit.roll.sigmaDeg.toFixed(1)}°. Add a GCP away from that line`,
+        'warn',
+        'Georeferencing',
+      )
     }
     georef.value = withCoregistration({
       evidenceKey: evidenceAtStart,
