@@ -250,6 +250,15 @@ test('Project Settings changes the capture type, and the project keeps it', asyn
   // An object capture has no map and no coordinate system.
   await expect(dialog.getByRole('heading', { name: 'Coordinate system' })).toHaveCount(0)
   await expect(page.locator('.tab').filter({ hasText: /^2D$/ })).toHaveCount(0)
+  // The view changes at once, the write to project storage after: reload only once it landed.
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const { readIndex, readProject } = await import('/src/utils/opfs.js')
+        return (await readProject((await readIndex()).lastOpenedId))?.sceneType
+      }),
+    )
+    .toBe('object')
 
   await page.reload()
   await page.locator('.project-main').first().click()
