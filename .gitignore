@@ -61,6 +61,7 @@ scripts/bench/configs/
 # Code notes. CLAUDE.md itself is public: it imports AGENTS.md, CONTRIBUTING.md
 # and docs/conventions.md.
 /dev/
+/publication/
 CLAUDE.local.md
 
 # Python (scripts/bench, scripts/examples)
