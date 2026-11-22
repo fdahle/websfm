@@ -181,8 +181,8 @@ export const INCLUDED = [
         url: 'https://cdn.proj.org',
         use: 'Heights above the geoid (vertical datums)',
         notice:
-          'Resampled to a 15′ grid from the U.S. National Geospatial-Intelligence Agency’s ' +
-          'EGM96 and EGM2008 models, as PROJ distributes them.',
+          'The U.S. National Geospatial-Intelligence Agency’s EGM96 grid (15′) and EGM2008 ' +
+          'grid thinned to 5′, as PROJ distributes them.',
       },
       {
         // scripts/figures/antarctica-110m.json, drawn into src/glossary/assets/crs-polar.svg

@@ -134,8 +134,9 @@ export default defineConfig(({ mode }) => {
           // (browsers that read the PWA cache all take woff2). ORT's runtime is
           // cached on first use instead (ORT_RUNTIME); models and example datasets
           // never go through here.
-          // The geoid grids (core/verticalDatum.js, 1.6 MB each) convert heights offline.
-          globPatterns: ['**/*.{html,js,css,wasm,json,svg,png,woff2}', 'geoid/*.i16.z'],
+          // The geoid grids (core/verticalDatum.js: EGM96 1.6 MB, EGM2008 5.8 MB) convert
+          // heights offline.
+          globPatterns: ['**/*.{html,js,css,wasm,json,svg,png,woff2}', 'geoid/*.z'],
           // The third-party notices (~3 MB, mostly license texts) load when About ▸
           // Licenses opens.
           globIgnores: ['models/**', 'examples/**', 'ort/**', '**/ort-wasm-*', NOTICES_JSON],

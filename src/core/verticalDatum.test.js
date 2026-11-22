@@ -1,15 +1,23 @@
 import { expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { unzlibSync } from 'fflate'
-import { geoidGrid, datumShift, isConvertible, loadGeoid, heightShifter } from './verticalDatum.js'
+import {
+  geoidGrid,
+  geoidNodes,
+  datumShift,
+  isConvertible,
+  loadGeoid,
+  heightShifter,
+  GEOID_GRIDS,
+} from './verticalDatum.js'
 
 const read = (file) => readFileSync(new URL(`../../public/geoid/${file}`, import.meta.url))
-const grid = (file) => {
-  const b = unzlibSync(read(file))
-  return geoidGrid(new Int16Array(b.buffer, b.byteOffset, b.byteLength / 2))
+const grid = (datum) => {
+  const shape = GEOID_GRIDS[datum]
+  return geoidGrid(geoidNodes(unzlibSync(read(shape.file)), shape), shape)
 }
-const egm96 = grid('egm96-15.i16.z'),
-  egm2008 = grid('egm2008-15.i16.z')
+const egm96 = grid('geoid:EGM96'),
+  egm2008 = grid('geoid:EGM2008')
 
 // N = −H from PROJ 9 (cs2cs EPSG:4979 → EPSG:4326+5773 / +3855 at h = 0), against
 // NGA's full grids: EGM96 at 15′ (the same nodes), EGM2008 at 2.5′.
@@ -26,13 +34,15 @@ const PROJ = [
   [-64.5, -62, 17.695, 19.781],
 ]
 
-it('interpolates the geoid like PROJ: EGM96 to the centimetre grid, EGM2008 within its 15′ reduction', () => {
+it('interpolates the geoid like PROJ: EGM96 to the centimetre grid, EGM2008 within its 5′ reduction', () => {
   for (const [lat, lon, n96, n08] of PROJ) {
     expect(Math.abs(egm96.undulation(lon, lat) - n96)).toBeLessThan(0.006)
-    // Bilinear between 15′ nodes of the 2.5′ model: 1 cm median, 8 cm p95 over
-    // Antarctica; under high relief (Everest: 36 cm) the short wavelengths are lost.
-    expect(Math.abs(egm2008.undulation(lon, lat) - n08)).toBeLessThan(lat === 27.99 ? 0.5 : 0.15)
+    // Bicubic between 5′ nodes of the 2.5′ model, even under Everest. (The 15′ grid
+    // read bilinearly, shipped until 0.9, was 36 cm off there.)
+    expect(Math.abs(egm2008.undulation(lon, lat) - n08)).toBeLessThan(0.03)
   }
+  // At a node, the node: the Int16 centimetres of the source grid.
+  expect(egm2008.undulation(0, 0)).toBeCloseTo(17.23, 2)
   // Longitude wraps: 180° E is 180° W.
   expect(egm96.undulation(180, -70)).toBeCloseTo(egm96.undulation(-180, -70), 9)
   expect(egm96.undulation(179.9, 60)).toBeCloseTo(egm96.undulation(-180.1, 60), 9)

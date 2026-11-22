@@ -22,33 +22,54 @@ const DATUM_IDS = new Set(VERTICAL_DATUMS.map((d) => d.id))
 export const isVerticalDatum = (id) => DATUM_IDS.has(id)
 export const datumLabel = (id) => VERTICAL_DATUMS.find((d) => d.id === id)?.label ?? id ?? 'Unknown'
 
-// The grids in public/geoid/ (scripts/build-geoid-grids.mjs): N at every 15′ node,
-// 721 rows from 90° N, 1440 columns from 180° W, Int16 centimetres, zlib.
-const GRID_FILES = { 'geoid:EGM96': 'egm96-15.i16.z', 'geoid:EGM2008': 'egm2008-15.i16.z' }
-const ROWS = 721,
-  COLS = 1440,
-  STEP = 0.25
+// The grids in public/geoid/ (scripts/build-geoid-grids.mjs): N at every node, Int16
+// centimetres, rows from 90° N, columns from 180° W, zlib. EGM96 at its own 15′, read
+// bilinearly as PROJ does; EGM2008 at 5′ (every 2nd node of its 2.5′ grid, rows stored as
+// differences along them), read bicubically: 4 mm RMS and 4 cm at p99.9 against the 2.5′
+// grid, where 15′ nodes read bilinearly were 7 cm RMS and up to 2.5 m (docs/METHODS.md §9.1).
+export const GEOID_GRIDS = {
+  'geoid:EGM96': { file: 'egm96-15.i16.z', rows: 721, cols: 1440, step: 0.25 },
+  'geoid:EGM2008': { file: 'egm2008-5.i16d.z', rows: 2161, cols: 4320, step: 1 / 12, delta: true, cubic: true },
+}
 
-export const isConvertible = (datum) => datum === 'ellipsoidal' || datum in GRID_FILES
+export const isConvertible = (datum) => datum === 'ellipsoidal' || datum in GEOID_GRIDS
 
-// N(lon, lat) in metres, bilinear between the 15′ nodes; longitude wraps.
-export function geoidGrid(cm) {
-  if (cm.length !== ROWS * COLS) throw new Error(`A geoid grid has ${ROWS * COLS} nodes, not ${cm.length}`)
+// Catmull–Rom through p1 (t = 0) and p2 (t = 1).
+const catmullRom = (p0, p1, p2, p3, t) =>
+  p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)))
+
+// N(lon, lat) in metres between the nodes of a grid (`shape` as in GRIDS, EGM96's by
+// default); longitude wraps, latitude clamps at the poles.
+export function geoidGrid(cm, shape = GEOID_GRIDS['geoid:EGM96']) {
+  const { rows, cols, step, cubic = false } = shape
+  if (cm.length !== rows * cols) throw new Error(`A geoid grid has ${rows * cols} nodes, not ${cm.length}`)
+  const at = (r, c) => cm[Math.min(rows - 1, Math.max(0, r)) * cols + (((c % cols) + cols) % cols)]
   return {
     undulation(lon, lat) {
-      const x = ((((lon + 180) / STEP) % COLS) + COLS) % COLS
-      const y = Math.min(ROWS - 1, Math.max(0, (90 - lat) / STEP))
+      const x = ((((lon + 180) / step) % cols) + cols) % cols
+      const y = Math.min(rows - 1, Math.max(0, (90 - lat) / step))
       const c0 = Math.floor(x),
-        r0 = Math.min(ROWS - 2, Math.floor(y))
-      const c1 = (c0 + 1) % COLS,
-        fx = x - c0,
+        r0 = Math.min(rows - 2, Math.floor(y))
+      const fx = x - c0,
         fy = y - r0
-      const at = (r, c) => cm[r * COLS + c]
-      const top = at(r0, c0) * (1 - fx) + at(r0, c1) * fx
-      const bottom = at(r0 + 1, c0) * (1 - fx) + at(r0 + 1, c1) * fx
+      if (cubic) {
+        const row = (r) => catmullRom(at(r, c0 - 1), at(r, c0), at(r, c0 + 1), at(r, c0 + 2), fx)
+        return catmullRom(row(r0 - 1), row(r0), row(r0 + 1), row(r0 + 2), fy) / 100
+      }
+      const top = at(r0, c0) * (1 - fx) + at(r0, c0 + 1) * fx
+      const bottom = at(r0 + 1, c0) * (1 - fx) + at(r0 + 1, c0 + 1) * fx
       return (top * (1 - fy) + bottom * fy) / 100
     },
   }
+}
+
+// The stored bytes of a grid (decompressed) as its node values.
+export function geoidNodes(bytes, shape) {
+  const cm = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2)
+  if (!shape.delta) return cm
+  const out = Int16Array.from(cm)
+  for (let i = 1; i < out.length; i++) if (i % shape.cols) out[i] += out[i - 1]
+  return out
 }
 
 /**
@@ -72,13 +93,13 @@ function geoidBaseUrl() {
 // Fetched once per session; the service worker precaches the files (vite.config.js).
 const loaded = new Map()
 export function loadGeoid(datum, { fetchImpl = (...a) => coreIo().fetch(...a) } = {}) {
-  if (!(datum in GRID_FILES)) return Promise.reject(new Error(`No geoid model for ${datum}`))
+  const shape = GEOID_GRIDS[datum]
+  if (!shape) return Promise.reject(new Error(`No geoid model for ${datum}`))
   if (!loaded.has(datum)) {
     const promise = (async () => {
-      const res = await fetchImpl(`${geoidBaseUrl()}${GRID_FILES[datum]}`)
+      const res = await fetchImpl(`${geoidBaseUrl()}${shape.file}`)
       if (!res.ok) throw new Error(`The ${datumLabel(datum)} grid could not be loaded (HTTP ${res.status})`)
-      const bytes = unzlibSync(new Uint8Array(await res.arrayBuffer()))
-      return geoidGrid(new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2))
+      return geoidGrid(geoidNodes(unzlibSync(new Uint8Array(await res.arrayBuffer())), shape), shape)
     })()
     loaded.set(datum, promise)
     promise.catch(() => loaded.delete(datum))
@@ -89,7 +110,7 @@ export function loadGeoid(datum, { fetchImpl = (...a) => coreIo().fetch(...a) } 
 // The grids a conversion between these datums needs, as datumShift takes them.
 export async function loadGeoids(...datums) {
   const grids = {}
-  for (const d of new Set(datums)) if (d in GRID_FILES) grids[d] = await loadGeoid(d)
+  for (const d of new Set(datums)) if (d in GEOID_GRIDS) grids[d] = await loadGeoid(d)
   return grids
 }
 

@@ -55,7 +55,7 @@ next to the app, and the app downloads each one when first used.
 | Where | What | License |
 | --- | --- | --- |
 | `epsg-index` package (`all.json`) | The EPSG Geodetic Parameter Dataset, owned by IOGP | [EPSG Terms of Use](licenses/data/EPSG-terms-of-use.txt) |
-| `public/geoid/` | EGM96 and EGM2008 geoid grids of the U.S. National Geospatial-Intelligence Agency, from PROJ's copies, resampled by `scripts/build-geoid-grids.mjs` | Public domain |
+| `public/geoid/` | EGM96 and EGM2008 geoid grids of the U.S. National Geospatial-Intelligence Agency, from PROJ's copies (EGM96 at 15′, EGM2008 thinned to 5′) by `scripts/build-geoid-grids.mjs` | Public domain |
 | `scripts/figures/antarctica-110m.json` | The Antarctic part of Natural Earth's 1:110m coastline, drawn into the glossary figure `crs-polar.svg` | Public domain |
 | Example project (downloaded, not committed) | The Aukerman photos of OpenDroneMap (`odm_data_aukerman`), 42 of 77, downscaled | CC0-1.0 ([credits](scripts/examples/aukerman-CREDITS.txt)) |
 | Map backgrounds (loaded at run time, not shipped) | OpenStreetMap, Esri World Imagery, NASA GIBS | Each map shows its attribution |
