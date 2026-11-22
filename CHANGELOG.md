@@ -703,6 +703,11 @@ Notable changes to WebSfM. The format follows
   bounds". Found while hunting such an error that a browser test logged in 2 of 3 full
   runs; it has not come back at this version in 120 repeats of that test, 3 runs of the
   tests before it and 2 full Chromium runs, so its cause is still open.
+- **Opening the Workflow Builder as a project opens keeps its workflows.** Opened in the
+  moment before a project's workflows had loaded, the Workflow Builder started an empty
+  Untitled workflow and could save it over the project's own; it now waits for them and
+  shows the workflow the project was saved with. Found by a browser test that reopens a
+  project and the builder at once, which failed once in Firefox.
 
 ## [0.8.0] — 2026-11-12
 

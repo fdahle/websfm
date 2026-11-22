@@ -52,8 +52,12 @@ export const useWorkflowsStore = registerProjectStore(
       return value.id
     }
 
+    // While a project's workflows load, the builder may open on the empty list: making
+    // and saving an Untitled workflow then would replace the saved ones. restore() makes
+    // it once it has read them, if there are none.
+    let restoring = false
     function ensureWorkflow() {
-      if (activeWorkflow.value) return activeWorkflow.value
+      if (activeWorkflow.value || restoring) return activeWorkflow.value
       addWorkflow(createWorkflow())
       return activeWorkflow.value
     }
@@ -135,7 +139,13 @@ export const useWorkflowsStore = registerProjectStore(
 
     async function restore({ projectId, projectData }) {
       const generation = ++restoreGeneration
-      const data = await opfs.loadWorkflows(projectId)
+      restoring = true
+      let data
+      try {
+        data = await opfs.loadWorkflows(projectId)
+      } finally {
+        if (generation === restoreGeneration) restoring = false
+      }
       if (generation !== restoreGeneration || projectId !== projects.currentProjectId) return
       workflows.value = Array.isArray(data?.workflows) ? data.workflows.map(normalizeWorkflow) : []
       runs.value = Array.isArray(data?.runs) ? data.runs.slice(0, MAX_RUNS) : []
@@ -147,6 +157,7 @@ export const useWorkflowsStore = registerProjectStore(
 
     function clear({ purge = false } = {}) {
       restoreGeneration++
+      restoring = false
       workflows.value = []
       activeId.value = null
       runs.value = []
