@@ -25,3 +25,5 @@ reaching the GPU*). The traps below each cost a run before they were written dow
 - Headed Chrome with `--enable-features=Vulkan` (the bench's GPU flag) reads a GPU-backed
   canvas back all black: a profile built before 2026-11-18 has black thumbnails (rebuild it).
   Any canvas the app encodes or reads must be CPU-backed (`utils/canvasReadback.test.js`).
+- ETH3D's evaluator (`eth3d_official.py`) won't build against PCL 1.13 as cloned: its
+  CMakeLists forces `-std=c++11`; change it to `-std=c++17` (the conda env `eth3d-eval`).

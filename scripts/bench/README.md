@@ -383,7 +383,8 @@ mesh as GLB and OBJ.
 
 The comparison tables of [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md) come from one
 manifest, `scoreboard.json`. It lists each table's jobs: a tool (`websfm`, `metashape`,
-`metashape-hist`, `colmap`, `odm`), the bench config by name, and any extra arguments.
+`metashape-hist`, `metashape-dense`, `colmap`, `colmap-hist`, `odm`), the bench config by
+name, and any extra arguments.
 `scoreboard.mjs` runs every job, one after another, into a dated folder. It scores each
 tool's summary in the same terms and writes the tables to `scoreboard.md`, with the config
 named in each row:
@@ -399,7 +400,11 @@ where it left off. The configs used are copied to `<out>/configs/`. `--pack` bun
 with the logs and summaries into `<out>.tar.gz`, without the photos, models or rasters.
 That archive is the release asset for that benchmark date. A job with `truth` is scored by
 `camera-check.mjs` (an ETH3D scene folder or a COLMAP `images.txt`), one with `eth3d` by
-`eth3d_score.py`.
+`eth3d_score.py` (our reimplementation, `f1`) and by ETH3D's own evaluator through
+`eth3d_official.py` (`f1Official`; the C++ program is built outside the repo, as its header
+says, at `/data1/websfm_eval/tools/` on the bench machine). A scoring step whose result file
+is missing runs even when the job's summary is there, so a new scorer reaches an old run
+without rerunning the tools.
 
 **Held-out tables** (`"heldout": true`: Strecha's six multi-view sets, and since 2026-11-22
 the KH-9 mapping camera block of Iceland 1980, `film-heldout`) run only with

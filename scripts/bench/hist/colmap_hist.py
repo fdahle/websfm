@@ -372,7 +372,8 @@ def main():
     geo = ws / "sparse_geo"
     if not (geo / "images.txt").exists():
         transform_model_txt(txt, geo, M)
-    summary = {"georef": {k: v for k, v in res.items() if k != "loo"}, "timings": timings}
+    summary = {"georef": {k: v for k, v in res.items() if k != "loo"}, "images": len(images),
+               "checkpoints": len(res["loo"]), "timings": timings}
     if not a.skip_dense:
         dense = ws / "dense"
         if not (dense / "sparse").exists():
