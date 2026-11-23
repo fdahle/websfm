@@ -54,7 +54,7 @@ export const REFERENCES = {
     year: 2018,
     title: 'SuperPoint: self-supervised interest point detection and description',
     venue: 'CVPR Workshops',
-    url: 'https://arxiv.org/abs/1712.07629',
+    doi: '10.1109/CVPRW.2018.00060',
   },
   tyszkiewicz2020: {
     authors: ['Michał J. Tyszkiewicz', 'Pascal Fua', 'Eduard Trulls'],
@@ -68,14 +68,14 @@ export const REFERENCES = {
     year: 2023,
     title: 'ALIKED: a lighter keypoint and descriptor extraction network via deformable transformation',
     venue: 'IEEE Transactions on Instrumentation and Measurement 72',
-    url: 'https://arxiv.org/abs/2304.03608',
+    doi: '10.1109/TIM.2023.3271000',
   },
   lindenberger2023: {
     authors: ['Philipp Lindenberger', 'Paul-Edouard Sarlin', 'Marc Pollefeys'],
     year: 2023,
     title: 'LightGlue: local feature matching at light speed',
-    venue: 'IEEE/CVF International Conference on Computer Vision (ICCV)',
-    url: 'https://arxiv.org/abs/2306.13643',
+    venue: 'IEEE/CVF International Conference on Computer Vision (ICCV), 17581–17592',
+    doi: '10.1109/ICCV51070.2023.01616',
   },
   fischler1981: {
     authors: ['Martin A. Fischler', 'Robert C. Bolles'],
@@ -277,8 +277,8 @@ export const REFERENCES = {
     authors: ['Qingshan Xu', 'Wenbing Tao'],
     year: 2019,
     title: 'Multi-scale geometric consistency guided multi-view stereo',
-    venue: 'IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)',
-    url: 'https://arxiv.org/abs/1904.08103',
+    venue: 'IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 5478–5487',
+    doi: '10.1109/CVPR.2019.00563',
   },
   xu2020: {
     authors: ['Qingshan Xu', 'Wenbing Tao'],
