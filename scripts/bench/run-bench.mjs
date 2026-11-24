@@ -245,10 +245,13 @@ if (cfg.dev) {
     }
     try {
       const body = await readFile(join(buildDir, path))
+      // `"isolated": false` leaves out the two headers, as a host that does not send them:
+      // no SharedArrayBuffer, so the single-threaded WASM builds (the browser-cost ablation).
       res.writeHead(200, {
         'Content-Type': STATIC_MIME[extname(path).toLowerCase()] ?? 'application/octet-stream',
-        'Cross-Origin-Opener-Policy': 'same-origin',
-        'Cross-Origin-Embedder-Policy': 'require-corp',
+        ...(cfg.isolated === false
+          ? {}
+          : { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }),
       })
       res.end(body)
     } catch {
