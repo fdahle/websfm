@@ -263,9 +263,10 @@ def grid_dem(xyz, origin, res, epsg, out_tif, fill_cells=0):
     x0, y1 = np.floor(e.min() / res) * res, np.ceil(n.max() / res) * res
     W = int(np.ceil((e.max() - x0) / res)) + 1
     H = int(np.ceil((y1 - n.min()) / res)) + 1
-    # ~13 bytes per cell (float32 grid + int64 index); a KH-9 frame (140 × 70 km) at the
-    # 2 m default is 2.5 G cells and took 40 GB. Refuse rather than exhaust the machine.
-    if W * H > 400_000_000:
+    # About 16 bytes per cell at the peak: a KH-9 frame (140 × 70 km) at the 2 m default is
+    # 2.5 G cells and took 40 GB. Iceland 1980 (90 × 45 km, 1 G cells) fits in 64 GB; refuse
+    # beyond that rather than exhaust the machine.
+    if W * H > 1_200_000_000:
         sys.exit(f"DEM grid {W}×{H} at {res} m is too large; pass a coarser --dem-res")
     col = ((e - x0) / res).astype(np.int64)
     row = ((y1 - n) / res).astype(np.int64)
@@ -280,15 +281,18 @@ def grid_dem(xyz, origin, res, epsg, out_tif, fill_cells=0):
     dem = dem.reshape(H, W)
     prof = {"driver": "GTiff", "height": H, "width": W, "count": 1, "dtype": "float32", "crs": f"EPSG:{epsg}",
             "transform": from_origin(x0, y1, res, res), "nodata": -9999.0, "compress": "deflate", "tiled": True}
-    out = np.where(np.isfinite(dem), dem, -9999.0).astype(np.float32)
+    valid = np.isfinite(dem)
+    cells = int(valid.sum())
+    dem[~valid] = -9999.0  # in place: a second grid-sized copy would not fit for the largest blocks
+    del valid
     with rasterio.open(out_tif, "w", **prof) as o:
-        o.write(out, 1)
+        o.write(dem, 1)
     if fill_cells:
         from rasterio.fill import fillnodata
         with rasterio.open(out_tif, "r+") as o:
             a = o.read(1)
             o.write(fillnodata(a, mask=(a != -9999.0), max_search_distance=fill_cells, smoothing_iterations=0), 1)
-    return {"cells": int(np.isfinite(dem).sum()), "width": W, "height": H}
+    return {"cells": cells, "width": W, "height": H}
 
 
 def main():
