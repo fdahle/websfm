@@ -5,7 +5,7 @@
 //     "intrinsics": ".../camera_model_intrinsics.csv",  focal_length (mm), pixel_pitch (mm/px),
 //                                                         principal_point_x/y_mm (y up)
 //     "mask": ".../image_mask.tif",                      one for all images; keep class = the centre's
-//     "maskPng": ".../websfm_eval/masks/cg.png",         where the app-convention PNG is cached
+//     "maskPng": ".../websfm_eval/shared/masks/cg.png",         where the app-convention PNG is cached
 //     "masks": ".../masks",                              a folder of per-image masks, paired by name
 //                                                         (Masks ▸ Import folder); TIFF is fine
 //     "maskExisting": "merge",                           with "mask" too: add each file to the static mask

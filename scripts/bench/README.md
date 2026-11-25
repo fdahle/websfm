@@ -19,13 +19,57 @@ node scripts/bench/run-bench.mjs --config scripts/bench/configs/sb-default.json
 node scripts/bench/run-bench.mjs --images C:/data/set --limit 20 --detect '{"maxDim":3200}'
 ```
 
-Each run writes to `bench-out/` (gitignored):
+A run started this way writes to today's scratch folder, `exp/<date>-scratch/` under the
+eval root (below; `bench-out/` on a machine without one):
 
 | file | contents |
 |---|---|
 | `<name>-<time>.log` | every log line, debug included, in the dev console's export format |
 | `<name>-<time>.json` | resolved settings and per-stage numbers: keypoints, pairs, accepted, inliers, cameras, points ≥3 views, seconds, and `positionCheck` (below) |
-| `<name>-<time>.build/` | the frozen app build the run used |
+| `<name>-<time>.build/` | the frozen app build the run used (deleted when it ends, unless `keepBuild`) |
+
+## Where runs go: `npm run bench`
+
+On a machine with a bench disk, every run goes through one command, so it lands where it can
+be found again with a record of what it ran on:
+
+```sh
+npm run bench -- exp puti-focal "Does the RTK-held focal move with the tie weights?"
+npm run bench -- run websfm main-rtk-puti444 --exp puti-focal --label tie-w2 -- --recon '{"tieWeight":2}'
+npm run bench -- run metashape main-rtk-puti444 --exp puti-focal      # same config, other tool
+npm run bench -- run --job eth3d-office-colmap --exp kp-tiling        # a scoreboard job as it runs there
+npm run bench -- scoreboard --only film                               # into results/<date>-<commit>
+npm run bench -- gate                                                 # into exp/<date>-gate/<commit>
+npm run bench -- ls puti                                              # runs, newest first
+npm run bench -- clean                                                # what nothing cites
+```
+
+The eval root is `$WEBSFM_EVAL`, else `"eval"` in `scripts/bench/paths.local.json`
+(gitignored: `{ "eval": "/data1/websfm_eval", "data": "/data1/websfm_testdata" }`), else
+`bench-out/`. Under it (`paths.mjs`):
+
+| folder | holds |
+|---|---|
+| `results/<name>/` | scoreboard runs, the only runs docs/BENCHMARKS.md and the paper cite (a release: `--name <version>`) |
+| `ref/<tool>-<version>/` | reference-tool runs kept for reuse |
+| `exp/<date>-<topic>/` | everything else: one folder per question, a `NOTE.md` (question, answer), one folder per run |
+| `shared/` | inputs, masks, tools and caches several runs read |
+| `archive/` | runs from before this layout, slimmed to their evidence |
+
+- **`run`** starts a tool on a config exactly as the scoreboard does (`tools.mjs`: the same
+  command lines, the same scorers), into `exp/<date>-<topic>/<label>/`. A rerun never
+  overwrites (`<label>~2`). A config is a name in `configs/` or a path to a `.json`. Arguments
+  after `--` go to the tool; for WebSfM they override the config's keys.
+- **`record.json`** beside each run's results: the commit and whether `src/`, `crates/` or
+  `scripts/` had changes, the tool's version, the config's hash, the photo set's fingerprint
+  (names and sizes), the CPU and GPU, the WebGPU backend the run used (SwiftShader shows),
+  start, time and exit code. Two numbers compare when their records agree.
+- **Runs write only into `results/`, `ref/` and `exp/`.** An old config's `out` pointing
+  anywhere else in the eval root is refused: drop the `out` key, or run it with `run … --exp`.
+- **`clean`** lists `exp/` and `archive/` with their size and whether anything cites them
+  (the repo, `dev/`, `publication/`, the configs). `clean --slim <folder> --yes` deletes a
+  finished run's workspace (profiles, builds, photos, rasters, clouds, tool projects) and
+  keeps its summaries, logs and notes.
 
 ## Config
 
@@ -129,7 +173,9 @@ Booleans go in a config file: on the command line `--gpu false` is the string "f
   identical inputs.
 - `dev`: use the Vite dev server instead of a frozen build (faster to start). Any
   source edit then reloads the page mid-run.
-- `build <dir>`: reuse an earlier snapshot. `headed`: show the browser window.
+- `build <dir>`: reuse an earlier snapshot. A run deletes the snapshot it built (`<out>.build`,
+  about 0.5 GB) when it ends; `keepBuild: true` keeps it for a later `build`. `headed`: show the
+  browser window.
 - `recon.baSolver`: the bundle-adjustment linear-solver policy (`SFM_TUNING.baSolver`,
   merged key by key, so a variant names only what it changes), e.g. `{ "pcgMinN": 1e9 }`
   (Cholesky only), `{}` (the default: inexact PCG, 200 iterations, partial accepted),
@@ -176,7 +222,7 @@ the median / p90 / max centre error in reference units and the cameras that are 
 ## Accuracy: LiDAR surface (`lidarCheck`)
 
 With `reference.lidar` (`dir`, `crs`, `cell`, `flatRangeM`; see `lidar.mjs`), the strips
-are decoded once and binned into a height grid, cached under `bench-out/cache/`. Each
+are decoded once and binned into a height grid, cached in the eval root's shared/cache folder. Each
 reconstruction then exports its ≥3-view points in the `positionCheck` ENU frame, and the
 runner maps them to the LiDAR CRS. Only cells whose LiDAR heights span ≤ `flatRangeM`
 count, because on slopes, edges and vegetation the two sensors legitimately differ.
@@ -385,13 +431,14 @@ The comparison tables of [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md) come fro
 manifest, `scoreboard.json`. It lists each table's jobs: a tool (`websfm`, `metashape`,
 `metashape-hist`, `metashape-dense`, `colmap`, `colmap-hist`, `odm`), the bench config by
 name, and any extra arguments.
-`scoreboard.mjs` runs every job, one after another, into a dated folder. It scores each
+`scoreboard.mjs` runs every job, one after another, into `results/<date>-<commit>/` (or
+`--name <name>`; `npm run bench -- scoreboard …` is the same), each job with its `record.json`. It scores each
 tool's summary in the same terms and writes the tables to `scoreboard.md`, with the config
 named in each row:
 
 ```sh
 node scripts/bench/scoreboard.mjs --only film --dry-run       # the commands it would run
-node scripts/bench/scoreboard.mjs --out /data1/websfm_eval/scoreboard-2026-11-12 --pack
+node scripts/bench/scoreboard.mjs --name 1.0 --repeat 3 --heldout --pack   # a release run
 node scripts/bench/scoreboard.mjs --out <dir> --tabulate      # tables again, no runs
 ```
 
@@ -402,7 +449,7 @@ That archive is the release asset for that benchmark date. A job with `truth` is
 `camera-check.mjs` (an ETH3D scene folder or a COLMAP `images.txt`), one with `eth3d` by
 `eth3d_score.py` (our reimplementation, `f1`) and by ETH3D's own evaluator through
 `eth3d_official.py` (`f1Official`; the C++ program is built outside the repo, as its header
-says, at `/data1/websfm_eval/tools/` on the bench machine). A scoring step whose result file
+says, at `/data1/websfm_eval/shared/tools/` on the bench machine). A scoring step whose result file
 is missing runs even when the job's summary is there, so a new scorer reaches an old run
 without rerunning the tools.
 
@@ -413,7 +460,7 @@ default or tune a method, so their numbers show how WebSfM does on data nobody f
 to. Don't run them while developing. If a change is ever made because of one, say so in
 the CHANGELOG: the set is then no longer held out. Their reference cameras come from
 `strecha-prep.mjs` (Strecha's `.camera` files as COLMAP `images.txt`). The KH-9 block runs
-from `/data1/websfm_eval/inputs/il_kh9mc_q` (HistoriX's scans at a quarter of their size).
+from `/data1/websfm_eval/shared/inputs/il_kh9mc_q` (HistoriX's scans at a quarter of their size).
 
 **Repeats.** `--repeat 3` runs each WebSfM job three times (`<job id>~2`, `~3`), and the
 table gives the median of each number with every run's cell beside it in brackets: a run

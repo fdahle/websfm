@@ -2,7 +2,8 @@
 // another on one date, scored the same way, written as the page's tables.
 //
 //   node scripts/bench/scoreboard.mjs [--manifest scripts/bench/scoreboard.json]
-//        [--out /data1/websfm_eval/scoreboard-<date>]   results, logs and the configs used
+//        [--name <name>]                                results/<name> (default <date>-<commit>)
+//        [--out <dir>]                                  or any folder: results, logs, configs
 //        [--only <table>[,<table>…]]                    some tables
 //        [--jobs <id>[,<id>…]]                          some jobs
 //        [--heldout]                                    also the held-out tables (a release run)
@@ -46,14 +47,13 @@
 // table gives the median of each number with every run's cell beside it. The other tools'
 // versions are pinned, so they run once.
 
-import { spawn } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readFile, readdir, writeFile, appendFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+import { RESULTS, checkOut, repo, today } from './paths.mjs'
+import { SUMMARY_FILE, commandsOf, configPath, runJob, runStep } from './tools.mjs'
 const args = {}
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i]
@@ -62,11 +62,12 @@ for (let i = 2; i < process.argv.length; i++) {
   if (next === undefined || next.startsWith('--')) args[a.slice(2)] = true
   else ((args[a.slice(2)] = next), i++)
 }
-const date = new Date().toISOString().slice(0, 10)
 const manifestPath = resolve(args.manifest ?? join(repo, 'scripts/bench/scoreboard.json'))
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-const out = resolve(args.out ?? `/data1/websfm_eval/scoreboard-${date}`)
-const python = process.env.METASHAPE_PYTHON ?? join(homedir(), 'miniconda3/envs/hist_env3/bin/python')
+// A run's name: --name (a release: its version), else <date>-<commit>.
+const shortSha = () =>
+  spawnSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: repo, encoding: 'utf8' }).stdout.trim()
+const out = resolve(args.out ?? join(RESULTS, String(args.name ?? `${today()}-${shortSha()}`)))
 const only = args.only ? new Set(String(args.only).split(',')) : null
 const pick = args.jobs ? new Set(String(args.jobs).split(',')) : null
 
@@ -85,136 +86,6 @@ const ids = new Set()
 for (const j of jobs) {
   if (ids.has(j.id)) throw new Error(`job id ${j.id} twice in the manifest`)
   ids.add(j.id)
-}
-
-// Where a tool's dense cloud lands in its job folder (else dense.ply).
-const CLOUD_FILE = { websfm: 'run.dense.bin', colmap: 'dense/fused.ply' }
-
-// The thinned ETH3D scans, built once per scene by eth3d_score.py (a minute each) and kept.
-const ETH3D_GT_CACHE = process.env.ETH3D_GT_CACHE ?? '/data1/websfm_eval/eth3d-gt-cache'
-const configPath = (name) => join(repo, 'scripts/bench/configs', `${name}.json`)
-const loadConfig = async (name) => JSON.parse(await readFile(configPath(name), 'utf8'))
-const epsgOf = (crs) => String(crs ?? '').replace(/^EPSG:+/i, '')
-
-// The command lines of one job: [exe, argv][] run in order, and where its summary lands.
-async function toolCommandsOf(job) {
-  const cfg = await loadConfig(job.config)
-  const dir = join(out, job.id)
-  const extra = job.args ?? []
-  const node = (script, argv) => [process.execPath, [join(repo, 'scripts/bench', script), ...argv]]
-  switch (job.tool) {
-    case 'websfm':
-      return {
-        summary: join(dir, 'run.json'),
-        steps: [node('run-bench.mjs', ['--config', configPath(job.config), '--out', join(dir, 'run'), ...extra])],
-      }
-    case 'metashape': {
-      const steps = [
-        node('metashape-ref.mjs', ['--config', configPath(job.config), '--ws', dir, '--name', job.id, ...extra]),
-      ]
-      if (job.checkpoints) {
-        const ref = cfg.reference ?? {}
-        if (!ref.gcps || !ref.metashape)
-          throw new Error(`${job.id}: checkpoints need reference.gcps and reference.metashape`)
-        steps.push([
-          python,
-          [
-            join(repo, 'scripts/bench/metashape_checkpoints.py'),
-            ...['--project', join(dir, 'project.psx'), '--gcps', ref.gcps, '--marks', ref.metashape],
-            ...(ref.excludeGcps?.length ? ['--exclude', ...ref.excludeGcps] : []),
-            ...['--out', join(dir, 'checkpoints.json')],
-          ],
-        ])
-      }
-      return { summary: join(dir, 'summary.json'), steps }
-    }
-    case 'metashape-hist': {
-      const h = cfg.hist ?? {}
-      const argv = [join(repo, 'scripts/bench/hist/metashape_hist.py'), '--images', cfg.images, '--ws', dir]
-      if (h.mask) argv.push('--mask', h.mask)
-      if (h.gcps) argv.push('--gcps', h.gcps)
-      if (h.intrinsics) argv.push('--intrinsics', h.intrinsics)
-      if (cfg.crs) argv.push('--epsg', epsgOf(cfg.crs))
-      if (h.refDem) argv.push('--ref-dem', h.refDem)
-      return { summary: join(dir, 'summary.json'), steps: [[python, [...argv, ...extra]]] }
-    }
-    case 'colmap-hist': {
-      const h = cfg.hist ?? {}
-      const argv = [join(repo, 'scripts/bench/hist/colmap_hist.py'), '--images', cfg.images, '--ws', dir]
-      if (h.mask) argv.push('--mask', h.mask)
-      if (!h.gcps) throw new Error(`${job.id}: colmap-hist needs hist.gcps in its config`)
-      argv.push('--gcps', h.gcps)
-      if (h.intrinsics) argv.push('--intrinsics', h.intrinsics)
-      if (cfg.crs) argv.push('--epsg', epsgOf(cfg.crs))
-      if (h.refDem) argv.push('--ref-dem', h.refDem)
-      return { summary: join(dir, 'summary.json'), steps: [[python, [...argv, ...extra]]] }
-    }
-    case 'metashape-dense': {
-      if (!job.eth3d) throw new Error(`${job.id}: metashape-dense needs eth3d (the scene folder)`)
-      const argv = [join(repo, 'scripts/bench/metashape_dense.py'), '--scene', job.eth3d, '--ws', dir]
-      return { summary: join(dir, 'metashape.json'), steps: [[python, [...argv, ...extra]]] }
-    }
-    case 'colmap':
-      return {
-        summary: join(dir, 'summary.json'),
-        steps: [node('colmap-ref.mjs', ['--config', configPath(job.config), '--ws', dir, '--name', job.id, ...extra])],
-      }
-    case 'odm':
-      return {
-        summary: join(dir, 'summary.json'),
-        steps: [node('odm-ref.mjs', ['--config', configPath(job.config), '--ws', dir, ...extra])],
-      }
-    default:
-      throw new Error(`${job.id}: unknown tool ${job.tool}`)
-  }
-}
-
-// The tool's steps, then the camera check against `truth` when the job names one.
-async function commandsOf(job) {
-  const c = await toolCommandsOf(job)
-  if (job.truth)
-    c.steps.push([
-      process.execPath,
-      [join(repo, 'scripts/bench/camera-check.mjs'), c.summary, job.truth],
-      { stdout: join(out, job.id, 'camera-check.json'), creates: join(out, job.id, 'camera-check.json') },
-    ])
-  if (job.eth3d) {
-    const dir = join(out, job.id)
-    const cloud = CLOUD_FILE[job.tool] ? join(dir, CLOUD_FILE[job.tool]) : join(dir, 'dense.ply')
-    c.steps.push([
-      python,
-      [
-        join(repo, 'scripts/bench/eth3d_score.py'),
-        ...['--scene', job.eth3d, '--recon', cloud, '--occlusion', 'min', '--label', job.id],
-        ...['--cache', ETH3D_GT_CACHE, '--out', join(dir, 'eth3d.json')],
-      ],
-      { creates: join(dir, 'eth3d.json') },
-    ])
-    c.steps.push([
-      python,
-      [
-        join(repo, 'scripts/bench/eth3d_official.py'),
-        ...['--scene', job.eth3d, '--recon', cloud, '--label', job.id, '--out', join(dir, 'eth3d-official.json')],
-      ],
-      { creates: join(dir, 'eth3d-official.json') },
-    ])
-  }
-  return c
-}
-
-// `opts.stdout`: a file that takes the step's standard output alone (a JSON line).
-function run(exe, argv, logFile, opts = {}) {
-  return new Promise((done) => {
-    const p = spawn(exe, argv, { cwd: repo, env: { ...process.env, QT_QPA_PLATFORM: 'offscreen' } })
-    const write = (b) => appendFile(logFile, b)
-    let stdout = ''
-    p.stdout.on('data', opts.stdout ? (b) => (stdout += b) : write)
-    p.stderr.on('data', write)
-    p.on('close', async (code) => {
-      if (opts.stdout) await writeFile(opts.stdout, stdout)
-      done(code)
-    })
-  })
 }
 
 const read = async (f) => (existsSync(f) ? JSON.parse(await readFile(f, 'utf8')) : null)
@@ -355,7 +226,6 @@ const COLUMNS = {
 }
 // Results are in metres (ETH3D, the drone blocks) or the reference's own units (`model`).
 // Where each tool's runner writes its summary (commandsOf names the same files).
-const SUMMARY_FILE = { 'websfm': 'run.json', 'metashape-dense': 'metashape.json' }
 const SCALE = { m: 1, cm: 100, mm: 1000, model: 1 }
 function fmt(v) {
   if (v == null || !Number.isFinite(v)) return '–'
@@ -426,7 +296,7 @@ async function tabulate() {
 
 async function pack() {
   // Configs, logs and summaries: what someone needs to check a table, without the data.
-  const keep = /\.(json|log|txt|md|out|csv)$/i
+  const keep = /\.(json|log|txt|md|out|csv)$/i // record.json included
   const files = []
   const walk = async (d, rel) => {
     for (const e of await readdir(d, { withFileTypes: true })) {
@@ -441,7 +311,7 @@ async function pack() {
   const list = join(out, '.pack-list')
   await writeFile(list, files.join('\n'))
   const tar = `${out}.tar.gz`
-  const code = await run('tar', ['-czf', tar, '-C', out, '-T', list], join(out, 'pack.log'))
+  const code = await runStep('tar', ['-czf', tar, '-C', out, '-T', list], join(out, 'pack.log'))
   console.log(
     code === 0 ? `packed ${files.length} files → ${tar}` : `tar failed (${code}), see ${join(out, 'pack.log')}`,
   )
@@ -449,7 +319,7 @@ async function pack() {
 
 // Run only as a script: importing this file (for scoreOf) must not start any job.
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
-  if (!args['dry-run']) await mkdir(join(out, 'configs'), { recursive: true })
+  if (!args['dry-run']) await mkdir(join(checkOut(out), 'configs'), { recursive: true })
   if (args.pack)
     for (const job of jobs)
       if (existsSync(join(out, job.id)) && existsSync(configPath(job.config)))
@@ -458,7 +328,8 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
     const progress = join(out, 'progress.log')
     const log = (m) => appendFile(progress, `${new Date().toISOString().slice(11, 19)} ${m}\n`)
     for (const job of jobs) {
-      const { summary, steps } = await commandsOf(job)
+      const dir = join(out, job.id)
+      const { summary, steps } = await commandsOf(job, dir)
       if (args['dry-run']) {
         console.log(`# ${job.id}`)
         for (const [exe, argv] of steps) console.log([exe, ...argv].join(' '))
@@ -469,18 +340,13 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
         const todo = steps.filter(([, , o]) => o?.creates && !existsSync(o.creates))
         await log(`skip ${job.id} (summary there)${todo.length ? `; scoring ${todo.length} missing` : ''}`)
         for (const [exe, argv, opts] of todo) {
-          const code = await run(exe, argv, join(out, job.id, 'console.log'), opts)
+          const code = await runStep(exe, argv, join(dir, 'console.log'), opts)
           await log(`scored ${job.id}: ${opts.creates.split('/').pop()} exit ${code}`)
         }
         continue
       }
-      await mkdir(join(out, job.id), { recursive: true })
       await log(`start ${job.id}`)
-      let code = 0
-      for (const [exe, argv, opts] of steps) {
-        code = await run(exe, argv, join(out, job.id, 'console.log'), opts)
-        if (code !== 0) break
-      }
+      const code = await runJob(job, dir, { extra: { table: job.table, run: out.split('/').pop() } })
       await log(`done ${job.id} exit ${code}`)
     }
     if (!args['dry-run']) await log('scoreboard finished')

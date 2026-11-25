@@ -9,7 +9,7 @@
 // the worker pool, the WebGPU matcher, OPFS persistence and every store-side gate. A
 // fresh browser profile per run means a fresh OPFS, so runs never see each other.
 //
-// Outputs (`--out <prefix>`, default bench-out/<name>-<timestamp>):
+// Outputs (`--out <prefix>`, default exp/<date>-scratch/<name>-<time> under the eval root):
 //   <prefix>.log   every log line, in the dev console's export format
 //   <prefix>.json  settings + per-stage numbers (keypoints, pairs, points ≥3 views, …)
 //
@@ -29,6 +29,7 @@
 // same run in Playwright's Firefox, without Chrome's memory probes or WebGPU flags).
 import { chromium, firefox } from 'playwright'
 import { startWorkerHeapSampler } from './workerHeap.mjs'
+import { checkOut, scratchOut } from './paths.mjs'
 import { loadReference } from './reference.mjs'
 import { spawn, spawnSync } from 'node:child_process'
 import { readFile, readdir, writeFile, mkdir, rm, stat } from 'node:fs/promises'
@@ -119,8 +120,9 @@ const stages = String(cfg.stages ?? 'detect,match,recon')
   .split(',')
   .map((s) => s.trim())
 const port = Number(cfg.port ?? 4180)
-const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-const outPrefix = resolve(repo, cfg.out ?? join('bench-out', `${name}-${stamp}`))
+// Without `out`: today's scratch experiment (scripts/bench/paths.mjs). Inside the eval root an
+// `out` must sit in exp/, results/ or ref/ (`npm run bench -- run` sets it).
+const outPrefix = checkOut(cfg.out ? resolve(repo, cfg.out) : scratchOut(name))
 // The run writes <out>.json: never over the config that started it (out = the config's own path minus .json).
 if (args.config && resolve(`${outPrefix}.json`) === resolve(args.config))
   throw new Error(
@@ -193,6 +195,9 @@ const STATIC_MIME = {
   '.png': 'image/png',
   '.onnx': 'application/octet-stream',
 }
+// The production build this run made (<out>.build, ~0.5 GB): deleted when the run ends,
+// unless `keepBuild: true` (another config can then serve it with `build: "<path>"`).
+let ownBuild = null
 if (cfg.dev) {
   if (!(await alive())) {
     vite = spawn(
@@ -204,6 +209,7 @@ if (cfg.dev) {
 } else {
   const buildDir = cfg.build ? resolve(repo, cfg.build) : `${outPrefix}.build`
   if (!cfg.build) {
+    if (!cfg.keepBuild) ownBuild = buildDir
     const t0 = Date.now()
     await new Promise((ok, fail) => {
       const p = spawn(
@@ -1346,4 +1352,5 @@ try {
   logOut.end()
   vite?.kill()
   server?.close()
+  if (ownBuild) await rm(ownBuild, { recursive: true, force: true }).catch(() => {})
 }

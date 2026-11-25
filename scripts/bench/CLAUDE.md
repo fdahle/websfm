@@ -3,6 +3,10 @@
 [README.md](README.md) is the reference (config keys, stages, accuracy checks, *Linux:
 reaching the GPU*). The traps below each cost a run before they were written down.
 
+- Start every run with `npm run bench -- run <tool> <config> --exp <topic>` (or `scoreboard`,
+  `gate`), never `run-bench.mjs` with an `out` of your own: it picks the folder, writes
+  `record.json` and `ls` finds it. One topic per question; write the answer in its `NOTE.md`
+  when it is known. Never put anything at the top of `/data1/websfm_eval` (README.txt there).
 - Start a multi-minute run with the shell tool's background mode and wait for its exit
   notice. Never wait with `until ! pgrep -f X` or `while pgrep -f X`: the loop's own
   command line matches. `pgrep` takes an extended regex (`"a|b"`, not `"a\|b"`).

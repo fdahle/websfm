@@ -455,7 +455,7 @@ export const SFM_TUNING = {
   // for the calibration.
   //
   // Four suffice, three do not (three fit the similarity exactly): with 3, Casa Grande
-  // 28 → 18 m, Iceland 331 m either way (gcpw-3ctl-2026-11-18).
+  // 28 → 18 m, Iceland 331 m either way (exp/2026-11-18-gcpw-3ctl).
   gcpRefineIntrinsicsMinGcps: 4,
   // ── Camera heights and GCP heights ──
   // When the vertical datum of the camera positions or of the GCPs is unknown, the

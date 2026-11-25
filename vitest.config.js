@@ -35,6 +35,8 @@ export default defineConfig({
       'scripts/licenses/**/*.test.{js,mjs}',
       // The scoreboard's tabulation (scripts/bench/scoreboard.mjs): plain functions.
       'scripts/bench/scoreboard.test.mjs',
+      // The bench's folders, run records and slimming: plain Node helpers.
+      'scripts/bench/housekeeping.test.mjs',
     ],
   },
 })

@@ -11,7 +11,7 @@
 //   node scripts/bench/bal/run.mjs --summary [--out DIR]
 //
 // --data   the problems, <set>/problem-*.txt (default /data1/websfm_testdata/bal)
-// --out    results (default /data1/websfm_eval/bal)
+// --out    results (default exp/<date>-bal under the eval root, scripts/bench/paths.mjs)
 // --pcg-max-cams  the `pcg` policy only up to this many cameras (default 600): it is the
 //          app's former solve, minutes where the others take seconds, and above ~600
 //          cameras the app never used it. 0 = never, Infinity = every problem.
@@ -33,6 +33,7 @@ import {
 import { cpus, homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { EXP, checkOut, today } from '../paths.mjs'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const arg = (name, def) => {
@@ -40,7 +41,7 @@ const arg = (name, def) => {
   return i > 0 ? process.argv[i + 1] : def
 }
 const data = arg('data', '/data1/websfm_testdata/bal')
-const out = arg('out', '/data1/websfm_eval/bal')
+const out = checkOut(arg('out', join(EXP, `${today()}-bal`)))
 const only = arg('only', '')
 const maxObs = Number(arg('max-obs', Infinity))
 const iters = Number(arg('iters', 100))

@@ -23,6 +23,7 @@ import { readFile, readdir, writeFile, mkdir, stat, open } from 'node:fs/promise
 import { join, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import proj4 from 'proj4'
+import { SHARED } from './paths.mjs'
 import initLaz, { decompress_points } from '../../src/wasm/lazcodec/lazcodec.js'
 import { decompressLazRecords } from '../../src/core/io/laz.js'
 import { readLasHeader } from '../../src/core/io/las.js'
@@ -49,7 +50,7 @@ export async function loadLidarGrid(cfg, log = console.log) {
   if (!files.length) throw new Error(`lidar: no .laz/.las in ${cfg.dir}`)
   const sizes = await Promise.all(files.map((f) => stat(join(cfg.dir, f)).then((s) => s.size)))
   const key = `${files.length}-${sizes.reduce((a, b) => a + b, 0)}-${cell}`
-  const cacheDir = join(repo, 'bench-out', 'cache')
+  const cacheDir = join(SHARED, 'cache')
   const base = join(cacheDir, `lidar-${key}`)
   try {
     const meta = JSON.parse(await readFile(`${base}.json`, 'utf8'))

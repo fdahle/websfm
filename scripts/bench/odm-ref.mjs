@@ -11,7 +11,7 @@
 //                             whole pipeline with a DSM and a COPC cloud.
 //        --mode georef        positions in as for full, stops after OpenSfM: the camera
 //                             check with positions in the solve, without the dense hours.
-//        [--ws <dir>]         workspace (default /data1/websfm_eval/odm-<date>/<name>-<mode>)
+//        [--ws <dir>]         workspace (default exp/<date>-scratch/<name>-<time>)
 //        [--gpu]              ODM's GPU image (opendronemap/odm:gpu) with the NVIDIA GPU passed in
 //        [--image <ref>]      Docker image (default opendronemap/odm:latest, or :gpu with --gpu)
 //        [--keep]             keep the photo copies and ODM's intermediate folders
@@ -25,6 +25,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { readFile, writeFile, readdir, mkdir, link, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { loadReference } from './reference.mjs'
+import { checkOut, scratchOut } from './paths.mjs'
 import { parseOpenSfm } from '../../src/core/io/sfmInterop.js'
 import { scoreCameraPositions, benchModel, stem } from './refScore.mjs'
 
@@ -45,8 +46,7 @@ const mode = args.mode ?? 'sfm'
 if (!['sfm', 'georef', 'full'].includes(mode)) throw new Error('--mode sfm|georef|full')
 const images = cfg.images
 const name = args.name ?? `odm-${cfg.name ?? 'run'}-${mode}`
-const day = new Date().toISOString().slice(0, 10)
-const ws = resolve(args.ws ?? `/data1/websfm_eval/odm-${day}/${name}`)
+const ws = checkOut(args.ws ? resolve(args.ws) : scratchOut(name), '--ws')
 const proj = join(ws, 'project')
 const imgDir = join(proj, 'images')
 const dockerImage = args.image ?? (args.gpu ? 'opendronemap/odm:gpu' : 'opendronemap/odm:latest')

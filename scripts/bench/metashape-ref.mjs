@@ -4,7 +4,7 @@
 // sit side by side in docs/BENCHMARKS.md (TODO ▸ PAR-1 scoreboard).
 //
 //   node scripts/bench/metashape-ref.mjs --config scripts/bench/configs/<cfg>.json
-//        [--ws <dir>]          workspace (default bench-out/metashape-<name>-<stamp>)
+//        [--ws <dir>]          workspace (default exp/<date>-scratch/<name>-<time>)
 //        [--python <exe>]      an interpreter with the Metashape module
 //                              (default $METASHAPE_PYTHON, else ~/miniconda3/envs/hist_env3)
 //        [--name <label>]
@@ -29,11 +29,11 @@ import { join, resolve, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { loadReference } from './reference.mjs'
+import { checkOut, scratchOut } from './paths.mjs'
 import { parseColmapModel, readColmapModel } from '../../src/core/io/colmapModel.js'
 import { scoreCameraPositions, benchModel } from './refScore.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const repo = resolve(here, '../..')
 const args = {}
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i]
@@ -50,8 +50,7 @@ const cfg = args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}
 const images = cfg.images
 if (!images) throw new Error('config needs "images"')
 const name = args.name ?? `metashape-${cfg.name ?? 'run'}`
-const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-const ws = args.ws ? resolve(args.ws) : join(repo, 'bench-out', `${name}-${stamp}`)
+const ws = checkOut(args.ws ? resolve(args.ws) : scratchOut(name), '--ws')
 await mkdir(ws, { recursive: true })
 const python = args.python ?? process.env.METASHAPE_PYTHON ?? join(homedir(), 'miniconda3/envs/hist_env3/bin/python')
 const preselect = cfg.match?.strategy === 'preselect'

@@ -75,6 +75,9 @@ Rules that are easy to miss:
   that changes what matching produces. Give the gate's table in the commit message. A
   synthetic test or a run on one kind of block is not evidence that nothing else broke
   ([docs/conventions.md](docs/conventions.md) ▸ *An option or not*).
+- Bench runs (WebSfM, COLMAP, Metashape, ODM) start with `npm run bench`: it puts each
+  run in `exp/<date>-<topic>/` or `results/` with a `record.json` of what it ran on
+  ([scripts/bench/README.md](scripts/bench/README.md) ▸ *Where runs go*).
 - Pushing deploys: `main` goes to dev.websfm.app, the `experimental` branch to
   experimental.websfm.app, a `v*` tag to websfm.app and its pinned copy at
   websfm.app/v/<version>/ (CI ▸ `deploy`). Don't push, and never push a tag, unless asked.

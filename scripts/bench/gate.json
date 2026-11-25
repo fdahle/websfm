@@ -98,7 +98,7 @@
         "hist": {
           "intrinsics": "/data1/websfm_testdata/casa_grande/aerial/preproc/camera_model_intrinsics.csv",
           "mask": "/data1/websfm_testdata/casa_grande/aerial/preproc/image_mask.tif",
-          "maskPng": "/data1/websfm_eval/masks/cg_aerial.png",
+          "maskPng": "/data1/websfm_eval/shared/masks/cg_aerial.png",
           "gcps": "/data1/websfm_testdata/casa_grande/aerial/preproc/gcp.csv",
           "checkEvery": 4
         },

@@ -20,6 +20,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readTruth, scoreCameras } from './cameraScore.mjs'
+import { EXP, checkOut, today } from './paths.mjs'
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const args = {}
@@ -38,7 +39,8 @@ const baselinePath = join(repo, 'scripts/bench/gate-baseline.json')
 const baseline = existsSync(baselinePath) ? JSON.parse(await readFile(baselinePath, 'utf8')) : { sets: {} }
 const only = args.only ? new Set(String(args.only).split(',')) : null
 const sets = manifest.sets.filter((s) => !only || only.has(s.id))
-const out = resolve(args.out ?? `/data1/websfm_eval/gate-${new Date().toISOString().slice(0, 10)}-${sha.slice(0, 7)}`)
+// Every gate run of a day in one experiment, a folder per commit.
+const out = checkOut(resolve(args.out ?? join(EXP, `${today()}-gate`, sha.slice(0, 7))))
 const port = Number(args.port ?? 4187)
 if (args['write-baseline'] && (dirty || only)) {
   console.error('--write-baseline needs a clean tree and every set')

@@ -5,7 +5,7 @@ result written in eth3d_score.py's JSON shape, so the scoreboard reads either:
         [--label x] [--out result.json] [--evaluator <ETH3DMultiViewEvaluation>]
 
 The evaluator is a C++ program built outside the repo: $ETH3D_EVALUATOR, else
-/data1/websfm_eval/tools/multi-view-evaluation/build/ETH3DMultiViewEvaluation. To build it
+/data1/websfm_eval/shared/tools/multi-view-evaluation/build/ETH3DMultiViewEvaluation ($ETH3D_EVALUATOR). To build it
 (PCL 1.13, Boost, Eigen; the conda env `eth3d-eval` on the bench machine):
 
     git clone https://github.com/ETH3D/multi-view-evaluation && cd multi-view-evaluation
@@ -27,7 +27,10 @@ import time
 
 import numpy as np
 
-DEFAULT_EVALUATOR = "/data1/websfm_eval/tools/multi-view-evaluation/build/ETH3DMultiViewEvaluation"
+DEFAULT_EVALUATOR = os.environ.get(
+    "ETH3D_EVALUATOR",
+    "/data1/websfm_eval/shared/tools/multi-view-evaluation/build/ETH3DMultiViewEvaluation",
+)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--scene", required=True)

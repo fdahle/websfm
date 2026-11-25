@@ -7,7 +7,7 @@
 //        [--colmap <colmap binary, default $COLMAP or PATH>] [--mapper mapper|global_mapper] [--dense]
 //        [--denseMaxImageSize 2000] [--cameraModel SIMPLE_RADIAL] [--name <label>]
 //        [--model <COLMAP model dir> --imagePath <dir>]   dense only, on a given model
-//        [--ws <dir>]                                       workspace (default bench-out/<name>-<stamp>)
+//        [--ws <dir>]                                       workspace (default exp/<date>-scratch/<name>-<time>)
 //                                                         (e.g. ETH3D's ground-truth cameras)
 //
 // Defaults are COLMAP's own, except two choices that mirror the websfm run so the
@@ -16,19 +16,18 @@
 // shared camera would drop all but those of the first size), and spatial matching with the config's neighbour count
 // when the config uses websfm's position preselection (else exhaustive). COLMAP runs
 // on the GPU (CUDA build); run it alone, not beside a bench run, or both timings lie.
-// Writes bench-out/colmap-<name>-<stamp>/ (database, models, logs) and a JSON summary.
+// Writes the workspace (database, models, logs) and a JSON summary.
 import { spawnSync } from 'node:child_process'
 import { readFile, writeFile, readdir, mkdir, stat } from 'node:fs/promises'
 import { openSync, readSync, closeSync } from 'node:fs'
-import { join, resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join, resolve } from 'node:path'
 import { loadReference } from './reference.mjs'
+import { checkOut, scratchOut } from './paths.mjs'
 import { parseColmapModel, readColmapModel } from '../../src/core/io/colmapModel.js'
 import { geodeticToEcef, makeEnuFrame } from '../../src/core/eval/positionCheck.js'
 import { scoreCameraPositions, benchModel, stem } from './refScore.mjs'
 import { DatabaseSync } from 'node:sqlite'
 
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const args = {}
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i]
@@ -45,9 +44,8 @@ const cfg = args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}
 // The binary: --colmap, else $COLMAP, else `colmap` on PATH.
 const colmap = args.colmap ?? process.env.COLMAP ?? 'colmap'
 const name = args.name ?? `colmap-${cfg.name ?? 'run'}`
-const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
 // `--ws <dir>`: write the workspace there instead (dense workspaces are GBs; keep them off the SSD).
-const ws = args.ws ? resolve(args.ws) : join(repo, 'bench-out', `${name}-${stamp}`)
+const ws = checkOut(args.ws ? resolve(args.ws) : scratchOut(name), '--ws')
 await mkdir(ws, { recursive: true })
 const images = args.imagePath ?? cfg.images
 if (!images) throw new Error('config needs "images" (or --imagePath)')
