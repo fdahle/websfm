@@ -21,8 +21,13 @@ inliers and a connected capture network matter.
 
 ## Sparse and coverage
 Registration rate, track length, and reprojection error describe different failure
-modes. Long tracks seen in several views are stronger than many two-view points. The
-coverage map reveals areas where tie points cluster or disappear. When images were
+modes. Long tracks seen in several views are stronger than many two-view points.
+
+The coverage map of an aerial project shows how many photos see each patch of ground, as
+Metashape's image overlap does. Ground that only two photos see gets a dense cloud with
+one other photo to confirm each depth; ground that one photo sees gets none. A film block
+flown at 60 % forward overlap is about half two-photo ground. **Tie points** switches to
+where the matches landed, which shows areas where matching found little. When images were
 added to the model ([Sparse Reconstruction](guide:sparse-reconstruction) ▸ Add to the
 model), each run is listed with the images it added and those it could not place.
 **Try again…** under the last one opens Sparse Reconstruction to add the photos still

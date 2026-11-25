@@ -104,4 +104,26 @@ export default {
       disconnected: 'disconnected (component {n, number})',
     },
   },
+  // Quality Report ▸ Coverage (EvalCoverageSection.vue).
+  coverage: {
+    noSparse: 'No sparse cloud.',
+    modePhotos: 'Photos',
+    modeTiePoints: 'Tie points',
+    modeTip: 'Photos: how many photos see each patch of ground. Tie points: where the matches landed.',
+    photos: '{n, plural, one {# photo} other {# photos}}',
+    photosPlus: '{n, number}+ photos',
+    views: '{n, plural, one {# view} other {# views}}',
+    viewsMinimum: '2 (minimum)',
+    viewsGood: '3+ (good)',
+    camera: 'camera',
+    notePhotos:
+      'How many photos see each patch of ground, on the surface the tie points give. Where only two photos see it, ' +
+      'the dense cloud has one other photo to confirm each depth; where one does, it has none.',
+    twoPhotoShare:
+      'Of the ground the photos cover, {one, number, ::percent} is seen by one photo, {two, number, ::percent} by two ' +
+      'and {more, number, ::percent} by three or more.',
+    noteTiePoints:
+      'Top-down tie-point density, cells coloured by the longest track in them. Thin (red, amber) regions are where ' +
+      'the matching is weakest.',
+  },
 }

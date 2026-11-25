@@ -96,4 +96,26 @@ export default {
       disconnected: 'nicht verbunden (Komponente {n, number})',
     },
   },
+  // Qualitätsbericht ▸ Abdeckung (EvalCoverageSection.vue).
+  coverage: {
+    noSparse: 'Keine Sparse-Punktwolke.',
+    modePhotos: 'Fotos',
+    modeTiePoints: 'Verknüpfungspunkte',
+    modeTip: 'Fotos: wie viele Fotos jede Stelle des Geländes sehen. Verknüpfungspunkte: wo die Matches liegen.',
+    photos: '{n, plural, one {# Foto} other {# Fotos}}',
+    photosPlus: '{n, number}+ Fotos',
+    views: '{n, plural, one {# Ansicht} other {# Ansichten}}',
+    viewsMinimum: '2 (Minimum)',
+    viewsGood: '3+ (gut)',
+    camera: 'Kamera',
+    notePhotos:
+      'Wie viele Fotos jede Stelle des Geländes sehen, auf der Oberfläche der Verknüpfungspunkte. Wo nur zwei Fotos ' +
+      'sie sehen, hat die dichte Punktwolke ein weiteres Foto, um jede Tiefe zu bestätigen; wo nur eines, keines.',
+    twoPhotoShare:
+      'Vom abgedeckten Gelände sehen {one, number, ::percent} ein Foto, {two, number, ::percent} zwei und ' +
+      '{more, number, ::percent} drei oder mehr.',
+    noteTiePoints:
+      'Dichte der Verknüpfungspunkte von oben, jede Zelle gefärbt nach der längsten Spur darin. Dünne (rote, gelbe) ' +
+      'Bereiche sind dort, wo das Matching am schwächsten ist.',
+  },
 }

@@ -77,6 +77,8 @@ export function useQualityReport() {
   const histogram = computed(() => modelStats.value.histogram)
   const perImage = computed(() => modelStats.value.perImage)
   const coverage = computed(() => modelStats.value.coverage)
+  // Photos per patch of ground (aerial): only computed when the Coverage section reads it.
+  const overlap = computed(() => modelStats.value.overlap)
 
   // Null before matching has produced any terminal result; an empty accepted
   // graph after a completed run remains a real (split) result.
@@ -733,6 +735,7 @@ export function useQualityReport() {
     histogram,
     perImage,
     coverage,
+    overlap,
     graph,
     selfCal,
     sensorRows,

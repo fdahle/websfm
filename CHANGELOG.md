@@ -6,6 +6,7 @@ Notable changes to WebSfM. The format follows
 ## [Unreleased]
 
 ### Added
+- **See how many photos cover each patch of ground.** Evaluate ▸ Coverage on an aerial project now maps how many photos see each spot of the ground, as Metashape's image overlap does, and says what share of it one, two, or three and more photos see; **Tie points** switches to the map of where the matches landed. Each cell of the ground, at the height of the tie points around it, is projected into every photo. The map before counted the longest track among a cell's tie points over 64 cells, so a two-photo patch with one point from the next strip showed green, and a patch where matching found nothing showed nothing; two-photo ground is where a dense cloud has one other photo to confirm each depth (see the dense-cloud fix below). The section is also in German now.
 - **A height datum for imported camera positions.** Import ▸ Camera Poses now asks what the positions' heights are measured from, as the GCP import does. With GCPs in another datum that converts, Sparse Model then converts the camera heights exactly instead of estimating the offset. The dialog is also in German now.
 
 ### Fixed

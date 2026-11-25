@@ -17,7 +17,7 @@
 
 import { projectPoint, cameraCenter } from '../sfm/geometry.js'
 import { trackLengthHistogram } from './reconStats.js'
-import { coverageGrid } from './coverage.js'
+import { coverageGrid, overlapGrid } from './coverage.js'
 import { SparsePoints } from '../sfm/sparsePoints.js'
 
 // One projection per observation → the global distribution and the per-camera rows.
@@ -98,10 +98,15 @@ export function sparseCoverage(cameras, points, opts = { targetCells: 64 }) {
   return coverageGrid(points, cams, opts)
 }
 
+// How many photos see each patch of ground (Quality Report ▸ Coverage, aerial projects).
+export function sparseOverlap(cameras, points, opts = {}) {
+  return overlapGrid(points, [...cameras.values()], opts)
+}
+
 const memo = new WeakMap() // points → { cameras, count, stats }
 
 // The memoised stats object for (cameras, points). Each field is computed on first
-// read and kept: { reproj, perImage, histogram, coverage }.
+// read and kept: { reproj, perImage, histogram, coverage, overlap }.
 export function sparseModelStats(cameras, points) {
   const pts = points ?? SparsePoints.empty()
   const cams = cameras || new Map()
@@ -109,7 +114,8 @@ export function sparseModelStats(cameras, points) {
   if (hit && hit.cameras === cams && hit.count === pts.length) return hit.stats
   let residuals = null,
     histogram = null,
-    coverage = null
+    coverage = null,
+    overlap = null
   const stats = {
     get reproj() {
       return (residuals ??= sparseResidualStats(cams, pts)).reproj
@@ -122,6 +128,9 @@ export function sparseModelStats(cameras, points) {
     },
     get coverage() {
       return (coverage ??= sparseCoverage(cams, pts))
+    },
+    get overlap() {
+      return (overlap ??= sparseOverlap(cams, pts))
     },
   }
   memo.set(pts, { cameras: cams, count: pts.length, stats })
