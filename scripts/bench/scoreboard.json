@@ -517,6 +517,43 @@
           "args": ["--mode", "sfm", "--gpu"]
         },
         {
+          "id": "eurosdr-p4-websfm",
+          "block": "EuroSDR Wards Hill",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "nm-eurosdr-p4"
+        },
+        {
+          "id": "eurosdr-p4-colmap",
+          "block": "EuroSDR Wards Hill",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "nm-eurosdr-p4"
+        },
+        {
+          "id": "eurosdr-p4-glomap",
+          "block": "EuroSDR Wards Hill",
+          "label": "COLMAP GLOMAP",
+          "tool": "colmap",
+          "config": "nm-eurosdr-p4",
+          "args": ["--mapper", "global_mapper"]
+        },
+        {
+          "id": "eurosdr-p4-metashape",
+          "block": "EuroSDR Wards Hill",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "nm-eurosdr-p4"
+        },
+        {
+          "id": "eurosdr-p4-odm",
+          "block": "EuroSDR Wards Hill",
+          "label": "ODM",
+          "tool": "odm",
+          "config": "nm-eurosdr-p4",
+          "args": ["--mode", "sfm", "--gpu"]
+        },
+        {
           "id": "usegeo-websfm",
           "block": "UseGeo dataset 1",
           "label": "WebSfM",
@@ -574,6 +611,21 @@
           "label": "Metashape",
           "tool": "metashape",
           "config": "main-rtk-puti444",
+          "checkpoints": true
+        },
+        {
+          "id": "rtk-eurosdr-p4-websfm",
+          "block": "EuroSDR Wards Hill",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "rtk-eurosdr-p4"
+        },
+        {
+          "id": "rtk-eurosdr-p4-metashape",
+          "block": "EuroSDR Wards Hill",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "rtk-eurosdr-p4",
           "checkpoints": true
         }
       ]
