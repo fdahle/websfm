@@ -184,7 +184,7 @@ function scoreOfTool(tool, s, extra) {
   }
 }
 
-const COLUMNS = {
+export const COLUMNS = {
   cameras: { head: 'cameras', cell: (x) => (x.cameras ? `${x.cameras[0]}/${x.cameras[1]}` : '–') },
   truth: {
     head: (u) => `cameras · median error vs truth (${u})`,
@@ -230,7 +230,7 @@ const COLUMNS = {
 }
 // Results are in metres (ETH3D, the drone blocks) or the reference's own units (`model`).
 // Where each tool's runner writes its summary (commandsOf names the same files).
-const SCALE = { m: 1, cm: 100, mm: 1000, model: 1 }
+export const SCALE = { m: 1, cm: 100, mm: 1000, model: 1 }
 function fmt(v) {
   if (v == null || !Number.isFinite(v)) return '–'
   if (v !== 0 && Math.abs(v) < 0.1) return v.toPrecision(2) // model units (South Building)
