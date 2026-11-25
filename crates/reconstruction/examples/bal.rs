@@ -1,6 +1,6 @@
 // The bundle adjustment on a BAL problem (Bundle Adjustment in the Large, Agarwal et al.
 // 2010, grail.cs.washington.edu/projects/bal), for comparing it with Ceres on the same
-// objective (scripts/bench/bal/run.mjs). Prints one JSON line.
+// objective (scripts/bench/suites/bal/run.mjs). Prints one JSON line.
 //
 //   cargo run --release --features threads --example bal -- <problem.txt> [app|pcg|implicit] [max_iters]
 //

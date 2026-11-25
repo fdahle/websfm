@@ -98,7 +98,7 @@ of images in headless Chrome and reports per-stage numbers. With the example dat
 fetched, this runs every stage from detection to the orthophoto:
 
 ```bash
-node scripts/bench/run-bench.mjs --config scripts/bench/example-aukerman.json
+node scripts/bench/websfm/run-bench.mjs --config scripts/bench/example-aukerman.json
 ```
 
 Results land in `bench-out/` (gitignored). [`scripts/bench/README.md`](../scripts/bench/README.md)

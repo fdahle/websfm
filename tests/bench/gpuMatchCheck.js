@@ -1,4 +1,4 @@
-// GPU vs WASM brute-force matching on planted descriptors (scripts/bench/gpu-match-check.mjs).
+// GPU vs WASM brute-force matching on planted descriptors (scripts/bench/checks/gpu-match-check.mjs).
 // Each case plants `shared` near-duplicate rows in B and compares the WebGPU matcher's
 // match count with the WASM crate's. They must agree; a pair wider than one 64×64
 // tile returning 0 on the GPU is the 2026-10 Vulkan/NVIDIA `acc` zero-init miscompile

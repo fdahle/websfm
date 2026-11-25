@@ -1,7 +1,7 @@
 // The CPU half of the regression gate (`npm run gate:sfm`): every saved SfM input of the
-// gate's sets (scripts/bench/gate.json ▸ dumpDir, made by `gate.mjs --dump`) replayed in
+// gate's sets (scripts/bench/suites/gate.json ▸ dumpDir, made by `gate.mjs --dump`) replayed in
 // Node, scored against the sets' reference cameras and held to the gate's baseline
-// (scripts/bench/gate-baseline.json). The inputs are the exact worker payloads, so a
+// (scripts/bench/suites/gate-baseline.json). The inputs are the exact worker payloads, so a
 // change under src/core/sfm is judged without the GPU and without matching's own changes.
 // About a minute a set, twice: ten minutes for the nine sets.
 //
@@ -19,7 +19,7 @@ import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { reconstruct } from './sfm.js'
 import { wrapPackedMatches } from './matchCodec.js'
 import { decodeSfmInput } from '../../../tests/bench/sfmInputDump.js'
-import { readTruth, scoreCameras } from '../../../scripts/bench/cameraScore.mjs'
+import { readTruth, scoreCameras } from '../../../scripts/bench/score/camera-score.mjs'
 
 const RUN = process.env.WEBSFM_SFM_GATE
 const repoFile = (p) => fileURLToPath(new URL(`../../../${p}`, import.meta.url))
@@ -52,8 +52,10 @@ describe.skipIf(!RUN)('SfM replay gate', () => {
   })
 
   // Read only when the gate is asked for: `npm test` collects this file too.
-  const manifest = RUN ? JSON.parse(readFileSync(repoFile('scripts/bench/gate.json'), 'utf8')) : { sets: [] }
-  const baseline = RUN ? JSON.parse(readFileSync(repoFile('scripts/bench/gate-baseline.json'), 'utf8')) : { sets: {} }
+  const manifest = RUN ? JSON.parse(readFileSync(repoFile('scripts/bench/suites/gate.json'), 'utf8')) : { sets: [] }
+  const baseline = RUN
+    ? JSON.parse(readFileSync(repoFile('scripts/bench/suites/gate-baseline.json'), 'utf8'))
+    : { sets: {} }
   const only = process.env.WEBSFM_SFM_GATE_ONLY ? new Set(process.env.WEBSFM_SFM_GATE_ONLY.split(',')) : null
 
   for (const set of manifest.sets) {

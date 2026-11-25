@@ -10,16 +10,16 @@
 //   npm run bench -- ls [text] [--all]               runs, newest first, from their records
 //   npm run bench -- clean [--slim <folder>…] [--yes]  what nothing cites; slim to evidence
 //
-// Folders: scripts/bench/paths.mjs. The record: record.mjs. Tools: tools.mjs.
+// Folders: lib/paths.mjs. The record: lib/record.mjs. How each tool runs a job: lib/jobs.mjs.
 
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync, lstatSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { basename, join, relative } from 'node:path'
-import { ARCHIVE, EVAL, EXP, REF, RESULTS, SHARED, expDir, repo, slug } from './paths.mjs'
-import { RECORD } from './record.mjs'
-import { sizeOf, slim } from './slim.mjs'
-import { TOOLS, configPath, runJob } from './tools.mjs'
+import { ARCHIVE, EVAL, EXP, REF, RESULTS, SHARED, expDir, repo, slug } from './lib/paths.mjs'
+import { RECORD } from './lib/record.mjs'
+import { sizeOf, slim } from './lib/slim.mjs'
+import { TOOLS, configPath, runJob } from './lib/jobs.mjs'
 
 const argv = process.argv.slice(2)
 const verb = argv[0]
@@ -59,7 +59,7 @@ async function runOne() {
   if (!topic) throw new Error('run needs --exp <topic>: the experiment it belongs to')
   let job
   if (flags.job) {
-    const manifest = JSON.parse(readFileSync(join(repo, 'scripts/bench/scoreboard.json'), 'utf8'))
+    const manifest = JSON.parse(readFileSync(join(repo, 'scripts/bench/suites/scoreboard.json'), 'utf8'))
     for (const t of manifest.tables) for (const j of t.jobs) if (j.id === flags.job) job = { ...j, table: t.id }
     if (!job) throw new Error(`no job ${flags.job} in scoreboard.json`)
     if (passThrough.length) job.args = [...(job.args ?? []), ...passThrough]
@@ -245,10 +245,10 @@ switch (verb) {
     await runOne()
     break
   case 'scoreboard':
-    await passOn('scoreboard.mjs', [])
+    await passOn('suites/scoreboard.mjs', [])
     break
   case 'gate':
-    await passOn('gate.mjs', [])
+    await passOn('suites/gate.mjs', [])
     break
   case 'ls':
     ls()

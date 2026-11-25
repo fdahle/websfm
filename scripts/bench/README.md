@@ -7,16 +7,34 @@ gets a fresh on-disk browser profile, deleted afterwards, so it starts from an e
 The profile is on disk because an incognito context keeps OPFS and blobs in memory, and
 a multi-GB dataset exhausts that.
 
+## What is where
+
+| folder | holds |
+|---|---|
+| `cli.mjs` | `npm run bench`: the way to start any run ([Where runs go](#where-runs-go-npm-run-bench)) |
+| `lib/` | what the runners share: the folders (`paths.mjs`), run records (`record.mjs`), how each tool runs a job (`jobs.mjs`), reference data (`reference.mjs`), slimming, the worker heap sampler |
+| `websfm/` | the headless WebSfM run (`run-bench.mjs`) and its build config |
+| `ref/` | the reference tools on a bench config: COLMAP, Metashape (and its Python), ODM |
+| `score/` | scorers: cameras against a reference, ETH3D dense (ours and ETH3D's own evaluator), LiDAR, point classes |
+| `prep/` | turning a downloaded dataset into bench reference data (EuroSDR, quarry, Mill19, Strecha) |
+| `suites/` | sets of runs with their manifests: the scoreboard, the regression gate, BAL against Ceres |
+| `checks/` | single checks the tests and docs call: the GPU depth and matching kernels, the texture lab |
+| `hist/`, `synth/` | film blocks and synthetic satellite blocks: their setup, reference runs and scoring |
+| `configs/` | bench configs (local, gitignored: they name local paths) |
+
+Names: kebab-case for `.mjs`, snake_case for `.py`. A script made for one investigation
+belongs with that investigation's notes, not here.
+
 To try it without a dataset of your own, fetch the example (`npm run fetch:examples`)
 and run the one committed config, which takes it from detection to the orthophoto:
 
 ```sh
-node scripts/bench/run-bench.mjs --config scripts/bench/example-aukerman.json
+node scripts/bench/websfm/run-bench.mjs --config scripts/bench/example-aukerman.json
 ```
 
 ```sh
-node scripts/bench/run-bench.mjs --config scripts/bench/configs/sb-default.json
-node scripts/bench/run-bench.mjs --images C:/data/set --limit 20 --detect '{"maxDim":3200}'
+node scripts/bench/websfm/run-bench.mjs --config scripts/bench/configs/sb-default.json
+node scripts/bench/websfm/run-bench.mjs --images C:/data/set --limit 20 --detect '{"maxDim":3200}'
 ```
 
 A run started this way writes to today's scratch folder, `exp/<date>-scratch/` under the
@@ -56,7 +74,7 @@ The eval root is `$WEBSFM_EVAL`, else `"eval"` in `scripts/bench/paths.local.jso
 | `shared/` | inputs, masks, tools and caches several runs read |
 | `archive/` | runs from before this layout, slimmed to their evidence |
 
-- **`run`** starts a tool on a config exactly as the scoreboard does (`tools.mjs`: the same
+- **`run`** starts a tool on a config exactly as the scoreboard does (`lib/jobs.mjs`: the same
   command lines, the same scorers), into `exp/<date>-<topic>/<label>/`. A rerun never
   overwrites (`<label>~2`). A config is a name in `configs/` or a path to a `.json`. Arguments
   after `--` go to the tool; for WebSfM they override the config's keys.
@@ -215,7 +233,7 @@ positions, and the check is no longer independent.
 
 Without GNSS, a run's camera centres can be scored against a reference model in COLMAP's
 `images.txt`: ETH3D's `dslr_calibration_undistorted` (ground truth) or a COLMAP model of
-the same images. `node scripts/bench/camera-check.mjs <out>.json <images.txt | ETH3D scene>`
+the same images. `node scripts/bench/score/camera-check.mjs <out>.json <images.txt | ETH3D scene>`
 fits a similarity, drops cameras beyond 5× the median and prints the registered count,
 the median / p90 / max centre error in reference units and the cameras that are off.
 
@@ -247,8 +265,8 @@ IoU, precision, recall and F1 (ground, building, vegetation as one class and per
 other). The PLY needs x, y, z (z up), optional colour and an integer label property.
 
 ```bash
-node scripts/bench/classify-score.mjs --ply OCCC_points.ply --preset stpls3d --out occc.json
-node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2,"6":6,"5":5}'
+node scripts/bench/score/classify-score.mjs --ply OCCC_points.ply --preset stpls3d --out occc.json
+node scripts/bench/score/classify-score.mjs --ply site.ply --label label --map '{"2":2,"6":6,"5":5}'
 ```
 
 `--preset stpls3d` maps STPLS3D's labels onto LAS classes; other datasets take `--map`
@@ -277,7 +295,7 @@ node scripts/bench/classify-score.mjs --ply site.ply --label label --map '{"2":2
   SfM worker's peak V8 heap (the ~4 GB per-isolate ceiling) and heap + ArrayBuffers
   (typed arrays and wasm memory, outside that ceiling), per segment of the solve. The
   segments close on the solver's `stage "…" took` and `memory mark "…"` debug lines;
-  the numbers land in the result JSON as `workerHeap` (`workerHeap.mjs`, Chrome DevTools
+  the numbers land in the result JSON as `workerHeap` (`lib/worker-heap.mjs`, Chrome DevTools
   Protocol, sampled every 250 ms, so a shorter spike can be missed).
 - `maxOldSpaceMb`: raise V8's heap ceiling for the page and its workers
   (`--max-old-space-size`), so a run that would die at ~4 GB finishes and reports its
@@ -395,27 +413,27 @@ headless → SwiftShader whatever the flags; headed without `--ignore-gpu-blockl
 SwiftShader in workers; headed with all three flags → `nvidia / turing`. Check the
 `backend = WebGPU (…)` log line: SwiftShader is slower than the WASM path.
 
-`node scripts/bench/gpu-match-check.mjs` checks that the WebGPU matcher agrees with
+`node scripts/bench/checks/gpu-match-check.mjs` checks that the WebGPU matcher agrees with
 WASM on this machine (planted pairs, 64² to 9000²). It found the 2026-10 miscompile on
 Vulkan/NVIDIA: the kernel's accumulator was zeroed only once, so every pair wider than
 one 64-column tile came back with 0 matches and each run fell back to WASM after its
 first validation (match.wgsl now zeroes it explicitly).
 
-`node scripts/bench/gpu-depth-check.mjs` runs the PatchMatch kernel on this machine's GPU
+`node scripts/bench/checks/gpu-depth-check.mjs` runs the PatchMatch kernel on this machine's GPU
 against the synthetic cases both kernels are held to (`tests/bench/patchmatchCases.js`):
 depth against the truth, and its cost against the Rust cost (`--swiftshader` for the
 software adapter the nightly suite uses).
 
 ## Texture lab
 
-`textureLab.mjs` reruns the mesh texture in Node on a real project, about 30 s per run
+`checks/texture-lab.mjs` reruns the mesh texture in Node on a real project, about 30 s per run
 instead of a browser pipeline run per change. The `texturedump` stage writes its inputs
 (the newest untextured mesh and every registered camera with its frame model) next to
 the run:
 
 ```sh
-node scripts/bench/run-bench.mjs --config … # stages …,mesh,decimate,texturedump
-node scripts/bench/textureLab.mjs --dump <out> --out /tmp/lab [--opts '{"smoothness":1}'] [--pages] [--glb lab.glb]
+node scripts/bench/websfm/run-bench.mjs --config … # stages …,mesh,decimate,texturedump
+node scripts/bench/checks/texture-lab.mjs --dump <out> --out /tmp/lab [--opts '{"smoothness":1}'] [--pages] [--glb lab.glb]
 ```
 
 Photos are read from the dataset folder and decoded with ffmpeg (cached under `--out`);
@@ -437,9 +455,9 @@ tool's summary in the same terms and writes the tables to `scoreboard.md`, with 
 named in each row:
 
 ```sh
-node scripts/bench/scoreboard.mjs --only film --dry-run       # the commands it would run
-node scripts/bench/scoreboard.mjs --name 1.0 --repeat 3 --heldout --pack   # a release run
-node scripts/bench/scoreboard.mjs --out <dir> --tabulate      # tables again, no runs
+node scripts/bench/suites/scoreboard.mjs --only film --dry-run       # the commands it would run
+node scripts/bench/suites/scoreboard.mjs --name 1.0 --repeat 3 --heldout --pack   # a release run
+node scripts/bench/suites/scoreboard.mjs --out <dir> --tabulate      # tables again, no runs
 ```
 
 A job whose summary is already in its folder is skipped, so a run that stopped resumes
@@ -476,8 +494,8 @@ SfM, and quote its table in the commit; about 15 minutes on the GPU.
 
 ```sh
 npm run gate                                  # every set; exit 1 on a failure
-node scripts/bench/gate.mjs --only eth3d-office,south-building
-node scripts/bench/gate.mjs --write-baseline --dump   # new baseline + fresh SfM inputs
+node scripts/bench/suites/gate.mjs --only eth3d-office,south-building
+node scripts/bench/suites/gate.mjs --write-baseline --dump   # new baseline + fresh SfM inputs
 npm run gate:sfm                              # SfM only, on the CPU, from the saved inputs
 ```
 
@@ -502,7 +520,7 @@ npm run gate:sfm                              # SfM only, on the CPU, from the s
 `preprocessed_images/`, `image_mask.tif`, `gcp.csv`, `camera_model_intrinsics.csv`,
 reference DEMs) the same way for WebSfM, COLMAP and Metashape:
 
-- config key `hist` (`hist/histSetup.mjs`): the certificate focal + scan pitch on one
+- config key `hist` (`hist/hist-setup.mjs`): the certificate focal + scan pitch on one
   sensor, the static mask on every image (or `hist.masks`, a folder of per-image masks
   imported through Masks ▸ Import folder), GCPs as control with every Nth as a
   checkpoint, and after the `dem` stage the DEM as `<out>.dem.tif`, scored against
@@ -550,7 +568,7 @@ ortho's full-resolution COG next to the summary (`<out>.<label>.ortho.tif`), for
 
 ## Bundle adjustment against Ceres (`bal/`)
 
-`node scripts/bench/bal/run.mjs` solves the BAL problems (Bundle Adjustment in the Large,
+`node scripts/bench/suites/bal/run.mjs` solves the BAL problems (Bundle Adjustment in the Large,
 grail.cs.washington.edu/projects/bal: 98 real photo collections with their tie points and
 starting cameras, 16–13,682 cameras, 11 GB unpacked) with the crate's bundle adjustment
 (`crates/reconstruction/examples/bal.rs`, the app's solver policy) and with Ceres 2.2

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Warns (never blocks) when a push carries changes to detection, matching or SfM that no
-# passing regression gate has covered: a full `node scripts/bench/gate.mjs` run on a clean
+# passing regression gate has covered: a full `node scripts/bench/suites/gate.mjs` run on a clean
 # tree at that commit or a later one records "<sha> clean pass" in .git/websfm-gate.log.
 # Enable once per clone: npm run hooks (git config core.hooksPath .githooks).
 GATED="crates/sift crates/matching crates/reconstruction src/core/sfm src/core/features src/stores/matching"
@@ -31,7 +31,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   fi
 done
 if [ "$warned" = 1 ]; then
-  echo "pre-push: run 'node scripts/bench/gate.mjs' (about 15 min, GPU) and give its table in the commit." >&2
+  echo "pre-push: run 'node scripts/bench/suites/gate.mjs' (about 15 min, GPU) and give its table in the commit." >&2
   echo "pre-push: pushing anyway (this hook only warns)." >&2
 fi
 exit 0

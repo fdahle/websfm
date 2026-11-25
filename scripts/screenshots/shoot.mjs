@@ -6,7 +6,7 @@
 //   node scripts/screenshots/shoot.mjs --rebuild    # run the example project again first
 //   node scripts/screenshots/shoot.mjs --out <dir>  # write somewhere else (to compare)
 //
-// 1. The project: the headless bench (scripts/bench/run-bench.mjs) runs the example
+// 1. The project: the headless bench (scripts/bench/websfm/run-bench.mjs) runs the example
 //    project (npm run fetch:examples) from detection to a textured mesh, georeferenced by
 //    the photos' GPS as the walkthrough does (example.json), in a browser profile it
 //    keeps under bench-out/screenshots/. That takes a few minutes, once.
@@ -59,7 +59,7 @@ if (rebuild || !existsSync(profile)) {
   if (rebuild) await run('rm', ['-rf', profile])
   console.log('== building the example project (a few minutes)')
   await run(process.execPath, [
-    'scripts/bench/run-bench.mjs',
+    'scripts/bench/websfm/run-bench.mjs',
     '--config',
     'scripts/screenshots/example.json',
     '--profile',

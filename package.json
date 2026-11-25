@@ -44,7 +44,7 @@
     "docs:readme": "node scripts/docs-readme.mjs",
     "screenshots": "node scripts/screenshots/shoot.mjs",
     "test:mutation": "stryker run",
-    "gate": "node scripts/bench/gate.mjs",
+    "gate": "node scripts/bench/suites/gate.mjs",
     "bench": "node scripts/bench/cli.mjs",
     "gate:sfm": "WEBSFM_SFM_GATE=1 vitest run src/core/sfm/sfmGate.test.js",
     "hooks": "git config core.hooksPath .githooks"

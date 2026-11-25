@@ -65,7 +65,7 @@ const config = {
 }
 const configPath = join(work, 'fixture.json')
 await writeFile(configPath, JSON.stringify(config, null, 1))
-execFileSync('node', [join(repo, 'scripts/bench/run-bench.mjs'), '--config', configPath], {
+execFileSync('node', [join(repo, 'scripts/bench/websfm/run-bench.mjs'), '--config', configPath], {
   cwd: repo,
   stdio: 'inherit',
 })

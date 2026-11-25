@@ -618,7 +618,7 @@ complement**, analytic Jacobians and **adaptive Huber** robustification (Triggs 
   fits better. Each solve logs RMS before and after and a per-iteration trace.
 
 **Checked against Ceres** on the 98 problems of Bundle Adjustment in the Large (Agarwal et
-al. 2010; `scripts/bench/bal/`, `crates/reconstruction/examples/bal.rs`): the app's solver
+al. 2010; `scripts/bench/suites/bal/`, `crates/reconstruction/examples/bal.rs`): the app's solver
 policy and Ceres 2.2 minimise the same ½Σ‖r‖² from the same start. Results:
 [BENCHMARKS.md](BENCHMARKS.md#bundle-adjustment-against-ceres-bal).
 

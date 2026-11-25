@@ -164,7 +164,7 @@ A change that makes a step faster or better either becomes a setting or doesn't:
 
 - **A pure win is not an option.** When the change is better or equal on every project
   measured, at no real cost in time or memory, it simply replaces the old behaviour.
-  "Every project measured" means at least the regression gate's (`scripts/bench/gate.json`:
+  "Every project measured" means at least the regression gate's (`scripts/bench/suites/gate.json`:
   close range outdoors and indoors, a drone block, film scans), not the kind of project the
   change was made for. A gain shown only on synthetic data is a hypothesis: it ships when a
   real project gains and the gate holds. (0.8's best-first RANSAC sampling was measured on

@@ -277,7 +277,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
   }
   // A finer boundary than markStage for memory measurement only: the bench samples the
   // worker heap and attributes each peak to the segment the next mark closes
-  // (scripts/bench/workerHeap.mjs). Debug level; not part of the run record.
+  // (scripts/bench/lib/worker-heap.mjs). Debug level; not part of the run record.
   const memoryMark = (label) => log(`Memory mark "${label}"`, 'debug', 'Sparse')
 
   // Per-track colour: median (per channel) of the source-image RGB sampled at

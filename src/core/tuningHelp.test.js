@@ -6,7 +6,7 @@ import { TUNING_GROUPS, tuningKeys } from './help/consoleSettings.js'
 // What the shown help (the first paragraph of each comment in tuning.js) and the section
 // titles must not hold, by AGENTS.md ▸ "Never name a test dataset, a bench number or a
 // date in the app": that is the evidence, which goes below the empty `//` line. The set
-// names come from scripts/bench/gate.json, the bench configs and the test-data README.
+// names come from scripts/bench/suites/gate.json, the bench configs and the test-data README.
 const MONTH = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?'
 const EVIDENCE = [
   [

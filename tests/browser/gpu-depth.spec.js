@@ -7,7 +7,7 @@ import { test, expect } from './fixtures.js'
 // runner has none. It filters textures in exact f32, so its cost matches the Rust cost to
 // ~1e-6 (median difference), and MAX_COST_DIFF catches drift between the kernels far
 // smaller than a hardware GPU's rounding would hide (DENSE_TUNING.gpuCheckWarn;
-// scripts/bench/gpu-depth-check.mjs runs these cases on this machine's GPU).
+// scripts/bench/checks/gpu-depth-check.mjs runs these cases on this machine's GPU).
 const MAX_COST_DIFF = 1e-5
 
 test('the WebGPU depth-map kernel reaches the Rust kernel’s bounds', async ({ browserName, playwright, baseURL }) => {

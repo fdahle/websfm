@@ -1,5 +1,5 @@
 // Headless pipeline bench: the real Pinia stores, worker pool and WebGPU matcher,
-// driven without the UI. scripts/bench/run-bench.mjs loads this page in Chrome and
+// driven without the UI. scripts/bench/websfm/run-bench.mjs loads this page in Chrome and
 // calls window.bench.* in order. Every useLog line is mirrored to the browser console
 // as `@@LOG {json}`, so the runner can write it out in the dev console's export format.
 //
@@ -169,7 +169,7 @@ const SENSOR_OVERRIDE_FIELDS = [
 ]
 const sensorBase = {}
 let demTiff = null
-let reference = null // scripts/bench/reference.mjs: { positions, leverArm, gcps }
+let reference = null // scripts/bench/lib/reference.mjs: { positions, leverArm, gcps }
 
 // Checkpoints: every reference GCP triangulated from its marks through the app's own
 // path (marks → pinhole frame → N-view triangulation), then through the camera-position
@@ -1173,7 +1173,7 @@ window.bench = {
       summary: cloud?.textureSummary ?? null,
     }
   },
-  // The texture lab's inputs (scripts/bench/textureLab.mjs): the newest untextured mesh
+  // The texture lab's inputs (scripts/bench/checks/texture-lab.mjs): the newest untextured mesh
   // and every registered camera with its frame model, as the texture run sees them.
   // → { meta (JSON), mesh bytes (pos f64 | idx u32 | col u8) } via textureDumpChunk.
   async texturedump() {
@@ -1421,7 +1421,7 @@ window.bench = {
   },
 
   // The fused dense cloud's positions, `n` points from `start`, as base64 Float32 xyz —
-  // the runner pulls it in chunks for a node-side comparison (scripts/bench/eth3d.mjs).
+  // the runner pulls it in chunks for a node-side comparison (scripts/bench/score/eth3d.mjs).
   denseInfo() {
     const c = recon.mainDenseCloud
     return c ? { count: c.count, posType: c.pos.constructor.name } : null
@@ -1438,7 +1438,7 @@ window.bench = {
   // The main fused dense cloud (the newest build: a rebuild adds one beside the old) in
   // the last reconstruction's positionCheck ENU frame, every
   // `stride`-th point so at most `maxPoints` come back (base64 Float32 e,n,u), for the
-  // node-side LiDAR check (scripts/bench/lidar.mjs). Null without a GPS fit.
+  // node-side LiDAR check (scripts/bench/score/lidar.mjs). Null without a GPS fit.
   densePointsEnu(maxPoints = 1_000_000) {
     const c = recon.mainDenseCloud
     // A run that reopened a project and only fused has no reconstruction of its own: fit
@@ -2912,7 +2912,7 @@ window.bench = {
       }
     }
     // The ≥3-view points in the positionCheck ENU frame, for a node-side comparison
-    // with a reference surface (scripts/bench/lidar.mjs); centimetre-rounded.
+    // with a reference surface (scripts/bench/score/lidar.mjs); centimetre-rounded.
     const pointsEnu =
       pc && exportPoints
         ? Array.from(

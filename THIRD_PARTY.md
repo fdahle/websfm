@@ -67,7 +67,7 @@ next to the app, and the app downloads each one when first used.
 | `tests/browser/fixtures/aukerman-4.webm` | Four Aukerman photos as a 4 s video | OpenDroneMap, CC0-1.0 |
 | `tests/fixtures/metashape/` | Metashape exports of the Aukerman photos | OpenDroneMap photos (CC0-1.0); made with Agisoft Metashape |
 | `src/core/lod/fixtures/tiny.copc.laz` | A synthetic point cloud | WebSfM's own (`scripts/fixtures/make-copc.py`, written by PDAL) |
-| `scripts/bench/bal/ceres_bal.cc` | WebSfM's own bench program; it links Ceres Solver (BSD-3-Clause), which is not in the repository | — |
+| `scripts/bench/suites/bal/ceres_bal.cc` | WebSfM's own bench program; it links Ceres Solver (BSD-3-Clause), which is not in the repository | — |
 | `docs/images/` | Screenshots of WebSfM with the Aukerman project | WebSfM's own; the map background of `orthophoto.webp` is Esri World Imagery, credited under it in the README |
 
 The icons, the favicon and the glossary's drawings were made for WebSfM.

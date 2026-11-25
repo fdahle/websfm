@@ -16,7 +16,7 @@
 // keypoint grids.
 //
 // The constants come from the headless bench's worker-heap sampler (scripts/bench/
-// workerHeap.mjs), per keypoint / match / observation, ×`margin` for allocator slack
+// lib/worker-heap.mjs), per keypoint / match / observation, ×`margin` for allocator slack
 // and run-to-run variation. Measured values: HANDOVER ▸ B-mem.
 
 export const SPARSE_HEAP_FRACTION = 0.86

@@ -23,7 +23,7 @@ error away.
 Registered cameras · median camera-centre error: against ETH3D's laser-scanned ground
 truth (mm), and against COLMAP's South Building model (model units). The ETH3D images
 carry no EXIF focal length. All three tools on 2026-11-11, one after another, on the GPU
-(`scripts/bench/scoreboard.mjs --only eth3d-sparse`).
+(`scripts/bench/suites/scoreboard.mjs --only eth3d-sparse`).
 
 | scene | WebSfM | COLMAP | Metashape | time, s (WebSfM · COLMAP · Metashape) |
 | --- | --- | --- | --- | --- |
@@ -201,7 +201,7 @@ matching, the reference positions (Mill19's, from PixSfM) in the solve at σ 5 m
 The 98 problems of Bundle Adjustment in the Large (Agarwal et al. 2010), 16 to 13,682
 cameras, from their published starts. WebSfM's solver (the app's policy, run natively; the
 app runs the same Rust as WebAssembly) against Ceres 2.2 (SPARSE_SCHUR), both minimising
-the same cost on 20 threads, each run capped at 2 h (`scripts/bench/bal/`). 2026-11-06.
+the same cost on 20 threads, each run capped at 2 h (`scripts/bench/suites/bal/`). 2026-11-06.
 
 | set | problems | cameras | cost vs Ceres (median) | worst | time vs Ceres (median) |
 | --- | --- | --- | --- | --- | --- |
@@ -294,7 +294,7 @@ complete.
 ### ETH3D high-res against Metashape
 
 The same scenes from the ground-truth cameras, both tools on the GPU. Scored with
-`scripts/bench/eth3d_score.py` (ETH3D's method; within about ±4 points of the official
+`scripts/bench/score/eth3d_score.py` (ETH3D's method; within about ±4 points of the official
 evaluator, so compare tools, not levels). F1 at 2 cm (%), time in seconds. 2026-11-07.
 
 | scene | WebSfM | Metashape Medium | Metashape High |

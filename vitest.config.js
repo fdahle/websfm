@@ -33,10 +33,10 @@ export default defineConfig({
       'src/workers/**/*.test.{js,ts}',
       // The build's third-party notices (scripts/licenses/): plain Node helpers.
       'scripts/licenses/**/*.test.{js,mjs}',
-      // The scoreboard's tabulation (scripts/bench/scoreboard.mjs): plain functions.
-      'scripts/bench/scoreboard.test.mjs',
+      // The scoreboard's tabulation (scripts/bench/suites/scoreboard.mjs): plain functions.
+      'scripts/bench/suites/scoreboard.test.mjs',
       // The bench's folders, run records and slimming: plain Node helpers.
-      'scripts/bench/housekeeping.test.mjs',
+      'scripts/bench/lib/housekeeping.test.mjs',
     ],
   },
 })

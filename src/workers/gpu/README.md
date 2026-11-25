@@ -78,10 +78,10 @@ WGSL runs only in a browser with WebGPU — Vitest/`tsc` can't exercise it.
   `npm test`; `tests/browser/gpu-depth.spec.js` runs them on this kernel in the nightly
   browser suite, on Chrome's software WebGPU (SwiftShader, `--use-webgpu-adapter=swiftshader`,
   no GPU needed), where texture filtering is exact f32 and the cost must match the Rust
-  cost to a median of 1e-5. `node scripts/bench/gpu-depth-check.mjs` runs the same cases
+  cost to a median of 1e-5. `node scripts/bench/checks/gpu-depth-check.mjs` runs the same cases
   on this machine's GPU (`--swiftshader` for the software one); run it after a kernel
   change, since a hardware sampler rounds differently.
-- **Matcher**: `node scripts/bench/gpu-match-check.mjs` (below).
+- **Matcher**: `node scripts/bench/checks/gpu-match-check.mjs` (below).
 
 For kernel work before that browser run, the `webgpu` npm package (Dawn's Node
 bindings — the same D3D12/Vulkan/Metal backends Chrome uses) runs these modules
