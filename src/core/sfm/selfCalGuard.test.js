@@ -20,6 +20,26 @@ describe('validateSelfCalUpdate', () => {
     expect(v).toMatchObject({ ok: false, code: 'focal-step' })
   })
 
+  // DJI P4 RTK (EuroSDR, 2026-11-25): the focal drifted from its EXIF 3,648 px to 2,480 px
+  // while the model was small; the whole-model solve that returns it to 3,340 px is a 35 %
+  // step, and must pass. The same step away from the EXIF value stays a runaway.
+  it('lets a large step back towards the nominal focal through, not one away from it', () => {
+    const p4 = { fx: 3648, fy: 3648, cx: 2736, cy: 1824 }
+    const run = (beforeFx, proposedFx) =>
+      validateSelfCalUpdate({
+        before: { ...p4, fx: beforeFx, fy: beforeFx },
+        proposed: { ...p4, fx: proposedFx, fy: proposedFx, k1: -0.27, k2: 0.11 },
+        nominalFx: 3648,
+        width: 5472,
+        height: 3648,
+      })
+    expect(run(2480, 3340).ok).toBe(true)
+    expect(run(2480, 3650).ok).toBe(true)
+    expect(run(3648, 2400)).toMatchObject({ ok: false, code: 'focal-step' })
+    // Past the nominal and further from it than before: still a runaway.
+    expect(run(3000, 4400)).toMatchObject({ ok: false, code: 'focal-step' })
+  })
+
   it('rejects cumulative drift even when the latest step is modest', () => {
     const v = validateSelfCalUpdate({ ...input({ fx: 3533, fy: 3533 }), before: { ...base, fx: 2842, fy: 2842 } })
     expect(v).toMatchObject({ ok: false, code: 'focal-nominal' })

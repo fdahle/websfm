@@ -22,7 +22,12 @@
 import { pnpSamplesFor, solvePnp, triangulateDlt } from './reconstruction.js'
 import { projectPoint, triangulationAngle, cameraCenter } from './geometry.js'
 import { toNorm, camToP34flat, retriangulatePairs } from './tracks.js'
-import { distortionIdentifiable, withoutDistortionTerms } from './selfCalSchedule.js'
+import {
+  distortionIdentifiable,
+  focalIsMeasured,
+  registrationTerms,
+  withoutDistortionTerms,
+} from './selfCalSchedule.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { asPairList } from './matchCodec.js'
 import { pluralize } from '../textFormat.js'
@@ -187,8 +192,15 @@ export async function registerImages(ctx) {
     }
     return next
   }
+  // A focal from the metadata or the sensor table stays fixed in the interim solves
+  // (selfCalSchedule.js registrationTerms); the post-filter passes refine it on the whole
+  // model. A guessed focal is still solved here: registration needs it to get anywhere.
+  const holdFocal =
+    cfg.selfCalHoldMeasuredFocal !== false && [...Kmap.values()].every((K) => focalIsMeasured(K?.source))
   const distortionRefine = (n) =>
-    selfCalOn && n >= distortionCalMinCams ? identifiableRefine(cfg.refineIntrinsics) : 'none'
+    registrationTerms(selfCalOn && n >= distortionCalMinCams ? identifiableRefine(cfg.refineIntrinsics) : 'none', {
+      holdFocal,
+    })
   const rescueRefine = (n) =>
     !selfCalOn ? 'none' : identifiableRefine(n >= distortionCalMinCams ? cfg.refineIntrinsics : 'f')
 

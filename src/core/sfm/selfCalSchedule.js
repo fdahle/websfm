@@ -37,6 +37,27 @@ export const SELF_CAL_STAGE_DEFAULTS = {
 // post-filter staging escalates from.
 export const SELF_CAL_BASE_TERMS = 'f,k1'
 
+// Whether a starting focal is a measurement (EXIF, the sensor table, a calibration or the
+// fiducials) rather than resolveK's default field-of-view guess, also when the pair
+// geometry refined that guess (focalFromPairs.js keeps the 'default FOV' prefix).
+export function focalIsMeasured(source) {
+  return !!source && !String(source).startsWith('default')
+}
+
+// The terms an interim bundle adjustment refines during registration. With
+// `holdFocal`, a measured focal stays where the metadata put it and only the lens terms
+// are solved: a block of nadir photos over flat ground cannot tell the focal from the
+// flying height, and with k1 the only lens term the focal also takes up the lens's k2.
+// The post-filter passes free it again, on the whole model.
+export function registrationTerms(mode, { holdFocal = false } = {}) {
+  if (!holdFocal || mode === 'none') return mode
+  const kept = String(mode)
+    .split(',')
+    .map((t) => t.trim())
+    .filter((t) => t && t !== 'f')
+  return kept.length ? kept.join(',') : 'none'
+}
+
 // Resolve the refine-terms string for a post-filter BA pass under the `auto` schedule.
 // Order is fixed (f, cxcy, p, k1, k2, k3, k4) but the crate's bitmask parser is order-free.
 //   lensTerms  — the most self-calibratable k terms any camera's lens has (4 for a

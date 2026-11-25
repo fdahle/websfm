@@ -555,9 +555,20 @@ export const SFM_TUNING = {
   // held back. Only active when refineIntrinsics self-calibrates (no calibrated model at
   // ingest).
   distortionCalMinCams: 6,
+  // A focal from the photos' metadata or the sensor table stays fixed while the photos are
+  // registered, and is refined with the rest of the lens once the model is complete. Turn it
+  // off to refine the focal from the first few photos on, which only helps when the metadata
+  // focal is far off.
+  //
+  // Measured 2026-11-25 on the EuroSDR Wards Hill block (DJI P4 RTK, 500 photos): refined
+  // from the start, the focal fell from 3,648 to 2,505 px over the first 28 photos (DJI's
+  // calibration: 3,654), bent the model by metres and left the cross strip out, with and
+  // without the RTK positions. register.js, selfCalSchedule.js registrationTerms.
+  selfCalHoldMeasuredFocal: true,
   // Self-calibration guard: a solve that moves the focal by more than this fraction in
-  // one step is rejected. These are broad plausibility bounds against runaway solves, not
-  // calibration priors.
+  // one step, away from its starting value, is rejected. A step back towards the starting
+  // value is always allowed. These are broad plausibility bounds against runaway solves,
+  // not calibration priors.
   //
   // Transactional self-cal guard. These are deliberately broad plausibility bounds,
   // not calibration priors: normal EXIF recovery remains free, while the observed

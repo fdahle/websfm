@@ -124,7 +124,12 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
   }
 
   const stepFrac = before.fx > 0 ? Math.abs(proposed.fx - before.fx) / before.fx : 0
-  if (stepFrac > maxStep) {
+  // The step bound stops a runaway from the nominal focal, so a step back towards it is
+  // no runaway, however large: a focal that drifted while the model was small must be
+  // able to return (DJI P4 RTK, 2026-11-25: 3,648 → 2,505 px over the first 28 photos,
+  // then every solve that moved it back by 31–35 % was refused, and the bent model kept).
+  const towardNominal = nominalFx > 0 && Math.abs(proposed.fx - nominalFx) < Math.abs(before.fx - nominalFx)
+  if (stepFrac > maxStep && !towardNominal) {
     return fail(
       `focal step ${(100 * stepFrac).toFixed(1)}% exceeds the ${(100 * maxStep).toFixed(0)}% safety limit`,
       'focal-step',

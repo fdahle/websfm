@@ -389,7 +389,10 @@ intrinsics both distort geometry and stop cameras from registering.
 A focal-only **pre-solve** corrects that guess right after registration. Every
 self-calibration update passes a plausibility guard (`core/sfm/selfCalGuard.js`): one pass
 may move the focal by at most 25 % and end at most 35 % from the nominal focal, which stops
-thin-block runaways. A guessed focal is no measurement (a 153 mm lens on 230 mm film sits
+thin-block runaways. A step back towards the nominal focal is never a runaway and is not
+bounded: otherwise a focal that drifted while the model was small could not return (a DJI
+P4 RTK block drifted 31 % below its EXIF focal over the first 28 photos, and every later
+solve that moved it back was refused). A guessed focal is no measurement (a 153 mm lens on 230 mm film sits
 33 % below the guess), so it gets wide bounds instead: 60 % per pass, within [0.3, 1.7] ×
 the guess. The lens may move a photo's corner by at most 25 % of its diagonal, counting the
 decentring terms with the radial ones (as `distort_norm` applies them), and p1, p2 may not
@@ -648,7 +651,13 @@ calibrated lens is given. An explicit string overrides it and bypasses staging.
 
 **Staged schedule** (`core/sfm/selfCalSchedule.js`): distortion is barely observable on a
 thin model, so terms unlock as it grows. Registration (interim and rescue BA, once
-`distortionCalMinCams` cameras are in) solves `f,k1`; the post-filter passes add `k2` at
+`distortionCalMinCams` cameras are in) solves `f,k1`, but a focal from the metadata or the
+sensor table is held in the interim solves (`registrationTerms`, tuning
+`selfCalHoldMeasuredFocal`): nadir photos over flat ground cannot tell the focal from the
+flying height, and with `k1` the only lens term the focal also takes up the lens's `k2`, so
+on a small model it drifts (the P4 RTK block above: 3,648 → 2,505 px, DJI's own
+calibration 3,654) and bends the model. A guessed focal is still solved, since
+registration needs it. The post-filter passes add `k2` at
 ≥ 8 cameras and 10k observations, principal point and decentring at ≥ 10 cameras, `k3` at
 ≥ 20 cameras and 30k observations. Never on the unfiltered model, where cx/cy drift. Results
 are logged, never written to the sensor table automatically.

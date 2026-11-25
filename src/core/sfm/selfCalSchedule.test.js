@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  focalIsMeasured,
+  registrationTerms,
   stagedSelfCalTerms,
   stagedSelfCalDeferred,
   SELF_CAL_BASE_TERMS,
@@ -89,5 +91,29 @@ describe('distortionIdentifiable', () => {
 
   it('does not divide by zero on an empty model', () => {
     expect(distortionIdentifiable({ nCams: 5, nTracks: 0, nMultiViewTracks: 0 }).ok).toBe(false)
+  })
+})
+
+describe('focalIsMeasured', () => {
+  it('trusts the metadata and the sensor table, not a field-of-view guess', () => {
+    expect(focalIsMeasured('focal 8.8mm (sensor width 13.2mm)')).toBe(true)
+    expect(focalIsMeasured('EXIF 35mm-equivalent focal')).toBe(true)
+    expect(focalIsMeasured('sensor table (focal in px)')).toBe(true)
+    expect(focalIsMeasured('default FOV (no focal length in metadata)')).toBe(false)
+    expect(focalIsMeasured('default FOV (no focal length in metadata), refined from 40 pairs to 3100px')).toBe(false)
+    expect(focalIsMeasured(undefined)).toBe(false)
+  })
+})
+
+describe('registrationTerms', () => {
+  it('holds a measured focal and keeps the lens terms', () => {
+    expect(registrationTerms('f,k1', { holdFocal: true })).toBe('k1')
+    expect(registrationTerms('f,cxcy,p,k1,k2', { holdFocal: true })).toBe('cxcy,p,k1,k2')
+    expect(registrationTerms('f', { holdFocal: true })).toBe('none')
+    expect(registrationTerms('none', { holdFocal: true })).toBe('none')
+  })
+  it('leaves the terms alone when the focal is not held', () => {
+    expect(registrationTerms('f,k1')).toBe('f,k1')
+    expect(registrationTerms('f,k1', { holdFocal: false })).toBe('f,k1')
   })
 })
