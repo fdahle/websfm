@@ -800,6 +800,45 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     expect(s.lowNcc).toBe(1)
   })
 
+  // Three cameras in a row over the plane at depth 1: a at x 0, b at 0.1, c at 0.25. Each
+  // sees ±0.16 around itself, so a's column u (ground x = (u − 16)/100) is seen by b
+  // alone at u 12 (x −0.04), by b and c at u 28 (x 0.12), and by no other view at u 4.
+  describe('two-photo stereo (only one other view sees the pixel)', () => {
+    const row = () => [mkPlane('a', 0), mkPlane('b', -0.1), mkPlane('c', -0.25)]
+    const run = (maps, twoPhotoStereo) =>
+      filterDepthMapsGeometric(maps, { minConsistent: 2, twoPhotoStereo, cull: false }, () => {})
+
+    it('keeps ground only two photos see when the other one agrees', () => {
+      const maps = row()
+      run(maps, true)
+      expect(maps[0].depth[at(12, 16)]).toBeGreaterThan(0) // b alone sees it, and agrees
+      expect(maps[0].depth[at(28, 16)]).toBeGreaterThan(0) // b and c agree
+      expect(maps[0].depth[at(4, 16)]).toBe(0) // no other view: no evidence
+    })
+
+    it('still asks for two where two other views see the pixel', () => {
+      const maps = row()
+      maps[2].depth.fill(1.3) // c sees a different surface: only b vouches at u 28
+      run(maps, true)
+      expect(maps[0].depth[at(28, 16)]).toBe(0)
+      expect(maps[0].depth[at(12, 16)]).toBeGreaterThan(0)
+    })
+
+    it('drops a flyer in the two-photo area', () => {
+      const maps = row()
+      maps[0].depth[at(12, 16)] = 2
+      run(maps, true)
+      expect(maps[0].depth[at(12, 16)]).toBe(0)
+    })
+
+    it('turned off, drops the two-photo ground as before', () => {
+      const maps = row()
+      run(maps, false)
+      expect(maps[0].depth[at(12, 16)]).toBe(0)
+      expect(maps[0].depth[at(28, 16)]).toBeGreaterThan(0)
+    })
+  })
+
   it('skips the cross-view check for a single map rather than rejecting everything', () => {
     const maps = [mkPlane('a', 0)]
     const s = filterDepthMapsGeometric(maps, { minConsistent: 2 }, () => {})

@@ -593,6 +593,7 @@ function* planSteps(maps, opts, onLog, hooks) {
   // = the fixed default (fusionCostSteps says why it no longer adapts to the data);
   // Infinity is an explicit "no cost gate".
   const minViews = numOpt(opts.minViews, Math.max(1, Math.min(2, maps.length - 1)), { int: true, min: 1 })
+  const twoPhotoStereo = boolOpt(opts.twoPhotoStereo, DENSE_TUNING.filterTwoPhotoStereo)
   const maxCost = opts.maxCost === Infinity ? Infinity : numOpt(opts.maxCost, DENSE_FUSE_DEFAULTS.maxCost, { min: 0 })
   onLog(
     `Fusion: valid-pixel cost median ${costStats.median.toFixed(2)}, p70 ${costStats.p70.toFixed(2)} ` +
@@ -614,7 +615,8 @@ function* planSteps(maps, opts, onLog, hooks) {
 
   onLog(
     `Fusion: ${pluralize(maps.length, 'map')}, minViews ${minViews}, maxCost ${maxCost}, ` +
-      `depth tol ${(depthTolRel * 100).toFixed(1)}%, consistency ±${consistencyPx}px, step ${step}px`,
+      `depth tol ${(depthTolRel * 100).toFixed(1)}%, consistency ±${consistencyPx}px, step ${step}px` +
+      `${twoPhotoStereo && minViews > 1 ? '; 1 view where only two photos see the ground' : ''}`,
     'info',
     'Dense',
   )
@@ -897,6 +899,9 @@ function* planSteps(maps, opts, onLog, hooks) {
     nMaps: nM,
     gates,
     minViews,
+    // Where one other map at most sees a pixel, its agreement is enough
+    // (DENSE_TUNING.filterTwoPhotoStereo, as in the depth filter).
+    twoPhotoStereo,
     maxCost,
     costMedian: costStats.median,
     bounds,

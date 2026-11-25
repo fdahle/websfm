@@ -36,7 +36,9 @@ the point from at least a minimum angle apart may vote.
 
 WebSfM applies the check twice. In [Depth Maps](guide:depth-maps) it runs as its own
 pass once every map exists: a view agrees when the round trip closes within 1 px, a
-pixel needs 2 agreeing views, and a view only counts at 3° of parallax or more.
+pixel needs 2 agreeing views on an aerial project (1 where only two photos see the
+ground, so there is no second view to ask), and a view only counts at 3° of parallax or
+more.
 Rejected pixels are erased from the stored maps themselves, so the orthophoto, which
 reuses the depth maps for visibility, is cleaned as well. The log's "Depth filter"
 lines say how many pixels failed for disagreement and how many for too little

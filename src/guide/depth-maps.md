@@ -92,8 +92,8 @@ slightly off (scanned film) and the check removes most of every map.
 <!-- param: minConsistent  default: auto (1 object capture, 2 aerial / mapping) -->
 How many other views must confirm a pixel. Blank follows the project type: 1 for an
 object capture (fills more of walls and plain surfaces), 2 for aerial (removes glints
-on water and stray points in the sky). Raise it for a cleaner, sparser result; images
-with fewer neighbours use what they have.
+on water and stray points in the sky). Ground that only two photos see, as along a film
+strip, needs only the other one. Raise it for a cleaner, sparser result.
 
 ## Minimum parallax
 <!-- param: minGeomAngleDeg  default: 3° -->

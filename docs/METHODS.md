@@ -1572,6 +1572,14 @@ when `e ≤ maxGeomCost` (px) **and** its triangulation angle at `P` is ≥ `min
 (3°, COLMAP's `filter_min_triangulation_angle`); `minConsistent` such views are required,
 plus an absolute `minNcc` floor.
 
+- **Two-photo stereo**: where at most one other view sees `P` at all (in front of it,
+  inside its frame, at the parallax gate), one agreeing view suffices whatever
+  `minConsistent` asks; fusion (§7.4) applies the same rule to its `minViews`
+  (`DENSE_TUNING.filterTwoPhotoStereo`). Requiring two other views everywhere kept only
+  ground that three photos see: on a film block flown at 60 % forward and 20–30 % side
+  overlap, a comb of gaps along every strip, about half the area. COLMAP's
+  `filter_min_num_consistent` (2) has the same effect on such blocks.
+
 - **The angle gate**: at ~0° parallax the round trip is vacuous: a source beside the
   reference looks down the same ray, so any depth, a sky pixel at an arbitrary distance
   included, returns to `(u,v)`. Pixels failing only for want of parallax are logged

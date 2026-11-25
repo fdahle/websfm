@@ -1241,6 +1241,16 @@ export const DENSE_TUNING = {
   // ~50 overlapping views a map on a 58-scan film block at High, that was 5.4 GB per
   // worker and 25 min on the one worker it allowed.
   filterMaxViews: 12,
+  // Where only two photos see the ground, the depth filter keeps a depth that the other
+  // photo confirms, even when Consistent views asks for two: there is no third photo to
+  // ask. Turn it off to keep only ground that three or more photos see.
+  //
+  // Measured 2026-11-25 on HistoriX Casa Grande and Iceland (scanned film, 60 % forward,
+  // 20–30 % side overlap): with two required everywhere, the DEM covered 197 and
+  // 1,906 km² of a common 8 m grid against Metashape's 335 and 2,828 km², in a comb of
+  // gaps along every strip; Metashape's DEM in those gaps was 97 % and 74 % within 5 m
+  // of the reference. geomFilter.js judgeReference counts the views that see each pixel.
+  filterTwoPhotoStereo: true,
   // The cross-view filter over saved maps takes at most one worker per this many maps
   // (and no more than the pool or the memory budget holds): contiguous chunks keep each
   // worker's candidate planes warm. It hardly matters on the sets where it binds: 48 quarry

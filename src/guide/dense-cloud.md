@@ -25,8 +25,8 @@ resolution, not at fusion.
 ## Min consistent views
 <!-- param: minViews  default: 2 -->
 With Auto off: how many other depth maps must see the same depth for a pixel to become
-a point. Raise it for a cleaner, sparser cloud; 1 keeps areas only two photos cover,
-such as block edges, with more noise.
+a point. Raise it for a cleaner, sparser cloud. Ground that only two photos see, such as
+block edges and much of a film block, needs only the other one.
 
 ## Depth agreement tolerance
 <!-- param: depthTolPct default: 1.0% -->

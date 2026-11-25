@@ -382,9 +382,13 @@ export function filterConfig(opts = {}) {
   // At most this many candidate views per reference, the nearest cameras first (0 =
   // every view that overlaps it): see DENSE_TUNING.filterMaxViews.
   const maxViews = numOpt(opts.maxViews, DENSE_TUNING.filterMaxViews, { int: true, min: 0 })
+  // Where only one other view sees a pixel at all, one agreeing view is enough
+  // (DENSE_TUNING.filterTwoPhotoStereo).
+  const twoPhotoStereo = boolOpt(opts.twoPhotoStereo, DENSE_TUNING.filterTwoPhotoStereo)
   return {
     minNcc,
     maxViews,
+    twoPhotoStereo,
     maxGeomCost,
     minConsistent,
     minGeomAngleDeg,
@@ -468,7 +472,7 @@ function judgeReference(
   onTick,
 ) {
   const { width: w, height: h, depth, cost } = ref
-  const { maxCostGate, maxGeomCost, angleOn, cosMinAngle } = cfg
+  const { maxCostGate, maxGeomCost, angleOn, cosMinAngle, twoPhotoStereo } = cfg
   const bw = plan ? plan.bw : 1
   const lists = plan ? plan.lists : null
   const flatList = lists ? null : Int32Array.from(cand)
@@ -536,9 +540,12 @@ function judgeReference(
         rz = mCz - Pz
       const rr = rx * rx + ry * ry + rz * rz
       // `flat` counts views that round-trip but at too little parallax: they decide
-      // only which bucket a rejected pixel is reported in, never the verdict.
+      // only which bucket a rejected pixel is reported in, never the verdict. `seen`
+      // counts the views that could vouch at all (P in front of them, inside their frame,
+      // at enough parallax), for the two-photo rule below.
       let agree = 0,
-        flat = 0
+        flat = 0,
+        seen = 0
       for (let k = 0; k < list.length && agree < minConsistent; k++) {
         const ci = list[k]
         const c = others[ci],
@@ -551,6 +558,17 @@ function judgeReference(
         const cu = Math.round(pc[12] * (xc / zc) + pc[14]),
           cv = Math.round(pc[13] * (yc / zc) + pc[15])
         if (cu < 0 || cu >= c.width || cv < 0 || cv >= c.height) continue
+        // Parallax between the two rays to P: a view at too little of it cannot vouch.
+        let lowParallax = false
+        if (angleOn) {
+          const Cs = centres[ci]
+          const sx = Cs[0] - Px,
+            sy = Cs[1] - Py,
+            sz = Cs[2] - Pz
+          const ss = sx * sx + sy * sy + sz * sz
+          lowParallax = rx * sx + ry * sy + rz * sz > cosMinAngle * Math.sqrt(rr * ss)
+        }
+        if (!lowParallax) seen++
         const od = depths[ci][cv * c.width + cu]
         if (!(od > 0)) continue // source has no depth here — no evidence either way
         // The source's own surface point at that pixel. If the source is looking at
@@ -569,23 +587,22 @@ function judgeReference(
         const qx = mR00 * Qx + mR01 * Qy + mR02 * Qz + mt0
         const qy = mR10 * Qx + mR11 * Qy + mR12 * Qz + mt1
         if (Math.hypot(mfx * (qx / qz) + mcx - u, mfy * (qy / qz) + mcy - v) > maxGeomCost) continue
-        if (angleOn) {
-          const Cs = centres[ci]
-          const sx = Cs[0] - Px,
-            sy = Cs[1] - Py,
-            sz = Cs[2] - Pz
-          const ss = sx * sx + sy * sy + sz * sz
-          if (rx * sx + ry * sy + rz * sz > cosMinAngle * Math.sqrt(rr * ss)) {
-            flat++
-            continue
-          }
+        if (lowParallax) {
+          flat++
+          continue
         }
         agree++
       }
-      if (agree < minConsistent) {
+      // Two-photo stereo: where only one other view can see the pixel at all, its
+      // agreement is all the evidence there is, and asking for two would drop every
+      // pixel of the ground only two photos cover (half of a 60 / 20 % film block).
+      // Where two or more other views see it, the full requirement holds. (`seen` is
+      // complete here whenever it matters: the loop stops early only on a kept pixel.)
+      const needHere = twoPhotoStereo && seen <= 1 ? Math.min(1, minConsistent) : minConsistent
+      if (agree < needHere) {
         mask[idx] = 1
         // Would have passed on views that only lacked parallax ⇒ report it as such.
-        if (agree + flat >= minConsistent) {
+        if (agree + flat >= needHere) {
           totals.lowParallax++
           mapLowParallax++
         } else {

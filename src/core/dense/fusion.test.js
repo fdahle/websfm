@@ -226,10 +226,16 @@ describe.each(Object.keys(RUNNERS))('fusion on a known plane (%s)', (runner) => 
     // Two other maps per pixel at most: two agree, three cannot.
     const two = await fuse(maps, { minViews: 2 })
     expect(two.count).toBeGreaterThan(300)
-    const three = await fuse(maps, { minViews: 3 })
+    const three = await fuse(maps, { minViews: 3, twoPhotoStereo: false })
     expect(three.count).toBe(0)
     expect(three.summary.keptPct).toBe(0)
     expect(three.summary.cullBreakdown.lowViewsPct).toBeGreaterThan(90)
+    // With the two-photo rule, the pixels only one other map sees need only it: the
+    // outer maps' far sides stay, the ground all three see does not.
+    const twoPhoto = await fuse(maps, { minViews: 3, twoPhotoStereo: true })
+    expect(twoPhoto.count).toBeGreaterThan(0)
+    expect(twoPhoto.count).toBeLessThan(two.count)
+    for (const p of points(twoPhoto)) expect(offPlane(p)).toBeLessThan(1e-4)
   })
 
   it('culls pixels that agree only at too little parallax', async () => {

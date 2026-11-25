@@ -178,7 +178,10 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
         // Σ over the agreeing views of their surface depth on this pixel's ray, for a
         // point at the mean of the views (Point position); not allocated without it.
         dsum = meanPosition ? new Float32Array(agree.length) : null,
-        nsum = meanPosition ? new Uint8Array(agree.length) : null
+        nsum = meanPosition ? new Uint8Array(agree.length) : null,
+        // The maps the pixel's point falls inside (in front, within the frame), for
+        // the two-photo rule (fusionSlabSteps needHere).
+        seen = new Uint8Array(agree.length)
       const C = cameraCenter(m),
         rad = Math.max(0, Math.round(consistencyPx))
       const loadComparison = hooks.loadDepth ?? loadMap
@@ -259,6 +262,7 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
           const cu = Math.round(p.u),
             cv = Math.round(p.v),
             tol = depthTolRel * p.depth
+          if (cu >= 0 && cu < other.width && cv >= 0 && cv < other.height && seen[idx] < 255) seen[idx]++
           let hit = false
           for (let dv = -rad; dv <= rad && !hit; dv++) {
             const y = cv + dv
@@ -295,7 +299,7 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
           'Checking depth consistency…',
         )
       }
-      next = iterator.next({ agree, angle, dsum, nsum })
+      next = iterator.next({ agree, angle, dsum, nsum, seen })
     }
   }
   const stream = { compared, culled, skipped, reads, hits, cacheBytes, loadMs, eligMs, checkMs }
@@ -423,6 +427,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
   const { consistencyPx, depthTolRel, step, minTriAngleDeg, removeIsolated, incidenceOn, cosIncGate, meanPosition } =
     plan.gates
   const { minViews, maxCost, bounds, mergeCell, region, axis, slabs, tiled, halo, visits, firstSlab, est } = plan
+  const twoPhotoStereo = plan.twoPhotoStereo === true
   const { onProgress } = hooks
   const inv = 1 / mergeCell,
     axKey = 'xyz'[axis]
@@ -545,6 +550,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
           // depth tolerance scaled by 1e-3, i.e. ≈0).
           const rad = Math.max(0, Math.round(consistencyPx))
           let agree = checks ? checks.agree[idx] : 0,
+            seen = checks ? checks.seen[idx] : 0,
             maxAngle = checks ? checks.angle[idx] : 0,
             dsum = checks?.dsum ? checks.dsum[idx] : 0,
             nsum = checks?.nsum ? checks.nsum[idx] : 0
@@ -556,6 +562,7 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
             if (!p) continue
             const cu = Math.round(p.u),
               cv = Math.round(p.v)
+            if (cu >= 0 && cu < c.m.width && cv >= 0 && cv < c.m.height) seen++
             const tol = depthTolRel * p.depth
             let hit = false
             for (let dv = -rad; dv <= rad && !hit; dv++) {
@@ -592,7 +599,10 @@ function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
               if (agree >= minViews && (minTriAngleDeg <= 0 || maxAngle >= minTriAngleDeg)) break
             }
           }
-          if (agree < minViews) {
+          // Two-photo stereo: where at most one other map sees the point, its agreement
+          // is all the evidence there is (DENSE_TUNING.filterTwoPhotoStereo).
+          const needHere = twoPhotoStereo && seen <= 1 ? 1 : minViews
+          if (agree < needHere) {
             if (own) failedConsistency++
             continue
           }
