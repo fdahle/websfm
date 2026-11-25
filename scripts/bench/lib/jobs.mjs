@@ -51,14 +51,22 @@ async function toolCommandsOf(job, dir) {
         node('ref/metashape.mjs', ['--config', configPath(job.config), '--ws', dir, '--name', job.id, ...extra]),
       ]
       if (job.checkpoints) {
+        // The GCPs as checkpoints: GeoScan-style (reference.gcps + a Metashape project's
+        // marks), or the bench's gcp.csv (hist.gcps) when WebSfM holds every GCP a check too.
         const ref = cfg.reference ?? {}
-        if (!ref.gcps || !ref.metashape)
-          throw new Error(`${job.id}: checkpoints need reference.gcps and reference.metashape`)
+        const h = cfg.hist ?? {}
+        let source
+        if (ref.gcps && ref.metashape) source = ['--gcps', ref.gcps, '--marks', ref.metashape]
+        else if (h.gcps && Array.isArray(h.control) && h.control.length === 0) source = ['--gcp-csv', h.gcps]
+        else
+          throw new Error(
+            `${job.id}: checkpoints need reference.gcps + reference.metashape, or hist.gcps with control []`,
+          )
         steps.push([
           PYTHON,
           [
             join(repo, 'scripts/bench/ref/metashape_checkpoints.py'),
-            ...['--project', join(dir, 'project.psx'), '--gcps', ref.gcps, '--marks', ref.metashape],
+            ...['--project', join(dir, 'project.psx'), ...source],
             ...(ref.excludeGcps?.length ? ['--exclude', ...ref.excludeGcps] : []),
             ...['--out', join(dir, 'checkpoints.json')],
           ],

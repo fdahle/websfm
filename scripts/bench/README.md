@@ -471,6 +471,22 @@ says, at `/data1/websfm_eval/shared/tools/` on the bench machine). A scoring ste
 is missing runs even when the job's summary is there, so a new scorer reaches an old run
 without rerunning the tools.
 
+**Reference runs are reused.** COLMAP, Metashape and ODM do not change when WebSfM does,
+so a scoreboard run takes a reference job's result from `ref/<tool>-<version>/` when nothing
+that decides it changed: the tool's version (ODM: its image digest), the config without
+`out`, `port` and other keys that only say where a run writes, the photo set, the job's
+arguments and scorers, and our runner's revision (`RUNNER_REV` in `lib/refstore.mjs`: bump
+it when a runner change alters what it does for a config it already ran). The job's folder
+then holds hard links to the stored evidence and a `record.json` with `reusedFrom`; a fresh
+reference run is stored for the next time. `--no-reuse` runs every job again.
+
+**Fair terms.** Every tool starts from what the photos lack in the same way: a config's
+`sensor` (a dataset's own calibration) is every tool's initial calibration, each refining it
+as it does by default; positions in the solve carry the same per-photo accuracies (the
+reference file's, or the RTK accuracies in the photos' XMP, which WebSfM reads too); pairing
+by position is mirrored in COLMAP and Metashape; WebSfM's time includes copying the photos
+into the browser.
+
 **Held-out tables** (`"heldout": true`: Strecha's six multi-view sets, and since 2026-11-22
 the KH-9 mapping camera block of Iceland 1980, `film-heldout`) run only with
 `--heldout`, in the scoreboard run of a release. Their sets are never used to choose a

@@ -95,6 +95,18 @@ async function oneSize(dir) {
   return sizes.size === 1 || sizes.has(null)
 }
 
+// The config's `sensor` (a dataset's own calibration): COLMAP starts from it as WebSfM does,
+// PINHOLE for a pinhole sensor (undistorted photos), else SIMPLE_RADIAL with k = 0, and
+// refines what COLMAP refines by default (focal length and distortion).
+const sensor = cfg.sensor?.focalUnit === 'px' && cfg.sensor.focal && cfg.sensor.cx != null ? cfg.sensor : null
+const pinhole = sensor?.distortionModel === 'pinhole'
+const cameraModel = args.cameraModel ?? (pinhole ? 'PINHOLE' : 'SIMPLE_RADIAL')
+const cameraParams = sensor
+  ? pinhole
+    ? `${sensor.focal},${sensor.focal},${sensor.cx},${sensor.cy}`
+    : `${sensor.focal},${sensor.cx},${sensor.cy},0`
+  : null
+
 if (!given) {
   const shared = await oneSize(images)
   if (!shared) console.log('   photos of different sizes: one COLMAP camera per photo')
@@ -102,8 +114,10 @@ if (!given) {
     'image_path': images,
     'database_path': db,
     'ImageReader.single_camera': shared ? 1 : 0,
-    'ImageReader.camera_model': args.cameraModel ?? 'SIMPLE_RADIAL',
+    'ImageReader.camera_model': cameraModel,
+    ...(cameraParams ? { 'ImageReader.camera_params': cameraParams } : {}),
   })
+  if (cameraParams) console.log(`   initial calibration ${cameraModel} ${cameraParams}`)
   // The positions websfm's preselection pairs by (the config's reference file) become
   // COLMAP's pose priors, so its spatial matcher pairs by the same thing: ENU metres
   // around their centroid (coordinate_system 1 = CARTESIAN). Without a file COLMAP keeps
@@ -209,7 +223,8 @@ const out = {
   colmap: {
     exe: colmap,
     mapper,
-    cameraModel: args.cameraModel ?? 'SIMPLE_RADIAL',
+    cameraModel,
+    initialCalibration: cameraParams,
     matcher: preselect ? `spatial (${cfg.match?.maxNeighbors ?? 50} neighbours)` : 'exhaustive',
   },
   images: nFiles,

@@ -121,6 +121,31 @@ if (mode !== 'sfm' && !exif0.GPSLatitude && ref?.positions) {
   console.log(`== geo.txt: ${lines.length - 1} positions from the reference file`)
 }
 
+// The config's `sensor` with a principal point (a dataset's own calibration): ODM starts
+// from it as WebSfM does, through --cameras, and still refines it. OpenSfM keys a camera by
+// "v2 <make> <model> <w> <h> <projection> <focal ratio>" and ignores an override whose key
+// does not match, so the run checks afterwards that it started from these values.
+let cameraOverride = null
+if (cfg.sensor?.focalUnit === 'px' && cfg.sensor.focal && cfg.sensor.cx != null && cfg.sensor.cy != null) {
+  const tags = JSON.parse(sh('exiftool', ['-j', '-n', '-Make', '-Model', join(images, files[0])]))[0]
+  const w = exif0.ImageWidth
+  const h = exif0.ImageHeight
+  const m = Math.max(w, h)
+  const f35 = needsFocal ? Math.round((cfg.sensor.focal / m) * 36) : null
+  const ratio = (f35 != null ? f35 / 36 : cfg.sensor.focal / m).toFixed(4)
+  const make = String(tags.Make ?? '').toLowerCase()
+  const model = String(tags.Model ?? '').toLowerCase()
+  const key = `v2 ${make} ${model} ${w} ${h} brown ${ratio}`
+  const fx = cfg.sensor.focal / m
+  cameraOverride = { key, focal_x: fx, c_x: (cfg.sensor.cx - w / 2) / m, c_y: (cfg.sensor.cy - h / 2) / m }
+  const cam = { projection_type: 'brown', width: w, height: h, focal_x: fx, focal_y: fx }
+  Object.assign(cam, { c_x: cameraOverride.c_x, c_y: cameraOverride.c_y, k1: 0, k2: 0, p1: 0, p2: 0, k3: 0 })
+  await writeFile(join(proj, 'cameras-start.json'), JSON.stringify({ [key]: cam }, null, 2))
+  console.log(
+    `== initial calibration for "${key}": f ${cfg.sensor.focal} px, principal point ${cfg.sensor.cx}, ${cfg.sensor.cy}`,
+  )
+}
+
 // ── run ─────────────────────────────────────────────────────────────────────────────
 const odmArgs = [
   '--project-path',
@@ -129,6 +154,7 @@ const odmArgs = [
   '--max-concurrency',
   String(args.threads ?? 20),
   ...(mode === 'full' ? ['--dsm', '--pc-copc'] : ['--end-with', 'opensfm']),
+  ...(cameraOverride ? ['--cameras', '/datasets/project/cameras-start.json'] : []),
   ...extra,
 ]
 const digest = sh('docker', ['image', 'inspect', '--format', '{{index .RepoDigests 0}}', dockerImage]).trim()
@@ -178,6 +204,16 @@ async function runOdm() {
   return { seconds, peakMiB }
 }
 
+// The override took: OpenSfM's starting camera models are the ones given.
+if (cameraOverride) {
+  const start = JSON.parse(await readFile(join(proj, 'opensfm/camera_models.json'), 'utf8'))
+  const got = start[cameraOverride.key]
+  if (!got || Math.abs(got.focal_x - cameraOverride.focal_x) > 1e-6 || Math.abs(got.c_x - cameraOverride.c_x) > 1e-6)
+    throw new Error(
+      `ODM did not start from the given calibration (keys: ${Object.keys(start).join(', ')}; expected "${cameraOverride.key}")`,
+    )
+}
+
 // ── score ───────────────────────────────────────────────────────────────────────────
 const recon = JSON.parse(await readFile(join(proj, 'opensfm/reconstruction.json'), 'utf8'))
 const model = parseOpenSfm(recon)
@@ -198,6 +234,7 @@ const out = {
     mode,
     args: odmArgs.join(' '),
     focalHint: needsFocal ? cfg.sensor.focal : null,
+    initialCalibration: cameraOverride,
   },
   images: files.length,
   registered: model.images.length,

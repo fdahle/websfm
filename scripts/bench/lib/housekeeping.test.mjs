@@ -9,6 +9,7 @@ process.env.WEBSFM_EVAL = '/srv/eval'
 const { EVAL, EXP, checkOut, expDir, slug } = await import('./paths.mjs')
 const { backendOf, datasetFingerprint } = await import('./record.mjs')
 const { slim, slimKeeps } = await import('./slim.mjs')
+const { configHash, refKey } = await import('./refstore.mjs')
 
 describe('paths', () => {
   it('takes the eval root from the environment', () => {
@@ -85,5 +86,27 @@ describe('slim', () => {
     expect(await slim(d, true)).toBe(100_030)
     expect(readdirSync(join(d, 'job'))).toEqual(['run.json'])
     expect(existsSync(join(d, 'SLIMMED.txt'))).toBe(true)
+  })
+})
+
+describe('refstore', () => {
+  const cfg = { images: '/nowhere', sceneType: 'aerial', recon: { posePriors: false }, out: '/a', port: 4317 }
+
+  it('hashes a config by what decides a result, not where it writes', () => {
+    expect(configHash({ ...cfg, out: '/b', port: 4999, profile: '/p', headed: true })).toBe(configHash(cfg))
+    expect(configHash({ ...cfg, recon: { posePriors: true } })).not.toBe(configHash(cfg))
+    // key order does not matter
+    expect(
+      configHash({ port: 4317, out: '/a', recon: { posePriors: false }, sceneType: 'aerial', images: '/nowhere' }),
+    ).toBe(configHash(cfg))
+  })
+
+  it('keys a job by tool version, arguments and scorers too', () => {
+    const job = { id: 'q-colmap', tool: 'colmap', config: 'q' }
+    const base = refKey(job, cfg, '4.0.3').hash
+    expect(refKey(job, cfg, '4.0.4').hash).not.toBe(base)
+    expect(refKey({ ...job, args: ['--mapper', 'global_mapper'] }, cfg, '4.0.3').hash).not.toBe(base)
+    expect(refKey({ ...job, truth: '/t/images.txt' }, cfg, '4.0.3').hash).not.toBe(base)
+    expect(refKey({ ...job, id: 'other-id' }, cfg, '4.0.3').hash).toBe(base) // the id is a name only
   })
 })

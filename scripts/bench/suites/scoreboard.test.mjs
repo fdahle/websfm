@@ -65,3 +65,10 @@ describe('scoreOf', () => {
     })
   })
 })
+
+describe('scoreOf time', () => {
+  it("counts WebSfM's photo import in its time, as the other tools' include reading the photos", () => {
+    const stages = { ingest: { seconds: 10 }, detect: { seconds: 20 }, match: { seconds: 30 }, recon: { seconds: 40 } }
+    expect(scoreOf('websfm', { stages }).sfmSeconds).toBe(100)
+  })
+})

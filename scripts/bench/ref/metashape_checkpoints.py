@@ -66,6 +66,19 @@ def read_gcps(path):
     return out
 
 
+def read_gcp_csv(path):
+    """gcp.csv (one row per mark) → ([(label, lat, lon, h)], {label: [(image, x, y)]})."""
+    import csv
+
+    gcps, marks = {}, {}
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            label = r["gcp_label"]
+            gcps.setdefault(label, (label, float(r["lat"]), float(r["lon"]), float(r["elev"])))
+            marks.setdefault(label, []).append((r["image_file_name"], float(r["x"]), float(r["y"])))
+    return list(gcps.values()), marks
+
+
 def stem(label):
     return re.sub(r"\.[^.]+$", "", label).lower()
 
@@ -77,8 +90,13 @@ def rms(values):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
-    ap.add_argument("--gcps", required=True)
-    ap.add_argument("--marks", required=True)
+    ap.add_argument("--gcps", help="GeoScan-style table: label lat lon height (WGS84)")
+    ap.add_argument("--marks", help="the Metashape project folder whose markers hold the image marks")
+    ap.add_argument(
+        "--gcp-csv",
+        help="the HistoriX / bench gcp.csv instead (gcp_label, image_file_name, x, y, lon, lat, elev): "
+        "positions and image marks in one table, every GCP a checkpoint",
+    )
     ap.add_argument("--exclude", nargs="*", default=[])
     ap.add_argument("--out")
     a = ap.parse_args()
@@ -89,11 +107,16 @@ def main():
     if chunk.transform.matrix is None:
         raise SystemExit("the chunk has no georeference: align it with camera references first")
     cameras = {stem(c.label): c for c in chunk.cameras if c.transform}
-    marks = metashape_marks(a.marks)
+    if a.gcp_csv:
+        gcps, marks = read_gcp_csv(a.gcp_csv)
+    elif a.gcps and a.marks:
+        gcps, marks = read_gcps(a.gcps), metashape_marks(a.marks)
+    else:
+        raise SystemExit("--gcps with --marks, or --gcp-csv")
     wgs84 = Metashape.CoordinateSystem("EPSG::4326")
 
     rows = []
-    for label, lat, lon, h in read_gcps(a.gcps):
+    for label, lat, lon, h in gcps:
         m = chunk.addMarker()
         m.label = f"check {label}"
         used = 0

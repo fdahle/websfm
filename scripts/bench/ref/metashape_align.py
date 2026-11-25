@@ -67,6 +67,12 @@ def main():
     )
     ap.add_argument("--reference", help="reference.json: camera positions with accuracies")
     ap.add_argument("--optimize", action="store_true", help="Optimize Cameras after alignment")
+    ap.add_argument(
+        "--calibration",
+        help="f,cx,cy in px (cx, cy from the top-left corner): the initial calibration of every "
+        "sensor, adjusted in the alignment as Metashape adjusts any (the bench config's `sensor`, "
+        "the one WebSfM starts from)",
+    )
     a = ap.parse_args()
 
     ws = Path(a.ws)
@@ -89,6 +95,16 @@ def main():
         print(f"   {seconds[name]} s", flush=True)
 
     stage("addPhotos", lambda: chunk.addPhotos(files))
+    if a.calibration:
+        f, cx, cy = (float(v) for v in a.calibration.split(","))
+        for s in chunk.sensors:
+            c = Metashape.Calibration()
+            c.width, c.height = s.width, s.height
+            c.f = f
+            c.cx, c.cy = cx - s.width / 2, cy - s.height / 2  # Metashape: offset from the centre
+            s.user_calib = c
+            s.fixed_calibration = False
+        print(f"   initial calibration f {f} px, principal point {cx}, {cy} px", flush=True)
     referenced = apply_reference(chunk, a.reference) if a.reference else 0
     # Metashape's alignment includes the photos' EXIF positions when they are enabled; a
     # pure-SfM comparison (the bench's posePriors: false) switches them off, as WebSfM's
@@ -133,6 +149,7 @@ def main():
         "peakRssMiB": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024,
         "referencePreselection": a.preselect_reference,
         "posePriors": not a.no_pose_priors,
+            "initialCalibration": a.calibration,
         "referenced": referenced,
         "optimize": a.optimize,
     }

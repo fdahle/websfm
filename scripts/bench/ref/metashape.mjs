@@ -60,14 +60,54 @@ const full = !!args.full
 
 // The config's reference cameras (with their accuracies) replace the EXIF positions in
 // Metashape's solve, as importPoses does for WebSfM, unless the positions are off.
+// Positions in the solve without a reference file (photos with RTK positions in their EXIF):
+// the positions and the per-photo accuracies WebSfM reads from the same tags
+// (core/io/metadata.js: GPS position and altitude, RtkStd* / GPS*Accuracy), so Metashape
+// weights each photo as WebSfM does instead of at its own 10 m default.
+function exifPositions(dir) {
+  const tags = ['GPSLatitude', 'GPSLongitude', 'GPSAltitude', 'GPSAltitudeRef', 'RtkStdLon', 'RtkStdLat']
+  tags.push('RtkStdHgt', 'GPSXYAccuracy', 'GPSZAccuracy')
+  const r = spawnSync(
+    'exiftool',
+    ['-j', '-n', '-ext', 'jpg', '-ext', 'jpeg', '-ext', 'tif', ...tags.map((t) => `-${t}`), dir],
+    {
+      encoding: 'utf8',
+      maxBuffer: 1 << 28,
+    },
+  )
+  const out = {}
+  for (const e of JSON.parse(r.stdout || '[]')) {
+    if (e.GPSLatitude == null || e.GPSLongitude == null || e.GPSAltitude == null) continue
+    const name = String(e.SourceFile).split('/').pop()
+    const p = { lat: e.GPSLatitude, lon: e.GPSLongitude, alt: e.GPSAltitudeRef === 1 ? -e.GPSAltitude : e.GPSAltitude }
+    const se = e.RtkStdLon ?? e.GPSXYAccuracy
+    const sn = e.RtkStdLat ?? e.GPSXYAccuracy
+    const su = e.RtkStdHgt ?? e.GPSZAccuracy
+    if (se != null && sn != null && su != null) Object.assign(p, { se, sn, su })
+    out[name.replace(/\.[^.]+$/, '').toLowerCase()] = p
+  }
+  return out
+}
+const positions = ref?.positions ?? (cfg.recon?.posePriors === true && !noPriors ? exifPositions(images) : null)
+if (positions && !ref?.positions)
+  console.log(`== ${Object.keys(positions).length} positions from EXIF, with their RTK accuracies where given`)
+
 const refArgs = []
-if (ref?.positions && !noPriors) {
+if (positions && Object.keys(positions).length && !noPriors) {
   // loadReference turns the antenna offset into the OpenCV camera frame; Metashape wants
   // its own axes back (x right, y up, z back: flip y and z).
-  const arm = cfg.recon?.leverArm && ref.leverArm ? [ref.leverArm[0], -ref.leverArm[1], -ref.leverArm[2]] : null
-  await writeFile(join(ws, 'reference.json'), JSON.stringify({ positions: ref.positions, leverArm: arm }))
+  const arm = cfg.recon?.leverArm && ref?.leverArm ? [ref.leverArm[0], -ref.leverArm[1], -ref.leverArm[2]] : null
+  await writeFile(join(ws, 'reference.json'), JSON.stringify({ positions, leverArm: arm }))
   refArgs.push('--reference', join(ws, 'reference.json'))
 }
+
+// The config's `sensor` (a dataset's own calibration, for photos without EXIF focal): the
+// calibration WebSfM starts from is Metashape's initial one too, adjusted as usual.
+const s = cfg.sensor
+const calibArgs =
+  s?.focalUnit === 'px' && s.focal && s.cx != null && s.cy != null
+    ? ['--calibration', `${s.focal},${s.cx},${s.cy}`]
+    : []
 
 let pyArgs
 if (full) {
@@ -83,6 +123,7 @@ if (full) {
     ...(preselect ? ['--preselect-reference'] : []),
     ...(noPriors ? ['--no-pose-priors'] : []),
     ...refArgs,
+    ...calibArgs,
     ...(args.optimize ? ['--optimize'] : []),
   ]
 }

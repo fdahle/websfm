@@ -11,6 +11,7 @@
 //        [--dry-run]                                    print the commands, run nothing
 //        [--tabulate]                                   no runs: tables from what <out> holds
 //        [--pack]                                       <out>.tar.gz: configs, logs, summaries
+//        [--no-reuse]                                   run every reference job again (else ref/, lib/refstore.mjs)
 //
 // The manifest (committed) lists tables, and in each the jobs: a tool and a bench config
 // by name (scripts/bench/configs/<config>.json, gitignored: they hold local paths). Each job
@@ -53,7 +54,8 @@ import { copyFile, mkdir, readFile, readdir, writeFile, appendFile } from 'node:
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RESULTS, checkOut, repo, today } from '../lib/paths.mjs'
-import { SUMMARY_FILE, commandsOf, configPath, runJob, runStep } from '../lib/jobs.mjs'
+import { SUMMARY_FILE, commandsOf, configPath, loadConfig, runJob, runStep } from '../lib/jobs.mjs'
+import { findStored, reuse, store } from '../lib/refstore.mjs'
 const args = {}
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i]
@@ -139,7 +141,9 @@ function scoreOfTool(tool, s, extra) {
       position: pos(rec.positionCheck),
       checkpoints: chk,
       dem: dem ? { rmse: dem.rmse_diff, nmad: dem.nmad_diff, coverage: dem.dem_valid_share_of_bbox } : null,
-      sfmSeconds: sec('detect') + sec('match') + sec('recon') || null,
+      // Copying the photos into the browser counts too: COLMAP's and ODM's times include
+      // reading them, and leaving it out would flatter WebSfM.
+      sfmSeconds: sec('ingest') + sec('detect') + sec('match') + sec('recon') || null,
     }
   }
   if (tool === 'colmap-hist') {
@@ -330,12 +334,20 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
     for (const job of jobs) {
       const dir = join(out, job.id)
       const { summary, steps } = await commandsOf(job, dir)
+      // A reference tool's result from ref/ when nothing that decides it changed (lib/refstore.mjs).
+      const cfg = job.tool === 'websfm' || args['no-reuse'] ? null : await loadConfig(job.config)
+      const hit = cfg && !existsSync(summary) ? findStored(job, cfg) : null
       if (args['dry-run']) {
-        console.log(`# ${job.id}`)
+        console.log(`# ${job.id}${hit ? `  (reused: ${hit.dir})` : ''}`)
+        if (hit) continue
         for (const [exe, argv] of steps) console.log([exe, ...argv].join(' '))
         continue
       }
       await copyFile(configPath(job.config), join(out, 'configs', `${job.config}.json`))
+      if (hit) {
+        await reuse(hit, dir, { table: job.table, run: out.split('/').pop(), job: job.id })
+        await log(`reused ${job.id} from ${hit.dir}`)
+      }
       if (existsSync(summary)) {
         const todo = steps.filter(([, , o]) => o?.creates && !existsSync(o.creates))
         await log(`skip ${job.id} (summary there)${todo.length ? `; scoring ${todo.length} missing` : ''}`)
@@ -348,6 +360,10 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
       await log(`start ${job.id}`)
       const code = await runJob(job, dir, { extra: { table: job.table, run: out.split('/').pop() } })
       await log(`done ${job.id} exit ${code}`)
+      if (code === 0 && job.tool !== 'websfm') {
+        const kept = await store(job, await loadConfig(job.config), dir).catch((e) => console.error(e.message))
+        if (kept) await log(`stored ${job.id} in ${kept}`)
+      }
     }
     if (!args['dry-run']) await log('scoreboard finished')
   }

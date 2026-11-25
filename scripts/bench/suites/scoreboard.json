@@ -561,6 +561,21 @@
           "config": "nm-usegeo1"
         },
         {
+          "id": "usegeo-colmap",
+          "block": "UseGeo dataset 1",
+          "label": "COLMAP",
+          "tool": "colmap",
+          "config": "nm-usegeo1"
+        },
+        {
+          "id": "usegeo-glomap",
+          "block": "UseGeo dataset 1",
+          "label": "COLMAP GLOMAP",
+          "tool": "colmap",
+          "config": "nm-usegeo1",
+          "args": ["--mapper", "global_mapper"]
+        },
+        {
           "id": "usegeo-metashape",
           "block": "UseGeo dataset 1",
           "label": "Metashape",
@@ -856,6 +871,13 @@
           "config": "heldout-il-kh9mc-q"
         },
         {
+          "id": "il-kh9mc-colmap",
+          "block": "Iceland 1980 KH-9",
+          "label": "COLMAP (GCP similarity fit)",
+          "tool": "colmap-hist",
+          "config": "heldout-il-kh9mc-q"
+        },
+        {
           "id": "il-kh9mc-metashape",
           "block": "Iceland 1980 KH-9",
           "label": "Metashape defaults",
@@ -877,6 +899,14 @@
           "label": "WebSfM",
           "tool": "websfm",
           "config": "heldout-helenenschacht"
+        },
+        {
+          "id": "helenenschacht-metashape",
+          "block": "helenenschacht (176)",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "heldout-helenenschacht",
+          "checkpoints": true
         }
       ]
     }
