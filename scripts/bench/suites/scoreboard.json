@@ -614,6 +614,15 @@
           "checkpoints": true
         },
         {
+          "id": "rtk-quarry-metashape-opt",
+          "block": "quarry",
+          "label": "Metashape + Optimize Cameras",
+          "tool": "metashape",
+          "config": "r3-rtk-quarry",
+          "checkpoints": true,
+          "args": ["--optimize"]
+        },
+        {
           "id": "rtk-puti-websfm",
           "block": "GeoScan PUTI",
           "label": "WebSfM",
@@ -629,6 +638,15 @@
           "checkpoints": true
         },
         {
+          "id": "rtk-puti-metashape-opt",
+          "block": "GeoScan PUTI",
+          "label": "Metashape + Optimize Cameras",
+          "tool": "metashape",
+          "config": "main-rtk-puti444",
+          "checkpoints": true,
+          "args": ["--optimize"]
+        },
+        {
           "id": "rtk-eurosdr-p4-websfm",
           "block": "EuroSDR Wards Hill",
           "label": "WebSfM",
@@ -642,6 +660,15 @@
           "tool": "metashape",
           "config": "rtk-eurosdr-p4",
           "checkpoints": true
+        },
+        {
+          "id": "rtk-eurosdr-p4-metashape-opt",
+          "block": "EuroSDR Wards Hill",
+          "label": "Metashape + Optimize Cameras",
+          "tool": "metashape",
+          "config": "rtk-eurosdr-p4",
+          "checkpoints": true,
+          "args": ["--optimize"]
         }
       ]
     },
@@ -907,6 +934,121 @@
           "tool": "metashape",
           "config": "heldout-helenenschacht",
           "checkpoints": true
+        },
+        {
+          "id": "helenenschacht-metashape-opt",
+          "block": "helenenschacht (176)",
+          "label": "Metashape + Optimize Cameras",
+          "tool": "metashape",
+          "config": "heldout-helenenschacht",
+          "checkpoints": true,
+          "args": ["--optimize"]
+        }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "title": "Full pipeline: photos to dense cloud, DSM, orthophoto and textured mesh at each tool's defaults, positions in the solve; seconds, peak memory, dense points; UseGeo's dense clouds against airborne LiDAR",
+      "unit": "m",
+      "columns": [
+        "pipeTotal",
+        "pipeSfm",
+        "pipeDense",
+        "pipeMesh",
+        "pipeTexture",
+        "pipeDsmOrtho",
+        "peak",
+        "densePoints",
+        "lidar",
+        "lidarDome",
+        "bowl"
+      ],
+      "jobs": [
+        {
+          "id": "pipe-quarry-websfm",
+          "block": "quarry (347)",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "full-quarry347"
+        },
+        {
+          "id": "pipe-quarry-metashape",
+          "block": "quarry (347)",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "full-quarry347",
+          "args": ["--full"]
+        },
+        {
+          "id": "pipe-quarry-odm",
+          "block": "quarry (347)",
+          "label": "ODM",
+          "tool": "odm",
+          "config": "full-quarry347",
+          "args": ["--mode", "full", "--gpu"]
+        },
+        {
+          "id": "pipe-puti-websfm",
+          "block": "GeoScan PUTI (444)",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "full-puti444"
+        },
+        {
+          "id": "pipe-puti-metashape",
+          "block": "GeoScan PUTI (444)",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "full-puti444",
+          "args": ["--full"]
+        },
+        {
+          "id": "pipe-puti-odm",
+          "block": "GeoScan PUTI (444)",
+          "label": "ODM",
+          "tool": "odm",
+          "config": "full-puti444",
+          "args": ["--mode", "full", "--gpu"]
+        },
+        {
+          "id": "pipe-usegeo-websfm",
+          "block": "UseGeo dataset 1 (224)",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "full-usegeo1"
+        },
+        {
+          "id": "pipe-usegeo-metashape",
+          "block": "UseGeo dataset 1 (224)",
+          "label": "Metashape",
+          "tool": "metashape",
+          "config": "full-usegeo1",
+          "args": ["--full", "--cloud-crs", "EPSG::32632"],
+          "lidar": true
+        },
+        {
+          "id": "pipe-usegeo-odm",
+          "block": "UseGeo dataset 1 (224)",
+          "label": "ODM",
+          "tool": "odm",
+          "config": "full-usegeo1",
+          "args": ["--mode", "full", "--gpu"],
+          "lidar": true
+        }
+      ]
+    },
+    {
+      "id": "mill19",
+      "title": "1,940 photos (Mill19 building): WebSfM alone from photos to orthophoto and mesh in one browser tab, the reference positions in the solve",
+      "unit": "m",
+      "columns": ["cameras", "position", "pipeTotal", "pipeSfm", "pipeDense", "pipeDsmOrtho", "peak", "densePoints"],
+      "jobs": [
+        {
+          "id": "mill19-websfm",
+          "block": "Mill19 building (1,940)",
+          "label": "WebSfM",
+          "tool": "websfm",
+          "config": "mill19-e2e"
         }
       ]
     }

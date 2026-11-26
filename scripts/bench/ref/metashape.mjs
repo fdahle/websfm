@@ -111,7 +111,7 @@ const calibArgs =
 
 let pyArgs
 if (full) {
-  pyArgs = [join(here, 'metashape_full.py'), '--images', images, '--ws', ws, ...refArgs]
+  pyArgs = [join(here, 'metashape_full.py'), '--images', images, '--ws', ws, ...refArgs, ...calibArgs]
   if (args['cloud-crs']) pyArgs.push('--cloud-crs', args['cloud-crs'])
 } else {
   pyArgs = [

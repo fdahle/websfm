@@ -38,6 +38,7 @@ def main():
     ap.add_argument("--ws", required=True)
     ap.add_argument("--reference")
     ap.add_argument("--cloud-crs")
+    ap.add_argument("--calibration", help="f,cx,cy in px: every sensor's initial calibration (as metashape_align.py)")
     a = ap.parse_args()
 
     ws = Path(a.ws)
@@ -62,6 +63,16 @@ def main():
     stage("addPhotos", lambda: chunk.addPhotos(files))
 
     referenced = apply_reference(chunk, a.reference) if a.reference else 0
+    if a.calibration:
+        f, cx, cy = (float(v) for v in a.calibration.split(","))
+        for s in chunk.sensors:
+            c = Metashape.Calibration()
+            c.width, c.height = s.width, s.height
+            c.f = f
+            c.cx, c.cy = cx - s.width / 2, cy - s.height / 2  # Metashape: offset from the centre
+            s.user_calib = c
+            s.fixed_calibration = False
+        print(f"   initial calibration f {f} px, principal point {cx}, {cy} px", flush=True)
 
     stage("matching", lambda: chunk.matchPhotos())
     stage("alignment", lambda: chunk.alignCameras())

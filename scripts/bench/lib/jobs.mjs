@@ -132,6 +132,37 @@ export async function commandsOf(job, dir) {
       [join(repo, 'scripts/bench/score/camera-check.mjs'), c.summary, job.truth],
       { stdout: join(dir, 'camera-check.json'), creates: join(dir, 'camera-check.json') },
     ])
+  // `lidar`: the dense cloud against the config's airborne LiDAR (reference.lidar), the same
+  // check run-bench runs on WebSfM's cloud: Metashape's cloud.las (--cloud-crs), ODM's LAZ
+  // unpacked to LAS by PDAL first (lidar-score reads plain LAS).
+  if (job.lidar && job.tool !== 'websfm') {
+    const las = join(dir, 'cloud.las')
+    if (job.tool === 'odm') {
+      const laz = '/d/project/odm_georeferencing/odm_georeferenced_model.laz'
+      c.steps.push([
+        'docker',
+        [
+          'run',
+          '--rm',
+          '--network',
+          'none',
+          '-v',
+          `${dir}:/d`,
+          'pdal/pdal:latest',
+          'pdal',
+          'translate',
+          laz,
+          '/d/cloud.las',
+        ],
+        { creates: las },
+      ])
+    }
+    c.steps.push([
+      process.execPath,
+      [join(repo, 'scripts/bench/score/lidar-score.mjs'), las, configPath(job.config)],
+      { stdout: join(dir, 'lidar.json'), creates: join(dir, 'lidar.json') },
+    ])
+  }
   if (job.eth3d) {
     const cloud = CLOUD_FILE[job.tool] ? join(dir, CLOUD_FILE[job.tool]) : join(dir, 'dense.ply')
     c.steps.push([

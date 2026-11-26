@@ -22,7 +22,7 @@
 // Docker runs rootless (`docker context use rootless`). Run it alone, not beside a bench
 // run, or both timings lie.
 import { spawn, spawnSync } from 'node:child_process'
-import { readFile, writeFile, readdir, mkdir, link, rm } from 'node:fs/promises'
+import { readFile, writeFile, readdir, mkdir, link, rm, open } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { loadReference } from '../lib/reference.mjs'
 import { checkOut, scratchOut } from '../lib/paths.mjs'
@@ -224,6 +224,21 @@ const bench = await readFile(join(proj, 'benchmark.txt'), 'utf8').catch(() => ''
 const stageSeconds = Object.fromEntries(
   [...bench.matchAll(/^(\w+) runtime: ([\d.e+-]+) seconds$/gm)].map((m) => [m[1], Math.round(Number(m[2]))]),
 )
+// The dense cloud's point count (full mode), from the LAZ header: no need to unpack it.
+let densePoints = null
+if (mode === 'full') {
+  try {
+    const fh = await open(join(proj, 'odm_georeferencing/odm_georeferenced_model.laz'), 'r')
+    const buf = Buffer.alloc(375)
+    await fh.read(buf, 0, 375, 0)
+    await fh.close()
+    // LAS: the u32 count at 107; LAS 1.4 may leave it 0 with the u64 count at 247.
+    const n32 = buf.readUInt32LE(107)
+    densePoints = n32 || (buf[25] >= 4 ? Number(buf.readBigUInt64LE(247)) : null)
+  } catch {
+    densePoints = null
+  }
+}
 const out = {
   name,
   config: args.config,
@@ -240,6 +255,7 @@ const out = {
   registered: model.images.length,
   reconstructions: Array.isArray(recon) ? recon.length : 1,
   points: model.points.length,
+  densePoints,
   seconds: Math.round(seconds),
   stageSeconds,
   peakMemMiB: Math.round(peakMiB),

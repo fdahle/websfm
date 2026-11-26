@@ -107,7 +107,62 @@ export function scoreOf(tool, s, extra = {}) {
     dense: at2(extra.eth3d),
     denseOfficial: at2(extra.eth3dOfficial),
     denseSeconds: denseSecondsOf(tool, s),
+    pipe: pipeOf(tool, s),
+    lidar: lidarOf(tool, s, extra.lidar),
   }
+}
+
+// The full pipeline's stages in common terms (seconds), peak memory (GiB) and dense points.
+function pipeOf(tool, s) {
+  const sum = (o, ks) => ks.reduce((a, k) => a + (o?.[k] ?? 0), 0)
+  if (tool === 'websfm') {
+    const st = s.stages ?? {}
+    if (!st.texture && !st.ortho) return null
+    const sec = Object.fromEntries(Object.entries(st).map(([k, v]) => [k, v?.seconds ?? 0]))
+    return {
+      total: sum(sec, Object.keys(sec)),
+      sfm: sum(sec, ['ingest', 'detect', 'match', 'recon']),
+      dense: sum(sec, ['depth', 'dense']),
+      mesh: sec.mesh ?? null,
+      texture: sec.texture ?? null,
+      dsmOrtho: sum(sec, ['dem', 'ortho']),
+      peakGB: s.procPeakGB ?? null,
+      densePoints: st.dense?.points ?? null,
+    }
+  }
+  if (tool === 'metashape' && s.seconds?.orthomosaic != null) {
+    const t = s.seconds
+    return {
+      total: t.total,
+      sfm: sum(t, ['addPhotos', 'matching', 'alignment']),
+      dense: sum(t, ['depthMaps', 'pointCloud']),
+      mesh: t.mesh,
+      texture: sum(t, ['uv', 'texture']),
+      dsmOrtho: sum(t, ['dem', 'orthomosaic']),
+      peakGB: s.peakRssMiB != null ? s.peakRssMiB / 1024 : null,
+      densePoints: s.densePoints ?? null,
+    }
+  }
+  if (tool === 'odm' && s.odm?.mode === 'full') {
+    const t = s.stageSeconds ?? {}
+    return {
+      total: s.seconds,
+      sfm: sum(t, ['dataset', 'split', 'merge', 'opensfm']),
+      dense: sum(t, ['openmvs', 'odm_filterpoints']),
+      mesh: t.odm_meshing ?? null,
+      texture: t.mvs_texturing ?? null,
+      dsmOrtho: sum(t, ['odm_georeferencing', 'odm_dem', 'odm_orthophoto']),
+      peakGB: s.peakMemMiB != null ? s.peakMemMiB / 1024 : null,
+      densePoints: s.densePoints ?? null,
+    }
+  }
+  return null
+}
+
+// The dense cloud against airborne LiDAR: WebSfM's from its run, the others' from lidar.json.
+function lidarOf(tool, s, extra) {
+  const r = tool === 'websfm' ? s.stages?.dense?.lidarCheck : extra
+  return r && !r.error ? r : null
 }
 
 // Depth maps + fusion (WebSfM) or depth maps + point cloud from the given cameras (Metashape).
@@ -184,7 +239,36 @@ function scoreOfTool(tool, s, extra) {
   }
 }
 
+const secs = (v) => (v != null && Number.isFinite(v) ? Math.round(v).toLocaleString('en-US') : '–')
+const pipeCol = (key, head) => ({ head, cell: (x) => (x.pipe ? secs(x.pipe[key]) : '–') })
 export const COLUMNS = {
+  pipeTotal: pipeCol('total', 'total (s)'),
+  pipeSfm: pipeCol('sfm', 'import + SfM'),
+  pipeDense: pipeCol('dense', 'depth + dense'),
+  pipeMesh: pipeCol('mesh', 'mesh'),
+  pipeTexture: pipeCol('texture', 'texture'),
+  pipeDsmOrtho: pipeCol('dsmOrtho', 'DSM + ortho'),
+  peak: { head: 'peak (GiB)', cell: (x) => (x.pipe?.peakGB ? String(Math.round(x.pipe.peakGB)) : '–') },
+  densePoints: {
+    head: 'dense points',
+    cell: (x) => (x.pipe?.densePoints ? `${Math.round(x.pipe.densePoints / 1e6)} M` : '–'),
+  },
+  lidar: {
+    head: 'vs LiDAR: median · within 10 cm',
+    cell: (x) =>
+      x.lidar ? `${(x.lidar.medianAbsM * 100).toFixed(1)} cm · ${Math.round(x.lidar.within10cm * 100)} %` : '–',
+  },
+  lidarDome: {
+    head: 'without the bowl',
+    cell: (x) =>
+      x.lidar?.domeMedianAbsM != null
+        ? `${(x.lidar.domeMedianAbsM * 100).toFixed(1)} cm · ${Math.round(x.lidar.domeWithin10cm * 100)} %`
+        : '–',
+  },
+  bowl: {
+    head: 'bowl at the edge (m)',
+    cell: (x) => (x.lidar?.domeAtEdgeM != null ? x.lidar.domeAtEdgeM.toFixed(2) : '–'),
+  },
   cameras: { head: 'cameras', cell: (x) => (x.cameras ? `${x.cameras[0]}/${x.cameras[1]}` : '–') },
   truth: {
     head: (u) => `cameras · median error vs truth (${u})`,
@@ -303,6 +387,7 @@ async function tabulate() {
           cameraCheck: await read(join(dir, 'camera-check.json')),
           eth3d: await read(join(dir, 'eth3d.json')),
           eth3dOfficial: await read(join(dir, 'eth3d-official.json')),
+          lidar: await read(join(dir, 'lidar.json')),
         })
         if (x) runs.push(x)
       }

@@ -32,6 +32,7 @@ function scoreDir(job, dir) {
     cameraCheck: read(join(dir, 'camera-check.json')),
     eth3d: read(join(dir, 'eth3d.json')),
     eth3dOfficial: read(join(dir, 'eth3d-official.json')),
+    lidar: read(join(dir, 'lidar.json')),
   })
 }
 
