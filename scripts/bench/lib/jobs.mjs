@@ -82,6 +82,8 @@ async function toolCommandsOf(job, dir) {
       if (h.intrinsics) argv.push('--intrinsics', h.intrinsics)
       if (cfg.crs) argv.push('--epsg', epsgOf(cfg.crs))
       if (h.refDem) argv.push('--ref-dem', h.refDem)
+      // The DEM at the resolution WebSfM's run makes it (the config's dem.gsd), so the scores compare.
+      if (cfg.dem?.gsd) argv.push('--dem-res', String(cfg.dem.gsd))
       return { summary: join(dir, 'summary.json'), steps: [[PYTHON, [...argv, ...extra]]] }
     }
     case 'colmap-hist': {
@@ -93,6 +95,8 @@ async function toolCommandsOf(job, dir) {
       if (h.intrinsics) argv.push('--intrinsics', h.intrinsics)
       if (cfg.crs) argv.push('--epsg', epsgOf(cfg.crs))
       if (h.refDem) argv.push('--ref-dem', h.refDem)
+      // The DEM at the resolution WebSfM's run makes it (the config's dem.gsd), so the scores compare.
+      if (cfg.dem?.gsd) argv.push('--dem-res', String(cfg.dem.gsd))
       return { summary: join(dir, 'summary.json'), steps: [[PYTHON, [...argv, ...extra]]] }
     }
     case 'metashape-dense': {
