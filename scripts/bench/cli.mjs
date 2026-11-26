@@ -7,6 +7,7 @@
 //                                                    runs there (args, truth, scorers)
 //   npm run bench -- scoreboard [scoreboard.mjs flags]   into results/<date>-<commit>
 //   npm run bench -- gate [gate.mjs flags]               into exp/<date>-gate/<commit>
+//   npm run bench -- publish [--check]                   the pinned run → docs/BENCHMARKS.md tables
 //   npm run bench -- ls [text] [--all]               runs, newest first, from their records
 //   npm run bench -- clean [--slim <folder>…] [--yes]  what nothing cites; slim to evidence
 //
@@ -232,7 +233,7 @@ async function clean() {
 // ── main ──
 const help = readFileSync(new URL(import.meta.url), 'utf8')
   .split('\n')
-  .slice(0, 14)
+  .slice(0, 15)
   .map((l) => l.replace(/^\/\/ ?/, ''))
   .join('\n')
 switch (verb) {
@@ -249,6 +250,9 @@ switch (verb) {
     break
   case 'gate':
     await passOn('suites/gate.mjs', [])
+    break
+  case 'publish':
+    await passOn('suites/publish.mjs', [])
     break
   case 'ls':
     ls()

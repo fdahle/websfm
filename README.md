@@ -142,26 +142,28 @@ Results, each from the run dated in [docs/BENCHMARKS.md](docs/BENCHMARKS.md):
 <!-- results:start: made by `npm run docs:readme` from docs/BENCHMARKS.md -->
 | Dataset | Images registered | Result | Compared against |
 | --- | --- | --- | --- |
-| Aerial survey block with RTK and 15 GCPs (GeoScan PUTI): RTK positions in the solve, every GCP a checkpoint | 444 / 444 | Checkpoints 3.7 / 7.8 cm (H / V); cameras vs RTK 0.5 / 0.9 cm | Metashape, same positions and marks: checkpoints 2.4 / 6.4 cm, cameras 0.5 / 1.0 cm |
-| Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK 26.5 / 14.6 cm (H / V) | COLMAP: 24.0 / 65.0 cm; ODM: 35.8 / 94.7 cm |
-| Quarry, Pix4D example (RTK in EXIF), pure SfM | 346 / 347 | Cameras vs RTK 20.3 / 13.4 cm (H / V) | Metashape: 13 / 12 cm; COLMAP: 49.5 / 84.7 cm; ODM: 58.0 / 11.6 cm |
+| Aerial survey block with RTK and 15 GCPs (GeoScan PUTI): RTK positions in the solve, every GCP a checkpoint | 444 / 444 | Checkpoints 3.07 / 7.93 cm (H / V); cameras vs RTK 0.54 / 0.87 cm | Metashape, same positions and marks: checkpoints 2.43 / 6.44 cm, cameras 0.52 / 0.96 cm |
+| Drone block with RTK in the photos (EuroSDR Wards Hill, 500 photos): RTK positions in the solve, 58 checkpoints | 500 / 500 | Checkpoints 0.96 / 1.21 cm (H / V) | Metashape: 0.98 / 1.63 cm |
+| GeoScan PUTI, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK 24.7 / 22.8 cm (H / V) | Metashape: 9.54 / 29.1 cm; COLMAP: 24.4 / 61.8 cm; ODM: 33.0 / 85.3 cm |
+| Quarry, Pix4D example (RTK in EXIF), pure SfM | 346 / 347 | Cameras vs RTK 20.0 / 11.3 cm (H / V) | Metashape: 13.3 / 11.8 cm; COLMAP: 49.5 / 85.3 cm; ODM: 441 / 76.4 cm |
 | Three drone blocks (224–444 photos), whole pipeline at defaults: dense cloud, DSM, ortho, textured mesh | all | 35–50 min, 13–23 GiB (smaller mesh and ortho than the others make by default) | Metashape: 48–68 min, 10–14 GiB; ODM: 65–102 min, 28–41 GiB |
-| ETH3D high-res (6 training scenes) and COLMAP South Building, sparse | 311 / 311 | Median camera error level with Metashape's: lower on 3 of 7 | Metashape: 311 / 311; COLMAP: 182 / 183 on ETH3D, median errors 3–10× WebSfM's |
-| ETH3D high-res, dense from the ground-truth cameras | – | Mean F1 66.2 at 2 cm (ETH3D's evaluator) | COLMAP: 58.4. Metashape Medium: 2.5 points higher in half the time (447 s against 827 s; approximate scorer) |
+| ETH3D high-res (6 training scenes) and COLMAP South Building, sparse, five runs per tool | 311 / 311 | Every camera in every run; median error 1.6–5.8 mm, lower than Metashape's on South Building | Metashape: 0.05–1.1 mm lower on ETH3D, but a wrong camera arrangement in 4 of its 30 runs there; COLMAP: median errors 1.7–11× WebSfM's |
+| ETH3D high-res, dense from the ground-truth cameras | – | Mean F1 69.5 at 2 cm (ETH3D's evaluator) in 794 s | Metashape Medium: 69.6 in 456 s; High: 69.3 in 1,681 s; COLMAP: 58.4 |
 | Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone) | – | Final cost a median +0.00004 % from Ceres' on 95 of 98 problems, at 1.40× its time | Ceres 2.2 |
-| Casa Grande 1978 aerial film (37 scans, GCPs in the solve, every fourth a checkpoint) | 37/37 | Checkpoints 1.09 / 1.01 m (H / V); DEM vs 1 m reference RMSE / NMAD 1.42 / 0.59 m on the cells every tool's DEM covers (WebSfM's covers 41 %) | Metashape defaults: 32/37 cameras, checkpoints 1.20 / 0.95 m (9 checks), DEM 1.55 / 0.70 m (covers 69 %); with guided matching 37/37, DEM 1.46 / 0.75 m (65 %) |
-| Iceland 1980 aerial film (125 scans, GCPs in the solve) | 123/125 | Checkpoints 1.74 / 1.02 m (18 checks); DEM RMSE / NMAD 19.99 / 1.28 m on the cells both DEMs cover (WebSfM's covers 27 %) | Metashape defaults: 125/125, checkpoints 1.54 / 0.97 m, DEM 13.96 / 1.11 m (covers 62 %) |
+| Casa Grande 1978 aerial film (37 scans, GCPs in the solve, every fourth a checkpoint) | 37 / 37 | Checkpoints 1.08 / 1.02 m (H / V); DEM vs 1 m reference RMSE / NMAD 4.87 / 0.71 m, covering 58 % | Metashape defaults: 37/37, checkpoints 1.08 / 0.88 m, DEM 11.3 / 0.78 m, covering 65 % |
+| Iceland 1980 aerial film (125 scans, GCPs in the solve) | 121 / 125 | Checkpoints 1.80 / 1.03 m; DEM RMSE / NMAD 29.4 / 1.50 m, covering 36 % | Metashape defaults: 125/125, checkpoints 1.55 / 0.98 m, DEM 40.7 / 1.38 m, covering 66 % |
+| Strecha's six multi-view sets, held out (never used to tune WebSfM) | 103 / 103 | Lowest median camera error of the three tools on 3 of 6 | Metashape: 3 of 6; COLMAP: 103 / 103, median errors 0.9–4.6× WebSfM's |
 <!-- results:end -->
 
 Every table, with its date, method and the weak results, is in
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-Known gaps: Metashape's checkpoint heights are closer on both RTK blocks, and its
-dense clouds are more accurate at 2 cm and more complete on open outdoor scenes, in
-about half WebSfM's time at the same quality setting. COLMAP keeps 40–260 % more sparse
-points. WebSfM's DEMs leave cells without texture empty instead of interpolating them,
-so they cover less ground; the film rows compare the DEMs on the cells all of them
-cover, where Metashape's Iceland DEM is the more accurate.
+Known gaps: Metashape is the more accurate in the drone blocks without control and in the
+sparse ETH3D scenes (where some of its runs fail), and its checkpoint heights are closer on
+PUTI with RTK. Its dense clouds are more accurate at 2 cm and more complete on open outdoor
+scenes, in about 60 % of WebSfM's time at the same quality setting. WebSfM's DEMs leave
+cells without texture empty instead of interpolating them, so they cover less ground, and
+on Iceland Metashape aligns every scan and its DEM covers nearly twice the area.
 
 Not yet verified:
 

@@ -255,6 +255,32 @@ export function medianScore(runs) {
   return merge(runs)
 }
 
+// A run whose median camera error is more than this many times the median of the job's runs
+// went wrong (a wrong camera arrangement, not a less accurate one): it counts as failed.
+export const FAIL_FACTOR = 10
+
+/**
+ * Several runs of one job → { score, repeats, failed, spread }: the median of the sound runs
+ * (medianScore), the runs left out as failed (their median camera errors), and the spread of
+ * the sound runs' median errors. Runs without a camera error (checkpoint, DEM and dense
+ * tables) are all sound. docs/BENCHMARKS.md (publish.mjs) and the paper's tables both use this.
+ */
+export function aggregateRuns(runs) {
+  const meds = runs.map((r) => r?.truth?.median)
+  if (runs.length >= 3 && meds.every((v) => v != null && Number.isFinite(v))) {
+    const all = medianScore(meds.map((m) => ({ m }))).m
+    const sound = runs.filter((r) => r.truth.median <= FAIL_FACTOR * all)
+    const sm = sound.map((r) => r.truth.median)
+    return {
+      score: medianScore(sound),
+      repeats: runs.length,
+      failed: runs.filter((r) => r.truth.median > FAIL_FACTOR * all).map((r) => r.truth.median),
+      spread: Math.max(...sm) - Math.min(...sm),
+    }
+  }
+  return { score: medianScore(runs), repeats: runs.length, failed: [], spread: null }
+}
+
 async function tabulate() {
   const lines = [`# Scoreboard ${out.split('/').pop()}`, '', `Manifest: ${manifestPath.replace(repo + '/', '')}`, '']
   for (const t of tables) {

@@ -1,0 +1,51 @@
+{
+  "about": "The scoreboard run docs/BENCHMARKS.md, the README and the paper's tables are made from (npm run bench -- publish; publication/tables/make-tables.mjs --published). Paths are under the eval root. `repeats`: earlier runs that count as more runs of the named tools' jobs in the named tables; never WebSfM's from older code.",
+  "run": "results/2026-11-26-62712b2",
+  "repeats": [
+    {
+      "dir": "results/eth3d-repeat-2026-11-24/r2",
+      "tools": ["metashape"],
+      "tables": ["eth3d-sparse"]
+    },
+    {
+      "dir": "results/eth3d-repeat-2026-11-24/r3",
+      "tools": ["metashape"],
+      "tables": ["eth3d-sparse"]
+    },
+    {
+      "dir": "results/eth3d-repeat-2026-11-24/r4",
+      "tools": ["metashape"],
+      "tables": ["eth3d-sparse"]
+    },
+    {
+      "dir": "results/eth3d-repeat-2026-11-24/r5",
+      "tools": ["metashape"],
+      "tables": ["eth3d-sparse"]
+    },
+    {
+      "dir": "results/2026-11-26-eth3d-colmap-repeat/r2",
+      "tools": ["colmap"],
+      "tables": ["eth3d-sparse"]
+    },
+    {
+      "dir": "results/2026-11-26-eth3d-colmap-repeat/r3",
+      "tools": ["colmap"],
+      "tables": ["eth3d-sparse"]
+    },
+    {
+      "dir": "results/2026-11-26-eth3d-colmap-repeat/r4",
+      "tools": ["colmap"],
+      "tables": ["eth3d-sparse"]
+    },
+    {
+      "dir": "results/2026-11-26-eth3d-colmap-repeat/r5",
+      "tools": ["colmap"],
+      "tables": ["eth3d-sparse"]
+    }
+  ],
+  "separate": {
+    "about": "Runs the paper's tables read that are not scoreboard jobs yet (separate runs, older code): Bundle Adjustment in the Large and the browser-cost ablation.",
+    "bal": "exp/2026-11-23-bal/results.jsonl",
+    "ablation": ["exp/2026-11-25-eurosdr/ablation", "exp/2026-11-23-paper-ablation"]
+  }
+}

@@ -7,6 +7,7 @@ crates/
 licenses/
 package-lock.json
 tests/fixtures/colmap/cameras.json
+docs/benchmarks.json
 # Local output and private notes.
 bench-out/
 test-results/

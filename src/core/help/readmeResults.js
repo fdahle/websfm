@@ -87,6 +87,11 @@ const range = (vals, f = (v) => v) => {
 const ETH3D = ['courtyard', 'delivery_area', 'office', 'pipes', 'playground', 'terrace']
 const BLOCKS = ['quarry', 'PUTI', 'UseGeo']
 
+// A cell without the checkpoint count or the registered cameras it may carry in brackets.
+const bare = (text) => text.replace(/\s*\([^)]*\)\s*$/, '')
+// The registered cameras a cell names in brackets ("20.0 / 11.3 (346/347)"), else all.
+const registered = (text, all) => /\((\d+)\/(\d+)\)/.exec(text)?.slice(1).join(' / ') ?? all
+
 /** The README's results table (markdown, no trailing newline) from BENCHMARKS.md's text. */
 export function readmeResultsTable(benchmarks) {
   const cell = cellReader(benchmarks)
@@ -95,54 +100,83 @@ export function readmeResultsTable(benchmarks) {
   const pipeline = 'Full pipeline: time and memory'
   const sparse = 'ETH3D high-res and South Building'
   const casa = 'Casa Grande 1978: 37 scans of 9139² px, 44 GCPs'
-  // DEMs compared on the cells every tool's DEM covers (score_dem.py --also).
-  const common = 'DEM vs reference on the common cells'
   const iceland = 'Iceland 1980: 125 scans of 11425² px, 70 GCPs'
+  const strecha = 'Strecha multi-view sets'
 
-  // Sparse: registered cameras and median errors per scene (cells "38/38 · 7.5").
+  // Sparse: registered cameras and median errors per scene (cells "38/38 · 5.84 · …").
   const scenes = [...ETH3D, 'South Building']
-  const regSum = (tool, list = scenes) => {
-    const parts = list.map((s) => cell(sparse, [s], tool).split('·')[0].trim().split('/').map(Number))
+  const regSum = (section, tool, list) => {
+    const parts = list.map((s) => cell(section, [s], tool).split('·')[0].trim().split('/').map(Number))
     return `${parts.reduce((a, p) => a + p[0], 0)} / ${parts.reduce((a, p) => a + p[1], 0)}`
   }
-  const err = (tool, s) => num(cell(sparse, [s], tool).split('·')[1])
-  const ahead = scenes.filter((s) => err('WebSfM', s) < err('Metashape', s)).length
-  const colmapRatio = range(
-    ETH3D.map((s) => err('COLMAP', s) / err('WebSfM', s)),
-    (v) => Math.round(v),
+  const err = (section, tool, s) => num(cell(section, [s], tool).split('·')[1])
+  const failed = (section, tool, list) =>
+    list.reduce((a, s) => a + Number(/(\d+) of \d+ runs failed/.exec(cell(section, [s], tool))?.[1] ?? 0), 0)
+  const gap = range(
+    ETH3D.map((s) => err(sparse, 'WebSfM', s) - err(sparse, 'Metashape', s)),
+    (v) => v.toFixed(2).replace(/0$/, ''),
   )
+  const colmapRatio = range(
+    ETH3D.map((s) => err(sparse, 'COLMAP', s) / err(sparse, 'WebSfM', s)),
+    (v) => (v < 10 ? v.toFixed(1) : Math.round(v)),
+  )
+
+  // Held-out Strecha: where WebSfM's median error is the lowest of the three.
+  const SETS = ['fountain-P11', 'Herz-Jesu-P8', 'Herz-Jesu-P25', 'entry-P10', 'castle-P19', 'castle-P30']
+  const best = SETS.filter((s) =>
+    ['COLMAP', 'Metashape'].every((t) => err(strecha, 'WebSfM', s) < err(strecha, t, s)),
+  ).length
 
   // Full pipeline: totals in minutes and peaks in GiB, over the three blocks.
   const total = (tool) => range(BLOCKS.map((b) => Math.round(num(cell(pipeline, [b, tool], 'total')) / 60)))
   const peak = (tool) => range(BLOCKS.map((b) => num(cell(pipeline, [b, tool], 'peak'))))
 
-  // Dense: the approximate scorer's means and totals ("69.7 · 827 s").
-  const dense = 'ETH3D high-res against Metashape'
-  const eth3dDense = "ETH3D high-res, ETH3D's own evaluator"
-  const denseMean = (tool) => cell(dense, ['mean'], tool)
-  const f1Gap = (num(denseMean('Metashape Medium')) - num(denseMean('WebSfM'))).toFixed(1)
+  // Dense: the mean F1 and total time of each tool ("69.5 · 794 s").
+  const dense = "ETH3D high-res, ETH3D's own evaluator"
+  const denseMean = (tool) =>
+    cell(dense, ['mean'], tool)
+      .split('·')
+      .map((p) => p.trim())
+
+  const film = (section, run) => ({
+    cameras: cell(section, [run], 'cameras'),
+    checkpoints: bare(cell(section, [run], 'checkpoints')),
+    dem: cell(section, [run], 'DEM vs reference'),
+    coverage: cell(section, [run], 'DEM coverage'),
+  })
+  const cg = film(casa, 'WebSfM')
+  const cgMs = film(casa, 'Metashape defaults')
+  const il = film(iceland, 'WebSfM')
+  const ilMs = film(iceland, 'Metashape defaults')
 
   const rows = [
     [
       'Aerial survey block with RTK and 15 GCPs (GeoScan PUTI): RTK positions in the solve, every GCP a checkpoint',
       '444 / 444',
-      `Checkpoints ${cell(rtk, ['GeoScan PUTI', 'WebSfM'], 'checkpoints')} cm (H / V); cameras vs RTK ` +
+      `Checkpoints ${bare(cell(rtk, ['GeoScan PUTI', 'WebSfM'], 'checkpoints'))} cm (H / V); cameras vs RTK ` +
         `${cell(rtk, ['GeoScan PUTI', 'WebSfM'], 'cameras')} cm`,
-      `Metashape, same positions and marks: checkpoints ${cell(rtk, ['GeoScan PUTI', 'Metashape'], 'checkpoints')} cm, ` +
+      `Metashape, same positions and marks: checkpoints ${bare(cell(rtk, ['GeoScan PUTI', 'Metashape'], 'checkpoints'))} cm, ` +
         `cameras ${cell(rtk, ['GeoScan PUTI', 'Metashape'], 'cameras')} cm`,
     ],
     [
-      'Same block, pure SfM (no GCPs, no RTK)',
-      '444 / 444',
-      `Cameras vs RTK ${cell(free, ['GeoScan PUTI'], 'WebSfM')} cm (H / V)`,
-      `COLMAP: ${cell(free, ['GeoScan PUTI'], 'COLMAP')} cm; ODM: ${cell(free, ['GeoScan PUTI'], 'ODM')} cm`,
+      'Drone block with RTK in the photos (EuroSDR Wards Hill, 500 photos): RTK positions in the solve, 58 checkpoints',
+      '500 / 500',
+      `Checkpoints ${bare(cell(rtk, ['EuroSDR', 'WebSfM'], 'checkpoints'))} cm (H / V)`,
+      `Metashape: ${bare(cell(rtk, ['EuroSDR', 'Metashape'], 'checkpoints'))} cm`,
+    ],
+    [
+      'GeoScan PUTI, pure SfM (no GCPs, no RTK)',
+      registered(cell(free, ['GeoScan PUTI'], 'WebSfM'), '444 / 444'),
+      `Cameras vs RTK ${bare(cell(free, ['GeoScan PUTI'], 'WebSfM'))} cm (H / V)`,
+      `Metashape: ${bare(cell(free, ['GeoScan PUTI'], 'Metashape'))} cm; COLMAP: ` +
+        `${bare(cell(free, ['GeoScan PUTI'], 'COLMAP'))} cm; ODM: ${bare(cell(free, ['GeoScan PUTI'], 'ODM'))} cm`,
     ],
     [
       'Quarry, Pix4D example (RTK in EXIF), pure SfM',
-      '346 / 347',
-      `Cameras vs RTK ${cell(free, ['quarry'], 'WebSfM')} cm (H / V)`,
-      `Metashape: ${cell(free, ['quarry'], 'Metashape')} cm; COLMAP: ${cell(free, ['quarry'], 'COLMAP')} cm; ` +
-        `ODM: ${cell(free, ['quarry'], 'ODM')} cm`,
+      registered(cell(free, ['quarry'], 'WebSfM'), '347 / 347'),
+      `Cameras vs RTK ${bare(cell(free, ['quarry'], 'WebSfM'))} cm (H / V)`,
+      `Metashape: ${bare(cell(free, ['quarry'], 'Metashape'))} cm; COLMAP: ${bare(cell(free, ['quarry'], 'COLMAP'))} cm; ` +
+        `ODM: ${bare(cell(free, ['quarry'], 'ODM'))} cm`,
     ],
     [
       'Three drone blocks (224–444 photos), whole pipeline at defaults: dense cloud, DSM, ortho, textured mesh',
@@ -151,18 +185,21 @@ export function readmeResultsTable(benchmarks) {
       `Metashape: ${total('Metashape')} min, ${peak('Metashape')} GiB; ODM: ${total('ODM')} min, ${peak('ODM')} GiB`,
     ],
     [
-      'ETH3D high-res (6 training scenes) and COLMAP South Building, sparse',
-      regSum('WebSfM'),
-      `Median camera error level with Metashape's: lower on ${ahead} of ${scenes.length}`,
-      `Metashape: ${regSum('Metashape')}; COLMAP: ${regSum('COLMAP', ETH3D)} on ETH3D, median errors ${colmapRatio}× WebSfM's`,
+      'ETH3D high-res (6 training scenes) and COLMAP South Building, sparse, five runs per tool',
+      regSum(sparse, 'WebSfM', scenes),
+      `Every camera in every run; median error ${range(
+        ETH3D.map((s) => err(sparse, 'WebSfM', s)),
+        (v) => v.toFixed(1),
+      )} mm, ` + "lower than Metashape's on South Building",
+      `Metashape: ${gap} mm lower on ETH3D, but a wrong camera arrangement in ` +
+        `${failed(sparse, 'Metashape', ETH3D)} of its 30 runs there; COLMAP: median errors ${colmapRatio}× WebSfM's`,
     ],
     [
       'ETH3D high-res, dense from the ground-truth cameras',
       '–',
-      `Mean F1 ${cell(eth3dDense, ['mean'], 'WebSfM')} at 2 cm (ETH3D's evaluator)`,
-      `COLMAP: ${cell(eth3dDense, ['mean'], 'COLMAP')}. Metashape Medium: ` +
-        `${f1Gap} points higher in half the time (${denseMean('Metashape Medium').split('·')[1].trim()} against ` +
-        `${denseMean('WebSfM').split('·')[1].trim()}; approximate scorer)`,
+      `Mean F1 ${denseMean('WebSfM')[0]} at 2 cm (ETH3D's evaluator) in ${denseMean('WebSfM')[1]}`,
+      `Metashape Medium: ${denseMean('Metashape Medium')[0]} in ${denseMean('Metashape Medium')[1]}; High: ` +
+        `${denseMean('Metashape High')[0]} in ${denseMean('Metashape High')[1]}; COLMAP: ${denseMean('COLMAP')[0]}`,
     ],
     [
       'Bundle Adjustment in the Large: 98 problems, 16–13,682 cameras (bundle adjustment alone)',
@@ -174,25 +211,26 @@ export function readmeResultsTable(benchmarks) {
     ],
     [
       'Casa Grande 1978 aerial film (37 scans, GCPs in the solve, every fourth a checkpoint)',
-      cell(casa, ['WebSfM, preprocessed scans (11'], 'cameras'),
-      `Checkpoints ${cell(casa, ['WebSfM, preprocessed scans (11'], 'checkpoints')} (H / V); DEM vs 1 m ` +
-        `reference RMSE / NMAD ${cell(casa, ['WebSfM, preprocessed scans'], common)} on the cells every ` +
-        `tool's DEM covers (WebSfM's covers ${cell(casa, ['WebSfM, preprocessed scans (11'], 'DEM coverage')})`,
-      `Metashape defaults: ${cell(casa, ['Metashape defaults'], 'cameras')} cameras, checkpoints ` +
-        `${cell(casa, ['Metashape defaults'], 'checkpoints')}, DEM ${cell(casa, ['Metashape defaults'], common)} ` +
-        `(covers ${cell(casa, ['Metashape defaults'], 'DEM coverage')}); with guided matching ` +
-        `${cell(casa, ['Metashape, 80'], 'cameras')}, DEM ${cell(casa, ['Metashape, 80'], common)} ` +
-        `(${cell(casa, ['Metashape, 80'], 'DEM coverage')})`,
+      cg.cameras.replace('/', ' / '),
+      `Checkpoints ${cg.checkpoints} m (H / V); DEM vs 1 m reference RMSE / NMAD ${cg.dem} m, covering ${cg.coverage}`,
+      `Metashape defaults: ${cgMs.cameras}, checkpoints ${cgMs.checkpoints} m, DEM ${cgMs.dem} m, covering ${cgMs.coverage}`,
     ],
     [
       'Iceland 1980 aerial film (125 scans, GCPs in the solve)',
-      cell(iceland, ['WebSfM (11'], 'cameras'),
-      `Checkpoints ${cell(iceland, ['WebSfM (11'], 'checkpoints')}; DEM RMSE / NMAD ` +
-        `${cell(iceland, ['WebSfM (11'], common)} on the cells both DEMs cover (WebSfM's covers ` +
-        `${cell(iceland, ['WebSfM (11'], 'DEM coverage')})`,
-      `Metashape defaults: ${cell(iceland, ['Metashape defaults'], 'cameras')}, checkpoints ` +
-        `${cell(iceland, ['Metashape defaults'], 'checkpoints')}, DEM ${cell(iceland, ['Metashape defaults'], common)} ` +
-        `(covers ${cell(iceland, ['Metashape defaults'], 'DEM coverage')})`,
+      il.cameras.replace('/', ' / '),
+      `Checkpoints ${il.checkpoints} m; DEM RMSE / NMAD ${il.dem} m, covering ${il.coverage}`,
+      `Metashape defaults: ${ilMs.cameras}, checkpoints ${ilMs.checkpoints} m, DEM ${ilMs.dem} m, covering ${ilMs.coverage}`,
+    ],
+    [
+      "Strecha's six multi-view sets, held out (never used to tune WebSfM)",
+      regSum(strecha, 'WebSfM', SETS),
+      `Lowest median camera error of the three tools on ${best} of 6`,
+      `Metashape: ${SETS.filter((s) => err(strecha, 'Metashape', s) < err(strecha, 'WebSfM', s)).length} of 6; ` +
+        `COLMAP: ${regSum(strecha, 'COLMAP', SETS)}, median errors ` +
+        `${range(
+          SETS.map((s) => err(strecha, 'COLMAP', s) / err(strecha, 'WebSfM', s)),
+          (v) => v.toFixed(1),
+        )}× WebSfM's`,
     ],
   ]
   return [

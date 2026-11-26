@@ -37,6 +37,8 @@ export default defineConfig({
       'scripts/bench/suites/scoreboard.test.mjs',
       // The bench's folders, run records and slimming: plain Node helpers.
       'scripts/bench/lib/housekeeping.test.mjs',
+      // docs/BENCHMARKS.md's tables against docs/benchmarks.json.
+      'scripts/bench/lib/bench-tables.test.mjs',
     ],
   },
 })

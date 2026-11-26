@@ -2,17 +2,37 @@
 
 How WebSfM compares with COLMAP, Metashape, OpenDroneMap (ODM) and reference data on
 public datasets. Every number is a measured run; the weak results stand beside the strong
-ones. [METHODS.md](METHODS.md) explains the methods. The README's results table is made
-from the tables below (`npm run docs:readme`; a unit test fails when the two differ), so
-change a number here, not there.
+ones. [METHODS.md](METHODS.md) explains the methods.
+
+**Where the numbers come from.** The tables of the sparse, dense, film and held-out
+sections are written from one scoreboard run, `results/2026-11-26-62712b2` (commit
+62712b2b, WebSfM 0.9.0 with the fixes after it), by `npm run bench -- publish` from
+`scripts/bench/published.json`; the scores are in [benchmarks.json](benchmarks.json). Don't
+edit those tables by hand: a unit test fails when they differ from the data. The README's
+results table and the paper's tables are made from the same run. The sections with a date
+of their own (fisheye, full pipeline, Mill19, bundle adjustment, LiDAR, TMA) are separate
+runs, not yet part of the scoreboard.
 
 **Setup.** One Linux workstation: Intel i9-10900X (20 threads), 64 GB RAM, NVIDIA Quadro
 RTX 5000. WebSfM runs in Chromium through the headless bench (`scripts/bench/`, the app's
-own code paths), the `main` branch of the date given. COLMAP 4.0.3 (CUDA), Metashape 2.2.2
-and ODM 3.6.2 (GPU Docker image) run on the same machine at their defaults unless a row
-says otherwise. Camera positions are compared after a seven-parameter similarity fit, so
+own code paths) on WebGPU. COLMAP 4.0.3 (CUDA), Metashape 2.2.2 and ODM 3.6.2 (GPU Docker
+image) run on the same machine at their defaults, one job at a time.
+
+**On the same terms.** Every tool gets what the photos lack in the same way: a dataset's
+own calibration (UseGeo) is every tool's starting calibration, each refining it as it does
+by default; positions in the solve carry the same per-photo accuracies; pairing by position
+is mirrored in COLMAP and Metashape. WebSfM's time includes copying the photos into the
+browser. WebSfM runs three times per job (five on ETH3D sparse, as every tool does there);
+the other tools once. A table gives the median of the sound runs: a run whose camera error is
+more than ten times the median of its runs went wrong (a wrong camera arrangement) and is
+counted as failed. Camera positions are compared after a seven-parameter similarity fit, so
 only the shape of the block counts; "off" counts cameras more than five times the median
-error away.
+error away. A reference tool's run is reused from an earlier run when the tool's version,
+its config, the photos and our runner are unchanged (each job's `record.json` says which).
+
+**Home ground.** WebSfM's defaults were developed on most of these sets: the regression gate
+holds ETH3D, South Building and Casa Grande, and quarry and PUTI were studied in depth. The
+[held-out sets](#held-out-sets) were never used to tune it.
 
 ---
 
@@ -22,110 +42,92 @@ error away.
 
 Registered cameras · median camera-centre error: against ETH3D's laser-scanned ground
 truth (mm), and against COLMAP's South Building model (model units). The ETH3D images
-carry no EXIF focal length. All three tools on 2026-11-11, one after another, on the GPU
-(`scripts/bench/suites/scoreboard.mjs --only eth3d-sparse`).
+carry no EXIF focal length. Five runs per tool and scene.
 
-| scene | WebSfM | COLMAP | Metashape | time, s (WebSfM · COLMAP · Metashape) |
+<!-- table:eth3d-sparse -->
+| scene | WebSfM | COLMAP | Metashape | SfM time, s (in tool order) |
 | --- | --- | --- | --- | --- |
-| courtyard | 38/38 · 7.5 | 38/38 · 32 | 38/38 · **5.2** | 49 · 79 · 37 |
-| delivery_area | 44/44 · 2.6 | 44/44 · 27 | 44/44 · **1.4** | 46 · 82 · 33 |
-| office | 26/26 · **2.6** | 26/26 · 9.2 | 26/26 · 3.9 · 2 off | 19 · 33 · 18 |
-| pipes | 14/14 · 1.6 | 14/14 · 4.9 | 14/14 · **1.1** | 19 · 18 · 10 |
-| playground | 38/38 · **1.4** | 37/38 · 4.5 | 38/38 · 1.5 | 40 · 76 · 34 |
-| terrace | 23/23 · 2.5 | 23/23 · 8.5 | 23/23 · **2.1** | 32 · 42 · 20 |
-| South Building | 128/128 · **0.0049** | reference | 128/128 · 0.0055 | 103 · – · 88 |
+| courtyard | 38/38 · 5.84 | 38/38 · 32.9 | **38/38 · 5.06** | 53 · 80 · 36 |
+| delivery_area | 44/44 · 2.50 | 44/44 · 27.1 | **44/44 · 1.40** | 44 · 76 · 32 |
+| office | 26/26 · 2.61 | 26/26 · 10.4 | **26/26 · 2.56 · 2 of 5 runs failed** | 21 · 33 · 19 |
+| pipes | 14/14 · 1.61 | 14/14 · 4.73 | **14/14 · 1.08** | 17 · 18 · 10 |
+| playground | 38/38 · 2.51 | 38/38 · 4.36 | **38/38 · 1.49 · 1 of 5 runs failed** | 41 · 54 · 35 |
+| terrace | 23/23 · 2.57 | 23/23 · 5.80 · 1 off | **23/23 · 2.11 · 1 of 5 runs failed** | 30 · 35 · 21 |
+| South Building | **128/128 · 0.0050** | reference | 128/128 · 0.0055 | 103 · – · 90 |
+<!-- /table -->
 
-- **Every camera registers** at the defaults. The low-texture interiors (office, pipes)
-  were the gap until detection scaled with the photo size in object projects (Detect
-  Features ▸ Detection resolution ▸ By project type).
-- **Accuracy is level with Metashape**: better on office, playground and South Building,
-  behind on courtyard, delivery_area, pipes and terrace by 0.4–2.3 mm. COLMAP's median
-  errors are 3–10× WebSfM's.
-- **Time**: WebSfM takes 1.1–1.9× Metashape's time (detection, matching and
-  reconstruction; copying the photos into the browser comes on top), and is faster than
-  COLMAP on five of the six scenes.
+- **Every camera registers** in every WebSfM run, and its five runs agree to 0.03 mm.
+- **Metashape is the more accurate on ETH3D**, by 0.05 mm (office) to 1.1 mm (delivery_area),
+  but some of its runs fail with a wrong camera arrangement, 100 to 1,000 times off: office
+  in two of five runs, playground and terrace in one. WebSfM leads on South Building.
+  COLMAP's median errors are 1.7 to 11 times WebSfM's.
+- **Time**: WebSfM takes 1.1 to 1.7 times Metashape's time and is faster than COLMAP on all
+  six scenes.
 
 ### Drone blocks, no positions in the solve
 
-Camera centres against the reference positions (RTK for quarry and PUTI, UseGeo's
-reference orientations), horizontal / vertical RMS in cm. WebSfM 2026-11-07, COLMAP
-2026-10-11, Metashape 2026-11-06, ODM 2026-11-08.
+Camera centres against the reference positions (RTK for quarry, PUTI and EuroSDR; UseGeo's
+reference orientations), horizontal / vertical RMS in cm. No tool uses the positions in its
+solve (ODM's copies of the photos have their GPS removed). In brackets: cameras registered,
+when not all.
 
+<!-- table:drone-free -->
 | block | WebSfM | COLMAP | COLMAP GLOMAP | Metashape | ODM |
 | --- | --- | --- | --- | --- | --- |
-| quarry (Pix4D, 347 images) | 20.3 / 13.4 | 49.5 / 84.7 | 49.0 / 86.4 | 13 / 12 | 58.0 / 11.6 |
-| GeoScan PUTI (444) | 26.5 / 14.6 | 24.0 / 65.0 | 176.1 / 83.6 | – | 35.8 / 94.7 |
-| UseGeo dataset 1 (224, 42 MP) | 3.8 / 6.1 | – | – | 3.3 / 8.5 | 4.5 / 16.6 |
+| quarry | 20.0 / 11.3 (346/347) | 49.5 / 85.3 | 48.6 / 86.5 | **13.3 / 11.8** | 441 / 76.4 (346/347) |
+| GeoScan PUTI | 24.7 / 22.8 | 24.4 / 61.8 | 104 / 63.3 | **9.54 / 29.1** | 33.0 / 85.3 |
+| EuroSDR Wards Hill | 21.4 / 11.4 | 78.0 / 596 | 82.2 / 701 | **3.79 / 3.56** | 3.76 / 3.61 |
+| UseGeo dataset 1 | 3.77 / 4.66 | 3.75 / 3.33 | **3.78 / 2.97** | 3.33 / 8.65 | 4.55 / 16.5 |
+<!-- /table -->
 
-- **Heights without control**: COLMAP domes both blocks by 0.65–0.85 m, ODM PUTI by
-  95 cm; WebSfM and Metashape stay within 15 cm.
-- ODM's quarry RMS comes from a few cameras metres off; its median is 13 / 7 cm. WebSfM was
-  given UseGeo's reference calibration, the others calibrated themselves.
-- COLMAP keeps 40–260 % more sparse points: WebSfM accepts fewer image pairs, so its
-  tracks are shorter.
+- **Metashape is the most accurate on three of the four blocks.** On EuroSDR, ODM matches it
+  (3.8 / 3.6 cm) and WebSfM is about five times behind (21.4 / 11.4 cm).
+- **Heights without control:** COLMAP's blocks bend on quarry, PUTI and EuroSDR (62 to 701 cm
+  vertical); WebSfM stays within 23 cm on every block.
+- **PUTI and EuroSDR trade off:** WebSfM now holds a measured focal while it registers the
+  photos. That keeps EuroSDR from breaking (572 / 1,405 cm before) and costs PUTI 8 cm of
+  height (14.8 cm before).
+- ODM's quarry RMS comes from a few cameras metres off; its median is about 13 / 7 cm.
+- **UseGeo**, every tool from the same calibration: COLMAP and GLOMAP are the closest in
+  height, Metashape horizontally.
 
-Time for detection, matching and SfM (s, photo import not counted). WebSfM with the
-positions in the solve, the others without:
+Time for detection, matching and SfM (s; WebSfM's includes copying the photos into the browser):
 
-| block | WebSfM (WebGPU, 2026-11-08) | COLMAP (2026-10-11) | COLMAP GLOMAP | Metashape (2026-11-06) |
-| --- | --- | --- | --- | --- |
-| quarry | 331 | 1,104 | 624 | 308 |
-| PUTI | 351 | 1,511 | 1,783 | – |
-| UseGeo | 261 | – | – | 247 |
+<!-- table:drone-free-time -->
+| block | WebSfM | COLMAP | COLMAP GLOMAP | Metashape | ODM |
+| --- | --- | --- | --- | --- | --- |
+| quarry | 342 | 1,551 | 1,079 | **299** | 11,255 |
+| GeoScan PUTI | 431 | 2,002 | 2,185 | **417** | 20,982 |
+| EuroSDR Wards Hill | 659 | 5,335 | 3,261 | **498** | 24,765 |
+| UseGeo dataset 1 | 419 | 931 | 738 | **221** | 5,407 |
+<!-- /table -->
 
 ### Drone blocks, RTK positions in the solve
 
 The same blocks with each camera's RTK position and its stated accuracy in the bundle
-adjustment, every GCP a checkpoint. Checkpoints and cameras against RTK, horizontal /
-vertical RMS in cm; time for detection, matching and SfM in s. WebSfM 2026-11-11,
-Metashape 2026-11-10. Metashape at its defaults with the same marks (`quarry_marks.py`,
-`metashape_checkpoints.py`). Optimize Cameras afterwards changes Metashape's numbers by
-less than 1 mm, so it gets no row of its own.
+adjustment, every GCP a checkpoint. Checkpoints (their count in brackets) and cameras against
+RTK, horizontal / vertical RMS in cm. Metashape at its defaults with the same marks and
+accuracies (`prep/quarry_marks.py`, `ref/metashape_checkpoints.py`).
 
-| block | run | checkpoints | mean height error | cameras vs RTK | time |
+<!-- table:drone-rtk -->
+| block | run | checkpoints (cm) | mean height error (cm) | cameras vs RTK (cm) | SfM time (s) |
 | --- | --- | --- | --- | --- | --- |
-| quarry (347, 9 checkpoints) | WebSfM | 4.6 / 21.6 | +21.2 | 6.3 / 4.4 | 327 |
-| | Metashape | **3.8 / 17.8** | +17.6 | **4.5 / 3.2** | 295 |
-| GeoScan PUTI (444, 15 checkpoints) | WebSfM (11-12) | 3.7 / 7.8 | +5.5 | **0.5 / 0.9** | 346 |
-| | Metashape | **2.4 / 6.4** | +4.1 | **0.5** / 1.0 | 418 |
+| quarry | WebSfM | 3.65 / 11.6 (9) | +11.3 | 5.43 / 3.70 | 353 |
+|  | Metashape | 3.76 / 18.1 (9) | +17.9 | 4.50 / 3.21 | 314 |
+| GeoScan PUTI | WebSfM | 3.07 / 7.93 (15) | +5.95 | 0.54 / 0.87 | 413 |
+|  | Metashape | 2.43 / 6.44 (15) | +4.19 | 0.52 / 0.96 | 410 |
+| EuroSDR Wards Hill | WebSfM | 0.96 / 1.21 (58) | -0.89 | 0.90 / 0.66 | 651 |
+|  | Metashape | 0.98 / 1.63 (58) | -1.48 | 0.54 / 0.60 | 710 |
+<!-- /table -->
 
-- **Metashape's checkpoint heights are closer**: 4 cm on quarry, 1.4 cm on PUTI. WebSfM's
-  cameras are level with it on PUTI. Before 11-11 the gap was 5–12 cm, and quarry's cameras were
-  10.4 / 5.4 cm off: a tie point counted 5–6 times what it measured against the RTK
-  positions (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly).
-- **Both tools put the ground too high on both blocks.** On quarry the two solve the
-  same focal (4,403.5 px). On PUTI WebSfM's is shorter: 5,671.8 against Metashape's 5,675.3
-  and 5,676.9 in GeoScan's own project with its GCPs as control, whose cameras sit on the
-  RTK positions (mean height −0.1 cm), so the RTK file is sound. Until 11-12 most of PUTI's
-  gap was the decentring terms: WebSfM kept p1, p2 only where they lowered the photos-alone
-  RMS by 1 %, and on PUTI they lower it by 0.0 % because the principal point stands in for
-  them, 2.8 px off. Nothing the solve sees tells this lens from the already undistorted
-  photos of South Building, ETH3D and UseGeo, where freeing p1, p2 without control moves the
-  cameras away from the reference: not the RMS, not |p|/σ (PUTI 27, South Building 30).
-  What does is survey-grade camera positions, so WebSfM now keeps p1, p2 under them (UseGeo
-  with its positions: even) and they come out as Metashape's (0.00019 / −0.00006 against
-  0.00017 / −0.00007; CHANGELOG ▸ Truer heights from RTK-only drone blocks). Detecting at
-  4,000 or 6,000 px instead of 2,400 did not close the gap (8.4 and 10.3 cm). Metashape
-  itself moves 6 cm when it is given one more lens term.
-- **Most of the quarry's height offset is shared by both tools** (+18 cm in Metashape).
-  The GCPs come in LV03 / LN02 and are converted to ETRS89 with swisstopo's CHENyx06 and
-  CHGeo2004 grids. The camera heights are the drone's ellipsoidal RTK heights. A datum
-  offset between the two would show up the same way in both tools.
+- **EuroSDR:** level horizontally, WebSfM closer in height (1.2 against 1.6 cm).
+- **PUTI:** Metashape is ahead by 0.6 cm horizontally and 1.5 cm in height.
+- **Quarry:** WebSfM's checkpoint heights are the closer (11.6 against 18.1 cm). Both tools
+  put the ground too high (+11 and +18 cm). The GCPs come in LV03 / LN02 and are converted to
+  ETRS89 with swisstopo's CHENyx06 and CHGeo2004 grids, the camera heights are the drone's
+  ellipsoidal RTK heights: a datum offset between the two would show the same in both tools.
 
-### Fisheye: FIORD MeetingRoom (200° lens)
 
-106 images of 3264² px (FIORD, CC-BY-4.0). Camera centres against FIORD's model, % of the
-scene span (median / p95). 2026-10-15.
-
-| run | registered | centre error | self-calibrated f · cx · cy |
-| --- | --- | --- | --- |
-| WebSfM, FIORD's calibration | 104/106 | 0.174 / 0.355 % | — |
-| WebSfM, self-calibrated | 103/106 | 0.155 / 0.387 % | 996.4 · 1610.6 · 1616.6 |
-| COLMAP, self-calibrated | 106/106 | 0.180 / 0.447 % | 995.7 · 1610.9 · 1616.9 |
-| Metashape, self-calibrated | 106/106 | 0.175 / 0.454 % | 996.1 · 1610.9 · 1617.0 |
-
-The calibrations agree to ~1 px. WebSfM registers 2–3 fewer images because it drops rays
-more than 75° off-axis.
 
 ---
 
@@ -193,6 +195,8 @@ matching, the reference positions (Mill19's, from PixSfM) in the solve at σ 5 m
 - The DSM's Auto resolution was capped at one 8,192 px tile; the orthophoto shows light
   smeared streaks in two places, not yet investigated.
 - Depth maps are half the time, the orthophoto a quarter.
+
+---
 
 ---
 
@@ -271,45 +275,34 @@ final cost, 1.9 GB.
 
 ---
 
+---
+
 ## Dense reconstruction
 
 ### ETH3D high-res, ETH3D's own evaluator
 
-Depth maps from the ground-truth cameras, F1 at 2 cm (%). WebSfM: Medium, Depth Maps ▸
-Method Full, WebGPU. COLMAP: `patch_match_stereo` + `stereo_fusion` at 2,000 px. 2026-10-26.
+Depth maps from ETH3D's ground-truth cameras, every cloud scored by ETH3D's own evaluator:
+F1 at 2 cm (%) · time for the depth maps and the cloud. WebSfM: Depth Maps at Medium, Method
+Full, WebGPU. COLMAP: `patch_match_stereo` and `stereo_fusion` at 2,000 px. Metashape: depth
+maps at Medium (a quarter of the photo size) and High (half).
 
-| scene | WebSfM | COLMAP |
-| --- | --- | --- |
-| courtyard | **74.3** | 66.7 |
-| delivery_area | **71.9** | 69.5 |
-| office | **62.4** | 39.0 |
-| pipes | **53.7** | 39.2 |
-| playground | 54.3 | **57.2** |
-| terrace | **80.4** | 78.9 |
-| **mean** | **66.2** | 58.4 |
+<!-- table:eth3d-dense -->
+| scene | WebSfM | COLMAP | Metashape Medium | Metashape High |
+| --- | --- | --- | --- | --- |
+| courtyard | 78.0 · 157 s | 66.7 · 1,422 s | 83.4 · 108 s | **85.4 · 394 s** |
+| delivery_area | 73.9 · 182 s | 69.5 · 1,908 s | **82.6 · 96 s** | 82.3 · 363 s |
+| office | **64.3 · 108 s** | 39.0 · 1,186 s | 55.9 · 62 s | 54.1 · 217 s |
+| pipes | **58.7 · 81 s** | 39.2 · 455 s | 44.7 · 49 s | 44.0 · 167 s |
+| playground | 61.1 · 157 s | 57.2 · 1,343 s | 67.2 · 83 s | **67.5 · 326 s** |
+| terrace | 80.9 · 109 s | 78.9 · 792 s | **84.0 · 58 s** | 82.7 · 214 s |
+| **mean / total** | 69.5 · 794 s | 58.4 · 7,106 s | 69.6 · 456 s | 69.3 · 1,681 s |
+<!-- /table -->
 
-At the same 2,000 px WebSfM scored 59.0: COLMAP is the more precise, WebSfM the more
-complete.
-
-### ETH3D high-res against Metashape
-
-The same scenes from the ground-truth cameras, both tools on the GPU. Scored with
-`scripts/bench/score/eth3d_score.py` (ETH3D's method; within about ±4 points of the official
-evaluator, so compare tools, not levels). F1 at 2 cm (%), time in seconds. 2026-11-07.
-
-| scene | WebSfM | Metashape Medium | Metashape High |
-| --- | --- | --- | --- |
-| courtyard | 69.7 · 159 s | **81.8** · 104 s | 83.7 · 393 s |
-| delivery_area | 76.5 · 185 s | **83.5** · 93 s | 84.1 · 353 s |
-| office | **63.7** · 114 s | 56.4 · 60 s | 54.0 · 209 s |
-| pipes | **57.7** · 85 s | 47.2 · 46 s | 46.6 · 171 s |
-| playground | 65.0 · 166 s | **76.9** · 84 s | 77.8 · 324 s |
-| terrace | 85.4 · 118 s | **87.5** · 60 s | 86.9 · 219 s |
-| **mean / total** | 69.7 · 827 s | 72.2 · 447 s | 72.2 · 1,669 s |
-
-- **Time**: WebSfM takes 1.85× Metashape Medium's time, half of High's.
-- **Quality**: level at 5 cm. At 2 cm Metashape is more accurate; WebSfM leads on the
-  low-texture interiors and is less complete on courtyard and playground.
+- **Level on average:** mean F1 69.5 (WebSfM), 69.6 and 69.3 (Metashape Medium and High),
+  58.4 (COLMAP). WebSfM leads on the low-texture interiors (office, pipes), Metashape on the
+  open outdoor scenes.
+- **Time:** WebSfM takes 1.7 times Metashape Medium's time, half of High's and a ninth of
+  COLMAP's.
 
 ### UseGeo dataset 1 against airborne LiDAR
 
@@ -332,78 +325,50 @@ suits flat ground.
 
 ---
 
+---
+
 ## Historical aerial film
 
 Casa Grande and Iceland are two of the image sets of
 [HistoriX](https://isprs-archives.copernicus.org/articles/XLIX-B2-2026/9/2026/), the
 Historical Images for Surface Topography Reconstruction Intercomparison eXperiment
 (Dehecq et al., 2026, ISPRS Archives XLIX-B2-2026, 9–16): scanned film with GCPs and a
-modern reference DEM. Every fourth GCP is a checkpoint, with the same split for every
-tool. Checkpoints in metres (H / V RMS); DEM coverage is the share of the reference area
-the DEM covers.
-WebSfM and Metashape (2.2.2 at its defaults: High, 40,000 / 4,000 points) were run on the
-same day, 2026-11-10, and both put the GCPs into their bundle adjustment. COLMAP and the
-raw-scan run are from 2026-10-13/14. COLMAP has no GCPs in its adjustment, so its block
-keeps its bend; it is shown with a GCP similarity fit.
+modern reference DEM. WebSfM and Metashape put the GCPs into their bundle adjustment, every
+fourth one a checkpoint, the same split for both. COLMAP has no GCPs in its adjustment, so
+its block keeps its bend: it is fitted to them afterwards by a similarity, every GCP scored
+leave-one-out. Checkpoints in metres (H / V RMS, their count in brackets); each DEM against
+the reference on its own cells, every tool's at 2 m; coverage is the share of the reference
+area a DEM covers.
 
 ### Casa Grande 1978: 37 scans of 9139² px, 44 GCPs
 
-| run | cameras | checkpoints | DEM vs reference RMSE / NMAD | DEM coverage |
-| --- | --- | --- | --- | --- |
-| WebSfM, preprocessed scans (11-11; DEM 11-12) | **37/37** | 1.09 / 1.01 m | **1.38 / 0.59 m** | 41 % |
-| WebSfM, preprocessed scans, before tie weighting | **37/37** | 1.25 / 1.18 m | 1.41 / 0.68 m | 41 % |
-| WebSfM, raw scans + fiducials (10-13) | **37/37** | **1.05 / 0.96 m** | — | — |
-| COLMAP (10-13) | **37/37** | 1.18 / 14.1 m | 13.0 / 13.5 m | — |
-| Metashape defaults | 32/37 | 1.20 / 0.95 m (9 checks) | 9.06 / 0.82 m | **69 %** |
-| Metashape, 80,000 points + guided matching | **37/37** | 1.20 / 1.29 m | 3.79 / 0.90 m | 65 % |
+<!-- table:film-cg -->
+| block | run | cameras | checkpoints (m) | DEM vs reference RMSE / NMAD (m) | DEM coverage |
+| --- | --- | --- | --- | --- | --- |
+| Casa Grande 1978 | WebSfM | 37/37 | 1.08 / 1.02 (11) | 4.87 / 0.71 | 58 % |
+|  | COLMAP (GCP similarity fit) | 37/37 | 1.17 / 13.2 (40) | 12.2 / 12.6 | 14 % |
+|  | Metashape defaults | 37/37 | 1.08 / 0.88 (11) | 11.3 / 0.78 | 65 % |
+|  | Metashape, 80,000 points + guided | 37/37 | 1.20 / 1.31 (11) | 6.53 / 0.90 | 65 % |
+<!-- /table -->
 
-With every photo aligned, the checkpoints of the two tools are level. WebSfM's DEM
-covers less ground: where matching finds no texture, WebSfM leaves the cell empty rather
-than interpolating, and those are the cells where every tool does worst. Scored only on
-the cells all three DEMs cover (180 M cells of the 1 m reference; `score_dem.py --also`,
-2026-11-22, the same DEMs), WebSfM's is still the more accurate, by centimetres rather
-than metres:
-
-| run | DEM vs reference on the common cells, RMSE / NMAD |
-| --- | --- |
-| WebSfM, preprocessed scans | 1.42 / 0.59 m |
-| Metashape defaults | 1.55 / 0.70 m |
-| Metashape, 80,000 points + guided matching | 1.46 / 0.75 m |
+Every tool aligns all 37 scans. The checkpoints of WebSfM and Metashape are level
+horizontally, Metashape's 0.14 m closer in height. WebSfM's DEM is the more accurate on its
+own cells (NMAD 0.71 against 0.78 m) and covers less (58 against 65 %): where matching finds
+no texture, WebSfM leaves the cell empty rather than interpolating.
 
 ### Iceland 1980: 125 scans of 11425² px, 70 GCPs
 
-| run | cameras | checkpoints | DEM vs reference RMSE / NMAD | DEM coverage |
-| --- | --- | --- | --- | --- |
-| WebSfM (11-11; DEM 11-12) | 123/125 | 1.74 / 1.02 m (18 checks) | **20.0** / **1.28 m** | 27 % |
-| WebSfM, before tie weighting | 123/125 | 1.97 / 2.46 m (18 checks) | 20.0 / 2.44 m | 27 % |
-| WebSfM (10-13) | 121/125 | 2.03 / 2.09 m (17 checks) | — | — |
-| WebSfM (10-13), detection at Auto resolution | 124/125 | 1.74 / 1.98 m | — | — |
-| COLMAP (10-13) | **125/125** | 3.94 / 103 m | — | — |
-| Metashape defaults | **125/125** | **1.54 / 0.97 m** | 153.6 / 1.38 m | **62 %** |
+<!-- table:film-il -->
+| block | run | cameras | checkpoints (m) | DEM vs reference RMSE / NMAD (m) | DEM coverage |
+| --- | --- | --- | --- | --- | --- |
+| Iceland 1980 | WebSfM | 121/125 | 1.80 / 1.03 (17) | 29.4 / 1.50 | 36 % |
+|  | COLMAP (GCP similarity fit) | 125/125 | 4.63 / 156 (67) | 156 / 142 | 8 % |
+|  | Metashape defaults | 125/125 | 1.55 / 0.98 (18) | 40.7 / 1.38 | 66 % |
+<!-- /table -->
 
-Metashape leads here:
-- **Height error:** level since 11-11 (1.02 against 0.97 m). Before, a tie point detected
-  at a fifth of the scan's size counted 23 times what it measured against the GCPs
-  (CHANGELOG ▸ GCPs and RTK positions hold the model more firmly), and WebSfM's height
-  error was two and a half times Metashape's. Horizontal, Metashape is 0.2 m ahead.
-- **DEM:** Metashape's is the more accurate and covers twice the area. Each scored on its
-  own cells, WebSfM's looked the sharper (NMAD 1.28 against 1.38 m; 2.44 m before the tie
-  weighting), but Metashape's own cells include the hard ground WebSfM leaves empty. On the
-  cells both DEMs cover (264 M cells; `score_dem.py --also`, 2026-11-22, the same DEMs):
-
-  | run | DEM vs reference on the common cells, RMSE / NMAD |
-  | --- | --- |
-  | WebSfM (11-11; DEM 11-12) | 19.99 / 1.28 m |
-  | Metashape defaults | 13.96 / 1.11 m |
-
-- **Tracks:** WebSfM's are short. 65 % of its points are seen in three or more photos,
-  and its reprojection median is 1.38 px.
-- **October to 11-10:** the heights looked 0.37 m worse (2.46 against 2.09 m), but the two runs
-  score different checkpoints. This run registers two more photos, which brings checkpoint
-  153 into the score: it lies at the block's south-west end, is seen in only two photos and
-  is 5.2 m off. Without it, the other 17 checkpoints give 2.18 m. The October run's files
-  were lost, so which 17 checkpoints it scored cannot be confirmed; 153 is the only
-  checkpoint seen in fewer than three photos.
+Metashape leads: it aligns all 125 scans against WebSfM's 121 (four at the block's ends have
+too few correspondences), its checkpoints are 0.25 m closer horizontally and level in height,
+and its DEM covers 66 against 36 % with a lower NMAD (1.38 against 1.50 m).
 
 ### Antarctic trimetrogon film (TMA), no ground control
 
@@ -421,9 +386,65 @@ Metashape's 99 %, because it does not interpolate where matching finds no textur
 
 ---
 
+---
+
+## Held-out sets
+
+Sets never used to choose a default or tune a method, run only at a release
+(`--heldout`): they show how WebSfM does on data nobody fitted it to.
+
+### Strecha multi-view sets
+
+<!-- table:strecha -->
+| set | WebSfM | COLMAP | Metashape | SfM time, s (in tool order) |
+| --- | --- | --- | --- | --- |
+| fountain-P11 | 11/11 · 2.76 | 11/11 · 6.18 | **11/11 · 2.53** | 16 · 18 · 11 |
+| Herz-Jesu-P8 | 8/8 · 10.6 | 8/8 · 9.19 | **8/8 · 4.66** | 17 · 8 · 7 |
+| Herz-Jesu-P25 | **25/25 · 4.90** | 25/25 · 16.2 | 25/25 · 5.50 | 31 · 39 · 41 |
+| entry-P10 | **10/10 · 11.4** | 10/10 · 23.7 | 10/10 · 12.8 | 17 · 11 · 28 |
+| castle-P19 | 19/19 · 37.2 · 1 off | 19/19 · 117 | **19/19 · 24.4** | 20 · 22 · 41 |
+| castle-P30 | **30/30 · 27.1** | 30/30 · 124 | 30/30 · 27.4 | 27 · 52 · 24 |
+<!-- /table -->
+
+Strecha et al.'s multi-view sets, cameras against the ground truth fitted to a laser scan,
+median error in mm. WebSfM is the most accurate on three of the six sets, Metashape on the
+other three; COLMAP is far behind on the castle sets.
+
+### Iceland 1980, KH-9 mapping camera
+
+<!-- table:film-heldout -->
+| block | run | cameras | checkpoints (m) | DEM vs reference RMSE / NMAD (m) | DEM coverage |
+| --- | --- | --- | --- | --- | --- |
+| Iceland 1980 KH-9 | WebSfM | 4/4 | 7.40 / 6.22 (5) | 69.7 / 11.5 | 39 % |
+|  | COLMAP (GCP similarity fit) | 4/4 | 13.5 / 554 (28) | 380 / 255 | 2 % |
+|  | Metashape defaults | 4/4 | 9.58 / 9.82 (5) | 22.2 / 9.98 | 64 % |
+<!-- /table -->
+
+Four KH-9 mapping-camera frames, scanned and used at a quarter of their size, 28 GCPs (every
+fourth a checkpoint for WebSfM and Metashape); every tool's DEM at 30 m. WebSfM's checkpoints
+are the closer (7.4 / 6.2 against 9.6 / 9.8 m), Metashape's DEM covers more and is more
+accurate (NMAD 10.0 against 11.5 m).
+
+### Drone block with RTK positions: helenenschacht
+
+<!-- table:drone-heldout -->
+| block | run | cameras | checkpoints (cm) | mean height error (cm) | SfM time (s) |
+| --- | --- | --- | --- | --- | --- |
+| helenenschacht (176) | WebSfM | 176/176 | 4.26 / 8.82 (5) | +5.47 | 167 |
+|  | Metashape | 176/176 | 12.5 / 235 (5) | -235 | 152 |
+<!-- /table -->
+
+176 photos from an Autel EVO II Pro RTK, their RTK positions and accuracies in the photos'
+metadata, used in the solve by both tools; all five GCPs are checkpoints. Metashape puts the
+ground 2.35 m too low: over this flat nadir block its self-calibrated focal stays near the
+drone's stated one (4,372 against 4,404 px), while the checkpoints confirm WebSfM's
+(4,199 px). From 50 m, a 4 % longer focal lowers the ground by about 2 m: the focal–height
+ambiguity of a flat block held by camera positions alone.
+
+---
+
 ## Not yet measured
 
 - COLMAP, Metashape and ODM on a 1,000+ image block (Mill19 so far has WebSfM alone;
   Metashape 2.2.2 at its defaults aligned 704 of its 1,940 photos).
 - Real blocks past 2,000 images (the 3,000-camera runs so far are synthetic).
-- Strecha's fountain and Herz-Jesu sets.

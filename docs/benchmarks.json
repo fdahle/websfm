@@ -1,0 +1,2985 @@
+{
+ "about": "Scores of the published scoreboard run (scripts/bench/suites/publish.mjs); edit published.json, not this.",
+ "run": "results/2026-11-26-62712b2",
+ "commit": "62712b2b",
+ "repeats": [
+  {
+   "dir": "results/eth3d-repeat-2026-11-24/r2",
+   "tools": [
+    "metashape"
+   ],
+   "tables": [
+    "eth3d-sparse"
+   ]
+  },
+  {
+   "dir": "results/eth3d-repeat-2026-11-24/r3",
+   "tools": [
+    "metashape"
+   ],
+   "tables": [
+    "eth3d-sparse"
+   ]
+  },
+  {
+   "dir": "results/eth3d-repeat-2026-11-24/r4",
+   "tools": [
+    "metashape"
+   ],
+   "tables": [
+    "eth3d-sparse"
+   ]
+  },
+  {
+   "dir": "results/eth3d-repeat-2026-11-24/r5",
+   "tools": [
+    "metashape"
+   ],
+   "tables": [
+    "eth3d-sparse"
+   ]
+  },
+  {
+   "dir": "results/2026-11-26-eth3d-colmap-repeat/r2",
+   "tools": [
+    "colmap"
+   ],
+   "tables": [
+    "eth3d-sparse"
+   ]
+  },
+  {
+   "dir": "results/2026-11-26-eth3d-colmap-repeat/r3",
+   "tools": [
+    "colmap"
+   ],
+   "tables": [
+    "eth3d-sparse"
+   ]
+  },
+  {
+   "dir": "results/2026-11-26-eth3d-colmap-repeat/r4",
+   "tools": [
+    "colmap"
+   ],
+   "tables": [
+    "eth3d-sparse"
+   ]
+  },
+  {
+   "dir": "results/2026-11-26-eth3d-colmap-repeat/r5",
+   "tools": [
+    "colmap"
+   ],
+   "tables": [
+    "eth3d-sparse"
+   ]
+  }
+ ],
+ "jobs": [
+  {
+   "id": "eth3d-courtyard-websfm",
+   "table": "eth3d-sparse",
+   "block": "courtyard",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 53.06441500020027,
+    "truth": {
+     "registered": "38/38",
+     "median": 0.00584,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-courtyard-colmap",
+   "table": "eth3d-sparse",
+   "block": "courtyard",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 80.476,
+    "truth": {
+     "registered": "38/38",
+     "median": 0.03288,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-courtyard-metashape",
+   "table": "eth3d-sparse",
+   "block": "courtyard",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 35.8,
+    "truth": {
+     "registered": "38/38",
+     "median": 0.00506,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-delivery_area-websfm",
+   "table": "eth3d-sparse",
+   "block": "delivery_area",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     44,
+     44
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 43.82593499994278,
+    "truth": {
+     "registered": "44/44",
+     "median": 0.0025,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-delivery_area-colmap",
+   "table": "eth3d-sparse",
+   "block": "delivery_area",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     44,
+     44
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 76.18299999999999,
+    "truth": {
+     "registered": "44/44",
+     "median": 0.0271,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-delivery_area-metashape",
+   "table": "eth3d-sparse",
+   "block": "delivery_area",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     44,
+     44
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 31.6,
+    "truth": {
+     "registered": "44/44",
+     "median": 0.0014,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-office-websfm",
+   "table": "eth3d-sparse",
+   "block": "office",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     26,
+     26
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 20.528370000123978,
+    "truth": {
+     "registered": "26/26",
+     "median": 0.00261,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-office-colmap",
+   "table": "eth3d-sparse",
+   "block": "office",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     26,
+     26
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 33.167,
+    "truth": {
+     "registered": "26/26",
+     "median": 0.01044,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-office-metashape",
+   "table": "eth3d-sparse",
+   "block": "office",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [
+    0.32963,
+    0.42307
+   ],
+   "score": {
+    "cameras": [
+     26,
+     26
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 18.6,
+    "truth": {
+     "registered": "26/26",
+     "median": 0.00256,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-pipes-websfm",
+   "table": "eth3d-sparse",
+   "block": "pipes",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     14,
+     14
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 17.284830000162124,
+    "truth": {
+     "registered": "14/14",
+     "median": 0.00161,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-pipes-colmap",
+   "table": "eth3d-sparse",
+   "block": "pipes",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     14,
+     14
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 17.73,
+    "truth": {
+     "registered": "14/14",
+     "median": 0.00473,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-pipes-metashape",
+   "table": "eth3d-sparse",
+   "block": "pipes",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     14,
+     14
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 10,
+    "truth": {
+     "registered": "14/14",
+     "median": 0.00108,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-playground-websfm",
+   "table": "eth3d-sparse",
+   "block": "playground",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 40.67810500001908,
+    "truth": {
+     "registered": "38/38",
+     "median": 0.00251,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-playground-colmap",
+   "table": "eth3d-sparse",
+   "block": "playground",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 54.144,
+    "truth": {
+     "registered": "38/38",
+     "median": 0.00436,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-playground-metashape",
+   "table": "eth3d-sparse",
+   "block": "playground",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [
+    0.41649
+   ],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 34.7,
+    "truth": {
+     "registered": "38/38",
+     "median": 0.001485,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-terrace-websfm",
+   "table": "eth3d-sparse",
+   "block": "terrace",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     23,
+     23
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 30.443149999856946,
+    "truth": {
+     "registered": "23/23",
+     "median": 0.00257,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-terrace-colmap",
+   "table": "eth3d-sparse",
+   "block": "terrace",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     23,
+     23
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 35.345,
+    "truth": {
+     "registered": "23/23",
+     "median": 0.0058,
+     "off": 1
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-terrace-metashape",
+   "table": "eth3d-sparse",
+   "block": "terrace",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 5,
+   "failed": [
+    2.36466
+   ],
+   "score": {
+    "cameras": [
+     23,
+     23
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 20.6,
+    "truth": {
+     "registered": "23/23",
+     "median": 0.0021149999999999997,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "southbuilding-websfm",
+   "table": "eth3d-sparse",
+   "block": "South Building",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "model",
+   "runs": 5,
+   "failed": [],
+   "score": {
+    "cameras": [
+     128,
+     128
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 103.23450500011444,
+    "truth": {
+     "registered": "128/128",
+     "median": 0.00499,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "southbuilding-metashape",
+   "table": "eth3d-sparse",
+   "block": "South Building",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "model",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     128,
+     128
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 89.8,
+    "truth": {
+     "registered": "128/128",
+     "median": 0.00546,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eth3d-dense-courtyard-websfm",
+   "table": "eth3d-dense",
+   "block": "courtyard",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": null,
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 5.484,
+    "truth": null,
+    "dense": {
+     "f1": 73.89,
+     "accuracy": 74.44,
+     "completeness": 73.35
+    },
+    "denseOfficial": {
+     "f1": 77.98,
+     "accuracy": 78.56,
+     "completeness": 77.41
+    },
+    "denseSeconds": 156.6469400000572
+   }
+  },
+  {
+   "id": "eth3d-dense-courtyard-colmap",
+   "table": "eth3d-dense",
+   "block": "courtyard",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     0
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 0,
+    "truth": null,
+    "dense": {
+     "f1": 69.08,
+     "accuracy": 88.74,
+     "completeness": 56.55
+    },
+    "denseOfficial": {
+     "f1": 66.66,
+     "accuracy": 87,
+     "completeness": 54.03
+    },
+    "denseSeconds": 1422.499
+   }
+  },
+  {
+   "id": "eth3d-dense-courtyard-metashape-medium",
+   "table": "eth3d-dense",
+   "block": "courtyard",
+   "label": "Metashape Medium",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 81.97,
+     "accuracy": 86.7,
+     "completeness": 77.72
+    },
+    "denseOfficial": {
+     "f1": 83.42,
+     "accuracy": 87.63,
+     "completeness": 79.6
+    },
+    "denseSeconds": 107.8
+   }
+  },
+  {
+   "id": "eth3d-dense-courtyard-metashape-high",
+   "table": "eth3d-dense",
+   "block": "courtyard",
+   "label": "Metashape High",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 83.77,
+     "accuracy": 89.53,
+     "completeness": 78.7
+    },
+    "denseOfficial": {
+     "f1": 85.44,
+     "accuracy": 89.69,
+     "completeness": 81.57
+    },
+    "denseSeconds": 393.7
+   }
+  },
+  {
+   "id": "eth3d-dense-delivery_area-websfm",
+   "table": "eth3d-dense",
+   "block": "delivery_area",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": null,
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 4.815,
+    "truth": null,
+    "dense": {
+     "f1": 80.03,
+     "accuracy": 77.92,
+     "completeness": 82.26
+    },
+    "denseOfficial": {
+     "f1": 73.91,
+     "accuracy": 69.99,
+     "completeness": 78.3
+    },
+    "denseSeconds": 181.71883999991417
+   }
+  },
+  {
+   "id": "eth3d-dense-delivery_area-colmap",
+   "table": "eth3d-dense",
+   "block": "delivery_area",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     44,
+     0
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 0,
+    "truth": null,
+    "dense": {
+     "f1": 71.61,
+     "accuracy": 90.58,
+     "completeness": 59.21
+    },
+    "denseOfficial": {
+     "f1": 69.51,
+     "accuracy": 92.53,
+     "completeness": 55.67
+    },
+    "denseSeconds": 1907.854
+   }
+  },
+  {
+   "id": "eth3d-dense-delivery_area-metashape-medium",
+   "table": "eth3d-dense",
+   "block": "delivery_area",
+   "label": "Metashape Medium",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     44,
+     44
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 83.51,
+     "accuracy": 88.59,
+     "completeness": 78.98
+    },
+    "denseOfficial": {
+     "f1": 82.6,
+     "accuracy": 90.06,
+     "completeness": 76.28
+    },
+    "denseSeconds": 96.2
+   }
+  },
+  {
+   "id": "eth3d-dense-delivery_area-metashape-high",
+   "table": "eth3d-dense",
+   "block": "delivery_area",
+   "label": "Metashape High",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     44,
+     44
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 84.04,
+     "accuracy": 90.45,
+     "completeness": 78.48
+    },
+    "denseOfficial": {
+     "f1": 82.33,
+     "accuracy": 89.93,
+     "completeness": 75.92
+    },
+    "denseSeconds": 362.7
+   }
+  },
+  {
+   "id": "eth3d-dense-office-websfm",
+   "table": "eth3d-dense",
+   "block": "office",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": null,
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 2.769,
+    "truth": null,
+    "dense": {
+     "f1": 65.86,
+     "accuracy": 76.93,
+     "completeness": 57.58
+    },
+    "denseOfficial": {
+     "f1": 64.32,
+     "accuracy": 72.42,
+     "completeness": 57.85
+    },
+    "denseSeconds": 108.34347500014306
+   }
+  },
+  {
+   "id": "eth3d-dense-office-colmap",
+   "table": "eth3d-dense",
+   "block": "office",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     26,
+     0
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 0,
+    "truth": null,
+    "dense": {
+     "f1": 38.82,
+     "accuracy": 97.49,
+     "completeness": 24.23
+    },
+    "denseOfficial": {
+     "f1": 38.95,
+     "accuracy": 94.12,
+     "completeness": 24.56
+    },
+    "denseSeconds": 1185.508
+   }
+  },
+  {
+   "id": "eth3d-dense-office-metashape-medium",
+   "table": "eth3d-dense",
+   "block": "office",
+   "label": "Metashape Medium",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     26,
+     26
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 56.01,
+     "accuracy": 94.05,
+     "completeness": 39.88
+    },
+    "denseOfficial": {
+     "f1": 55.93,
+     "accuracy": 90.21,
+     "completeness": 40.53
+    },
+    "denseSeconds": 61.5
+   }
+  },
+  {
+   "id": "eth3d-dense-office-metashape-high",
+   "table": "eth3d-dense",
+   "block": "office",
+   "label": "Metashape High",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     26,
+     26
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 53.81,
+     "accuracy": 96.33,
+     "completeness": 37.34
+    },
+    "denseOfficial": {
+     "f1": 54.11,
+     "accuracy": 93.15,
+     "completeness": 38.13
+    },
+    "denseSeconds": 217.2
+   }
+  },
+  {
+   "id": "eth3d-dense-pipes-websfm",
+   "table": "eth3d-dense",
+   "block": "pipes",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": null,
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 1.751,
+    "truth": null,
+    "dense": {
+     "f1": 63.28,
+     "accuracy": 88.46,
+     "completeness": 49.25
+    },
+    "denseOfficial": {
+     "f1": 58.74,
+     "accuracy": 89.27,
+     "completeness": 43.77
+    },
+    "denseSeconds": 81.08127500009536
+   }
+  },
+  {
+   "id": "eth3d-dense-pipes-colmap",
+   "table": "eth3d-dense",
+   "block": "pipes",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     14,
+     0
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 0,
+    "truth": null,
+    "dense": {
+     "f1": 40.92,
+     "accuracy": 97.51,
+     "completeness": 25.9
+    },
+    "denseOfficial": {
+     "f1": 39.18,
+     "accuracy": 97.48,
+     "completeness": 24.51
+    },
+    "denseSeconds": 455.07099999999997
+   }
+  },
+  {
+   "id": "eth3d-dense-pipes-metashape-medium",
+   "table": "eth3d-dense",
+   "block": "pipes",
+   "label": "Metashape Medium",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     14,
+     14
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 47.32,
+     "accuracy": 93.31,
+     "completeness": 31.7
+    },
+    "denseOfficial": {
+     "f1": 44.72,
+     "accuracy": 96.63,
+     "completeness": 29.09
+    },
+    "denseSeconds": 48.7
+   }
+  },
+  {
+   "id": "eth3d-dense-pipes-metashape-high",
+   "table": "eth3d-dense",
+   "block": "pipes",
+   "label": "Metashape High",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     14,
+     14
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 46.57,
+     "accuracy": 95.15,
+     "completeness": 30.83
+    },
+    "denseOfficial": {
+     "f1": 43.98,
+     "accuracy": 98.12,
+     "completeness": 28.34
+    },
+    "denseSeconds": 167.3
+   }
+  },
+  {
+   "id": "eth3d-dense-playground-websfm",
+   "table": "eth3d-dense",
+   "block": "playground",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": null,
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 6.333,
+    "truth": null,
+    "dense": {
+     "f1": 73.12,
+     "accuracy": 93.32,
+     "completeness": 60.12
+    },
+    "denseOfficial": {
+     "f1": 61.07,
+     "accuracy": 82.71,
+     "completeness": 48.41
+    },
+    "denseSeconds": 157.06450500011442
+   }
+  },
+  {
+   "id": "eth3d-dense-playground-colmap",
+   "table": "eth3d-dense",
+   "block": "playground",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     0
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 0,
+    "truth": null,
+    "dense": {
+     "f1": 65.04,
+     "accuracy": 92.86,
+     "completeness": 50.05
+    },
+    "denseOfficial": {
+     "f1": 57.2,
+     "accuracy": 87.11,
+     "completeness": 42.57
+    },
+    "denseSeconds": 1342.9759999999999
+   }
+  },
+  {
+   "id": "eth3d-dense-playground-metashape-medium",
+   "table": "eth3d-dense",
+   "block": "playground",
+   "label": "Metashape Medium",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 77.17,
+     "accuracy": 92.6,
+     "completeness": 66.14
+    },
+    "denseOfficial": {
+     "f1": 67.21,
+     "accuracy": 87.06,
+     "completeness": 54.73
+    },
+    "denseSeconds": 83.4
+   }
+  },
+  {
+   "id": "eth3d-dense-playground-metashape-high",
+   "table": "eth3d-dense",
+   "block": "playground",
+   "label": "Metashape High",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     38,
+     38
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 77.45,
+     "accuracy": 92.75,
+     "completeness": 66.48
+    },
+    "denseOfficial": {
+     "f1": 67.5,
+     "accuracy": 89.11,
+     "completeness": 54.33
+    },
+    "denseSeconds": 326.3
+   }
+  },
+  {
+   "id": "eth3d-dense-terrace-websfm",
+   "table": "eth3d-dense",
+   "block": "terrace",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": null,
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 2.663,
+    "truth": null,
+    "dense": {
+     "f1": 85.95,
+     "accuracy": 85.85,
+     "completeness": 86.05
+    },
+    "denseOfficial": {
+     "f1": 80.92,
+     "accuracy": 84.4,
+     "completeness": 77.72
+    },
+    "denseSeconds": 109.02275
+   }
+  },
+  {
+   "id": "eth3d-dense-terrace-colmap",
+   "table": "eth3d-dense",
+   "block": "terrace",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     23,
+     0
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 0,
+    "truth": null,
+    "dense": {
+     "f1": 83.05,
+     "accuracy": 93,
+     "completeness": 75.02
+    },
+    "denseOfficial": {
+     "f1": 78.92,
+     "accuracy": 96.7,
+     "completeness": 66.66
+    },
+    "denseSeconds": 792.2779999999999
+   }
+  },
+  {
+   "id": "eth3d-dense-terrace-metashape-medium",
+   "table": "eth3d-dense",
+   "block": "terrace",
+   "label": "Metashape Medium",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     23,
+     23
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 87.53,
+     "accuracy": 92.99,
+     "completeness": 82.68
+    },
+    "denseOfficial": {
+     "f1": 84.01,
+     "accuracy": 96.12,
+     "completeness": 74.6
+    },
+    "denseSeconds": 58.1
+   }
+  },
+  {
+   "id": "eth3d-dense-terrace-metashape-high",
+   "table": "eth3d-dense",
+   "block": "terrace",
+   "label": "Metashape High",
+   "tool": "metashape-dense",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     23,
+     23
+    ],
+    "truth": null,
+    "dense": {
+     "f1": 86.98,
+     "accuracy": 93.51,
+     "completeness": 81.31
+    },
+    "denseOfficial": {
+     "f1": 82.7,
+     "accuracy": 94.45,
+     "completeness": 73.56
+    },
+    "denseSeconds": 213.8
+   }
+  },
+  {
+   "id": "quarry-websfm",
+   "table": "drone-free",
+   "block": "quarry",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "cm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     346,
+     347
+    ],
+    "position": {
+     "h": 0.1999,
+     "v": 0.1133
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 342.2602149999141,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "quarry-colmap",
+   "table": "drone-free",
+   "block": "quarry",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     347,
+     347
+    ],
+    "position": {
+     "h": 0.4952,
+     "v": 0.8531
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 1550.7740000000001,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "quarry-glomap",
+   "table": "drone-free",
+   "block": "quarry",
+   "label": "COLMAP GLOMAP",
+   "tool": "colmap",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     347,
+     347
+    ],
+    "position": {
+     "h": 0.4861,
+     "v": 0.8646
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 1078.748,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "quarry-metashape",
+   "table": "drone-free",
+   "block": "quarry",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     347,
+     347
+    ],
+    "position": {
+     "h": 0.1328,
+     "v": 0.1175
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 299,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "quarry-odm",
+   "table": "drone-free",
+   "block": "quarry",
+   "label": "ODM",
+   "tool": "odm",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     346,
+     347
+    ],
+    "position": {
+     "h": 4.4135,
+     "v": 0.7638
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 11255,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "puti-websfm",
+   "table": "drone-free",
+   "block": "GeoScan PUTI",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "cm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.2469,
+     "v": 0.2279
+    },
+    "checkpoints": {
+     "h": 0.2747,
+     "v": 0.9978,
+     "meanU": 0.9819,
+     "n": 15
+    },
+    "dem": null,
+    "sfmSeconds": 431.33549499988555,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "puti-colmap",
+   "table": "drone-free",
+   "block": "GeoScan PUTI",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.2441,
+     "v": 0.6181
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 2001.545,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "puti-glomap",
+   "table": "drone-free",
+   "block": "GeoScan PUTI",
+   "label": "COLMAP GLOMAP",
+   "tool": "colmap",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 1.0411,
+     "v": 0.6329
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 2185.359,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "puti-metashape",
+   "table": "drone-free",
+   "block": "GeoScan PUTI",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.0954,
+     "v": 0.2915
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 417,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "puti-odm",
+   "table": "drone-free",
+   "block": "GeoScan PUTI",
+   "label": "ODM",
+   "tool": "odm",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.3297,
+     "v": 0.8529
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 20982,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eurosdr-p4-websfm",
+   "table": "drone-free",
+   "block": "EuroSDR Wards Hill",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "cm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     500,
+     500
+    ],
+    "position": {
+     "h": 0.2143,
+     "v": 0.1143
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 659.1475150001049,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eurosdr-p4-colmap",
+   "table": "drone-free",
+   "block": "EuroSDR Wards Hill",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     500,
+     500
+    ],
+    "position": {
+     "h": 0.7805,
+     "v": 5.9613
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 5335.263000000001,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eurosdr-p4-glomap",
+   "table": "drone-free",
+   "block": "EuroSDR Wards Hill",
+   "label": "COLMAP GLOMAP",
+   "tool": "colmap",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     500,
+     500
+    ],
+    "position": {
+     "h": 0.8219,
+     "v": 7.0083
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 3261.047,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eurosdr-p4-metashape",
+   "table": "drone-free",
+   "block": "EuroSDR Wards Hill",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     500,
+     500
+    ],
+    "position": {
+     "h": 0.0379,
+     "v": 0.0356
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 497.6,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "eurosdr-p4-odm",
+   "table": "drone-free",
+   "block": "EuroSDR Wards Hill",
+   "label": "ODM",
+   "tool": "odm",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     500,
+     500
+    ],
+    "position": {
+     "h": 0.0376,
+     "v": 0.0361
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 24765,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "usegeo-websfm",
+   "table": "drone-free",
+   "block": "UseGeo dataset 1",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "cm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     224,
+     224
+    ],
+    "position": {
+     "h": 0.0377,
+     "v": 0.0466
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 419.0157049996853,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "usegeo-colmap",
+   "table": "drone-free",
+   "block": "UseGeo dataset 1",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     224,
+     224
+    ],
+    "position": {
+     "h": 0.0375,
+     "v": 0.0333
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 930.525,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "usegeo-glomap",
+   "table": "drone-free",
+   "block": "UseGeo dataset 1",
+   "label": "COLMAP GLOMAP",
+   "tool": "colmap",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     224,
+     224
+    ],
+    "position": {
+     "h": 0.0378,
+     "v": 0.0297
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 737.601,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "usegeo-metashape",
+   "table": "drone-free",
+   "block": "UseGeo dataset 1",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     224,
+     224
+    ],
+    "position": {
+     "h": 0.0333,
+     "v": 0.0865
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 220.9,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "usegeo-odm",
+   "table": "drone-free",
+   "block": "UseGeo dataset 1",
+   "label": "ODM",
+   "tool": "odm",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     224,
+     224
+    ],
+    "position": {
+     "h": 0.0455,
+     "v": 0.1649
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 5407,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "rtk-quarry-websfm",
+   "table": "drone-rtk",
+   "block": "quarry",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "cm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     346,
+     347
+    ],
+    "position": {
+     "h": 0.0543,
+     "v": 0.037
+    },
+    "checkpoints": {
+     "h": 0.0365,
+     "v": 0.116,
+     "meanU": 0.1132,
+     "n": 9
+    },
+    "dem": null,
+    "sfmSeconds": 352.819649999857,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "rtk-quarry-metashape",
+   "table": "drone-rtk",
+   "block": "quarry",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     347,
+     347
+    ],
+    "position": {
+     "h": 0.045,
+     "v": 0.0321
+    },
+    "checkpoints": {
+     "h": 0.03761772631796522,
+     "v": 0.18127469333705806,
+     "meanU": 0.17894444444444446,
+     "n": 9
+    },
+    "dem": null,
+    "sfmSeconds": 314.2,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "rtk-puti-websfm",
+   "table": "drone-rtk",
+   "block": "GeoScan PUTI",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "cm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.0054,
+     "v": 0.0087
+    },
+    "checkpoints": {
+     "h": 0.0307,
+     "v": 0.0793,
+     "meanU": 0.0595,
+     "n": 15
+    },
+    "dem": null,
+    "sfmSeconds": 412.9280499999523,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "rtk-puti-metashape",
+   "table": "drone-rtk",
+   "block": "GeoScan PUTI",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.0052,
+     "v": 0.0096
+    },
+    "checkpoints": {
+     "h": 0.02429227586428795,
+     "v": 0.06436338503631807,
+     "meanU": 0.04190666666666667,
+     "n": 15
+    },
+    "dem": null,
+    "sfmSeconds": 410.2,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "rtk-eurosdr-p4-websfm",
+   "table": "drone-rtk",
+   "block": "EuroSDR Wards Hill",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "cm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     500,
+     500
+    ],
+    "position": {
+     "h": 0.009,
+     "v": 0.0066
+    },
+    "checkpoints": {
+     "h": 0.0096,
+     "v": 0.0121,
+     "meanU": -0.0089,
+     "n": 58
+    },
+    "dem": null,
+    "sfmSeconds": 650.6870850002766,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "rtk-eurosdr-p4-metashape",
+   "table": "drone-rtk",
+   "block": "EuroSDR Wards Hill",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     500,
+     500
+    ],
+    "position": {
+     "h": 0.0054,
+     "v": 0.006
+    },
+    "checkpoints": {
+     "h": 0.009836438239595638,
+     "v": 0.0163120750704332,
+     "meanU": -0.01476206896551724,
+     "n": 58
+    },
+    "dem": null,
+    "sfmSeconds": 710.3,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "cg-websfm",
+   "table": "film",
+   "block": "Casa Grande 1978",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     37,
+     37
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 1.0840598918736237,
+     "v": 1.0230179037843825,
+     "meanU": 0.3386795831430928,
+     "n": 11
+    },
+    "dem": {
+     "rmse": 4.866554973426289,
+     "nmad": 0.7087233398437499,
+     "coverage": 0.5774
+    },
+    "sfmSeconds": 174.32523500037195,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": 2077.949364999771
+   }
+  },
+  {
+   "id": "cg-colmap",
+   "table": "film",
+   "block": "Casa Grande 1978",
+   "label": "COLMAP (GCP similarity fit)",
+   "tool": "colmap-hist",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     37,
+     37
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 1.1725339427553727,
+     "v": 13.16679717154929,
+     "meanU": null,
+     "n": 40
+    },
+    "dem": {
+     "rmse": 12.170155051677035,
+     "nmad": 12.572419042968749,
+     "coverage": 0.1433
+    },
+    "sfmSeconds": 130,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "cg-metashape",
+   "table": "film",
+   "block": "Casa Grande 1978",
+   "label": "Metashape defaults",
+   "tool": "metashape-hist",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     37,
+     37
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 1.082840873512375,
+     "v": 0.8826078077193825,
+     "meanU": null,
+     "n": 11
+    },
+    "dem": {
+     "rmse": 11.268538780952646,
+     "nmad": 0.7830162231445312,
+     "coverage": 0.6484
+    },
+    "sfmSeconds": 54.5,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "cg-metashape-more",
+   "table": "film",
+   "block": "Casa Grande 1978",
+   "label": "Metashape, 80,000 points + guided",
+   "tool": "metashape-hist",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     37,
+     37
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 1.1999723004518676,
+     "v": 1.3085165750210666,
+     "meanU": null,
+     "n": 11
+    },
+    "dem": {
+     "rmse": 6.5276437533856635,
+     "nmad": 0.9017400512695312,
+     "coverage": 0.6537
+    },
+    "sfmSeconds": 86.8,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "il-websfm",
+   "table": "film",
+   "block": "Iceland 1980",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     121,
+     125
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 1.8006148493674465,
+     "v": 1.0269898006322515,
+     "meanU": 0.0862406187884709,
+     "n": 17
+    },
+    "dem": {
+     "rmse": 29.439862334549375,
+     "nmad": 1.4999402847290038,
+     "coverage": 0.3619
+    },
+    "sfmSeconds": 1023.039095000267,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": 2931.9753350000383
+   }
+  },
+  {
+   "id": "il-colmap",
+   "table": "film",
+   "block": "Iceland 1980",
+   "label": "COLMAP (GCP similarity fit)",
+   "tool": "colmap-hist",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     125,
+     125
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 4.633550236176037,
+     "v": 155.54851030802598,
+     "meanU": null,
+     "n": 67
+    },
+    "dem": {
+     "rmse": 155.90533383548788,
+     "nmad": 142.23632668762207,
+     "coverage": 0.0751
+    },
+    "sfmSeconds": 697.4,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "il-metashape",
+   "table": "film",
+   "block": "Iceland 1980",
+   "label": "Metashape defaults",
+   "tool": "metashape-hist",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     125,
+     125
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 1.5514503181516046,
+     "v": 0.9750454320848218,
+     "meanU": null,
+     "n": 18
+    },
+    "dem": {
+     "rmse": 40.69539991784694,
+     "nmad": 1.3843723205566405,
+     "coverage": 0.6588
+    },
+    "sfmSeconds": 248.9,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-fountain-p11-websfm",
+   "table": "strecha",
+   "block": "fountain-P11",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     11,
+     11
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 16.385134999990463,
+    "truth": {
+     "registered": "11/11",
+     "median": 0.00276,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-fountain-p11-colmap",
+   "table": "strecha",
+   "block": "fountain-P11",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     11,
+     11
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 17.602,
+    "truth": {
+     "registered": "11/11",
+     "median": 0.00618,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-fountain-p11-metashape",
+   "table": "strecha",
+   "block": "fountain-P11",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     11,
+     11
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 11.2,
+    "truth": {
+     "registered": "11/11",
+     "median": 0.00253,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-herz-jesus-p8-websfm",
+   "table": "strecha",
+   "block": "Herz-Jesu-P8",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     8,
+     8
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 16.50054000020027,
+    "truth": {
+     "registered": "8/8",
+     "median": 0.01059,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-herz-jesus-p8-colmap",
+   "table": "strecha",
+   "block": "Herz-Jesu-P8",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     8,
+     8
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 8.025,
+    "truth": {
+     "registered": "8/8",
+     "median": 0.00919,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-herz-jesus-p8-metashape",
+   "table": "strecha",
+   "block": "Herz-Jesu-P8",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     8,
+     8
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 7.2,
+    "truth": {
+     "registered": "8/8",
+     "median": 0.00466,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-herz-jesus-p25-websfm",
+   "table": "strecha",
+   "block": "Herz-Jesu-P25",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     25,
+     25
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 30.792615000247956,
+    "truth": {
+     "registered": "25/25",
+     "median": 0.0049,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-herz-jesus-p25-colmap",
+   "table": "strecha",
+   "block": "Herz-Jesu-P25",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     25,
+     25
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 39.040000000000006,
+    "truth": {
+     "registered": "25/25",
+     "median": 0.01619,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-herz-jesus-p25-metashape",
+   "table": "strecha",
+   "block": "Herz-Jesu-P25",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     25,
+     25
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 40.7,
+    "truth": {
+     "registered": "25/25",
+     "median": 0.0055,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-entry-p10-websfm",
+   "table": "strecha",
+   "block": "entry-P10",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     10,
+     10
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 16.823705000162125,
+    "truth": {
+     "registered": "10/10",
+     "median": 0.01141,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-entry-p10-colmap",
+   "table": "strecha",
+   "block": "entry-P10",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     10,
+     10
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 11.382000000000001,
+    "truth": {
+     "registered": "10/10",
+     "median": 0.02368,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-entry-p10-metashape",
+   "table": "strecha",
+   "block": "entry-P10",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     10,
+     10
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 28.4,
+    "truth": {
+     "registered": "10/10",
+     "median": 0.01285,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-castle-p19-websfm",
+   "table": "strecha",
+   "block": "castle-P19",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     19,
+     19
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 20.46460999965668,
+    "truth": {
+     "registered": "19/19",
+     "median": 0.03716,
+     "off": 1
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-castle-p19-colmap",
+   "table": "strecha",
+   "block": "castle-P19",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     19,
+     19
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 21.875,
+    "truth": {
+     "registered": "19/19",
+     "median": 0.11696,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-castle-p19-metashape",
+   "table": "strecha",
+   "block": "castle-P19",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     19,
+     19
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 40.5,
+    "truth": {
+     "registered": "19/19",
+     "median": 0.02444,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-castle-p30-websfm",
+   "table": "strecha",
+   "block": "castle-P30",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "mm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     30,
+     30
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 27.242325000047682,
+    "truth": {
+     "registered": "30/30",
+     "median": 0.02706,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-castle-p30-colmap",
+   "table": "strecha",
+   "block": "castle-P30",
+   "label": "COLMAP",
+   "tool": "colmap",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     30,
+     30
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 52.281,
+    "truth": {
+     "registered": "30/30",
+     "median": 0.12376,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "strecha-castle-p30-metashape",
+   "table": "strecha",
+   "block": "castle-P30",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "mm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     30,
+     30
+    ],
+    "position": null,
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 24.2,
+    "truth": {
+     "registered": "30/30",
+     "median": 0.02739,
+     "off": 0
+    },
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "il-kh9mc-websfm",
+   "table": "film-heldout",
+   "block": "Iceland 1980 KH-9",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     4,
+     4
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 7.404723272199667,
+     "v": 6.220664207437835,
+     "meanU": 0.8872415440911311,
+     "n": 5
+    },
+    "dem": {
+     "rmse": 69.65949301385685,
+     "nmad": 11.46230148010254,
+     "coverage": 0.3931
+    },
+    "sfmSeconds": 29.660950000286107,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": 277.4989299998283
+   }
+  },
+  {
+   "id": "il-kh9mc-colmap",
+   "table": "film-heldout",
+   "block": "Iceland 1980 KH-9",
+   "label": "COLMAP (GCP similarity fit)",
+   "tool": "colmap-hist",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     4,
+     4
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 13.474218866520632,
+     "v": 553.6059128339919,
+     "meanU": null,
+     "n": 28
+    },
+    "dem": {
+     "rmse": 379.52893603734975,
+     "nmad": 254.67347021484375,
+     "coverage": 0.016
+    },
+    "sfmSeconds": 28.9,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "il-kh9mc-metashape",
+   "table": "film-heldout",
+   "block": "Iceland 1980 KH-9",
+   "label": "Metashape defaults",
+   "tool": "metashape-hist",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     4,
+     4
+    ],
+    "position": null,
+    "checkpoints": {
+     "h": 9.581572264907754,
+     "v": 9.821388270265345,
+     "meanU": null,
+     "n": 5
+    },
+    "dem": {
+     "rmse": 22.163176372657478,
+     "nmad": 9.979181158447265,
+     "coverage": 0.6354
+    },
+    "sfmSeconds": 7.8,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "helenenschacht-websfm",
+   "table": "drone-heldout",
+   "block": "helenenschacht (176)",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "cm",
+   "runs": 3,
+   "failed": [],
+   "score": {
+    "cameras": [
+     176,
+     176
+    ],
+    "position": {
+     "h": 0.0334,
+     "v": 0.0256
+    },
+    "checkpoints": {
+     "h": 0.04262041174634193,
+     "v": 0.08821001901846151,
+     "meanU": 0.05469895452441733,
+     "n": 5
+    },
+    "dem": null,
+    "sfmSeconds": 166.5020799999237,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  },
+  {
+   "id": "helenenschacht-metashape",
+   "table": "drone-heldout",
+   "block": "helenenschacht (176)",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     176,
+     176
+    ],
+    "position": {
+     "h": 0.0622,
+     "v": 0.1498
+    },
+    "checkpoints": {
+     "h": 0.12481886075429466,
+     "v": 2.3543723112541057,
+     "meanU": -2.35232,
+     "n": 5
+    },
+    "dem": null,
+    "sfmSeconds": 152.3,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null
+   }
+  }
+ ]
+}

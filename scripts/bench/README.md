@@ -471,6 +471,16 @@ says, at `/data1/websfm_eval/shared/tools/` on the bench machine). A scoring ste
 is missing runs even when the job's summary is there, so a new scorer reaches an old run
 without rerunning the tools.
 
+**Publishing a run.** `scripts/bench/published.json` names the run docs/BENCHMARKS.md is made
+from (and any earlier folders that count as more runs of some tools' jobs). `npm run bench --
+publish` scores every job with `scoreOf` and `aggregateRuns` (the median of the sound runs; a
+run more than ten times off the others counts as failed and is reported), writes the scores to
+`docs/benchmarks.json` and the tables between BENCHMARKS.md's `<!-- table:<id> -->` markers;
+`npm run docs:readme` then writes the README's results table from those tables, and the
+paper's `make-tables.mjs --published` reads the same pin. `lib/bench-tables.test.mjs` fails
+when BENCHMARKS.md's tables differ from the data, so a number is changed by publishing a run,
+never by hand.
+
 **Reference runs are reused.** COLMAP, Metashape and ODM do not change when WebSfM does,
 so a scoreboard run takes a reference job's result from `ref/<tool>-<version>/` when nothing
 that decides it changed: the tool's version (ODM: its image digest), the config without

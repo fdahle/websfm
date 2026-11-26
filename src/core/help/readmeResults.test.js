@@ -12,10 +12,13 @@ describe('README results table', () => {
 
   it('takes its numbers from the BENCHMARKS cells: a changed cell changes the README', () => {
     const md = read('docs/BENCHMARKS.md')
+    // PUTI's checkpoints with RTK, whatever the published run measured ("3.07 / 7.93 (15)").
+    const was = cellReader(md)('Drone blocks, RTK positions in the solve', ['GeoScan PUTI', 'WebSfM'], 'checkpoints')
+    expect(md.split(`| ${was} |`)).toHaveLength(2)
     const before = readmeResultsTable(md)
-    const after = readmeResultsTable(md.replace('| 3.7 / 7.8 |', '| 3.9 / 8.1 |'))
-    expect(before).toContain('Checkpoints 3.7 / 7.8 cm')
-    expect(after).toContain('Checkpoints 3.9 / 8.1 cm')
+    const after = readmeResultsTable(md.replace(`| ${was} |`, '| 9.87 / 6.54 (15) |'))
+    expect(before).toContain(`Checkpoints ${was.replace(/ \(\d+\)$/, '')} cm`)
+    expect(after).toContain('Checkpoints 9.87 / 6.54 cm')
   })
 
   it('names the cell it cannot find', () => {
