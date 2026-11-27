@@ -19,6 +19,7 @@ import {
 } from '../../workers/computeClient.js'
 import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
 import { pluralize } from '../../core/textFormat.js'
+import { TEXTURE_DEFAULTS } from '../../core/defaults.user.js'
 import { isSharedArray, postableCopy } from '../../core/bigArray.js'
 import { poissonHeapBytes } from '../../core/products/mesh.js'
 
@@ -208,9 +209,11 @@ export function createMeshRun({
   // The texture step of Build Mesh: the mesh's photo texture, or null when it keeps its
   // vertex colours (logged: no registered photo, or the bake failed). A cancel goes on up.
   async function textureMeshRun(mesh, texture, onProgress) {
+    // A workflow passes only the settings it changes; the worker fills in the rest the same way.
+    const t = { ...TEXTURE_DEFAULTS, ...texture }
     log(
-      `Mesh: texturing from the photos (up to ${pluralize(texture.maxPages, 'page')} of ${texture.pageSize} px, ` +
-        `at most ${texture.maxScale === 1 ? 'the native photo pixels' : `${texture.maxScale} × the photo pixels`})`,
+      `Mesh: texturing from the photos (up to ${pluralize(t.maxPages, 'page')} of ${t.pageSize} px, ` +
+        `at most ${t.maxScale === 1 ? 'the native photo pixels' : `${t.maxScale} × the photo pixels`})`,
       'info',
       'Products',
     )
