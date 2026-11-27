@@ -181,7 +181,7 @@ export function readmeResultsTable(benchmarks) {
     [
       'Three drone blocks (224–444 photos), whole pipeline at defaults: dense cloud, DSM, ortho, textured mesh',
       'all',
-      `${total('WebSfM')} min, ${peak('WebSfM')} GiB (a smaller mesh than Metashape makes by default)`,
+      `${total('WebSfM')} min, ${peak('WebSfM')} GiB (a smaller mesh and a coarser orthophoto than Metashape makes by default)`,
       `Metashape: ${total('Metashape')} min, ${peak('Metashape')} GiB; ODM: ${total('ODM')} min, ${peak('ODM')} GiB`,
     ],
     [

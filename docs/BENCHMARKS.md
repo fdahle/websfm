@@ -159,9 +159,12 @@ The products are not the same size, so read the stage columns with this:
 - **Depth:** WebSfM and Metashape compute depth at 1/4 of the photo size (Medium in both),
   ODM at 1/8 (its default `pc-quality` medium).
 - **Mesh:** WebSfM's default mesh has 490–640 k triangles and is textured within the mesh
-  step (hence "in mesh"); Metashape's (High, from the depth maps) has 4.6–9.2 M.
-- **DSM and ortho:** WebSfM's orthophotos are 12,000–16,400 px on the long side, at
-  2.4–3.2 mm per pixel; Metashape and ODM build theirs at the full ground resolution.
+  step (hence "in mesh"); Metashape's (High, from the depth maps) has 4.6–9.2 M, ODM's at
+  most 200 k (its default `mesh-size`).
+- **DSM and ortho:** WebSfM's Auto orthophoto has a cell of two photo pixels (12,100–16,400 px
+  on the long side) and its DSM stops at 8,192 px. Metashape builds its orthophoto at the
+  photos' ground resolution (26,900–36,600 px) and its DSM at four times that; ODM builds
+  both at its default 5 cm.
 - **Peak memory:** WebSfM's is the browser tab's process, without the GPU process;
   Metashape's the process; ODM's the container.
 - ODM's features, matching and texturing run on the CPU; the GPU only speeds its dense step.
