@@ -18,6 +18,7 @@ Notable changes to WebSfM. The format follows
 - **EGM2008 heights converted to a few millimetres.** WebSfM now ships EGM2008 at 5′ and reads it bicubically. Against NGA's 2.5′ grid that is 4.4 mm RMS, 3.8 cm at the 99.9th percentile and 0.22 m at worst on Earth, where the 15′ grid shipped until now was 7.2 cm RMS, 30 cm at the 99th percentile and 2.5 m at worst (sampled over a fifth of the 2.5′ nodes; bicubic on the 15′ grid would have reached only 5.1 cm RMS and 1.6 m). The download is 5.8 MB instead of 1.6, still cached for offline use. EGM96 is unchanged and still matches PROJ to 5 mm.
 - **No more false warning about a flat GCP layout.** Georeference no longer warns that GCPs spanning little height weakly constrain scale and tilt: a similarity needs GCPs off one line, not spread in height, so it fired on most survey sites. It now warns when the GCPs lie close to one line instead, which leaves the roll about that line weak.
 - **References cite the published papers.** The glossary, the Quality Report's methods and docs/METHODS.md now cite SuperPoint, LightGlue, ALIKED and Xu & Tao (2019) by the DOI of their published version instead of the arXiv preprint (checked against Crossref).
+- **The mesh texture's log line names its settings again.** Build Mesh with a texture, run from an automated workflow, logged "up to undefined pages of undefined px"; it now gives the page count, page size and finest texel scale the texture is made with. The texture itself was not affected.
 
 ## [0.9.0] — 2026-11-22
 
