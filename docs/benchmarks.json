@@ -102,7 +102,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -130,7 +132,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -158,7 +162,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -186,7 +192,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -214,7 +222,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -242,7 +252,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -270,7 +282,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -298,7 +312,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -329,7 +345,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -357,7 +375,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -385,7 +405,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -413,7 +435,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -441,7 +465,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -469,7 +495,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -499,7 +527,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -527,7 +557,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -555,7 +587,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -585,7 +619,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -613,7 +649,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -641,7 +679,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -670,7 +710,9 @@
      "accuracy": 78.56,
      "completeness": 77.41
     },
-    "denseSeconds": 156.6469400000572
+    "denseSeconds": 156.6469400000572,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -702,7 +744,9 @@
      "accuracy": 87,
      "completeness": 54.03
     },
-    "denseSeconds": 1422.499
+    "denseSeconds": 1422.499,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -730,7 +774,9 @@
      "accuracy": 87.63,
      "completeness": 79.6
     },
-    "denseSeconds": 107.8
+    "denseSeconds": 107.8,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -758,7 +804,9 @@
      "accuracy": 89.69,
      "completeness": 81.57
     },
-    "denseSeconds": 393.7
+    "denseSeconds": 393.7,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -787,7 +835,9 @@
      "accuracy": 69.99,
      "completeness": 78.3
     },
-    "denseSeconds": 181.71883999991417
+    "denseSeconds": 181.71883999991417,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -819,7 +869,9 @@
      "accuracy": 92.53,
      "completeness": 55.67
     },
-    "denseSeconds": 1907.854
+    "denseSeconds": 1907.854,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -847,7 +899,9 @@
      "accuracy": 90.06,
      "completeness": 76.28
     },
-    "denseSeconds": 96.2
+    "denseSeconds": 96.2,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -875,7 +929,9 @@
      "accuracy": 89.93,
      "completeness": 75.92
     },
-    "denseSeconds": 362.7
+    "denseSeconds": 362.7,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -904,7 +960,9 @@
      "accuracy": 72.42,
      "completeness": 57.85
     },
-    "denseSeconds": 108.34347500014306
+    "denseSeconds": 108.34347500014306,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -936,7 +994,9 @@
      "accuracy": 94.12,
      "completeness": 24.56
     },
-    "denseSeconds": 1185.508
+    "denseSeconds": 1185.508,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -964,7 +1024,9 @@
      "accuracy": 90.21,
      "completeness": 40.53
     },
-    "denseSeconds": 61.5
+    "denseSeconds": 61.5,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -992,7 +1054,9 @@
      "accuracy": 93.15,
      "completeness": 38.13
     },
-    "denseSeconds": 217.2
+    "denseSeconds": 217.2,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1021,7 +1085,9 @@
      "accuracy": 89.27,
      "completeness": 43.77
     },
-    "denseSeconds": 81.08127500009536
+    "denseSeconds": 81.08127500009536,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1053,7 +1119,9 @@
      "accuracy": 97.48,
      "completeness": 24.51
     },
-    "denseSeconds": 455.07099999999997
+    "denseSeconds": 455.07099999999997,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1081,7 +1149,9 @@
      "accuracy": 96.63,
      "completeness": 29.09
     },
-    "denseSeconds": 48.7
+    "denseSeconds": 48.7,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1109,7 +1179,9 @@
      "accuracy": 98.12,
      "completeness": 28.34
     },
-    "denseSeconds": 167.3
+    "denseSeconds": 167.3,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1138,7 +1210,9 @@
      "accuracy": 82.71,
      "completeness": 48.41
     },
-    "denseSeconds": 157.06450500011442
+    "denseSeconds": 157.06450500011442,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1170,7 +1244,9 @@
      "accuracy": 87.11,
      "completeness": 42.57
     },
-    "denseSeconds": 1342.9759999999999
+    "denseSeconds": 1342.9759999999999,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1198,7 +1274,9 @@
      "accuracy": 87.06,
      "completeness": 54.73
     },
-    "denseSeconds": 83.4
+    "denseSeconds": 83.4,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1226,7 +1304,9 @@
      "accuracy": 89.11,
      "completeness": 54.33
     },
-    "denseSeconds": 326.3
+    "denseSeconds": 326.3,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1255,7 +1335,9 @@
      "accuracy": 84.4,
      "completeness": 77.72
     },
-    "denseSeconds": 109.02275
+    "denseSeconds": 109.02275,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1287,7 +1369,9 @@
      "accuracy": 96.7,
      "completeness": 66.66
     },
-    "denseSeconds": 792.2779999999999
+    "denseSeconds": 792.2779999999999,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1315,7 +1399,9 @@
      "accuracy": 96.12,
      "completeness": 74.6
     },
-    "denseSeconds": 58.1
+    "denseSeconds": 58.1,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1343,7 +1429,9 @@
      "accuracy": 94.45,
      "completeness": 73.56
     },
-    "denseSeconds": 213.8
+    "denseSeconds": 213.8,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1370,7 +1458,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1397,7 +1487,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1424,7 +1516,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1451,7 +1545,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1478,7 +1574,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1510,7 +1608,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1537,7 +1637,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1564,7 +1666,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1591,7 +1695,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1618,7 +1724,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1645,7 +1753,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1672,7 +1782,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1699,7 +1811,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1726,7 +1840,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1753,7 +1869,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1780,7 +1898,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1807,7 +1927,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1834,7 +1956,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1861,7 +1985,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1888,7 +2014,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1920,7 +2048,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1952,7 +2082,43 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
+   }
+  },
+  {
+   "id": "rtk-quarry-metashape-opt",
+   "table": "drone-rtk",
+   "block": "quarry",
+   "label": "Metashape + Optimize Cameras",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     347,
+     347
+    ],
+    "position": {
+     "h": 0.0439,
+     "v": 0.0317
+    },
+    "checkpoints": {
+     "h": 0.038011591799227654,
+     "v": 0.17876340353787307,
+     "meanU": 0.17638888888888887,
+     "n": 9
+    },
+    "dem": null,
+    "sfmSeconds": 313.3,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -1984,7 +2150,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2016,7 +2184,43 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
+   }
+  },
+  {
+   "id": "rtk-puti-metashape-opt",
+   "table": "drone-rtk",
+   "block": "GeoScan PUTI",
+   "label": "Metashape + Optimize Cameras",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.0051,
+     "v": 0.0096
+    },
+    "checkpoints": {
+     "h": 0.024347183273087943,
+     "v": 0.06279389036097913,
+     "meanU": 0.04058,
+     "n": 15
+    },
+    "dem": null,
+    "sfmSeconds": 412.9,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2048,7 +2252,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2080,7 +2286,43 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
+   }
+  },
+  {
+   "id": "rtk-eurosdr-p4-metashape-opt",
+   "table": "drone-rtk",
+   "block": "EuroSDR Wards Hill",
+   "label": "Metashape + Optimize Cameras",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     500,
+     500
+    ],
+    "position": {
+     "h": 0.0053,
+     "v": 0.0059
+    },
+    "checkpoints": {
+     "h": 0.009822239017166341,
+     "v": 0.01597590858675693,
+     "meanU": -0.014427586206896551,
+     "n": 58
+    },
+    "dem": null,
+    "sfmSeconds": 485.6,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2113,7 +2355,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": 2077.949364999771
+    "denseSeconds": 2077.949364999771,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2146,7 +2390,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2179,7 +2425,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2212,7 +2460,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2245,7 +2495,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": 2931.9753350000383
+    "denseSeconds": 2931.9753350000383,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2278,7 +2530,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2311,7 +2565,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2339,7 +2595,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2367,7 +2625,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2395,7 +2655,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2423,7 +2685,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2451,7 +2715,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2479,7 +2745,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2507,7 +2775,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2535,7 +2805,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2563,7 +2835,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2591,7 +2865,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2619,7 +2895,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2647,7 +2925,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2675,7 +2955,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2703,7 +2985,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2731,7 +3015,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2759,7 +3045,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2787,7 +3075,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2815,7 +3105,9 @@
     },
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2848,7 +3140,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": 277.4989299998283
+    "denseSeconds": 277.4989299998283,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2881,7 +3175,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2914,7 +3210,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2946,7 +3244,9 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
    }
   },
   {
@@ -2978,7 +3278,509 @@
     "truth": null,
     "dense": null,
     "denseOfficial": null,
-    "denseSeconds": null
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
+   }
+  },
+  {
+   "id": "helenenschacht-metashape-opt",
+   "table": "drone-heldout",
+   "block": "helenenschacht (176)",
+   "label": "Metashape + Optimize Cameras",
+   "tool": "metashape",
+   "unit": "cm",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     176,
+     176
+    ],
+    "position": {
+     "h": 0.0481,
+     "v": 0.1454
+    },
+    "checkpoints": {
+     "h": 0.12063492031746031,
+     "v": 2.5979900496345247,
+     "meanU": -2.59602,
+     "n": 5
+    },
+    "dem": null,
+    "sfmSeconds": 156.1,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": null,
+    "lidar": null
+   }
+  },
+  {
+   "id": "pipe-quarry-websfm",
+   "table": "pipeline",
+   "block": "quarry (347)",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     346,
+     347
+    ],
+    "position": {
+     "h": 0.0543,
+     "v": 0.037
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 380.32183000016215,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": 1196.545995000124,
+    "pipe": {
+     "total": 2308.78628000021,
+     "sfm": 380.32183000016215,
+     "dense": 1196.545995000124,
+     "mesh": 190.84255500006677,
+     "texture": null,
+     "textureInMesh": true,
+     "dsmOrtho": 541.0743199999332,
+     "peakGB": 13.546722412109375,
+     "densePoints": 63687102
+    },
+    "lidar": null
+   }
+  },
+  {
+   "id": "pipe-quarry-metashape",
+   "table": "pipeline",
+   "block": "quarry (347)",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     347,
+     347
+    ],
+    "position": {
+     "h": 0.1343,
+     "v": 0.1258
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 280.6,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": {
+     "total": 2790.6,
+     "sfm": 283.2,
+     "dense": 1010.4000000000001,
+     "mesh": 704.5,
+     "texture": 307.7,
+     "dsmOrtho": 484.8,
+     "peakGB": 9.599609375,
+     "densePoints": 26805640
+    },
+    "lidar": null
+   }
+  },
+  {
+   "id": "pipe-quarry-odm",
+   "table": "pipeline",
+   "block": "quarry (347)",
+   "label": "ODM",
+   "tool": "odm",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     347,
+     347
+    ],
+    "position": {
+     "h": 0.081,
+     "v": 0.0399
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 1263,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": {
+     "total": 3011,
+     "sfm": 1267,
+     "dense": 269,
+     "mesh": 367,
+     "texture": 806,
+     "dsmOrtho": 263,
+     "peakGB": 34.5,
+     "densePoints": 21656712
+    },
+    "lidar": null
+   }
+  },
+  {
+   "id": "pipe-puti-websfm",
+   "table": "pipeline",
+   "block": "GeoScan PUTI (444)",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.0054,
+     "v": 0.0087
+    },
+    "checkpoints": {
+     "h": 0.0307,
+     "v": 0.0793,
+     "meanU": 0.0595,
+     "n": 15
+    },
+    "dem": null,
+    "sfmSeconds": 461.11876500010493,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": 1849.1351449997426,
+    "pipe": {
+     "total": 2989.9034349994663,
+     "sfm": 461.11876500010493,
+     "dense": 1849.1351449997426,
+     "mesh": 191.88111500000954,
+     "texture": null,
+     "textureInMesh": true,
+     "dsmOrtho": 487.76699999976154,
+     "peakGB": 12.744823455810547,
+     "densePoints": 109466304
+    },
+    "lidar": null
+   }
+  },
+  {
+   "id": "pipe-puti-metashape",
+   "table": "pipeline",
+   "block": "GeoScan PUTI (444)",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.0052,
+     "v": 0.0096
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 344.9,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": {
+     "total": 3657.7,
+     "sfm": 350.9,
+     "dense": 1122.1,
+     "mesh": 1151.7,
+     "texture": 299.29999999999995,
+     "dsmOrtho": 733.6999999999999,
+     "peakGB": 12.171875,
+     "densePoints": 76719567
+    },
+    "lidar": null
+   }
+  },
+  {
+   "id": "pipe-puti-odm",
+   "table": "pipeline",
+   "block": "GeoScan PUTI (444)",
+   "label": "ODM",
+   "tool": "odm",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     444,
+     444
+    ],
+    "position": {
+     "h": 0.4079,
+     "v": 0.0232
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 2255,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": {
+     "total": 4896,
+     "sfm": 2301,
+     "dense": 453,
+     "mesh": 277,
+     "texture": 1515,
+     "dsmOrtho": 298,
+     "peakGB": 48.919921875,
+     "densePoints": 34032669
+    },
+    "lidar": null
+   }
+  },
+  {
+   "id": "pipe-usegeo-websfm",
+   "table": "pipeline",
+   "block": "UseGeo dataset 1 (224)",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     224,
+     224
+    ],
+    "position": {
+     "h": 0.0377,
+     "v": 0.0468
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 404.48160000014303,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": 1577.5330199997425,
+    "pipe": {
+     "total": 3296.8533449997904,
+     "sfm": 404.48160000014303,
+     "dense": 1577.5330199997425,
+     "mesh": 220.82978999996186,
+     "texture": null,
+     "textureInMesh": true,
+     "dsmOrtho": 1094.0074000000952,
+     "peakGB": 14.22262191772461,
+     "densePoints": 88500926
+    },
+    "lidar": {
+     "points": 994393,
+     "onFlat": 153162,
+     "inlierShare": 0.9019,
+     "shiftM": [
+      0.2,
+      -0.2
+     ],
+     "offsetM": 0.0607,
+     "tiltPer100m": [
+      -0.0035,
+      -0.0089
+     ],
+     "domeAtEdgeM": -0.2709,
+     "edgeRadiusM": 234,
+     "rmsM": 0.1029,
+     "medianAbsM": 0.0649,
+     "p90AbsM": 0.1708,
+     "within10cm": 0.7355,
+     "domeInlierShare": 0.8464,
+     "domeRmsM": 0.0489,
+     "domeMedianAbsM": 0.0262,
+     "domeWithin10cm": 0.9331,
+     "denseCount": 88500926,
+     "stride": 89
+    }
+   }
+  },
+  {
+   "id": "pipe-usegeo-metashape",
+   "table": "pipeline",
+   "block": "UseGeo dataset 1 (224)",
+   "label": "Metashape",
+   "tool": "metashape",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     224,
+     224
+    ],
+    "position": {
+     "h": 0.0328,
+     "v": 0.0835
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 209.7,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": {
+     "total": 3830.3,
+     "sfm": 212.10000000000002,
+     "dense": 1553.2,
+     "mesh": 935.5,
+     "texture": 404,
+     "dsmOrtho": 725.5,
+     "peakGB": 13.7265625,
+     "densePoints": 50008586
+    },
+    "lidar": {
+     "file": "/data1/websfm_eval/results/2026-11-26-62712b2/pipe-usegeo-metashape/cloud.las",
+     "lasPoints": 50008586,
+     "stride": 50,
+     "points": 1000172,
+     "onFlat": 181507,
+     "inlierShare": 0.9289,
+     "shiftM": [
+      -0.1,
+      0
+     ],
+     "offsetM": 0.0848,
+     "tiltPer100m": [
+      -0.015,
+      -0.0182
+     ],
+     "domeAtEdgeM": -0.5076,
+     "edgeRadiusM": 248,
+     "rmsM": 0.1876,
+     "medianAbsM": 0.1269,
+     "p90AbsM": 0.2771,
+     "within10cm": 0.4022,
+     "domeInlierShare": 0.7987,
+     "domeRmsM": 0.038,
+     "domeMedianAbsM": 0.0191,
+     "domeWithin10cm": 0.9747
+    }
+   }
+  },
+  {
+   "id": "pipe-usegeo-odm",
+   "table": "pipeline",
+   "block": "UseGeo dataset 1 (224)",
+   "label": "ODM",
+   "tool": "odm",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     224,
+     224
+    ],
+    "position": {
+     "h": 0.0579,
+     "v": 0.1037
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 1400,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": null,
+    "pipe": {
+     "total": 3913,
+     "sfm": 1409,
+     "dense": 389,
+     "mesh": 367,
+     "texture": 1562,
+     "dsmOrtho": 149,
+     "peakGB": 35.6396484375,
+     "densePoints": 28799913
+    },
+    "lidar": {
+     "file": "/data1/websfm_eval/results/2026-11-26-62712b2/pipe-usegeo-odm/cloud.las",
+     "lasPoints": 28799913,
+     "stride": 28,
+     "points": 1028569,
+     "onFlat": 240677,
+     "inlierShare": 0.9371,
+     "shiftM": [
+      0.1,
+      -0.4
+     ],
+     "offsetM": 0.1815,
+     "tiltPer100m": [
+      0.0153,
+      -0.0148
+     ],
+     "domeAtEdgeM": -0.4419,
+     "edgeRadiusM": 220,
+     "rmsM": 0.1379,
+     "medianAbsM": 0.0945,
+     "p90AbsM": 0.2239,
+     "within10cm": 0.5361,
+     "domeInlierShare": 0.8693,
+     "domeRmsM": 0.043,
+     "domeMedianAbsM": 0.0245,
+     "domeWithin10cm": 0.9607
+    }
+   }
+  },
+  {
+   "id": "mill19-websfm",
+   "table": "mill19",
+   "block": "Mill19 building (1,940)",
+   "label": "WebSfM",
+   "tool": "websfm",
+   "unit": "m",
+   "runs": 1,
+   "failed": [],
+   "score": {
+    "cameras": [
+     1940,
+     1940
+    ],
+    "position": {
+     "h": 0.4867,
+     "v": 0.4613
+    },
+    "checkpoints": null,
+    "dem": null,
+    "sfmSeconds": 2144.9985250003338,
+    "truth": null,
+    "dense": null,
+    "denseOfficial": null,
+    "denseSeconds": 6820.628940000057,
+    "pipe": {
+     "total": 13090.166190000295,
+     "sfm": 2144.9985250003338,
+     "dense": 6820.628940000057,
+     "mesh": 417.36826999998095,
+     "texture": null,
+     "textureInMesh": true,
+     "dsmOrtho": 3695.211940000057,
+     "peakGB": 13.334972381591797,
+     "densePoints": 167919989
+    },
+    "lidar": null
    }
   }
  ]

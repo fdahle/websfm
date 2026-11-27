@@ -85,7 +85,7 @@ const range = (vals, f = (v) => v) => {
 }
 
 const ETH3D = ['courtyard', 'delivery_area', 'office', 'pipes', 'playground', 'terrace']
-const BLOCKS = ['quarry', 'PUTI', 'UseGeo']
+const BLOCKS = ['quarry', 'GeoScan PUTI', 'UseGeo']
 
 // A cell without the checkpoint count or the registered cameras it may carry in brackets.
 const bare = (text) => text.replace(/\s*\([^)]*\)\s*$/, '')
@@ -181,7 +181,7 @@ export function readmeResultsTable(benchmarks) {
     [
       'Three drone blocks (224–444 photos), whole pipeline at defaults: dense cloud, DSM, ortho, textured mesh',
       'all',
-      `${total('WebSfM')} min, ${peak('WebSfM')} GiB (smaller mesh and ortho than the others make by default)`,
+      `${total('WebSfM')} min, ${peak('WebSfM')} GiB (a smaller mesh than Metashape makes by default)`,
       `Metashape: ${total('Metashape')} min, ${peak('Metashape')} GiB; ODM: ${total('ODM')} min, ${peak('ODM')} GiB`,
     ],
     [

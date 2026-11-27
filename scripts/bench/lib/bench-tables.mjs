@@ -132,6 +132,57 @@ export const TABLES = {
       col('meanHeight', 'mean height error (cm)'),
       time(),
     ]),
+  'pipeline': (d) => pipeline(d.byTable.pipeline),
+  'lidar': (d) =>
+    long(
+      d.byTable.pipeline.filter((j) => j.score?.lidar),
+      [
+        col('densePoints', 'dense points'),
+        col('lidar', 'median / within 10 cm'),
+        col('lidarDome', 'without the bowl'),
+        col('bowl', 'bowl at the edge (m)'),
+      ],
+    ),
+  'mill19': (d) =>
+    long(d.byTable.mill19, [
+      col('cameras', 'cameras'),
+      col('position', 'cameras vs reference (m)'),
+      col('pipeTotal', 'total (s)'),
+      col('pipeSfm', 'import + SfM'),
+      col('pipeDense', 'depth + dense'),
+      col('pipeDsmOrtho', 'DSM + ortho'),
+      col('pipeMesh', 'mesh'),
+      col('peak', 'peak (GiB)'),
+      col('densePoints', 'dense points'),
+    ]),
+}
+
+// The full pipeline: one row per block and tool, the fastest total and the smallest peak
+// memory of a block in bold.
+function pipeline(jobs) {
+  const cols = ['pipeTotal', 'pipeSfm', 'pipeDense', 'pipeMesh', 'pipeTexture', 'pipeDsmOrtho', 'peak', 'densePoints']
+  const heads = ['total', 'import + SfM', 'depth + dense', 'mesh', 'texture', 'DSM + ortho', 'peak', 'dense points']
+  const best = (b, key) => {
+    const v = jobs.filter((j) => j.block === b && j.score?.pipe?.[key] != null).map((j) => j.score.pipe[key])
+    return v.length > 1 ? Math.min(...v) : null
+  }
+  const lines = [`| block | tool | ${heads.join(' | ')} |`, `| ${['', '', ...heads].map(() => '---').join(' | ')} |`]
+  let last = null
+  for (const j of jobs) {
+    const block = j.block === last ? '' : j.block
+    last = j.block
+    const p = j.score?.pipe
+    const cells = cols.map((c) => {
+      if (!p) return 'not run'
+      const s = COLUMNS[c].cell(j.score, k(j))
+      if (c === 'pipeTotal') return bold(s, p.total === best(j.block, 'total'))
+      if (c === 'peak')
+        return bold(s, p.peakGB != null && Math.round(p.peakGB) === Math.round(best(j.block, 'peakGB') ?? NaN))
+      return s
+    })
+    lines.push(`| ${block} | ${j.label} | ${cells.join(' | ')} |`)
+  }
+  return lines
 }
 
 function film(jobs) {

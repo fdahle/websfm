@@ -124,7 +124,9 @@ function pipeOf(tool, s) {
       sfm: sum(sec, ['ingest', 'detect', 'match', 'recon']),
       dense: sum(sec, ['depth', 'dense']),
       mesh: sec.mesh ?? null,
-      texture: sec.texture ?? null,
+      // WebSfM textures inside its mesh step; its own texture stage is then a no-op.
+      texture: sec.texture >= 1 ? sec.texture : null,
+      textureInMesh: !(sec.texture >= 1),
       dsmOrtho: sum(sec, ['dem', 'ortho']),
       peakGB: s.procPeakGB ?? null,
       densePoints: st.dense?.points ?? null,
@@ -246,7 +248,10 @@ export const COLUMNS = {
   pipeSfm: pipeCol('sfm', 'import + SfM'),
   pipeDense: pipeCol('dense', 'depth + dense'),
   pipeMesh: pipeCol('mesh', 'mesh'),
-  pipeTexture: pipeCol('texture', 'texture'),
+  pipeTexture: {
+    head: 'texture',
+    cell: (x) => (x.pipe?.textureInMesh ? 'in mesh' : x.pipe ? secs(x.pipe.texture) : '–'),
+  },
   pipeDsmOrtho: pipeCol('dsmOrtho', 'DSM + ortho'),
   peak: { head: 'peak (GiB)', cell: (x) => (x.pipe?.peakGB ? String(Math.round(x.pipe.peakGB)) : '–') },
   densePoints: {
